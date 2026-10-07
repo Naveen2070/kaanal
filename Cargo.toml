@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/kaanal-core"]
+members = ["crates/kaanal-core", "crates/kaanal-data"]
 
 [workspace.package]
 version = "0.0.1"
