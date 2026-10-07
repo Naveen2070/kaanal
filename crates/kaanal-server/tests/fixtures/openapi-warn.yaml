@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info: { title: Warn sample, version: "1.0" }
+paths:
+  /things:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { type: object, properties: { code: { type: string, pattern: "^A" } } }

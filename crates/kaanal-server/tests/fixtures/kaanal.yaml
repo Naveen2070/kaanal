@@ -1,0 +1,12 @@
+version: 1
+seed: 42
+nodes:
+  nginx: { type: gateway, flavor: nginx, proc: 1ms }
+  app:   { type: service, spec: openapi.yaml, proc: 1ms }
+  db:    { type: database, flavor: postgres, ops: { read: 1ms, write: 1ms, scan: 1ms } }
+edges:
+  - { from: nginx, to: app, net: 1ms }
+  - { from: app, to: db, net: 1ms }
+routes:
+  "GET /users": { body: [ { id: 1 } ] }
+  "GET /health": { body: { ok: true } }
