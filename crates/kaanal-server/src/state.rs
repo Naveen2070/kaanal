@@ -9,13 +9,11 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-#[allow(dead_code)] // used from Task 8
 pub enum Body {
     Generated { schema: Option<Value> },
     Static(Value),
 }
 
-#[allow(dead_code)] // used from Task 8
 pub struct Route {
     pub method: String,
     /// "GET /users/{id}" — chain RNG key and display name.
@@ -41,7 +39,7 @@ pub struct Event {
     pub failed_node: Option<String>,
 }
 
-#[allow(dead_code)] // used from Task 8
+#[allow(dead_code)] // token/route_keys/port are read by the control API (Task 9)
 pub struct AppState {
     pub topo: Topology,
     pub paths: matchit::Router<Vec<Route>>,
@@ -138,6 +136,12 @@ impl AppState {
                 .split_once(' ')
                 .ok_or_else(|| format!("routes: '{spec}' must look like 'GET /path'"))?;
             let (m, p) = (m.to_uppercase(), p.trim().to_string());
+            if !(100..=599).contains(&ov.status) {
+                return Err(format!(
+                    "routes: '{spec}': status {} must be between 100 and 599",
+                    ov.status
+                ));
+            }
             if !METHODS.contains(&m.as_str()) {
                 return Err(format!("routes: '{spec}': unknown method '{m}'"));
             }
