@@ -1,3 +1,21 @@
 pub mod config;
+pub mod dist;
 
 pub use config::{Config, ConfigError, NodeKind};
+pub use dist::Dist;
+
+/// FNV-1a 64 over the parts, with a separator byte between parts.
+/// Stable across platforms and Rust versions (std hashers are not).
+pub fn stable_hash(parts: &[&[u8]]) -> u64 {
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for part in parts {
+        for b in *part {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(PRIME);
+        }
+        h ^= 0xff;
+        h = h.wrapping_mul(PRIME);
+    }
+    h
+}

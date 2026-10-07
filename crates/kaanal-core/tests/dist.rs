@@ -1,0 +1,64 @@
+use kaanal_core::{Dist, stable_hash};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
+use std::time::Duration;
+
+fn ms(n: u64) -> Duration {
+    Duration::from_millis(n)
+}
+
+fn sorted_samples_ms(d: &Dist, n: usize) -> Vec<f64> {
+    let mut rng = ChaCha8Rng::seed_from_u64(7);
+    let mut v: Vec<f64> = (0..n)
+        .map(|_| d.sample(&mut rng).as_secs_f64() * 1000.0)
+        .collect();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v
+}
+
+fn quantile(sorted: &[f64], q: f64) -> f64 {
+    sorted[((sorted.len() as f64 - 1.0) * q).round() as usize]
+}
+
+#[test]
+fn lognormal_hits_p50_and_p99_within_5_percent() {
+    let v = sorted_samples_ms(&Dist::from_p50_p99(ms(4), ms(20)), 100_000);
+    let (p50, p99) = (quantile(&v, 0.50), quantile(&v, 0.99));
+    assert!((p50 - 4.0).abs() / 4.0 < 0.05, "p50 = {p50}");
+    assert!((p99 - 20.0).abs() / 20.0 < 0.05, "p99 = {p99}");
+}
+
+#[test]
+fn fixed_is_fixed() {
+    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    assert_eq!(Dist::Fixed(ms(5)).sample(&mut rng), ms(5));
+}
+
+#[test]
+fn p99_not_above_p50_falls_back_to_fixed() {
+    assert_eq!(Dist::from_p50_p99(ms(10), ms(10)), Dist::Fixed(ms(10)));
+    assert_eq!(Dist::from_p50_p99(ms(10), ms(5)), Dist::Fixed(ms(10)));
+}
+
+#[test]
+fn fat_tail_is_capped_at_ten_times_p99() {
+    let v = sorted_samples_ms(&Dist::from_p50_p99(ms(1), ms(1000)), 100_000);
+    assert!(
+        *v.last().unwrap() <= 10_000.0 + 1e-6,
+        "max = {}",
+        v.last().unwrap()
+    );
+}
+
+#[test]
+fn same_seed_same_samples() {
+    let d = Dist::from_p50_p99(ms(4), ms(20));
+    assert_eq!(sorted_samples_ms(&d, 100), sorted_samples_ms(&d, 100));
+}
+
+#[test]
+fn stable_hash_is_fixed_and_separates_parts() {
+    assert_eq!(stable_hash(&[]), 0xcbf2_9ce4_8422_2325);
+    assert_eq!(stable_hash(&[b"a", b"bc"]), stable_hash(&[b"a", b"bc"]));
+    assert_ne!(stable_hash(&[b"ab", b"c"]), stable_hash(&[b"a", b"bc"]));
+}
