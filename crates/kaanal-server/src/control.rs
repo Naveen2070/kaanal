@@ -23,9 +23,9 @@ type Reject = (StatusCode, Json<Value>);
 /// Longest extra latency a chaos setting may add. A typo like 1e12 would otherwise hang every request.
 const MAX_LATENCY_MS: u64 = 300_000;
 
-// ponytail: limitation: error messages echo the node name from the URL path (`unknown node '...'`) unsanitized.
-// It is JSON-encoded, so the browser UI is safe, but a token holder could put terminal escape sequences in it
-// and the CLI prints it as-is. Strip control characters in the CLI (or here) if that ever matters.
+// ponytail: error messages echo the node name from the URL path (`unknown node '...'`) unsanitized.
+// It is JSON-encoded, so the browser UI is safe, and the CLI replaces control characters before printing.
+// Other clients that print it to a terminal must do the same.
 fn reject(code: StatusCode, msg: &str) -> Reject {
     (code, Json(json!({ "error": msg })))
 }

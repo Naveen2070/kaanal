@@ -1,0 +1,16 @@
+[package]
+name = "kaanal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Kaanal: a mirage of your backend. Mock APIs, chaos, and what-if simulation in one binary."
+homepage = "https://kaanal.naveenr.in"
+
+[dependencies]
+kaanal-core.workspace = true
+kaanal-server.workspace = true
+tokio.workspace = true
+clap.workspace = true
+ureq.workspace = true
+serde_json.workspace = true
