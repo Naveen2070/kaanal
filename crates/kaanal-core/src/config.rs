@@ -2,7 +2,8 @@ use std::fmt;
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use serde::Deserialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -64,16 +65,35 @@ pub struct EdgeConfig {
 }
 
 /// `5ms` (fixed) or `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum DistConfig {
-    Fixed(#[serde(with = "humantime_serde")] Duration),
-    Pct {
-        #[serde(with = "humantime_serde")]
-        p50: Duration,
-        #[serde(with = "humantime_serde")]
-        p99: Duration,
-    },
+    Fixed(Duration),
+    Pct { p50: Duration, p99: Duration },
+}
+
+impl<'de> Deserialize<'de> for DistConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // A plain untagged enum reports "data did not match any variant"; say what is expected instead.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Fixed(#[serde(with = "humantime_serde")] Duration),
+            Pct {
+                #[serde(with = "humantime_serde")]
+                p50: Duration,
+                #[serde(with = "humantime_serde")]
+                p99: Duration,
+            },
+        }
+        Raw::deserialize(d)
+            .map(|r| match r {
+                Raw::Fixed(x) => DistConfig::Fixed(x),
+                Raw::Pct { p50, p99 } => DistConfig::Pct { p50, p99 },
+            })
+            .map_err(|_| {
+                D::Error::custom("expected a duration like `5ms`, or `{ p50: 1ms, p99: 3ms }`")
+            })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

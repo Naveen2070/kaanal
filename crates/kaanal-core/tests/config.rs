@@ -66,3 +66,14 @@ fn bom_and_crlf_parse_like_lf() {
     let cfg = Config::from_yaml(&windows).unwrap();
     assert_eq!(cfg.nodes.len(), 3);
 }
+
+#[test]
+fn bad_duration_explains_what_is_expected() {
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: { p50: oops, p99: 3ms } }\n";
+    let err = Config::from_yaml(yaml).unwrap_err();
+    assert!(err.msg.contains("expected a duration like"), "{err}");
+    assert_eq!(err.line, Some(3), "{err}");
+    let err =
+        Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, proc: fast }\n").unwrap_err();
+    assert!(err.msg.contains("expected a duration like"), "{err}");
+}

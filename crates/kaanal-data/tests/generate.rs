@@ -232,3 +232,25 @@ fn length_limits_never_break_formats() {
         assert!(v["userEmail"].as_str().unwrap().ends_with("@example.com"));
     }
 }
+
+#[test]
+fn city_state_pincode_and_address_describe_the_same_place() {
+    let s = json!({ "type": "object", "properties": {
+        "city": { "type": "string" }, "state": { "type": "string" },
+        "pincode": { "type": "string" }, "address": { "type": "string" }
+    }});
+    let mut by_city = std::collections::HashMap::new();
+    for seed in 0..300 {
+        let v = generate(&s, None, seed);
+        let city = v["city"].as_str().unwrap().to_string();
+        let place = (v["state"].clone(), v["pincode"].clone());
+        // one city always means the same state and pincode
+        assert_eq!(
+            by_city.entry(city.clone()).or_insert(place.clone()),
+            &place,
+            "{v}"
+        );
+        assert!(v["address"].as_str().unwrap().ends_with(&city), "{v}");
+    }
+    assert!(by_city.len() > 3, "cities should still vary: {by_city:?}");
+}

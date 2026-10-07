@@ -502,3 +502,26 @@ async fn ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counte
     // node names are used as Map keys, never as plain object keys
     assert!(!html.contains("stats[") && html.contains("new Map()"));
 }
+
+#[tokio::test]
+async fn trace_shows_sub_millisecond_hops_and_names_the_failing_node() {
+    let s = start().await;
+    let ok = s.get("/users/42").await;
+    let trace = ok.headers()["x-kaanal-trace"].to_str().unwrap().to_string();
+    // every hop has one decimal, e.g. `net=1.0ms`, never a truncated `0ms`
+    assert!(
+        trace.split(',').all(|h| {
+            let v = h.split('=').nth(1).unwrap();
+            v.ends_with("ms") && v.trim_end_matches("ms").contains('.')
+        }),
+        "{trace}"
+    );
+    s.put_chaos("db", json!({ "error_rate": 1.0, "error_status": 504 }))
+        .await;
+    let failed = s.get("/users/42").await;
+    let trace = failed.headers()["x-kaanal-trace"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(trace.ends_with(",db.error=504"), "{trace}");
+}

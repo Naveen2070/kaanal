@@ -1,0 +1,15 @@
+version: 1
+seed: 42
+port: 8080
+nodes:
+  nginx: { type: gateway,  flavor: nginx,    proc: { p50: 1ms, p99: 3ms } }
+  app:   { type: service,  spec: openapi.yaml, proc: { p50: 5ms, p99: 20ms } }
+  db:    { type: database, flavor: postgres,
+           ops: { read:  { p50: 4ms,  p99: 20ms },
+                  write: { p50: 8ms,  p99: 40ms },
+                  scan:  { p50: 30ms, p99: 150ms } } }
+edges:
+  - { from: nginx, to: app, net: { p50: 1ms, p99: 2ms } }
+  - { from: app,   to: db,  net: { p50: 1ms, p99: 2ms } }
+routes:
+  "GET /health": { status: 200, body: { ok: true } }

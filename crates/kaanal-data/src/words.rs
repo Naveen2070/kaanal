@@ -98,7 +98,3 @@ pub const WORDS: &[&str] = &[
 pub fn pick<'a>(list: &[&'a str], rng: &mut ChaCha8Rng) -> &'a str {
     list[rng.random_range(0..list.len())]
 }
-
-pub fn city(rng: &mut ChaCha8Rng) -> (&'static str, &'static str, &'static str) {
-    CITIES[rng.random_range(0..CITIES.len())]
-}

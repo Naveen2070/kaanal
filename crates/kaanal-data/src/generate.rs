@@ -13,7 +13,7 @@ const BASE_EPOCH: i64 = 1_767_225_600;
 /// Deterministic JSON for an OpenAPI 3.0 schema whose `$ref`s are already inlined.
 /// Priority: example → enum → allOf/oneOf/anyOf → type (format → field-name heuristic → constraints → fallback).
 pub fn generate(schema: &Value, field: Option<&str>, seed: u64) -> Value {
-    value_for(schema, field, seed, 0)
+    value_for(schema, field, seed, seed, 0)
 }
 
 /// FNV-1a 64 with a separator byte between parts. Same algorithm as `kaanal_core::stable_hash`
@@ -61,7 +61,9 @@ pub fn apply_params(body: &mut Value, params: &[(String, String)]) {
     }
 }
 
-fn value_for(s: &Value, field: Option<&str>, seed: u64, depth: usize) -> Value {
+/// `group` is the seed of the enclosing object: fields that must agree with each other
+/// (city, state, pincode, address) derive their shared choice from it, not from their own seeds.
+fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize) -> Value {
     if depth > MAX_DEPTH {
         return Value::Null;
     }
@@ -80,7 +82,7 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, depth: usize) -> Value {
         let mut merged = Map::new();
         for (i, part) in parts.iter().enumerate() {
             if let Value::Object(o) =
-                value_for(part, field, child_seed(seed, "allOf", i), depth + 1)
+                value_for(part, field, child_seed(seed, "allOf", i), group, depth + 1)
             {
                 merged.extend(o);
             }
@@ -91,7 +93,7 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, depth: usize) -> Value {
         .iter()
         .find_map(|k| s.get(*k).and_then(Value::as_array)?.first())
     {
-        return value_for(first, field, child_seed(seed, "oneOf", 0), depth + 1);
+        return value_for(first, field, child_seed(seed, "oneOf", 0), group, depth + 1);
     }
     let default_type = if s.get("properties").is_some() {
         "object"
@@ -109,7 +111,7 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, depth: usize) -> Value {
                 for (name, ps) in props {
                     out.insert(
                         name.clone(),
-                        value_for(ps, Some(name), child_seed(seed, name, 0), depth + 1),
+                        value_for(ps, Some(name), child_seed(seed, name, 0), seed, depth + 1),
                     );
                 }
             }
@@ -128,14 +130,14 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, depth: usize) -> Value {
             let items = s.get("items").cloned().unwrap_or(json!({}));
             Value::Array(
                 (0..n as usize)
-                    .map(|i| value_for(&items, None, child_seed(seed, "[]", i), depth + 1))
+                    .map(|i| value_for(&items, None, child_seed(seed, "[]", i), group, depth + 1))
                     .collect(),
             )
         }
         "integer" => json!(int_for(s, field, rng)),
         "number" => number_for(s, field, rng),
         "boolean" => json!(rng.random_bool(0.5)),
-        _ => json!(string_for(s, field, rng)),
+        _ => json!(string_for(s, field, rng, group)),
     }
 }
 
@@ -229,7 +231,7 @@ fn round(v: f64, places: i32) -> f64 {
     (v * p).round() / p
 }
 
-fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> String {
+fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) -> String {
     let v = match s.get("format").and_then(Value::as_str).unwrap_or("") {
         "email" => email(rng),
         "uuid" => uuid(rng),
@@ -242,7 +244,7 @@ fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> String {
             rng.random_range(0..=255),
             rng.random_range(1..=254)
         ),
-        _ => heuristic(&norm(field), is_id(field), rng)
+        _ => heuristic(&norm(field), is_id(field), group, rng)
             .unwrap_or_else(|| words::pick(words::WORDS, rng).to_string()),
     };
     let structured = s.get("format").is_some() || keeps_format(&norm(field), is_id(field));
@@ -262,7 +264,13 @@ fn keeps_format(f: &str, id_like: bool) -> bool {
         )
 }
 
-fn heuristic(f: &str, id_like: bool, rng: &mut ChaCha8Rng) -> Option<String> {
+/// The (city, state, pincode) of the object a field belongs to: same object, same place.
+fn place(group: u64) -> (&'static str, &'static str, &'static str) {
+    let i = stable_hash(&[&group.to_le_bytes(), b"place"]) % words::CITIES.len() as u64;
+    words::CITIES[i as usize]
+}
+
+fn heuristic(f: &str, id_like: bool, group: u64, rng: &mut ChaCha8Rng) -> Option<String> {
     Some(match f {
         "firstname" | "givenname" => words::pick(words::FIRST, rng).to_string(),
         "lastname" | "surname" | "familyname" => words::pick(words::LAST, rng).to_string(),
@@ -273,16 +281,16 @@ fn heuristic(f: &str, id_like: bool, rng: &mut ChaCha8Rng) -> Option<String> {
         ),
         f if f.ends_with("email") => email(rng),
         f if f.ends_with("phone") || f == "mobile" => format!("+91 9{}", digits(rng, 9)),
-        "city" => words::city(rng).0.to_string(),
-        "state" => words::city(rng).1.to_string(),
-        "pincode" | "zip" | "zipcode" | "postalcode" => words::city(rng).2.to_string(),
+        "city" => place(group).0.to_string(),
+        "state" => place(group).1.to_string(),
+        "pincode" | "zip" | "zipcode" | "postalcode" => place(group).2.to_string(),
         "country" => "India".to_string(),
         "address" | "street" => {
             format!(
                 "{} {}, {}",
                 rng.random_range(1..=250),
                 words::pick(words::STREETS, rng),
-                words::city(rng).0
+                place(group).0
             )
         }
         "currency" => "INR".to_string(),

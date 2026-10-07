@@ -64,19 +64,28 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         };
         execute(&st.topo, &chaos, &req)
     };
+    // ponytail: limitation: on Windows the OS timer ticks about every 15 ms, so a sleep shorter than that
+    // rounds up. Measured latency (the `ms` in events) can exceed the simulated sum shown in the trace.
+    // Linux and macOS are exact to about 1 ms. Raise the timer resolution if sub-15 ms accuracy matters.
     tokio::time::sleep(outcome.total()).await;
 
     let name = |id: usize| st.topo.nodes[id].name.as_str();
-    let trace = outcome
+    // One decimal: real hops are often under 1 ms and must not show as `0ms`.
+    let fmt_ms = |d: std::time::Duration| format!("{:.1}ms", d.as_secs_f64() * 1000.0);
+    let mut parts: Vec<String> = outcome
         .hops
         .iter()
         .map(|h| match h.kind {
-            HopKind::Net => format!("net={}ms", h.dur.as_millis()),
-            HopKind::Proc => format!("{}.proc={}ms", name(h.node), h.dur.as_millis()),
-            HopKind::Op(op) => format!("{}.{}={}ms", name(h.node), op.name(), h.dur.as_millis()),
+            HopKind::Net => format!("net={}", fmt_ms(h.dur)),
+            HopKind::Proc => format!("{}.proc={}", name(h.node), fmt_ms(h.dur)),
+            HopKind::Op(op) => format!("{}.{}={}", name(h.node), op.name(), fmt_ms(h.dur)),
         })
-        .collect::<Vec<_>>()
-        .join(",");
+        .collect();
+    // The walk stops at the first failing node, so say which one and why.
+    if let ChainResult::Err { node, status } = &outcome.result {
+        parts.push(format!("{}.error={status}", name(*node)));
+    }
+    let trace = parts.join(",");
 
     let (status, body, failed) = match outcome.result {
         ChainResult::Err { node, status } => (
