@@ -442,3 +442,63 @@ async fn ui_page_cannot_be_framed_and_sends_no_referrer() {
     assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
     assert_eq!(r.headers()["referrer-policy"], "no-referrer");
 }
+
+#[tokio::test]
+async fn ui_page_is_served_without_token() {
+    let s = start().await;
+    let r = s.get("/__kaanal/ui").await;
+    assert_eq!(r.status(), 200);
+    assert!(
+        r.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    let html = r.text().await.unwrap();
+    assert!(
+        html.contains("Kaanal") && html.contains("EventSource") && html.contains("location.hash")
+    );
+}
+
+/// Static guard for the page's security rules: no HTML-string sinks, no eval, no inline
+/// handlers, no token storage, no external URLs. Request paths and node names are untrusted.
+#[tokio::test]
+async fn ui_page_avoids_unsafe_dom_apis_and_external_assets() {
+    let s = start().await;
+    let html = s.get("/__kaanal/ui").await.text().await.unwrap();
+    for bad in [
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+        "onclick=",
+        "localStorage",
+        "http://",
+        "https://",
+    ] {
+        assert!(!html.contains(bad), "page contains {bad}");
+    }
+}
+
+#[tokio::test]
+async fn ui_controls_have_accessible_names_and_dark_form_controls() {
+    let s = start().await;
+    let html = s.get("/__kaanal/ui").await.text().await.unwrap();
+    assert!(html.contains("color-scheme: light dark"));
+    for needle in ["setAttribute('aria-label'", "role=\"alert\""] {
+        assert!(html.contains(needle), "missing {needle}");
+    }
+}
+
+#[tokio::test]
+async fn ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters() {
+    let s = start().await;
+    let html = s.get("/__kaanal/ui").await.text().await.unwrap();
+    assert!(html.contains("id=\"note\"") && html.contains("role=\"status\""));
+    assert!(html.contains("const note = ") && html.contains("const say = "));
+    // fixed-size counters, not a growing event list filtered every second
+    assert!(html.contains("const buckets = ") && !html.contains("recent.filter"));
+    // node names are used as Map keys, never as plain object keys
+    assert!(!html.contains("stats[") && html.contains("new Map()"));
+}

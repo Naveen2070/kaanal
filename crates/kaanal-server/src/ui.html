@@ -1,1 +1,180 @@
-<!doctype html><title>Kaanal</title><p>Kaanal control page</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaanal</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --line:#e7e5e4; --bad:#b91c1c; --badbg:#fef2f2; --accent:#0f766e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c; --bad:#f87171; --badbg:#3f1d1d; --accent:#2dd4bf; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
+  h1 { font-size:18px; margin:0 0 12px; } h1 span { color:var(--muted); font-weight:400; }
+  h2 { font-size:15px; }
+  table { border-collapse:collapse; width:100%; margin-bottom:20px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--muted); font-weight:500; }
+  input[type=number] { width:70px; } select, input, button { font:inherit; }
+  button { cursor:pointer; } .bad { color:var(--bad); } tr.bad td { background:var(--badbg); }
+  #log { max-height:50vh; overflow:auto; } #err { color:var(--bad); min-height:1.4em; margin:0 0 4px; }
+  #note { color:var(--muted); min-height:1.4em; margin:0 0 8px; }
+  #log td:nth-child(3) { word-break:break-all; }
+  .wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<h1>Kaanal <span>local control</span></h1>
+<p id="err" role="alert"></p>
+<p id="note" role="status"></p>
+<div class="wrap"><table>
+  <thead><tr><th>Node</th><th>Type</th><th>rps</th><th>err %</th><th>Latency +ms</th><th>Error %</th><th>Status</th><th>Down</th><th></th></tr></thead>
+  <tbody id="nodes"></tbody>
+</table></div>
+<h2>Requests</h2>
+<div class="wrap" id="log"><table>
+  <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>ms</th><th>Failed at</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table></div>
+<script>
+'use strict';
+// Security: every dynamic value (paths, node names, API errors) goes through textContent.
+// The token lives only in this variable: header on API calls, ?token= on the event stream.
+const token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
+const err = document.getElementById('err');
+// Two separate lines so one message never hides the other: `say` = API errors (alert), `note` = event stream status.
+const say = msg => { err.textContent = msg; };
+const noteEl = document.getElementById('note');
+const note = msg => { noteEl.textContent = msg; };
+if (!token) say('No token in the URL. Open the link printed by `kaanal up`.');
+
+const MAX_LATENCY_MS = 300000, WINDOW_MS = 10000, MAX_ROWS = 200;
+
+async function api(path, opts = {}) {
+  const headers = { 'Authorization': 'Bearer ' + token };
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  const r = await fetch(path, { ...opts, headers, cache: 'no-store' });
+  if (r.status === 204) return null;
+  let body = null;
+  try { body = await r.json(); } catch (_) { /* non-JSON body */ }
+  if (!r.ok) throw new Error(body && typeof body.error === 'string' ? body.error : path + ': HTTP ' + r.status);
+  return body;
+}
+
+const el = (tag, text, cls) => {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = String(text);
+  if (cls) e.className = cls;
+  return e;
+};
+const numInput = (min, max, value) => {
+  const i = el('input'); i.type = 'number'; i.min = min; i.max = max; i.step = 1; i.value = value; return i;
+};
+
+// rps and err% are sums over the last WINDOW_MS, kept as one counter bucket per second and node.
+// Cost per event is O(nodes touched) and memory is fixed, however fast requests arrive.
+// Maps, not plain objects: node names come from config and could be `__proto__`.
+const BUCKETS = WINDOW_MS / 1000;
+const buckets = Array.from({ length: BUCKETS }, () => new Map()); // node name -> {hits, bad}
+let cur = 0;
+const stats = new Map(); // node name -> {rps, er} cells
+
+function count(ev) {
+  const b = buckets[cur];
+  for (const name of Array.isArray(ev.nodes) ? ev.nodes : []) {
+    let c = b.get(name);
+    if (!c) { c = { hits: 0, bad: 0 }; b.set(name, c); }
+    c.hits++;
+    if (ev.status >= 500) c.bad++;
+  }
+}
+
+async function loadNodes() {
+  const [topo, chaos] = await Promise.all([api('/__kaanal/topology'), api('/__kaanal/chaos')]);
+  const body = document.getElementById('nodes'); body.replaceChildren();
+  stats.clear();
+  for (const n of topo.nodes) {
+    const c = Object.hasOwn(chaos, n.name) ? chaos[n.name] : { latency_ms: 0, error_rate: 0, error_status: 503, down: false };
+    const tr = el('tr');
+    tr.append(el('td', n.name), el('td', n.type + (n.flavor ? ' · ' + n.flavor : '')));
+    const rps = el('td', '0.0'), er = el('td', '0'); tr.append(rps, er); stats.set(n.name, { rps, er });
+    const lat = numInput(0, MAX_LATENCY_MS, c.latency_ms);
+    const rate = numInput(0, 100, Math.round(c.error_rate * 100));
+    const status = el('select');
+    for (const s of [500, 501, 502, 503, 504]) { const o = el('option', s); o.value = s; o.selected = s === c.error_status; status.append(o); }
+    const down = el('input'); down.type = 'checkbox'; down.checked = c.down;
+    const apply = el('button', 'Apply'), clear = el('button', 'Clear');
+    // Accessible names: the column headings are not associated with these controls.
+    lat.setAttribute('aria-label', n.name + ': extra latency in ms');
+    rate.setAttribute('aria-label', n.name + ': error percent');
+    status.setAttribute('aria-label', n.name + ': error status');
+    down.setAttribute('aria-label', n.name + ': down');
+    apply.setAttribute('aria-label', 'Apply chaos to ' + n.name);
+    clear.setAttribute('aria-label', 'Clear chaos on ' + n.name);
+    const url = '/__kaanal/chaos/' + encodeURIComponent(n.name);
+    apply.addEventListener('click', () => {
+      const ms = Number(lat.value), pct = Number(rate.value);
+      if (!Number.isInteger(ms) || ms < 0 || ms > MAX_LATENCY_MS) return say('Latency must be a whole number from 0 to ' + MAX_LATENCY_MS + ' ms.');
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) return say('Error % must be from 0 to 100.');
+      api(url, { method: 'PUT', body: JSON.stringify({ latency_ms: ms, error_rate: pct / 100, error_status: Number(status.value), down: down.checked }) })
+        .then(() => say('')).catch(e => say(e.message));
+    });
+    clear.addEventListener('click', () => api(url, { method: 'DELETE' }).then(() => { say(''); return loadNodes(); }).catch(e => say(e.message)));
+    for (const x of [lat, rate, status, down]) { const td = el('td'); td.append(x); tr.append(td); }
+    const td = el('td'); td.append(apply, ' ', clear); tr.append(td);
+    body.append(tr);
+  }
+}
+
+function addRow(ev) {
+  const rows = document.getElementById('rows');
+  const tr = el('tr', undefined, ev.status >= 500 ? 'bad' : '');
+  tr.append(el('td', new Date(ev.ts_ms).toLocaleTimeString()), el('td', ev.method), el('td', ev.path),
+            el('td', ev.status), el('td', ev.ms), el('td', ev.failed_node || ''));
+  rows.prepend(tr);
+  while (rows.children.length > MAX_ROWS) rows.lastChild.remove();
+}
+
+setInterval(() => {
+  cur = (cur + 1) % BUCKETS;
+  buckets[cur] = new Map(); // the oldest second drops out of the window
+  for (const [name, cells] of stats) {
+    let hits = 0, bad = 0;
+    for (const b of buckets) {
+      const c = b.get(name);
+      if (c) { hits += c.hits; bad += c.bad; }
+    }
+    cells.rps.textContent = (hits * 1000 / WINDOW_MS).toFixed(1);
+    cells.er.textContent = hits ? Math.round(100 * bad / hits) : 0;
+    cells.er.className = bad ? 'bad' : '';
+  }
+}, 1000);
+
+// ponytail: limitations. (1) Chaos set from the CLI shows here only after Clear or a reconnect; there is no
+// polling. Poll /__kaanal/chaos every few seconds if that confuses people. (2) Each open tab keeps one event
+// stream open; over HTTP/1.1 browsers allow ~6 connections per host, so many tabs can stall other requests
+// to this port. Close extra tabs.
+if (token) {
+  loadNodes().catch(e => say(e.message));
+  const es = new EventSource('/__kaanal/events?token=' + encodeURIComponent(token));
+  let lost = false;
+  es.addEventListener('open', () => {
+    // Reconnected after a drop: chaos may have changed meanwhile, so reload it.
+    if (lost) { lost = false; note(''); loadNodes().catch(e => say(e.message)); }
+  });
+  es.addEventListener('request', m => {
+    let ev;
+    try { ev = JSON.parse(m.data); } catch (_) { return; }
+    count(ev);
+    addRow(ev);
+  });
+  es.addEventListener('lagged', m => note('Log skipped ' + m.data + ' events (too fast to display).'));
+  es.addEventListener('error', () => {
+    lost = true;
+    // CLOSED means the browser gave up (e.g. 401 after kaanal restarted with a new token).
+    note(es.readyState === EventSource.CLOSED
+      ? 'Disconnected from kaanal. If it restarted, open the new link it printed.'
+      : 'Lost connection to kaanal, retrying...');
+  });
+}
+</script>
+</body>
+</html>
