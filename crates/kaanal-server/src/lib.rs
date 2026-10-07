@@ -1,3 +1,4 @@
+mod control;
 mod mock;
 mod state;
 
@@ -5,10 +6,9 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::routing::{get, put};
+use axum::{Router, middleware};
 use kaanal_core::Config;
-use serde_json::json;
 
 pub use state::Event;
 
@@ -84,8 +84,22 @@ fn router(st: Arc<state::AppState>) -> Router {
     Router::new()
         .route(
             "/__kaanal/health",
-            get(|| async { Json(json!({ "ok": true })) }),
+            get(|| async { axum::Json(serde_json::json!({ "ok": true })) }),
         )
+        .route("/__kaanal/topology", get(control::topology))
+        .route(
+            "/__kaanal/chaos",
+            get(control::get_chaos).delete(control::clear_all),
+        )
+        .route(
+            "/__kaanal/chaos/{node}",
+            put(control::set_chaos).delete(control::clear_node),
+        )
+        .route("/__kaanal/events", get(control::events))
+        .route("/__kaanal/ui", get(control::ui))
+        // route_layer: wraps only the control routes above, never the mock fallback.
+        // Every control route is guarded here, so a new handler cannot forget authentication.
+        .route_layer(middleware::from_fn_with_state(st.clone(), control::guard))
         .fallback(mock::handle)
         .with_state(st)
 }

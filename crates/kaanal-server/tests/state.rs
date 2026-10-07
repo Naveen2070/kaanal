@@ -127,3 +127,12 @@ fn override_status_must_be_a_real_http_status() {
         assert!(err.contains("between 100 and 599"), "{err}");
     }
 }
+
+#[test]
+fn control_namespace_is_reserved() {
+    for p in ["/__kaanal", "/__kaanal/x"] {
+        let err =
+            check_yaml(&format!("{GW_APP}routes:\n  \"GET {p}\": {{ body: 1 }}\n")).unwrap_err();
+        assert!(err.contains("reserved"), "{err}");
+    }
+}

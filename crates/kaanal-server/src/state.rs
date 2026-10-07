@@ -39,7 +39,6 @@ pub struct Event {
     pub failed_node: Option<String>,
 }
 
-#[allow(dead_code)] // token/route_keys/port are read by the control API (Task 9)
 pub struct AppState {
     pub topo: Topology,
     pub paths: matchit::Router<Vec<Route>>,
@@ -58,6 +57,10 @@ const METHODS: [&str; 7] = ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OP
 /// Reject two paths that differ only in parameter names (`/users/{id}` vs `/users/{uid}`):
 /// the router would refuse the second with an unhelpful message.
 fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), String> {
+    // A mock under /__kaanal would be served without CORS next to the control API (RULES R5.4).
+    if path == "/__kaanal" || path.starts_with("/__kaanal/") {
+        return Err(format!("path '{path}' is reserved for the control API"));
+    }
     let mut shape = String::new();
     let mut in_param = false;
     for c in path.chars() {
