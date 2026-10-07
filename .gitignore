@@ -1,5 +1,12 @@
+# Local-only project docs and agent instructions (never commit)
 internal
-.serena
-.remember
 AGENTS.md
 CLAUDE.md
+
+# Local tool state
+.serena
+.remember
+.kaanal/
+
+# Build output
+/target
