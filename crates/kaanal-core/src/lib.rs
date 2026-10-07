@@ -1,9 +1,13 @@
+pub mod chaos;
 pub mod config;
 pub mod dist;
+pub mod exec;
 pub mod topology;
 
+pub use chaos::{ChaosState, NodeChaos};
 pub use config::{Config, ConfigError, NodeKind};
 pub use dist::Dist;
+pub use exec::{ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, execute};
 pub use topology::{Edge, Node, NodeId, Topology, TopologyError};
 
 /// FNV-1a 64 over the parts, with a separator byte between parts.
