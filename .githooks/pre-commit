@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs fmt check + clippy + tests before every commit. Enable: git config core.hooksPath .githooks
+# Runs fmt check + clippy + tests + markdown check before every commit. Enable: git config core.hooksPath .githooks
 [ -f Cargo.toml ] || exit 0
 echo "pre-commit: cargo fmt --check"
 cargo fmt --all --check || { echo "fmt failed: run 'cargo fmt --all'"; exit 1; }
@@ -7,3 +7,9 @@ echo "pre-commit: cargo clippy"
 cargo clippy --workspace --all-targets -- -D warnings || { echo "clippy failed"; exit 1; }
 echo "pre-commit: cargo test --workspace"
 cargo test --workspace --quiet || exit 1
+if command -v dprint >/dev/null 2>&1; then
+    echo "pre-commit: dprint check"
+    dprint check || { echo "dprint failed: run 'dprint fmt'"; exit 1; }
+else
+    echo "pre-commit: dprint not found, skipping markdown check (install: cargo install dprint)"
+fi

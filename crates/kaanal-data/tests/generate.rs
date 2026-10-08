@@ -105,7 +105,7 @@ fn field_name_heuristics() {
         let price = v["price"].as_f64().unwrap();
         assert!((99.0..=4999.0).contains(&price), "{price}");
         assert!(v["phone"].as_str().unwrap().starts_with("+91 "));
-        assert!(!v["city"].as_str().unwrap().is_empty());
+        assert_ne!(v["city"].as_str().unwrap(), "");
         assert_eq!(v["currency"], "INR");
     }
 }

@@ -147,7 +147,7 @@ fn accepts_unquoted_numeric_version() {
 info: { title: t, version: \"1\" }
 paths: {}
 ";
-    assert!(ApiModel::from_openapi(spec).unwrap().endpoints.is_empty());
+    assert_eq!(ApiModel::from_openapi(spec).unwrap().endpoints, []);
 }
 
 #[test]

@@ -165,7 +165,7 @@ async fn head_answers_like_get_without_a_body() {
         .unwrap();
     assert_eq!(r.status(), 200);
     assert!(r.headers().contains_key("x-kaanal-trace"));
-    assert!(r.bytes().await.unwrap().is_empty());
+    assert_eq!(r.bytes().await.unwrap(), "");
 }
 
 #[tokio::test]

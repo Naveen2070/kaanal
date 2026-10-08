@@ -12,24 +12,24 @@ The control API handlers and the security guard that stands in front of them.
 
 ## Handlers
 
-| Handler | Route | What it does |
-|---|---|---|
-| `topology` | `GET /__kaanal/topology` | JSON dump: nodes (name/type/flavor), edges (from/to names), sorted route keys. |
-| `get_chaos` | `GET /__kaanal/chaos` | Map of node name → `ChaosView` for every node with chaos set. |
-| `set_chaos` | `PUT /__kaanal/chaos/{node}` | **Merges** a `ChaosPatch` into the node's existing settings (absent fields keep their values). Validates: `error_rate` 0–1, `error_status` 500–504, `latency_ms` ≤ `MAX_LATENCY_MS` (300 s — a typo like 1e12 would otherwise hang every request). Unknown node → 404; bad body → the extractor's own 4xx. `deny_unknown_fields` rejects typo'd keys. Returns the merged view. |
-| `clear_node` | `DELETE /__kaanal/chaos/{node}` | Removes one node's chaos → 204. Unknown node → 404. |
-| `clear_all` | `DELETE /__kaanal/chaos` | Wipes all chaos → 204. |
-| `events` | `GET /__kaanal/events` | SSE stream: every request event as JSON (`event: request`), plus `event: lagged` if a slow subscriber drops messages. Backed by the `broadcast` bus in `AppState`; keep-alive enabled. |
-| `ui` | `GET /__kaanal/ui` | The embedded HTML page (`include_str!`). Served with `Referrer-Policy: no-referrer` and a strict CSP (inline script/style only, `connect-src 'self'`, `frame-ancestors 'none'`). The page reads the token from the URL **fragment**, which browsers never send to a server. |
+| Handler      | Route                           | What it does                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `topology`   | `GET /__kaanal/topology`        | JSON dump: nodes (name/type/flavor), edges (from/to names), sorted route keys.                                                                                                                                                                                                                                                                                                 |
+| `get_chaos`  | `GET /__kaanal/chaos`           | Map of node name → `ChaosView` for every node with chaos set.                                                                                                                                                                                                                                                                                                                  |
+| `set_chaos`  | `PUT /__kaanal/chaos/{node}`    | **Merges** a `ChaosPatch` into the node's existing settings (absent fields keep their values). Validates: `error_rate` 0–1, `error_status` 500–504, `latency_ms` ≤ `MAX_LATENCY_MS` (300 s — a typo like 1e12 would otherwise hang every request). Unknown node → 404; bad body → the extractor's own 4xx. `deny_unknown_fields` rejects typo'd keys. Returns the merged view. |
+| `clear_node` | `DELETE /__kaanal/chaos/{node}` | Removes one node's chaos → 204. Unknown node → 404.                                                                                                                                                                                                                                                                                                                            |
+| `clear_all`  | `DELETE /__kaanal/chaos`        | Wipes all chaos → 204.                                                                                                                                                                                                                                                                                                                                                         |
+| `events`     | `GET /__kaanal/events`          | SSE stream: every request event as JSON (`event: request`), plus `event: lagged` if a slow subscriber drops messages. Backed by the `broadcast` bus in `AppState`; keep-alive enabled.                                                                                                                                                                                         |
+| `ui`         | `GET /__kaanal/ui`              | The embedded HTML page (`include_str!`). Served with `Referrer-Policy: no-referrer` and a strict CSP (inline script/style only, `connect-src 'self'`, `frame-ancestors 'none'`). The page reads the token from the URL **fragment**, which browsers never send to a server.                                                                                                    |
 
 ## Supporting items
 
-| Item | What it does |
-|---|---|
-| `reject(code, msg)` | Builds the uniform `{ "error": msg }` JSON error tuple used by all handlers. |
-| `query_token(query)` | Extracts `token=` from a query string; `xtoken=` or a bare `token` do not match. |
+| Item                             | What it does                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `reject(code, msg)`              | Builds the uniform `{ "error": msg }` JSON error tuple used by all handlers.         |
+| `query_token(query)`             | Extracts `token=` from a query string; `xtoken=` or a bare `token` do not match.     |
 | `ChaosView` / `From<&NodeChaos>` | The public JSON shape of chaos (`latency_ms`, `error_rate`, `error_status`, `down`). |
-| `ChaosPatch` | The accepted PUT body — all fields optional, unknown fields denied. |
+| `ChaosPatch`                     | The accepted PUT body — all fields optional, unknown fields denied.                  |
 
 ## Unit tests in this file
 

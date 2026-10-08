@@ -1,69 +1,307 @@
 # Architecture
 
-## Crates
+This document provides a comprehensive architectural breakdown of Kaanal (கானல்): its design principles, crate boundaries, execution engine, data synthesis model, control plane, security guarantees, and concurrency model.
 
+---
+
+## 1. Design Philosophy & Architectural Invariants
+
+Kaanal simulates a multi-tier microservice backend using a single binary, a single configuration file (`kaanal.yaml`), and OpenAPI 3.0 specifications.
+
+### Core Tenets
+
+1. **One Binary, One Port**: Mock routes and the `/__kaanal/*` control plane share a single TCP port. No secondary listener or out-of-band proxy is required.
+2. **Behavioral Modeling, Not Protocol Emulation**: Databases and caches are virtual nodes modeled by their operation latencies and failure probabilities. Kaanal does not execute SQL or emulate wire protocols (rule R2.8).
+3. **One Cost Model, Two Drivers**: Latency calculation, distribution sampling, and failure decisions exist solely in `kaanal-core`. The live HTTP server awaits the simulated time via Tokio, while future simulators advance virtual time without changes to the cost model (rule R2.5).
+4. **Pure Core Engine**: `kaanal-core` contains zero asynchronous code, zero IO, zero threads, and zero network calls. It computes outcomes deterministically given its inputs (rule R2.3).
+5. **Absolute Determinism**: For a fixed `seed` in `kaanal.yaml`, identical request sequences produce identical timings, failure distributions, and response payloads.
+6. **Thin Interfaces**: Every user interface (CLI, Web UI, automated test scripts) is a thin HTTP client consuming the `/__kaanal/*` control API. No interface contains business logic (rule R2.6).
+7. **Fail Fast and Loud**: Invalid configurations, unparseable schemas, cyclic topologies, and illegal overrides are rejected during startup with `file:line:col` error diagnostics (rule R6.1). Kaanal never serves half-configured states.
+
+---
+
+## 2. Crate Decomposition & Layering
+
+The codebase is organized into four distinct crates with a strict one-way dependency hierarchy:
+
+```mermaid
+flowchart TD
+    CLI["kaanal (Binary / CLI)<br/><code>crates/kaanal</code>"]
+    Server["kaanal-server (HTTP Engine)<br/><code>crates/kaanal-server</code>"]
+    Core["kaanal-core (Pure Logic & Topology)<br/><code>crates/kaanal-core</code>"]
+    Data["kaanal-data (OpenAPI & Synthesis)<br/><code>crates/kaanal-data</code>"]
+
+    CLI -->|Invokes serve/check| Server
+    Server -->|Evaluates call chains & topology| Core
+    Server -->|Generates mock JSON responses| Data
+
+    style CLI fill:#f4f4f4,stroke:#333,stroke-width:2px
+    style Server fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    style Core fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style Data fill:#fff8e1,stroke:#f57f17,stroke-width:2px
 ```
-kaanal (bin) ──► kaanal-server ──► kaanal-core
-                        └───────► kaanal-data
+
+### Dependency Rules and Invariants
+
+| Crate               | Primary Role                                                                      | Prohibited Technologies                                              | Invariant                                                                             |
+| ------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **`kaanal-core`**   | Topology graph validation, latency distributions, chain execution, FNV-1a hash.   | No `tokio`, no `axum`, no filesystem/network IO, no wall-clock time. | Pure computation only; computes outcomes, never sleeps. (Rule R2.3)                   |
+| **`kaanal-data`**   | OpenAPI 3.0 parsing, `$ref` inlining, deterministic schema-driven data generator. | No dependency on `kaanal-core`, no HTTP, no async.                   | Maintains private FNV-1a hash algorithm pinned by cross-crate unit tests. (Rule R2.4) |
+| **`kaanal-server`** | Axum router, mock request handler, control API, SSE event bus, shared state.      | No CLI terminal logic, no direct argv parsing.                       | Only crate that speaks HTTP. (Rule R2.4)                                              |
+| **`kaanal`**        | CLI parsing via clap, directory locking, runfile management, control API client.  | No direct mock engine or database logic.                             | Thin client over control API. (Rule R2.6)                                             |
+
+---
+
+## 3. Topology Compilation & Graph Invariants
+
+Kaanal models a system as a directed graph $G = (V, E)$, compiled during startup by `Topology::build`:
+
+- **Nodes ($V$)**:
+  - `Gateway`: The single entry point of the system (exactly 1 required).
+  - `Service`: Backend service hosting an OpenAPI 3.0 `spec`.
+  - `Database`: Data store providing `ops` (`read`, `write`, `scan`) costs.
+- **Edges ($E$)**:
+  - Directed dependencies carrying network latency distributions (`net`).
+
+```mermaid
+flowchart LR
+    GW["Gateway (nginx)<br/>proc: 1ms"] -->|net: 1ms| SVC["Service (app)<br/>spec: openapi.yaml<br/>proc: 5ms"]
+    SVC -->|net: 1ms| DB["Database (db)<br/>ops: read/write/scan"]
+
+    style GW fill:#f9f9f9,stroke:#666
+    style SVC fill:#e3f2fd,stroke:#1976d2
+    style DB fill:#e8f8f5,stroke:#117a65
 ```
 
-Dependencies go one way only:
+### Semantic Graph Validation
 
-- **`kaanal-core`** — pure logic. No tokio, no axum, no IO, no global state. Parses config, builds the topology graph, computes latency distributions, walks call chains. Deterministic given its inputs; it computes outcomes and never sleeps.
-- **`kaanal-data`** — OpenAPI 3.0 parsing and deterministic mock-data generation. Never depends on core (it keeps its own copy of the FNV-1a hash for that reason).
-- **`kaanal-server`** — the only crate that knows HTTP. Axum router, control API (`/__kaanal/*`), mock fallback handler, embedded HTML page, shared `AppState`.
-- **`kaanal`** (bin) — the only crate that knows argv and the terminal. Thin `clap` CLI; every subcommand other than `up`/`validate` is an HTTP call to the control API.
+During `Topology::build`, the graph is verified against strict rules:
 
-## Request flow
+1. **Single Gateway Invariant**: Exactly one node must have `type: gateway`. Zero or multiple gateways fail with `TopologyError::GatewayCount` (rule R2.7).
+2. **Phase One Edge Shapes**: Edges must follow either `gateway -> service` or `service -> database`. Direct `gateway -> database` links and `service -> service` links are rejected (rule R1.4, R2.7).
+3. **Cycle Rejection**: The graph must be a strict DAG. Cycle detection executes an iterative depth-first search (DFS) with 3-color vertex marking (unvisited, active path, completed). Detected cycles fail with `TopologyError::Cycle` listing the cycle path (`cycle: a -> b -> a`).
+4. **Reachability**: Any `service` node specifying an OpenAPI `spec` must have an incoming edge from the gateway. Unreachable services fail with `TopologyError::MissingGatewayEdge`.
+5. **Node Attribute Affinity**: `ops` is permitted only on `database` nodes (and is mandatory for them); `spec` is permitted only on `service` nodes. Misplaced fields fail with clear errors.
 
+---
+
+## 4. Execution Engine & Cost Model
+
+When a mock request arrives, Kaanal evaluates what that request experiences across the simulated architecture:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Router as Axum Router (matchit)
+    participant Mock as Mock Handler (mock.rs)
+    participant Core as Chain Executor (exec.rs)
+    participant Chaos as ChaosState (RwLock)
+    participant Data as Data Generator (generate.rs)
+    participant Bus as SSE Broadcast Bus
+
+    Client->>Router: GET /users/42
+    Router->>Mock: Dispatched Route
+    Mock->>Chaos: Acquire Read Lock (brief)
+    Mock->>Core: execute(topology, chaos, request)
+    Note over Core: Pure Synchronous Evaluation:<br/>1. Gateway proc (1.0ms)<br/>2. Net hop (1.0ms)<br/>3. Service proc (5.0ms)<br/>4. Net hop (1.0ms)<br/>5. DB read op (4.2ms)
+    Core-->>Mock: ChainOutcome { hops, total: 12.2ms, status: Ok }
+    Mock->>Mock: tokio::time::sleep(12.2ms)
+    Mock->>Data: generate(schema, "response", seed=hash(node, path))
+    Data-->>Mock: Synthetic JSON Payload
+    Mock->>Mock: apply_params(body, {"id": 42})
+    Mock->>Bus: send(Event { status: 200, ms: 12.2, nodes })
+    Mock-->>Client: 200 OK + X-Kaanal-Trace Header
 ```
-kaanal up
-  └─ main.rs: one tokio multi-thread runtime
-       └─ kaanal_server::serve()
-            ├─ bind TcpListener (requested port, else next free up to +20)
-            ├─ AppState::build()   ← config, topology, OpenAPI specs, routes
-            └─ tokio::spawn(axum::serve(listener, router))
 
-Router (single port):
-  /__kaanal/health|topology|chaos|events|ui   ── control.rs (guard middleware first)
-  everything else (fallback)                  ── mock.rs
+### Operation Inference
+
+The database hop operation (`Op`) is inferred from the HTTP request method and path template:
+
+- `GET` or `HEAD` with a path parameter (e.g. `/users/{id}`) $\rightarrow$ `Op::Read` (single item lookup).
+- `GET` or `HEAD` without parameters (e.g. `/users`) $\rightarrow$ `Op::Scan` (table/collection scan).
+- All other HTTP methods (`POST`, `PUT`, `DELETE`, `PATCH`) $\rightarrow$ `Op::Write`.
+
+### Latency Distribution Sampling
+
+Node processing (`proc`), network hops (`net`), and database operations (`ops`) use `Dist`:
+
+- **`Fixed(Duration)`**: Constant latency.
+- **`LogNormal { mu, sigma, cap_ms }`**: Long-tailed distribution fitted to configured percentiles $\{p50, p99\}$:
+  $$\mu = \ln(p50)$$
+  $$\sigma = \frac{\ln(p99 / p50)}{Z_{99}} \quad \text{where } Z_{99} \approx 2.3263479$$
+- **Tail Cap Safety**: Samples are clamped to $\min(\text{sample}, 10 \times p99)$. This prevents astronomical tail samples from indefinitely hanging a request.
+
+---
+
+## 5. Live Chaos Engine & Upstream Propagation
+
+Chaos settings live in `AppState.chaos` as an in-memory `std::sync::RwLock<ChaosState>`. Chaos is never persisted to `kaanal.yaml` and does not require server restarts.
+
+```mermaid
+flowchart LR
+    subgraph Control["Control Plane"]
+        CLI["kaanal chaos set"] -->|PUT /__kaanal/chaos/{node}| Guard["Security Guard"]
+        UI["Web UI"] -->|PUT /__kaanal/chaos/{node}| Guard
+        Guard --> Handler["set_chaos Handler"]
+        Handler -->|Write Lock| State[("RwLock<ChaosState>")]
+    end
+
+    subgraph Runtime["Mock Request Pipeline"]
+        MockHandler["mock::handle"] -->|Read Lock| State
+        MockHandler --> Exec["kaanal_core::execute"]
+        Exec --> Output["X-Kaanal-Trace & Error Status"]
+    end
 ```
 
-A mock request is handled entirely inline in `mock::handle`:
+### Supported Chaos Controls
 
-1. CORS preflight short-circuits (never on `/__kaanal/*`).
-2. `matchit` looks up the path; method not matched → 405, no route → 404.
-3. `kaanal_core::execute()` walks the call chain **synchronously** in the handler: gateway proc → net → service proc → net → database op. At each node it checks chaos (down, error rate, added latency). It is pure: it returns hop durations, it does not sleep.
-4. `tokio::time::sleep(outcome.total())` makes the client actually wait the simulated time.
-5. The body is a static override or generated from the endpoint's schema (`kaanal_data::generate`), seeded by `hash(node, path)` so the same URL always returns the same data. Path params are then copied into matching fields.
-6. The `X-Kaanal-Trace` header carries the per-hop waterfall; an `Event` goes on the `broadcast` bus for `/__kaanal/events` (SSE) subscribers.
+Per node, users can configure:
 
-## Threading model
+- `latency_ms`: Additional delay injected on every visit to that node (capped at 300,000 ms).
+- `error_rate`: Probability $[0.0, 1.0]$ of failure on visit.
+- `error_status`: HTTP error status code ($500 \le \text{status} \le 504$).
+- `down`: Hard outage flag ($100\%$ failure with HTTP 503).
 
-One tokio multi-thread runtime (worker threads = CPU cores). There is **no** separate engine thread: the engine (chain executor, data generator) runs inside the request handler's task on the shared worker pool. This is deliberate for phase one — the CPU work per request is microseconds. See `internal/docs/suggestions/2026-10-08.md` for the pressure points and the two-listener split if load isolation is ever needed.
+### Invariant: Unconditional Random Draws
 
-## Shared state
+To ensure determinism (rule R4.1), **the chaos error roll is always drawn from the RNG**, regardless of whether chaos is currently configured on that node. If the draw were skipped when chaos was inactive, enabling chaos would shift all subsequent PRNG draws, altering downstream latencies and body seeds. Drawing unconditionally guarantees that timing sequences remain identical across test runs.
 
-`AppState` (one `Arc`, in `kaanal-server/src/state.rs`):
+### Failure Cascading & Tracing
 
-| Field                         | Type                                        | Mutated by                                                           |
-| ----------------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
-| `topo`, `paths`, `route_keys` | built once at startup                       | never (immutable)                                                    |
-| `chaos`                       | `std::sync::RwLock<ChaosState>`             | control API writes, mock handler reads (briefly, across `execute()`) |
-| `events`                      | `tokio::sync::broadcast::Sender` (cap 1024) | mock handler sends per request                                       |
-| `seed`, `token`, `port`       | plain values                                | never                                                                |
+When a downstream node fails (e.g., database error 504):
 
-## Determinism model
+1. The execution chain terminates immediately at that hop.
+2. The overall request adopts that node's error status.
+3. Total delay includes all hops executed up to and including the failed node.
+4. The response includes `X-Kaanal-Trace` ending in `node.error=STATUS` (e.g. `nginx.proc=1.0ms,net=1.0ms,app.proc=5.0ms,net=1.0ms,db.error=504`).
 
-- All randomness comes from `ChaCha8Rng` seeded by **FNV-1a 64** (`stable_hash`) over explicit parts — never std hashers (not stable across platforms/versions).
-- Chain outcome seed = `hash(seed, endpoint_key, request_counter n)`. Same sequential request stream → same timings and failures every run.
-- Generated body seed = `hash(node, path)`. Each field's seed derives from `(parent_seed, field_name, index)`, so adding or reordering schema properties never changes other fields.
-- The chaos error roll is **always drawn**, even when no chaos is set, so enabling chaos never shifts the RNG sequence of timings.
+---
 
-## Security model (phase one)
+## 6. Deterministic Data Synthesis Engine
 
-- Binds `127.0.0.1` by default; non-loopback bind prints a warning.
-- Control API: every route goes through the `guard` middleware — `Host` must be loopback with the bound port (DNS-rebinding guard), and every route except `health`/`ui` needs the 256-bit bearer token (`?token=` allowed only on `/events` for `EventSource`).
-- CORS `*` on mock routes only; the control namespace never gets CORS.
-- The token lives in `.kaanal/run.json`, created with user-only permissions (0700/0600 on Unix, a single-user ACL on Windows).
-- One instance per project directory via an OS file lock on `.kaanal/lock`.
+Response bodies are synthesized by `kaanal-data` using response schemas declared in OpenAPI 3.0 files.
+
+```mermaid
+flowchart TD
+    ConfigSeed["kaanal.yaml seed"]
+    
+    subgraph Execution["Execution PRNG (kaanal-core)"]
+        ExecSeed["stable_hash(seed, endpoint_key, n)"]
+        ChaChaExec["ChaCha8Rng (Latency & Chaos)"]
+    end
+
+    subgraph DataGen["Data Synthesis PRNG (kaanal-data)"]
+        BodySeed["stable_hash(node_name, path)"]
+        Field1["child_seed(parent, 'id', 0)"]
+        Field2["child_seed(parent, 'email', 1)"]
+        Field3["child_seed(parent, 'address', 2)"]
+        GroupSeed["Object Group Seed<br/>(Shared Place Context)"]
+    end
+
+    ConfigSeed --> ExecSeed --> ChaChaExec
+    ConfigSeed -.-> BodySeed
+    BodySeed --> Field1
+    BodySeed --> Field2
+    BodySeed --> Field3
+    BodySeed --> GroupSeed
+```
+
+### Seeding Invariants
+
+- **Endpoint Seed Independence (Rule R4.4)**: Each generated property derives its seed via:
+  $$\text{child\_seed} = \text{stable\_hash}(\text{parent\_seed}, \text{field\_name}, \text{index})$$
+  Adding, removing, or reordering schema properties never alters the generated values of sibling properties.
+- **Geographic Coherence**: All address components (`city`, `state`, `pincode`, `street`) in a single JSON object sample a shared `group` seed derived from the enclosing object. A generated object never mixes a Mumbai pincode with a Chennai city.
+- **Formats Beat Lengths (Rule R4.5)**: Standard formats (`uuid`, `email`, `date-time`, `ipv4`, `uri`) and well-formed heuristic fields are never truncated by `maxLength` or padded by `minLength`. A truncated email is invalid; well-formed formatting takes precedence.
+- **URL Parameter Binding**: Path parameters (e.g., `/users/{id}` called as `/users/42`) overwrite matching schema properties via `apply_params`, safely coercing numeric types without crashing on non-numeric strings.
+
+---
+
+## 7. Control Plane, Security & Event Bus
+
+The control plane exposes operational endpoints under `/__kaanal/*`:
+
+```mermaid
+flowchart LR
+    subgraph Ingress["Single Port Ingress (e.g. :8080)"]
+        Req["HTTP Request"] --> Guard{"Host & Token Guard"}
+    end
+
+    Guard -->|Host != Loopback| R403["403 Forbidden"]
+    Guard -->|Invalid Token| R401["401 Unauthorized"]
+    Guard -->|Valid Request| Dispatcher{"Route Dispatcher"}
+
+    Dispatcher -->|GET /__kaanal/health| Health["Health Probe (No Auth)"]
+    Dispatcher -->|GET /__kaanal/ui| UI["Embedded Web UI (No Auth)"]
+    Dispatcher -->|GET /__kaanal/topology| Topo["Topology Manifest"]
+    Dispatcher -->|GET,PUT,DELETE /__kaanal/chaos| Chaos["Chaos State API"]
+    Dispatcher -->|GET /__kaanal/events| SSE["SSE Broadcast Stream"]
+```
+
+### Security Guard Architecture
+
+The `guard` middleware executes before any axum request extractor:
+
+1. **Host Header Verification (DNS Rebinding Guard, Rule R5.3)**: `Host` must match `localhost`, `127.0.0.1`, or `[::1]`, optionally followed by the exact bound port. Requests targeting attacker domains resolving to loopback are rejected with 403.
+2. **Bearer Token Authentication (Rule R5.2)**: All control routes (except `health` and `ui`) require `Authorization: Bearer <token>`. Comparisons use `constant_time_eq` to prevent timing attacks.
+3. **Query Parameter Token Exemption**: `?token=<token>` is accepted exclusively on `GET /__kaanal/events` because standard browser `EventSource` cannot set custom headers.
+4. **CORS Boundary (Rule R5.4)**: `Access-Control-Allow-Origin: *` is set exclusively on mock routes. Control endpoints never emit CORS headers, preventing rogue websites from manipulating chaos.
+5. **Security Response Headers**: Every control response carries `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+
+---
+
+## 8. Embedded Web UI Architecture
+
+Served at `/__kaanal/ui`, the Web UI is a self-contained single-page dashboard embedded directly into the binary via `include_str!`:
+
+- **Zero Assets, Zero Build Step**: Vanilla HTML, CSS, and modern JavaScript.
+- **Fragment Token Transport**: The access token is read strictly from the URL fragment (`#__kaanal/ui#token=...`). Browsers never transmit URL fragments to servers, keeping the token out of server access logs.
+- **XSS Immunity**: The UI constructs dynamic DOM nodes exclusively via `element.textContent`, never `innerHTML` or `eval()`.
+- **Content Security Policy (CSP)**: Served with `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`.
+- **Bounded Resource Usage**: Real-time traffic rate (rps) and error percentages (err%) use fixed-size 10-second bucket counters, ensuring memory usage remains constant under high request rates.
+
+---
+
+## 9. Process Lifecycle & Concurrency Model
+
+```mermaid
+flowchart TD
+    Start(["kaanal up"]) --> PrivDir["Create .kaanal/ Directory<br/>(0700 Unix / icacls Windows)"]
+    PrivDir --> Lock["Acquire OS File Lock<br/>(.kaanal/lock via File::try_lock)"]
+    Lock --> CheckLock{Locked?}
+
+    CheckLock -- No --> ExitBusy["Print 'already running' & Exit 1"]
+    CheckLock -- Yes --> Init["Build AppState & Bind TCP Port"]
+    Init --> RunFile["Atomically Write .kaanal/run.json<br/>(temp file + rename)"]
+    RunFile --> Serve["Serve Requests on Tokio Multi-thread Pool"]
+
+    Serve --> SigWait{"Wait for Ctrl+C / SIGINT"}
+    SigWait --> TokenCheck{"run.json contains our token?"}
+    TokenCheck -- Yes --> Unlink["Delete .kaanal/run.json"]
+    TokenCheck -- No --> Keep["Leave run.json intact"]
+    Unlink --> KernelUnlock["Process exits -> OS releases .kaanal/lock"]
+    Keep --> KernelUnlock
+    KernelUnlock --> Terminate(["Exit 0"])
+```
+
+### Single Instance Enforcement
+
+- **OS File Lock (Rule R6.7)**: `kaanal up` opens `.kaanal/lock` and calls `std::fs::File::try_lock()` (Rust 1.89+). If another instance holds the lock, it immediately exits with code 1.
+- **Crash Safety**: Operating system file locks are released by the kernel upon process termination. Stale lock files never occur after abnormal termination or `kill -9`.
+- **Atomic State Persistence**: Server metadata (`port`, `token`, `pid`) is written to `.kaanal/run.json` via a temporary file and atomic rename.
+
+---
+
+## 10. System Invariants & 3 AM Failure Modes
+
+| Potential Failure Mode                 | Root Cause                                                     | Kaanal Defense-in-Depth                                                                                 |
+| -------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **DNS-Rebinding Attack**               | Malicious website scripts browser to query `127.0.0.1:8080`.   | `guard` middleware checks `Host` header against loopback whitelist; rejects foreign hosts with 403.     |
+| **Cross-Origin Chaos Manipulation**    | Browser tries to send preflight or POST to `/__kaanal/chaos`.  | CORS headers are strictly disabled on the control plane. Options preflights fail.                       |
+| **RNG Desynchronization**              | Toggling chaos causes subsequent timings or payloads to shift. | Chaos error rolls are drawn unconditionally on every request, preserving downstream PRNG sequence.      |
+| **Recursive `$ref` Memory Exhaustion** | Circular OpenAPI schema causes unbounded recursion.            | `ApiModel::from_openapi` tracks traversal stack and enforces a 10,000 reference expansion budget.       |
+| **Race Conditions During Startup**     | Two terminal sessions launch `kaanal up` simultaneously.       | OS file lock on `.kaanal/lock` guarantees exactly one winner; loser fails cleanly with code 1.          |
+| **Token Leakage via Proxy / Redirect** | CLI tool obeys `HTTP_PROXY` or follows malicious redirects.    | CLI `ureq` client explicitly disables system proxies and redirects.                                     |
+| **Token Compromise in Logs**           | Token passed via query string appears in server or proxy logs. | Query string tokens are rejected everywhere except `/__kaanal/events`. UI reads token from `#fragment`. |
+| **Port Clashing**                      | Configured port is already occupied by another service.        | Server automatically probes `port..=port+20`, binding the first available socket.                       |

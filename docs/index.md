@@ -29,6 +29,7 @@ This documentation has three parts.
 | [web/user-guide.md](web/user-guide.md)   | Install, `kaanal.yaml`, CLI commands, the embedded UI           |
 | [web/control-api.md](web/control-api.md) | The `/__kaanal/*` HTTP control API reference                    |
 | [web/concepts.md](web/concepts.md)       | Topology, call chains, chaos, determinism — explained for users |
+| [web/web-ui.md](web/web-ui.md)           | Embedded status page guide, live counters, security rules       |
 
 ## The 30-second version
 

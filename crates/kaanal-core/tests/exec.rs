@@ -219,5 +219,5 @@ fn gateway_down_fails_static_route_with_no_hops() {
             status: 503
         }
     );
-    assert!(out.hops.is_empty());
+    assert_eq!(out.hops, []);
 }

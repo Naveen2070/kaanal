@@ -12,15 +12,15 @@ The token rides in the URL **fragment** (`#…`), which browsers never send to a
 
 **Node table** — one row per topology node:
 
-| Column | Meaning |
-|---|---|
-| Node / Type | Name, kind and flavor (`database · postgres`). |
-| rps / err % | Rolling 10-second window, recomputed every second from the event stream. |
-| Latency +ms | Extra latency input (0–300 000). |
-| Error % | Failure probability input (0–100). |
-| Status | Failure status select (500–504). |
-| Down | Hard-outage checkbox. |
-| Apply / Clear | PUTs the merged chaos patch for that row, or DELETEs it. |
+| Column        | Meaning                                                                  |
+| ------------- | ------------------------------------------------------------------------ |
+| Node / Type   | Name, kind and flavor (`database · postgres`).                           |
+| rps / err %   | Rolling 10-second window, recomputed every second from the event stream. |
+| Latency +ms   | Extra latency input (0–300 000).                                         |
+| Error %       | Failure probability input (0–100).                                       |
+| Status        | Failure status select (500–504).                                         |
+| Down          | Hard-outage checkbox.                                                    |
+| Apply / Clear | PUTs the merged chaos patch for that row, or DELETEs it.                 |
 
 **Request log** — newest first, capped at 200 rows: time, method, path, status, ms (measured), and the node that failed (rows with 5xx are highlighted).
 

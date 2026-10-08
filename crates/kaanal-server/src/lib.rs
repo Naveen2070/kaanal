@@ -72,12 +72,12 @@ pub fn new_token() -> String {
         })
 }
 
-/// Binds the port, builds [`AppState`](state::AppState), spawns the axum server on
+/// Binds the port, builds server state, spawns the axum server on
 /// the current tokio runtime, and returns its handle.
 ///
 /// # Errors
 /// Returns a message if no port in `port..=port+20` is free or if
-/// [`AppState::build`](state::AppState::build) fails (bad config, specs or routes).
+/// building server state fails (bad config, specs or routes).
 pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, String> {
     let listener = bind(opts.host, opts.port).await?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;

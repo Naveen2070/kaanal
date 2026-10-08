@@ -72,7 +72,7 @@ fn unsupported_keywords_become_warnings() {
 fn clean_config_has_no_warnings() {
     let src = std::fs::read_to_string(fixtures().join("kaanal.yaml")).unwrap();
     let warnings = kaanal_server::check(&Config::from_yaml(&src).unwrap(), &fixtures()).unwrap();
-    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(warnings, Vec::<String>::new());
 }
 
 #[test]

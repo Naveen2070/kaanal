@@ -39,7 +39,8 @@ The full rulebook is `internal/RULES.md` (local only, git-ignored — never comm
 - **Branches:** work on a feature branch, never directly on `main`.
 - **Commit only when asked.** Otherwise stage the work and wait.
 - **Every commit is signed off** (`git commit -s`, DCO — rule R1.10).
-- **Message style:** short subject + a compact, human bullet list of what was done. Gist, not a changelog. **If AI tools (Copilot, Claude, Cursor, …) helped write the change, disclose it with a `Co-Authored-By:` trailer** on the commit.
+- **Message style:** short subject + a compact, human bullet list of what was done. Gist, not a changelog. **No `Co-Authored-By` or other AI attribution trailers** unless explicitly requested by the developer (rule R1.6).
+- **Identity:** author, committer, and sign-off use the GitHub noreply `104181086+Naveen2070@users.noreply.github.com` (rule R1.11).
 
 ## 4. "I want to change X" → read these docs
 
@@ -59,9 +60,9 @@ The full rulebook is `internal/RULES.md` (local only, git-ignored — never comm
 
 ## 5. Before you commit
 
-0. **One-time setup after cloning:** `git config core.hooksPath .githooks` — the pre-commit hook then runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` for you on every commit. Style and lints are pinned by `rustfmt.toml` and `clippy.toml` in the repo root.
+0. **One-time setup after cloning:** `git config core.hooksPath .githooks` — the pre-commit hook runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `dprint check` (Markdown formatting) for you on every commit. Style and lints are pinned by `rustfmt.toml`, `clippy.toml`, and `dprint.json` in the repo root.
 1. `cargo test --workspace` green (the hook checks, but run it yourself first — it's faster than a rejected commit).
-2. `cargo fmt --all` and clippy clean.
+2. `cargo fmt --all`, `dprint fmt`, and clippy clean.
 3. Determinism intact: if you touched seeding, re-check the invariants in R4.x and the tests that pin them.
 4. Security intact: if you touched the control API, re-check R5.x — the guard, CORS split, token handling.
 5. On a feature branch, signed off, human message.

@@ -1,15 +1,15 @@
 # Kaanal user documentation (docs site)
 
-This folder holds the **user-facing documentation** — the content of Kaanal's public docs site. It is written for people *using* the tool, not changing it. (Contributors: you want [../coding-guide/](../coding-guide/index.md) and [../source/](../source/architecture.md).)
+This folder holds the **user-facing documentation** — the content of Kaanal's public docs site. It is written for people _using_ the tool, not changing it. (Contributors: you want [../coding-guide/](../coding-guide/index.md) and [../source/](../source/architecture.md).)
 
 ## Site structure
 
-| Page | Audience | Contents |
-|---|---|---|
-| [user-guide.md](user-guide.md) | Everyone | Install, `kaanal.yaml`, CLI, the embedded status page |
-| [control-api.md](control-api.md) | Test authors, tooling writers | The `/__kaanal/*` HTTP API, request/response reference |
-| [concepts.md](concepts.md) | Everyone | Topology, call chains, chaos, determinism — what Kaanal actually simulates |
-| [web-ui.md](web-ui.md) | Users of the status page | The embedded `/__kaanal/ui` page, feature by feature |
+| Page                             | Audience                      | Contents                                                                   |
+| -------------------------------- | ----------------------------- | -------------------------------------------------------------------------- |
+| [user-guide.md](user-guide.md)   | Everyone                      | Install, `kaanal.yaml`, CLI, the embedded status page                      |
+| [control-api.md](control-api.md) | Test authors, tooling writers | The `/__kaanal/*` HTTP API, request/response reference                     |
+| [concepts.md](concepts.md)       | Everyone                      | Topology, call chains, chaos, determinism — what Kaanal actually simulates |
+| [web-ui.md](web-ui.md)           | Users of the status page      | The embedded `/__kaanal/ui` page, feature by feature                       |
 
 ## Conventions for these docs
 

@@ -10,7 +10,7 @@ Phase one walks `gateway → service → database`. More node kinds (cache, exte
 
 ## Call chains
 
-A request to a mocked endpoint doesn't return instantly. Kaanal walks the path *behind* that endpoint and adds up the simulated cost of each hop:
+A request to a mocked endpoint doesn't return instantly. Kaanal walks the path _behind_ that endpoint and adds up the simulated cost of each hop:
 
 ```
 GET /users/42
@@ -48,7 +48,7 @@ Given the same `seed` in `kaanal.yaml`:
 - The same URL always returns the same generated body (`GET /users/42` is always the same Priya).
 - A sequence of requests sent one after another always sees the same timings and the same failure pattern.
 
-This makes tests reproducible: commit the config, and every CI run gets the same backend. (Under *concurrent* requests, arrival order decides which specific request fails; only the failure *rate* is guaranteed.)
+This makes tests reproducible: commit the config, and every CI run gets the same backend. (Under _concurrent_ requests, arrival order decides which specific request fails; only the failure _rate_ is guaranteed.)
 
 ## Generated data
 

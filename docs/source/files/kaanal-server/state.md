@@ -8,12 +8,12 @@
 
 ## Types
 
-| Item | Kind | What it does |
-|---|---|---|
-| `Body` | enum | `Generated { schema }` (from an OpenAPI response) or `Static(Value)` (from a `routes:` override). |
-| `Route` | struct | One `method + path`: `key` (`"GET /users/{id}"` — also the chain RNG key), `owner` (`None` = static-only route answered by the gateway), `op` (inferred read/write/scan), `status`, `body`, `counter` (atomic request count → `ChainRequest.n`). |
-| `Event` | struct | One finished request for the SSE stream: `ts_ms`, `method`, `path`, `status`, measured `ms`, `nodes` visited in order, `failed_node`. |
-| `AppState` | struct | `topo`, `paths` (matchit router of `Vec<Route>` per path), `route_keys` (sorted, for display), `chaos` (`RwLock<ChaosState>`), `events` (broadcast sender, capacity 1024), `token`, `seed`, `port`, `warnings`. |
+| Item       | Kind   | What it does                                                                                                                                                                                                                                     |
+| ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Body`     | enum   | `Generated { schema }` (from an OpenAPI response) or `Static(Value)` (from a `routes:` override).                                                                                                                                                |
+| `Route`    | struct | One `method + path`: `key` (`"GET /users/{id}"` — also the chain RNG key), `owner` (`None` = static-only route answered by the gateway), `op` (inferred read/write/scan), `status`, `body`, `counter` (atomic request count → `ChainRequest.n`). |
+| `Event`    | struct | One finished request for the SSE stream: `ts_ms`, `method`, `path`, `status`, measured `ms`, `nodes` visited in order, `failed_node`.                                                                                                            |
+| `AppState` | struct | `topo`, `paths` (matchit router of `Vec<Route>` per path), `route_keys` (sorted, for display), `chaos` (`RwLock<ChaosState>`), `events` (broadcast sender, capacity 1024), `token`, `seed`, `port`, `warnings`.                                  |
 
 ## `AppState::build` pipeline
 

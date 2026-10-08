@@ -51,13 +51,13 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 
 ## CLI
 
-| Command | What it does |
-|---|---|
-| `kaanal up [-c f] [--port p] [--host ip]` | Start (foreground). Ctrl+C stops. |
-| `kaanal validate [-c f]` | Check config, topology and specs. |
-| `kaanal status` | Table of nodes with their live chaos settings. |
+| Command                                                                               | What it does                                              |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `kaanal up [-c f] [--port p] [--host ip]`                                             | Start (foreground). Ctrl+C stops.                         |
+| `kaanal validate [-c f]`                                                              | Check config, topology and specs.                         |
+| `kaanal status`                                                                       | Table of nodes with their live chaos settings.            |
 | `kaanal chaos set <node> [--latency 300ms] [--error-rate 10%] [--error 503] [--down]` | Change chaos live. Fields merge — set only what you name. |
-| `kaanal chaos clear [node]` | Clear one node, or everything with no argument. |
+| `kaanal chaos clear [node]`                                                           | Clear one node, or everything with no argument.           |
 
 Exit codes: `0` ok, `1` error, `2` no running instance.
 

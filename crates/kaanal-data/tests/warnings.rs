@@ -42,7 +42,7 @@ fn flags_max_length_that_cannot_fit_the_format() {
 #[test]
 fn clean_schema_has_no_warnings() {
     let s = json!({ "type": "object", "properties": { "a": { "type": "integer", "minimum": 1 } } });
-    assert!(unsupported_keywords(&s, "GET /ok").is_empty());
+    assert_eq!(unsupported_keywords(&s, "GET /ok"), Vec::<String>::new());
 }
 
 #[test]

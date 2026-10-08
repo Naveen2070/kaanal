@@ -50,12 +50,12 @@ All active chaos, keyed by node name. Empty object when nothing is set.
 { "latency_ms": 300, "error_rate": 0.1, "error_status": 504, "down": true }
 ```
 
-| Field | Rules |
-|---|---|
-| `latency_ms` | integer, 0 – 300 000 |
-| `error_rate` | number, 0.0 – 1.0 |
-| `error_status` | integer, 500 – 504 |
-| `down` | boolean — when true, everything through the node fails 503 |
+| Field          | Rules                                                      |
+| -------------- | ---------------------------------------------------------- |
+| `latency_ms`   | integer, 0 – 300 000                                       |
+| `error_rate`   | number, 0.0 – 1.0                                          |
+| `error_status` | integer, 500 – 504                                         |
+| `down`         | boolean — when true, everything through the node fails 503 |
 
 Unknown node → `404 "unknown node '<name>'"`. Out-of-range values → `400`. Unknown JSON keys → rejected.
 
@@ -75,7 +75,7 @@ event: lagged
 data: 37
 ```
 
-- `ms` is measured wall time; the per-hop *simulated* breakdown is in the response's `X-Kaanal-Trace` header.
+- `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header.
 - `lagged` means the stream fell behind and skipped that many events.
 
 ### `GET /__kaanal/ui`

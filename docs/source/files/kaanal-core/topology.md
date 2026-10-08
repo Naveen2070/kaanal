@@ -8,13 +8,13 @@ The topology graph: nodes, edges, and all semantic validation of the config.
 
 ## Types
 
-| Item | Kind | What it does |
-|---|---|---|
-| `NodeId` | type alias | `usize` — index into `Topology::nodes`. |
-| `Node` | struct | Runtime node: `name`, `kind`, `flavor`, `spec`, `proc` distribution, `ops: Option<[Dist; 3]>` (read/write/scan, indexed by `Op as usize`). |
-| `Edge` | struct | `from`, `to`, `net` latency distribution. |
-| `Topology` | struct | `nodes`, `edges`, `gateway` (the one gateway's id), private `index` (name → id). |
-| `TopologyError` | enum | Every rejection reason, each with human `Display`: `UnknownNode { edge, name }`, `GatewayCount(n)`, `Cycle(path)`, `MissingOps(name)`, `MissingGatewayEdge(name)`, `Unsupported(msg)`. |
+| Item            | Kind       | What it does                                                                                                                                                                           |
+| --------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NodeId`        | type alias | `usize` — index into `Topology::nodes`.                                                                                                                                                |
+| `Node`          | struct     | Runtime node: `name`, `kind`, `flavor`, `spec`, `proc` distribution, `ops: Option<[Dist; 3]>` (read/write/scan, indexed by `Op as usize`).                                             |
+| `Edge`          | struct     | `from`, `to`, `net` latency distribution.                                                                                                                                              |
+| `Topology`      | struct     | `nodes`, `edges`, `gateway` (the one gateway's id), private `index` (name → id).                                                                                                       |
+| `TopologyError` | enum       | Every rejection reason, each with human `Display`: `UnknownNode { edge, name }`, `GatewayCount(n)`, `Cycle(path)`, `MissingOps(name)`, `MissingGatewayEdge(name)`, `Unsupported(msg)`. |
 
 ## `Topology::build` checks, in order
 
@@ -28,8 +28,8 @@ The topology graph: nodes, edges, and all semantic validation of the config.
 
 ## Lookup methods
 
-| Method | What it does |
-|---|---|
-| `id(name)` | Name → `NodeId`. |
-| `out_edges(id)` | Iterator over edges leaving a node. |
-| `edge(from, to)` | The specific edge, if any. |
+| Method           | What it does                        |
+| ---------------- | ----------------------------------- |
+| `id(name)`       | Name → `NodeId`.                    |
+| `out_edges(id)`  | Iterator over edges leaving a node. |
+| `edge(from, to)` | The specific edge, if any.          |
