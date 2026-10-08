@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::num::NonZeroU32;
 
 use crate::config::{Config, NodeKind};
 use crate::dist::Dist;
@@ -28,6 +29,8 @@ pub struct Node {
     pub proc: Dist,
     /// Database op costs, indexed by `Op as usize`: read, write, scan.
     pub ops: Option<[Dist; 3]>,
+    /// Capacity for this node's own hops (see `NodeConfig::concurrency`); `None` = unlimited.
+    pub concurrency: Option<NonZeroU32>,
 }
 
 /// A dependency between two nodes, with its network latency.
@@ -144,6 +147,7 @@ impl Topology {
                 spec: n.spec.clone(),
                 proc: Dist::from_config(n.proc.as_ref()),
                 ops,
+                concurrency: n.concurrency,
             });
         }
 

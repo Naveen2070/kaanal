@@ -25,7 +25,8 @@ GET /users/42
 
 The breakdown comes back in the `X-Kaanal-Trace` response header, and the total is what your frontend experiences — so loading states, spinners and timeouts behave like they will in production.
 
-Costs can be fixed (`5ms`) or long-tailed (`{ p50: 4ms, p99: 20ms }` — most reads are ~4 ms, one in a hundred is ~20 ms, capped at 10×p99).
+Costs can be fixed (`5ms`), long-tailed (`{ p50: 4ms, p99: 20ms }` — most reads are ~4 ms, one in a hundred is ~20 ms, capped at 10×p99) or exponential (`{ mean: 5ms }`, as in queueing theory, capped at 10×mean).
+A node may also set `concurrency: N` (how many requests it serves at once, the rest queue). The simulator honours it; live mode warns and ignores it until M1.
 
 ## Operations
 

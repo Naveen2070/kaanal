@@ -130,7 +130,9 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
 - **`LogNormal { mu, sigma, cap_ms }`**: Long-tailed distribution fitted to configured percentiles $\{p50, p99\}$:
   $$\mu = \ln(p50)$$
   $$\sigma = \frac{\ln(p99 / p50)}{Z_{99}} \quad \text{where } Z_{99} \approx 2.3263479$$
-- **Tail Cap Safety**: Samples are clamped to $\min(\text{sample}, 10 \times p99)$. This prevents astronomical tail samples from indefinitely hanging a request.
+- **`Exp { mean }`**: Exponential (the queueing-theory default): $\text{mean} \times -\ln(1 - U)$ with $U$ uniform in $[0, 1)$, so $\ln(0)$ cannot occur.
+- **Tail Cap Safety**: Lognormal samples are clamped to $\min(\text{sample}, 10 \times p99)$ and exponential samples to $10 \times \text{mean}$. This prevents astronomical tail samples from indefinitely hanging a request.
+- **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.concurrency` carries it to the simulator; live mode has no queues, so `AppState::build` warns and ignores it until M1.
 
 ---
 

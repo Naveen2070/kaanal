@@ -51,7 +51,7 @@ impl BoundServer {
 }
 
 /// Validate everything `serve` would load (config, topology, specs, routes) without binding a port.
-/// `Ok` carries non-fatal warnings (ignored schema keywords).
+/// `Ok` carries non-fatal warnings (ignored schema keywords, nodes with `concurrency`).
 ///
 /// # Errors
 /// Returns the first load error (bad config, unreadable or invalid spec, route conflict).

@@ -1,4 +1,5 @@
-use kaanal_core::{Config, NodeKind};
+use kaanal_core::{Config, NodeKind, Topology};
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 const SAMPLE: &str = r#"
@@ -29,9 +30,7 @@ fn parses_sample() {
     assert_eq!(cfg.routes["GET /health"].status, 200);
     match cfg.nodes["app"].proc.as_ref().unwrap() {
         kaanal_core::config::DistConfig::Fixed(d) => assert_eq!(*d, Duration::from_millis(5)),
-        other @ kaanal_core::config::DistConfig::Pct { .. } => {
-            panic!("expected fixed, got {other:?}")
-        }
+        other => panic!("expected fixed, got {other:?}"),
     }
 }
 
@@ -91,4 +90,70 @@ fn huge_durations_are_rejected_with_a_position() {
     assert!(Config::from_yaml(yaml).is_err());
     let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: 1h }\n";
     assert!(Config::from_yaml(yaml).is_ok());
+}
+
+#[test]
+fn exponential_duration_parses_and_is_strict() {
+    let cfg =
+        Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, proc: { mean: 5ms } }\n")
+            .unwrap();
+    assert!(
+        matches!(
+            cfg.nodes["gw"].proc,
+            Some(kaanal_core::config::DistConfig::Exp { mean }) if mean == Duration::from_millis(5)
+        ),
+        "{:?}",
+        cfg.nodes["gw"].proc
+    );
+    // Over the 1 h cap: rejected with its line.
+    let err =
+        Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, proc: { mean: 2h } }\n")
+            .unwrap_err();
+    assert!(err.to_string().contains("at most 1h"), "{err}");
+    assert_eq!(err.line, Some(3), "{err}");
+    // Mixed shapes are not silently read as one of them.
+    let err = Config::from_yaml(
+        "version: 1\nnodes:\n  gw: { type: gateway, proc: { mean: 5ms, p99: 9ms } }\n",
+    )
+    .unwrap_err();
+    assert!(err.msg.contains("{ mean: 5ms }"), "{err}");
+    // Extra keys on a percentile pair are rejected too, not dropped.
+    let err = Config::from_yaml(
+        "version: 1
+nodes:
+  gw: { type: gateway, proc: { p50: 1ms, p99: 2ms, mean: 3ms } }
+",
+    )
+    .unwrap_err();
+    assert!(err.msg.contains("{ mean: 5ms }"), "{err}");
+}
+
+#[test]
+fn concurrency_parses_on_every_node_type_and_must_be_positive() {
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, concurrency: 4 }\n  app: { type: service, concurrency: 2 }\n  db: { type: database, concurrency: 1, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: db }\n";
+    let cfg = Config::from_yaml(yaml).unwrap();
+    let got: Vec<u32> = ["gw", "app", "db"]
+        .iter()
+        .map(|n| cfg.nodes[*n].concurrency.unwrap().get())
+        .collect();
+    assert_eq!(got, [4, 2, 1]);
+    let t = Topology::build(&cfg).unwrap();
+    assert_eq!(
+        t.nodes[t.id("db").unwrap()]
+            .concurrency
+            .map(NonZeroU32::get),
+        Some(1)
+    );
+    for bad in ["0", "-1", "1.5"] {
+        let err = Config::from_yaml(&format!(
+            "version: 1\nnodes:\n  gw: {{ type: gateway, concurrency: {bad} }}\n"
+        ))
+        .unwrap_err();
+        assert_eq!(err.line, Some(3), "{bad}: {err}");
+    }
+    let cfg = Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway }\n").unwrap();
+    assert!(
+        cfg.nodes["gw"].concurrency.is_none(),
+        "absent means unlimited"
+    );
 }

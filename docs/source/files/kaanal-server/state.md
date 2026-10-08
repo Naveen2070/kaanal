@@ -17,7 +17,7 @@
 
 ## `AppState::build` pipeline
 
-1. **Topology** — `Topology::build(cfg)`; any `TopologyError` aborts.
+1. **Topology** — `Topology::build(cfg)`; any `TopologyError` aborts. Each node with `concurrency` adds a warning (the simulator honours it, live mode does not yet; M1).
 2. **Specs** — for each service node with `spec`, reads the file (relative to the config's directory) and parses `ApiModel::from_openapi`. Warnings (ignored keywords) are collected, prefixed with the file name.
 3. **Spec routes** — each endpoint becomes a `Route`. Two services defining the same `method + path` → error naming both owners. `check_shape` (below) runs on every path.
 4. **Overrides** — each `routes:` entry is validated (`"METHOD /path"` shape, known method, leading slash, status 200–599; 1xx is not a final response) and either **replaces** an existing spec route's status/body (same shape, same param names) or **adds** a static-only route.

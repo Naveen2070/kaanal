@@ -8,27 +8,30 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 
 ## `crates/kaanal-core/tests/config.rs` — YAML parsing
 
-| Test                                          | What it proves                                                                                                                                                        |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `parses_sample`                               | A full sample file lands in the right typed fields: seed, port, node kinds, `spec`, edges, route override default status 200, and `proc: 5ms` parses as `Fixed(5ms)`. |
-| `defaults_apply`                              | Minimal config (`version: 1, nodes: {}`) gets seed 0, port 8080, empty edges.                                                                                         |
-| `bad_value_reports_line`                      | A type error deep in the file reports the right **line number** and renders as `3: …` (rule R6.1).                                                                    |
-| `unknown_field_is_rejected`                   | `deny_unknown_fields`: a `bogus:` key fails and names itself.                                                                                                         |
-| `wrong_version_is_rejected`                   | `version: 2` fails with a version message.                                                                                                                            |
-| `bom_and_crlf_parse_like_lf`                  | UTF-8 BOM + Windows CRLF line endings parse identically (rule R6.4).                                                                                                  |
-| `bad_duration_explains_what_is_expected`      | Bad `proc` values (in both duration shapes) fail with the friendly "expected a duration like …" message and the right line — not serde's untagged-enum gibberish.     |
-| `huge_durations_are_rejected_with_a_position` | A duration or p99 over 1 h is rejected with its line (summed hops would overflow); exactly 1 h is fine.                                                               |
+| Test                                                         | What it proves                                                                                                                                                        |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parses_sample`                                              | A full sample file lands in the right typed fields: seed, port, node kinds, `spec`, edges, route override default status 200, and `proc: 5ms` parses as `Fixed(5ms)`. |
+| `defaults_apply`                                             | Minimal config (`version: 1, nodes: {}`) gets seed 0, port 8080, empty edges.                                                                                         |
+| `bad_value_reports_line`                                     | A type error deep in the file reports the right **line number** and renders as `3: …` (rule R6.1).                                                                    |
+| `unknown_field_is_rejected`                                  | `deny_unknown_fields`: a `bogus:` key fails and names itself.                                                                                                         |
+| `wrong_version_is_rejected`                                  | `version: 2` fails with a version message.                                                                                                                            |
+| `bom_and_crlf_parse_like_lf`                                 | UTF-8 BOM + Windows CRLF line endings parse identically (rule R6.4).                                                                                                  |
+| `bad_duration_explains_what_is_expected`                     | Bad `proc` values (in both duration shapes) fail with the friendly "expected a duration like …" message and the right line — not serde's untagged-enum gibberish.     |
+| `huge_durations_are_rejected_with_a_position`                | A duration or p99 over 1 h is rejected with its line (summed hops would overflow); exactly 1 h is fine.                                                               |
+| `exponential_duration_parses_and_is_strict`                  | `{ mean: 5ms }` parses; `{ mean: 2h }` is rejected with its line; `{ mean, p99 }` is rejected with the "expected a duration like" message.                            |
+| `concurrency_parses_on_every_node_type_and_must_be_positive` | `concurrency` parses on gateway/service/database, is carried into `Node`, `0`/`-1`/`1.5` are rejected with line 3, absent = unlimited.                                |
 
 ## `crates/kaanal-core/tests/dist.rs` — latency distributions
 
-| Test                                          | What it proves                                                                                                                                                                                  |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lognormal_hits_p50_and_p99_within_5_percent` | 100 000 samples of a fitted lognormal land within 5 % of the configured p50 and p99 (mirrors NFR-11's 5 % accuracy bar).                                                                        |
-| `fixed_is_fixed`                              | `Fixed(5ms)` always samples 5 ms.                                                                                                                                                               |
-| `p99_not_above_p50_falls_back_to_fixed`       | Degenerate p50/p99 pairs (equal, or p99 < p50) become `Fixed(p50)` instead of producing a broken distribution.                                                                                  |
-| `fat_tail_is_capped_at_ten_times_p99`         | Even a 1 ms/1 s distribution never samples above 10×p99 — a fat tail can't hang a request.                                                                                                      |
-| `same_seed_same_samples`                      | Same seed → identical sample vectors (determinism).                                                                                                                                             |
-| `stable_hash_is_fixed_and_separates_parts`    | The FNV-1a hash matches a hard-coded known value (so it can never silently change) and `["ab","c"]` ≠ `["a","bc"]`. These vectors are duplicated in kaanal-data to pin the two copies together. |
+| Test                                            | What it proves                                                                                                                                                                                  |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lognormal_hits_p50_and_p99_within_5_percent`   | 100 000 samples of a fitted lognormal land within 5 % of the configured p50 and p99 (mirrors NFR-11's 5 % accuracy bar).                                                                        |
+| `fixed_is_fixed`                                | `Fixed(5ms)` always samples 5 ms.                                                                                                                                                               |
+| `p99_not_above_p50_falls_back_to_fixed`         | Degenerate p50/p99 pairs (equal, or p99 < p50) become `Fixed(p50)` instead of producing a broken distribution.                                                                                  |
+| `fat_tail_is_capped_at_ten_times_p99`           | Even a 1 ms/1 s distribution never samples above 10×p99 — a fat tail can't hang a request.                                                                                                      |
+| `same_seed_same_samples`                        | Same seed → identical sample vectors (determinism).                                                                                                                                             |
+| `exponential_has_the_configured_mean_and_a_cap` | 100k samples: mean within 2%, median ≈ mean·ln 2, never above 10 × mean, same seed → same samples.                                                                                              |
+| `stable_hash_is_fixed_and_separates_parts`      | The FNV-1a hash matches a hard-coded known value (so it can never silently change) and `["ab","c"]` ≠ `["a","bc"]`. These vectors are duplicated in kaanal-data to pin the two copies together. |
 
 ## `crates/kaanal-core/tests/topology.rs` — graph validation
 
@@ -124,6 +127,7 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `spec_on_non_service_is_rejected`                        | `spec` on a gateway node is rejected.                                                     |
 | `unsupported_keywords_become_warnings`                   | The `pattern` keyword in `openapi-warn.yaml` becomes exactly one warning naming the file. |
 | `clean_config_has_no_warnings`                           | The clean fixture produces zero warnings.                                                 |
+| `concurrency_warns_that_live_mode_ignores_it`            | One warning per node with `concurrency`, naming the node and saying "simulator only".     |
 | `token_is_64_hex_and_random`                             | `new_token`: 64 hex chars, two calls differ.                                              |
 | `override_differing_only_in_param_name_is_a_clear_error` | `GET /users/{x}` vs spec's `GET /users/{id}` → error naming both spellings.               |
 | `override_with_same_param_name_replaces_the_spec_route`  | Same shape, same names → override merges cleanly.                                         |

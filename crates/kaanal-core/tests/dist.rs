@@ -68,3 +68,25 @@ fn stable_hash_is_fixed_and_separates_parts() {
     assert_eq!(stable_hash(&[b"a", b"bc"]), stable_hash(&[b"a", b"bc"]));
     assert_ne!(stable_hash(&[b"ab", b"c"]), stable_hash(&[b"a", b"bc"]));
 }
+
+#[test]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "test: 100k samples average exactly enough in f64"
+)]
+fn exponential_has_the_configured_mean_and_a_cap() {
+    let d = Dist::Exp { mean: ms(10) };
+    let v = sorted_samples_ms(&d, 100_000);
+    let mean = v.iter().sum::<f64>() / v.len() as f64;
+    assert!((mean - 10.0).abs() < 0.2, "mean {mean}");
+    // Median of an exponential is mean × ln 2.
+    let median = quantile(&v, 0.5);
+    assert!(
+        (median - 10.0 * std::f64::consts::LN_2).abs() < 0.3,
+        "median {median}"
+    );
+    assert!(v[0] >= 0.0);
+    assert!(*v.last().unwrap() <= 100.0 + 1e-9, "capped at 10 × mean");
+    // Same seed → same samples.
+    assert_eq!(v, sorted_samples_ms(&d, 100_000));
+}

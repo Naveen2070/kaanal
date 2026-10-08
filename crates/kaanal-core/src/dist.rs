@@ -1,11 +1,12 @@
 //! Latency distributions: how long one hop takes.
 //!
 //! A configured p50/p99 pair becomes a lognormal (real latencies have a fat right
-//! tail); a plain duration is fixed. Sampling always goes through a caller-owned
+//! tail); `{ mean }` is exponential (the queueing-theory default); a plain duration is fixed. Sampling always goes through a caller-owned
 //! RNG so outcomes stay deterministic.
 
 use std::time::Duration;
 
+use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, LogNormal};
 
@@ -13,6 +14,10 @@ use crate::config::DistConfig;
 
 /// **Private.** z-score of the 99th percentile of the standard normal distribution.
 const Z99: f64 = 2.326_347_874;
+
+/// **Private.** Exponential samples are capped at this many means, like the lognormal's
+/// 10 × p99, so no sample hangs a request. The cut tail has probability e⁻¹⁰ ≈ 4.5e-5.
+const EXP_CAP: f64 = 10.0;
 
 /// A samplable latency distribution.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +32,12 @@ pub enum Dist {
         sigma: f64,
         /// Hard ceiling per sample (10×p99), so a fat tail cannot hang a request.
         cap_ms: f64,
+    },
+    /// Exponential with this mean (memoryless; the queueing-theory default). Samples are
+    /// capped at 10 × mean.
+    Exp {
+        /// Mean duration.
+        mean: Duration,
     },
 }
 
@@ -56,6 +67,7 @@ impl Dist {
             None => Dist::ZERO,
             Some(DistConfig::Fixed(d)) => Dist::Fixed(*d),
             Some(DistConfig::Pct { p50, p99 }) => Dist::from_p50_p99(*p50, *p99),
+            Some(DistConfig::Exp { mean }) => Dist::Exp { mean: *mean },
         }
     }
 
@@ -68,6 +80,11 @@ impl Dist {
             Dist::LogNormal { mu, sigma, cap_ms } => {
                 let ms: f64 = LogNormal::new(*mu, *sigma).expect("sigma > 0").sample(rng);
                 Duration::from_secs_f64(ms.min(*cap_ms) / 1000.0)
+            }
+            Dist::Exp { mean } => {
+                let u: f64 = rng.random();
+                // 1 − U is in (0, 1], so ln never sees 0; abs() turns ln's ≤ 0 (and −0.0) into ≥ 0.
+                mean.mul_f64((1.0 - u).ln().abs().min(EXP_CAP))
             }
         }
     }

@@ -37,7 +37,7 @@ routes:                          # optional static overrides
   "GET /users":  { body: [ { id: 1 } ], status: 200 }
 ```
 
-- **nodes** — `gateway` (exactly one), `service` (with an OpenAPI 3.0 `spec`), `database` (needs `ops` costs for `read`/`write`/`scan`). `proc` is processing time. A duration is `5ms` or a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution).
+- **nodes** — `gateway` (exactly one), `service` (with an OpenAPI 3.0 `spec`), `database` (needs `ops` costs for `read`/`write`/`scan`). `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
 - **edges** — the dependency graph. Phase one: `gateway → service → database` only. Cycles and dangling references are rejected at startup.
 - **routes** — static responses that replace or extend the spec's routes. Same path + same parameter names = override; otherwise a new route.
 

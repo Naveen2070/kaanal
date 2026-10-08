@@ -168,7 +168,8 @@ routes:                  # Optional static overrides
 - **`nodes`**:
   - `gateway`: Exactly one entry point per topology.
   - `service`: Backend microservice hosting an OpenAPI 3.0 `spec`.
-  - `database`: Data store with configured costs for `read`, `write`, and `scan` operations. Costs can be fixed (`5ms`) or fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`).
+  - `database`: Data store with configured costs for `read`, `write`, and `scan` operations. Costs can be fixed (`5ms`) fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
+- Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
 - **`edges`**: Directed dependency graph. In Phase One, requests flow `gateway -> service -> database`.
 - **`routes`**: Static route overrides that take precedence over generated OpenAPI schemas.
 

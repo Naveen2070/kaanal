@@ -82,7 +82,7 @@ pub struct AppState {
     pub seed: u64,
     /// The bound port (after the +20 search), used by the Host guard.
     pub port: u16,
-    /// Non-fatal findings from loading (ignored schema keywords); shown by `validate` and `up`.
+    /// Non-fatal findings from loading (ignored schema keywords, nodes with `concurrency`); shown by `validate` and `up`.
     pub warnings: Vec<String>,
 }
 
@@ -146,6 +146,13 @@ impl AppState {
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
         let mut shapes: HashMap<String, String> = HashMap::new();
         let mut warnings = Vec::new();
+        // Live mode has no queues yet; say so instead of silently ignoring the setting.
+        for n in topo.nodes.iter().filter(|n| n.concurrency.is_some()) {
+            warnings.push(format!(
+                "node '{}': concurrency is honoured by the simulator only (live mode enforces it from M1)",
+                n.name
+            ));
+        }
 
         for (id, node) in topo.nodes.iter().enumerate() {
             let Some(spec) = &node.spec else { continue };

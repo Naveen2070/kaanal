@@ -5,6 +5,7 @@
 //! Unknown fields are rejected everywhere, so a typo fails loudly at load.
 
 use std::fmt;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use indexmap::IndexMap;
@@ -69,6 +70,10 @@ pub struct NodeConfig {
     /// Operation costs; required on database nodes, invalid elsewhere.
     #[serde(default)]
     pub ops: Option<OpsConfig>,
+    /// Most of this node's own hops (proc/op) that may run at once; absent = unlimited.
+    /// Honoured by the simulator; live mode warns and ignores it until M1.
+    #[serde(default)]
+    pub concurrency: Option<NonZeroU32>,
 }
 
 /// Per-operation latency costs of a database node. All three are required.
@@ -96,7 +101,7 @@ pub struct EdgeConfig {
     pub net: Option<DistConfig>,
 }
 
-/// A duration in YAML: `5ms` (fixed) or `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both).
+/// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).
 #[derive(Debug, Clone)]
 pub enum DistConfig {
     /// A single fixed duration, parsed with `humantime`.
@@ -108,34 +113,55 @@ pub enum DistConfig {
         /// 99th percentile.
         p99: Duration,
     },
+    /// Exponential with this mean (`{ mean: 5ms }`); see [`crate::Dist::Exp`].
+    Exp {
+        /// Mean duration.
+        mean: Duration,
+    },
 }
 
 impl<'de> Deserialize<'de> for DistConfig {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         // A plain untagged enum reports "data did not match any variant"; say what is expected instead.
-        /// **Private.** Parsing shim for the two YAML shapes of a duration.
+        /// **Private.** `{ p50, p99 }`. Unknown keys rejected, so a mixed map can't half-match.
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct PctRaw {
+            #[serde(with = "humantime_serde")]
+            p50: Duration,
+            #[serde(with = "humantime_serde")]
+            p99: Duration,
+        }
+        /// **Private.** `{ mean }`. Unknown keys rejected, so `{ mean, p99 }` is an error.
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ExpRaw {
+            #[serde(with = "humantime_serde")]
+            mean: Duration,
+        }
+        /// **Private.** Parsing shim for the three YAML shapes of a duration.
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Raw {
             Fixed(#[serde(with = "humantime_serde")] Duration),
-            Pct {
-                #[serde(with = "humantime_serde")]
-                p50: Duration,
-                #[serde(with = "humantime_serde")]
-                p99: Duration,
-            },
+            Pct(PctRaw),
+            Exp(ExpRaw),
         }
         let c = Raw::deserialize(d)
             .map(|r| match r {
                 Raw::Fixed(x) => DistConfig::Fixed(x),
-                Raw::Pct { p50, p99 } => DistConfig::Pct { p50, p99 },
+                Raw::Pct(PctRaw { p50, p99 }) => DistConfig::Pct { p50, p99 },
+                Raw::Exp(ExpRaw { mean }) => DistConfig::Exp { mean },
             })
             .map_err(|_| {
-                D::Error::custom("expected a duration like `5ms`, or `{ p50: 1ms, p99: 3ms }`")
+                D::Error::custom(
+                    "expected a duration like `5ms`, `{ p50: 1ms, p99: 3ms }` or `{ mean: 5ms }`",
+                )
             })?;
         let longest = match &c {
             DistConfig::Fixed(x) => *x,
             DistConfig::Pct { p99, .. } => *p99,
+            DistConfig::Exp { mean } => *mean,
         };
         if longest > MAX_DURATION {
             return Err(D::Error::custom(

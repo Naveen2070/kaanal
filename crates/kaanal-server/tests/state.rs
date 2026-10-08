@@ -136,3 +136,22 @@ fn control_namespace_is_reserved() {
         assert!(err.contains("reserved"), "{err}");
     }
 }
+
+#[test]
+fn concurrency_warns_that_live_mode_ignores_it() {
+    let cfg = Config::from_yaml(
+        "version: 1\nnodes:\n  gw: { type: gateway, concurrency: 2 }\n  app: { type: service, spec: openapi.yaml, concurrency: 1 }\nedges:\n  - { from: gw, to: app }\n",
+    )
+    .unwrap();
+    let warnings = kaanal_server::check(&cfg, &fixtures()).unwrap();
+    let c: Vec<&String> = warnings
+        .iter()
+        .filter(|w| w.contains("concurrency"))
+        .collect();
+    assert_eq!(c.len(), 2, "one per node: {warnings:?}");
+    assert!(
+        c[0].starts_with("node 'gw': ") && c[0].contains("simulator only"),
+        "{warnings:?}"
+    );
+    assert!(c[1].starts_with("node 'app': "), "{warnings:?}");
+}
