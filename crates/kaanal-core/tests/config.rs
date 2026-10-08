@@ -79,3 +79,16 @@ fn bad_duration_explains_what_is_expected() {
         Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, proc: fast }\n").unwrap_err();
     assert!(err.msg.contains("expected a duration like"), "{err}");
 }
+
+#[test]
+fn huge_durations_are_rejected_with_a_position() {
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: 10000000000000000000s }\n";
+    let err = Config::from_yaml(yaml).unwrap_err();
+    assert!(err.to_string().contains("at most 1h"), "{err}");
+    assert_eq!(err.line, Some(3), "{err}");
+    // A p99 over the limit is caught too; 1h itself is fine.
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: { p50: 1ms, p99: 2h } }\n";
+    assert!(Config::from_yaml(yaml).is_err());
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: 1h }\n";
+    assert!(Config::from_yaml(yaml).is_ok());
+}

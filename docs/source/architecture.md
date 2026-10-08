@@ -107,7 +107,7 @@ sequenceDiagram
     Note over Core: Pure Synchronous Evaluation:<br/>1. Gateway proc (1.0ms)<br/>2. Net hop (1.0ms)<br/>3. Service proc (5.0ms)<br/>4. Net hop (1.0ms)<br/>5. DB read op (4.2ms)
     Core-->>Mock: ChainOutcome { hops, total: 12.2ms, status: Ok }
     Mock->>Mock: tokio::time::sleep(12.2ms)
-    Mock->>Data: generate(schema, "response", seed=hash(node, path))
+    Mock->>Data: generate(schema, "response", seed=hash(seed, node, path))
     Data-->>Mock: Synthetic JSON Payload
     Mock->>Mock: apply_params(body, {"id": 42})
     Mock->>Bus: send(Event { status: 200, ms: 12.2, nodes })
@@ -192,7 +192,7 @@ flowchart TD
     end
 
     subgraph DataGen["Data Synthesis PRNG (kaanal-data)"]
-        BodySeed["stable_hash(node_name, path)"]
+        BodySeed["stable_hash(seed, node_name, path)"]
         Field1["child_seed(parent, 'id', 0)"]
         Field2["child_seed(parent, 'email', 1)"]
         Field3["child_seed(parent, 'address', 2)"]

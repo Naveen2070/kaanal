@@ -14,16 +14,20 @@ use serde_json::{Map, Value, json};
 use crate::words;
 
 /// **Private.** Recursion ceiling; deeper nesting yields `null` instead of overflowing.
-const MAX_DEPTH: usize = 16;
+pub(crate) const MAX_DEPTH: usize = 16;
 /// **Private.** Cap on random array length so `maxItems: 1000000` can't build a huge array.
 const MAX_RANDOM_ITEMS: u64 = 20;
+/// **Private.** Most values one body may hold. Nested arrays multiply (`20^5` = 3.2M) and
+/// `minItems` is honoured, so a per-array cap alone cannot bound a body; past this, values are `null`.
+const MAX_VALUES: usize = 10_000;
 /// **Private.** Timestamps are "the last 365 days before 2026-01-01", fixed so output never changes between runs.
 const BASE_EPOCH: i64 = 1_767_225_600;
 
 /// Deterministic JSON for an `OpenAPI` 3.0 schema whose `$ref`s are already inlined.
 /// Priority: example → enum → allOf/oneOf/anyOf → type (format → field-name heuristic → constraints → fallback).
 pub fn generate(schema: &Value, field: Option<&str>, seed: u64) -> Value {
-    value_for(schema, field, seed, seed, 0)
+    let mut budget = MAX_VALUES;
+    value_for(schema, field, seed, seed, 0, &mut budget)
 }
 
 /// **Private.** FNV-1a 64 with a separator byte between parts. Same algorithm as
@@ -76,10 +80,19 @@ pub fn apply_params(body: &mut Value, params: &[(String, String)]) {
 ///
 /// `group` is the seed of the enclosing object: fields that must agree with each other
 /// (city, state, pincode, address) derive their shared choice from it, not from their own seeds.
-fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize) -> Value {
-    if depth > MAX_DEPTH {
+/// `budget` counts the values still allowed in this body (see `MAX_VALUES`).
+fn value_for(
+    s: &Value,
+    field: Option<&str>,
+    seed: u64,
+    group: u64,
+    depth: usize,
+    budget: &mut usize,
+) -> Value {
+    if depth > MAX_DEPTH || *budget == 0 {
         return Value::Null;
     }
+    *budget -= 1;
     let rng = &mut ChaCha8Rng::seed_from_u64(seed);
     if let Some(ex) = s.get("example") {
         return ex.clone();
@@ -94,9 +107,14 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize
     if let Some(parts) = s.get("allOf").and_then(Value::as_array) {
         let mut merged = Map::new();
         for (i, part) in parts.iter().enumerate() {
-            if let Value::Object(o) =
-                value_for(part, field, child_seed(seed, "allOf", i), group, depth + 1)
-            {
+            if let Value::Object(o) = value_for(
+                part,
+                field,
+                child_seed(seed, "allOf", i),
+                group,
+                depth + 1,
+                budget,
+            ) {
                 merged.extend(o);
             }
         }
@@ -106,7 +124,14 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize
         .iter()
         .find_map(|k| s.get(*k).and_then(Value::as_array)?.first())
     {
-        return value_for(first, field, child_seed(seed, "oneOf", 0), group, depth + 1);
+        return value_for(
+            first,
+            field,
+            child_seed(seed, "oneOf", 0),
+            group,
+            depth + 1,
+            budget,
+        );
     }
     let default_type = if s.get("properties").is_some() {
         "object"
@@ -124,30 +149,20 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize
                 for (name, ps) in props {
                     out.insert(
                         name.clone(),
-                        value_for(ps, Some(name), child_seed(seed, name, 0), seed, depth + 1),
+                        value_for(
+                            ps,
+                            Some(name),
+                            child_seed(seed, name, 0),
+                            seed,
+                            depth + 1,
+                            budget,
+                        ),
                     );
                 }
             }
             Value::Object(out)
         }
-        "array" => {
-            let min = s.get("minItems").and_then(Value::as_u64).unwrap_or(1);
-            // limitation: cap random length so `maxItems: 1000000` can't build a huge array; minItems is still honoured
-            let max = s
-                .get("maxItems")
-                .and_then(Value::as_u64)
-                .unwrap_or(5)
-                .min(MAX_RANDOM_ITEMS)
-                .max(min);
-            let n = rng.random_range(min..=max);
-            let items = s.get("items").cloned().unwrap_or(json!({}));
-            let n = usize::try_from(n).expect("length is capped by MAX_RANDOM_ITEMS");
-            Value::Array(
-                (0..n)
-                    .map(|i| value_for(&items, None, child_seed(seed, "[]", i), group, depth + 1))
-                    .collect(),
-            )
-        }
+        "array" => array_for(s, rng, seed, group, depth, budget),
         "integer" => json!(int_for(s, field, rng)),
         "number" => number_for(s, field, rng),
         "boolean" => json!(rng.random_bool(0.5)),
@@ -244,6 +259,46 @@ fn number_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> Value {
     json!(round(v, 2).clamp(lo, hi))
 }
 
+/// **Private.** Array value: random length in `minItems..=maxItems` (random part capped at
+/// `MAX_RANDOM_ITEMS`), then cut to the remaining value budget.
+fn array_for(
+    s: &Value,
+    rng: &mut ChaCha8Rng,
+    seed: u64,
+    group: u64,
+    depth: usize,
+    budget: &mut usize,
+) -> Value {
+    let min = s.get("minItems").and_then(Value::as_u64).unwrap_or(1);
+    // limitation: cap random length so `maxItems: 1000000` can't build a huge array; minItems is still honoured
+    let max = s
+        .get("maxItems")
+        .and_then(Value::as_u64)
+        .unwrap_or(5)
+        .min(MAX_RANDOM_ITEMS)
+        .max(min);
+    // The draw is unchanged by the budget, so seeds stay stable; only the length is cut.
+    let n = rng
+        .random_range(min..=max)
+        .min(u64::try_from(*budget).unwrap_or(u64::MAX));
+    let n = usize::try_from(n).expect("length is capped by the value budget");
+    let items = s.get("items").cloned().unwrap_or(json!({}));
+    Value::Array(
+        (0..n)
+            .map(|i| {
+                value_for(
+                    &items,
+                    None,
+                    child_seed(seed, "[]", i),
+                    group,
+                    depth + 1,
+                    budget,
+                )
+            })
+            .collect(),
+    )
+}
+
 /// **Private.** Rounds to `places` decimal digits.
 fn round(v: f64, places: i32) -> f64 {
     let p = 10f64.powi(places);
@@ -254,7 +309,8 @@ fn round(v: f64, places: i32) -> f64 {
 /// lorem word. Formats beat lengths (rule R4.5): `fit_length` is skipped for values
 /// that must stay well-formed.
 fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) -> String {
-    let v = match s.get("format").and_then(Value::as_str).unwrap_or("") {
+    let format = s.get("format").and_then(Value::as_str).unwrap_or("");
+    let v = match format {
         "email" => email(rng, group),
         "uuid" => uuid(rng),
         "date-time" => date_time(rng),
@@ -269,7 +325,11 @@ fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) 
         _ => heuristic(&norm(field), is_id(field), group, rng)
             .unwrap_or_else(|| words::pick(words::WORDS, rng).to_string()),
     };
-    let structured = s.get("format").is_some() || keeps_format(&norm(field), is_id(field));
+    // Only formats built above must stay well-formed; unknown ones (`password`) still get lengths.
+    let structured = matches!(
+        format,
+        "email" | "uuid" | "date-time" | "date" | "uri" | "url" | "ipv4"
+    ) || keeps_format(&norm(field), is_id(field));
     // truncating or padding an email, uuid or timestamp would make it invalid; the format wins over lengths
     if structured { v } else { fit_length(v, s) }
 }

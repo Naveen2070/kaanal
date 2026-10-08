@@ -5,7 +5,7 @@
 //! instance via `.kaanal/run.json` and call its control API (rule R2.6: every
 //! interface is a thin client, no per-interface logic).
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -94,10 +94,23 @@ fn err(msg: impl Into<String>) -> Fail {
 
 /// **Private.** Entry point: prints the failure message to stderr and returns the code.
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    // clap's own exit code for usage errors is 2, which here means "not running" (R6.3).
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            let _ = e.print();
+            return if e.use_stderr() {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            };
+        }
+    };
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Fail(code, msg)) => {
-            eprintln!("{msg}");
+            // Messages can quote config and spec contents; never let them drive the terminal.
+            eprintln!("{}", clean_lines(&msg));
             ExitCode::from(code)
         }
     }
@@ -111,7 +124,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
             let warnings = kaanal_server::check(&cfg, &dir)
                 .map_err(|e| err(format!("{}: {e}", config.display())))?;
             for w in warnings {
-                eprintln!("warning: {w}");
+                eprintln!("warning: {}", clean(&w));
             }
             println!("ok: {}", config.display());
             Ok(())
@@ -209,9 +222,9 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
             .map_err(|e| err(format!("{}: {e}", config.display())))?;
         let port = server.addr.port();
         for w in &server.warnings {
-            eprintln!("warning: {w}");
+            eprintln!("warning: {}", clean(w));
         }
-        write_run_file(port, &token)?;
+        write_run_file(server.addr, &token)?;
         println!("Mocks: http://localhost:{port}");
         println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
         // limitation: only Ctrl+C removes run.json. Closing the window, SIGTERM (docker stop) or a
@@ -303,7 +316,7 @@ fn lock_instance() -> Result<std::fs::File, Fail> {
     match f.try_lock() {
         Ok(()) => Ok(f),
         Err(std::fs::TryLockError::WouldBlock) => {
-            let port = read_run().map_or(String::new(), |(p, _)| format!(" on port {p}"));
+            let port = read_run().map_or(String::new(), |(a, _)| format!(" on port {}", a.port()));
             Err(err(format!(
                 "kaanal is already running{port} (this directory's {LOCK_FILE} is held)"
             )))
@@ -312,11 +325,19 @@ fn lock_instance() -> Result<std::fs::File, Fail> {
     }
 }
 
-/// **Private.** Writes `{port, token, pid}` via temp file + rename, so a concurrent
-/// `status` never reads half a file.
-fn write_run_file(port: u16, token: &str) -> Result<(), Fail> {
+/// **Private.** Writes `{host, port, token, pid}` via temp file + rename, so a concurrent
+/// `status` never reads half a file. `host` is where the CLI connects: the bound address,
+/// or loopback when bound to all interfaces.
+fn write_run_file(bound: SocketAddr, token: &str) -> Result<(), Fail> {
     use std::io::Write;
-    let body = json!({ "port": port, "token": token, "pid": std::process::id() }).to_string();
+    let host = match bound.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ip => ip,
+    };
+    let body =
+        json!({ "host": host, "port": bound.port(), "token": token, "pid": std::process::id() })
+            .to_string();
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -332,22 +353,33 @@ fn write_run_file(port: u16, token: &str) -> Result<(), Fail> {
         .map_err(|e| err(format!("{RUN_FILE}: {e}")))
 }
 
-/// **Private.** Reads `(port, token)` from the run file; any malformed piece → `None`.
-fn read_run() -> Option<(u16, String)> {
+/// **Private.** Reads `(address, token)` from the run file; any malformed piece → `None`.
+/// A file without `host` (older versions) means `127.0.0.1`.
+fn read_run() -> Option<(SocketAddr, String)> {
     let run: Value = serde_json::from_str(&std::fs::read_to_string(RUN_FILE).ok()?).ok()?;
     let port = u16::try_from(run["port"].as_u64()?).ok()?;
-    Some((port, run["token"].as_str()?.to_string()))
+    let host = match run.get("host") {
+        Some(h) => h.as_str()?.parse().ok()?,
+        None => IpAddr::V4(Ipv4Addr::LOCALHOST),
+    };
+    Some((
+        SocketAddr::new(host, port),
+        run["token"].as_str()?.to_string(),
+    ))
 }
 
 /// **Private.** Calls the running instance found via `.kaanal/run.json`. Exit 2 if
 /// it isn't running. The client never follows redirects and never uses a proxy —
 /// either could forward the token.
 fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
-    let (port, token) =
+    let (addr, token) =
         read_run().ok_or_else(|| Fail(2, format!("kaanal is not running (no {RUN_FILE})")))?;
+    let port = addr.port();
     let auth = format!("Bearer {token}");
-    // The control API only accepts a loopback Host with the bound port (R5.3).
-    let url = format!("http://127.0.0.1:{port}{path}");
+    let url = format!("http://{addr}{path}");
+    // The control API only accepts a loopback Host with the bound port (R5.3), even when
+    // we connect to a non-loopback bind address.
+    let host = format!("localhost:{port}");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         // Never send the token through an HTTP(S)_PROXY from the environment.
@@ -359,12 +391,23 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
         .build()
         .into();
     let res = match (method, body) {
-        ("PUT", Some(b)) => agent.put(&url).header("Authorization", &auth).send_json(&b),
-        ("DELETE", _) => agent.delete(&url).header("Authorization", &auth).call(),
-        _ => agent.get(&url).header("Authorization", &auth).call(),
+        ("PUT", Some(b)) => agent
+            .put(&url)
+            .header("Host", &host)
+            .header("Authorization", &auth)
+            .send_json(&b),
+        ("DELETE", _) => agent
+            .delete(&url)
+            .header("Host", &host)
+            .header("Authorization", &auth)
+            .call(),
+        _ => agent
+            .get(&url)
+            .header("Host", &host)
+            .header("Authorization", &auth)
+            .call(),
     };
-    let mut resp =
-        res.map_err(|e| Fail(2, format!("kaanal is not running on port {port}: {e}")))?;
+    let mut resp = res.map_err(|e| Fail(2, format!("kaanal is not running on {addr}: {e}")))?;
     let status = resp.status().as_u16();
     let text = resp.body_mut().read_to_string().unwrap_or_default();
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -414,6 +457,11 @@ fn clean(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { '?' } else { c })
         .collect()
+}
+
+/// **Private.** [`clean`] per line, keeping our own line breaks.
+fn clean_lines(s: &str) -> String {
+    s.lines().map(clean).collect::<Vec<_>>().join("\n")
 }
 
 /// **Private.** RFC 3986 unreserved characters; everything else in a path segment is escaped.

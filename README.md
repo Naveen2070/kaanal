@@ -105,7 +105,7 @@ x-kaanal-trace: nginx.proc=0.6ms,net=0.9ms,app.proc=3.0ms,net=1.1ms,db.read=2.7m
 access-control-allow-origin: *
 access-control-expose-headers: x-kaanal-trace
 
-{"city":"Coimbatore","createdAt":"2025-10-31T00:15:04Z","email":"karthik.bose67@example.com","firstName":"Karthik","id":42,"lastName":"Bose","phone":"+91 9695550062","pincode":"641001","state":"Tamil Nadu","status":"active"}
+{"city":"Kochi","createdAt":"2025-04-02T23:57:31Z","email":"siddharth.rao81@example.com","firstName":"Siddharth","id":42,"lastName":"Rao","phone":"+91 9385785563","pincode":"682001","state":"Kerala","status":"active"}
 ```
 
 (Some CORS and standard headers trimmed.)

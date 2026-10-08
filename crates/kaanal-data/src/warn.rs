@@ -7,6 +7,7 @@
 use serde_json::Value;
 
 use crate::ApiModel;
+use crate::generate::MAX_DEPTH;
 
 /// **Private.** Keywords the generator does not honour; generated values may violate them.
 const IGNORED: [&str; 6] = [
@@ -22,14 +23,26 @@ const IGNORED: [&str; 6] = [
 /// `at` names the endpoint, e.g. `GET /users`. Property *names* are never mistaken for keywords.
 fn unsupported_keywords(schema: &Value, at: &str) -> Vec<String> {
     let mut out = Vec::new();
-    walk(schema, at, &mut out);
+    walk(schema, at, &mut out, 0);
     out
 }
 
 /// **Private.** Recursive schema walk: flags ignored keywords and `maxLength` too
 /// small for a `format`, then descends into properties, items and combinators.
-fn walk(s: &Value, at: &str, out: &mut Vec<String>) {
+/// Nesting past the generator's `MAX_DEPTH` warns once: those values are `null` (R6.2).
+fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
     let Value::Object(m) = s else { return };
+    if depth > MAX_DEPTH {
+        // Named by endpoint only (`at` before the first ` .field`), so a branching schema warns once.
+        let endpoint = at.split(" .").next().unwrap_or(at);
+        let msg = format!(
+            "{endpoint}: schema nests deeper than {MAX_DEPTH} levels; deeper values are null"
+        );
+        if !out.contains(&msg) {
+            out.push(msg);
+        }
+        return;
+    }
     for k in IGNORED {
         if m.contains_key(k) {
             out.push(format!("{at}: '{k}' is not supported and is ignored"));
@@ -53,18 +66,18 @@ fn walk(s: &Value, at: &str, out: &mut Vec<String>) {
     }
     if let Some(Value::Object(props)) = m.get("properties") {
         for (name, p) in props {
-            walk(p, &format!("{at} .{name}"), out);
+            walk(p, &format!("{at} .{name}"), out, depth + 1);
         }
     }
     for k in ["items", "additionalProperties"] {
         if let Some(v) = m.get(k) {
-            walk(v, at, out);
+            walk(v, at, out, depth + 1);
         }
     }
     for k in ["allOf", "oneOf", "anyOf"] {
         if let Some(Value::Array(parts)) = m.get(k) {
             for p in parts {
-                walk(p, at, out);
+                walk(p, at, out, depth + 1);
             }
         }
     }
@@ -131,5 +144,34 @@ mod tests {
         let s =
             json!({ "type": "object", "properties": { "a": { "type": "integer", "minimum": 1 } } });
         assert_eq!(unsupported_keywords(&s, "GET /ok"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn too_deep_schema_warns_once_and_matches_the_generator() {
+        use super::{MAX_DEPTH, Value};
+        let nest = |levels: usize| {
+            let mut s = json!({ "type": "integer" });
+            for _ in 0..levels {
+                s = json!({ "type": "object", "properties": { "a": s } });
+            }
+            s
+        };
+        let leaf = |v: &Value, levels: usize| (0..levels).fold(v.clone(), |v, _| v["a"].clone());
+        // Deepest allowed: no warning, and the generator still fills the leaf.
+        assert_eq!(
+            unsupported_keywords(&nest(MAX_DEPTH), "GET /ok"),
+            Vec::<String>::new()
+        );
+        assert!(leaf(&crate::generate(&nest(MAX_DEPTH), None, 1), MAX_DEPTH).is_i64());
+        // One level more, on two branches: one warning, and the generator gives up there too.
+        let deep = json!({ "type": "object", "properties": { "x": nest(MAX_DEPTH), "y": nest(MAX_DEPTH) } });
+        let w = unsupported_keywords(&deep, "GET /deep");
+        assert_eq!(w.len(), 1, "once per endpoint, not per branch: {w:?}");
+        assert!(
+            w[0].starts_with("GET /deep: ") && w[0].contains("deeper than 16"),
+            "{w:?}"
+        );
+        let body = crate::generate(&deep, None, 1);
+        assert!(leaf(&body["x"], MAX_DEPTH - 1)["a"].is_null(), "{body}");
     }
 }

@@ -11,7 +11,7 @@ The mock request handler — the axum fallback that serves every non-control rou
 3. **Chain execution** — builds a `ChainRequest` (owning service, inferred op, endpoint key, per-route atomic counter `n`, config seed) and calls `kaanal_core::execute` **synchronously in the handler** (microseconds of pure math). The chaos `RwLock` read guard is held across it — briefly.
 4. **Sleep** — `tokio::time::sleep(outcome.total())` makes the client actually wait the simulated time. (Windows caveat: sub-15 ms sleeps round up to the OS timer tick; measured latency can exceed the simulated sum.)
 5. **Trace header** — `X-Kaanal-Trace`: comma-separated hops with one decimal (`nginx.proc=1.0ms,net=1.0ms,db.read=1.0ms`); a failure appends `node.error=STATUS` naming the node whose chaos stopped the chain.
-6. **Body** — on `ChainResult::Err`: `{"error":"chaos","node":name}` with the chaos status. On `Ok`: the static override if the route has one, else `kaanal_data::generate` seeded by `stable_hash(node, path)` (same URL → same body forever), then `apply_params` copies path params into matching fields.
+6. **Body** — on `ChainResult::Err`: `{"error":"chaos","node":name}` with the chaos status. On `Ok`: the static override if the route has one, else `kaanal_data::generate` seeded by `stable_hash(seed, node, path)` (same `seed:` + URL → same body forever; a new `seed:` reshuffles the data), then `apply_params` copies path params into matching fields.
 7. **Event** — sends an `Event` (timestamp, method, path, status, **measured** wall ms, ordered unique node names, failing node) on the broadcast bus for SSE subscribers. No subscribers = send error, ignored by design.
 
 ## Other items

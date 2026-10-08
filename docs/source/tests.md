@@ -8,15 +8,16 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 
 ## `crates/kaanal-core/tests/config.rs` — YAML parsing
 
-| Test                                     | What it proves                                                                                                                                                        |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `parses_sample`                          | A full sample file lands in the right typed fields: seed, port, node kinds, `spec`, edges, route override default status 200, and `proc: 5ms` parses as `Fixed(5ms)`. |
-| `defaults_apply`                         | Minimal config (`version: 1, nodes: {}`) gets seed 0, port 8080, empty edges.                                                                                         |
-| `bad_value_reports_line`                 | A type error deep in the file reports the right **line number** and renders as `3: …` (rule R6.1).                                                                    |
-| `unknown_field_is_rejected`              | `deny_unknown_fields`: a `bogus:` key fails and names itself.                                                                                                         |
-| `wrong_version_is_rejected`              | `version: 2` fails with a version message.                                                                                                                            |
-| `bom_and_crlf_parse_like_lf`             | UTF-8 BOM + Windows CRLF line endings parse identically (rule R6.4).                                                                                                  |
-| `bad_duration_explains_what_is_expected` | Bad `proc` values (in both duration shapes) fail with the friendly "expected a duration like …" message and the right line — not serde's untagged-enum gibberish.     |
+| Test                                          | What it proves                                                                                                                                                        |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parses_sample`                               | A full sample file lands in the right typed fields: seed, port, node kinds, `spec`, edges, route override default status 200, and `proc: 5ms` parses as `Fixed(5ms)`. |
+| `defaults_apply`                              | Minimal config (`version: 1, nodes: {}`) gets seed 0, port 8080, empty edges.                                                                                         |
+| `bad_value_reports_line`                      | A type error deep in the file reports the right **line number** and renders as `3: …` (rule R6.1).                                                                    |
+| `unknown_field_is_rejected`                   | `deny_unknown_fields`: a `bogus:` key fails and names itself.                                                                                                         |
+| `wrong_version_is_rejected`                   | `version: 2` fails with a version message.                                                                                                                            |
+| `bom_and_crlf_parse_like_lf`                  | UTF-8 BOM + Windows CRLF line endings parse identically (rule R6.4).                                                                                                  |
+| `bad_duration_explains_what_is_expected`      | Bad `proc` values (in both duration shapes) fail with the friendly "expected a duration like …" message and the right line — not serde's untagged-enum gibberish.     |
+| `huge_durations_are_rejected_with_a_position` | A duration or p99 over 1 h is rejected with its line (summed hops would overflow); exactly 1 h is fine.                                                               |
 
 ## `crates/kaanal-core/tests/dist.rs` — latency distributions
 
@@ -97,16 +98,19 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `length_limits_never_break_formats`                      | `maxLength: 8` doesn't truncate an email; `minLength: 50` doesn't pad a uuid; name-heuristic emails are also protected (rule R4.5).                                             |
 | `city_state_pincode_and_address_describe_the_same_place` | 300 seeds: one object always has a consistent (city, state, pincode) triple and the address ends in that city; cities still vary across seeds.                                  |
 | `names_and_email_describe_the_same_person`               | 300 seeds: `name` is `firstName lastName` and `email` starts with `first.last`; people still vary across seeds.                                                                 |
+| `unknown_formats_still_get_length_limits`                | `format: password` + `minLength`/`maxLength` stays within the lengths (only built formats skip them).                                                                           |
+| `huge_or_deeply_nested_arrays_are_bounded`               | `minItems: 1e9` yields at most 10 000 items; five nested 20-item levels stay under 1 MB (per-body value budget).                                                                |
 
 ## `crates/kaanal-data/src/warn.rs` (unit) + `tests/warnings.rs` — ignored-keyword warnings
 
-| Test                                            | What it proves                                                                                                 |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `flags_ignored_keywords_but_not_property_names` | A _property called_ `pattern` is not flagged; a real `pattern:` keyword and `uniqueItems` are, with locations. |
-| `walks_items_and_combinators`                   | `not` nested inside `items → allOf` is found.                                                                  |
-| `flags_max_length_that_cannot_fit_the_format`   | `format: uuid` + `maxLength: 10` warns (the format wins); `maxLength: 36` does not.                            |
-| `clean_schema_has_no_warnings`                  | No ignored keywords → no warnings.                                                                             |
-| `api_model_collects_warnings_per_endpoint`      | End-to-end from a spec string: `ApiModel::warnings()` prefixes warnings with `GET /things`.                    |
+| Test                                                   | What it proves                                                                                                                                       |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flags_ignored_keywords_but_not_property_names`        | A _property called_ `pattern` is not flagged; a real `pattern:` keyword and `uniqueItems` are, with locations.                                       |
+| `walks_items_and_combinators`                          | `not` nested inside `items → allOf` is found.                                                                                                        |
+| `flags_max_length_that_cannot_fit_the_format`          | `format: uuid` + `maxLength: 10` warns (the format wins); `maxLength: 36` does not.                                                                  |
+| `clean_schema_has_no_warnings`                         | No ignored keywords → no warnings.                                                                                                                   |
+| `too_deep_schema_warns_once_and_matches_the_generator` | (unit) 16 levels: no warning and a filled leaf; 17 levels on two branches: one warning per endpoint, and the generator returns `null` at that depth. |
+| `api_model_collects_warnings_per_endpoint`             | End-to-end from a spec string: `ApiModel::warnings()` prefixes warnings with `GET /things`.                                                          |
 
 ## `crates/kaanal-server/tests/state.rs` — load pipeline (no HTTP)
 
@@ -124,7 +128,7 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `override_differing_only_in_param_name_is_a_clear_error` | `GET /users/{x}` vs spec's `GET /users/{id}` → error naming both spellings.               |
 | `override_with_same_param_name_replaces_the_spec_route`  | Same shape, same names → override merges cleanly.                                         |
 | `override_needs_known_method_and_leading_slash`          | `FOO /x` and `GET users` each fail with targeted messages.                                |
-| `override_status_must_be_a_real_http_status`             | Status 99 and 1000 are rejected (100–599 only).                                           |
+| `override_status_must_be_a_real_http_status`             | Status 99, 100, 199 and 1000 are rejected (200–599 only).                                 |
 | `control_namespace_is_reserved`                          | `routes:` can never claim `/__kaanal` or anything under it.                               |
 
 ## `crates/kaanal-server/tests/http.rs` — end-to-end HTTP
@@ -175,6 +179,7 @@ _Embedded UI page:_
 | `ui_page_avoids_unsafe_dom_apis_and_external_assets`                        | Static guard: no `innerHTML`/`eval(`/inline handlers/`localStorage`/any `http(s)://` URL in the page.                     |
 | `ui_controls_have_accessible_names_and_dark_form_controls`                  | `color-scheme: light dark`, aria labels, `role="alert"`.                                                                  |
 | `ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters` | Structural guards on the page's JS: separate status/error elements, fixed-size counter buckets, node names as `Map` keys. |
+| `config_seed_changes_generated_bodies`                                      | Same `seed:` → same `/users/42` body; a different `seed:` → different data (path `id` still 42).                          |
 
 ## `crates/kaanal/tests/cli.rs` — binary end-to-end
 
@@ -193,6 +198,10 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 | `killed_instance_does_not_block_the_next_up`                   | After a kill -9 style death, the OS releases the lock; a new `up` starts and `status` works (rule R6.7).                                                                                                                                          |
 | `two_simultaneous_ups_let_exactly_one_win`                     | Race: exactly one instance exits 1, the winner keeps running.                                                                                                                                                                                     |
 | `run_file_is_restricted_to_the_current_user_on_windows`        | (Windows only) `icacls` shows only the current user on `.kaanal/run.json` — no Everyone/Users grants (rule R5.8).                                                                                                                                 |
+| `cli_reaches_an_instance_bound_to_ipv6_loopback`               | `up --host ::1` then `status` works (CLI connects to `run.json`'s host, sends `Host: localhost:<port>`).                                                                                                                                          |
+| `bad_arguments_exit_1_not_2`                                   | Usage errors (`--error 70000`, unknown subcommand) exit 1, not clap's 2 ("not running"); `--help` exits 0.                                                                                                                                        |
+| `spec_text_cannot_drive_the_terminal`                          | An ESC sequence in a spec property name reaches the warning as `?[31m…`, never as a raw escape.                                                                                                                                                   |
+| `sample_project_validates`                                     | `examples/nginx-server/kaanal.yaml` validates with no warnings.                                                                                                                                                                                   |
 
 ## Unit tests inside source files
 

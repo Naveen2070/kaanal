@@ -125,16 +125,30 @@ impl<'de> Deserialize<'de> for DistConfig {
                 p99: Duration,
             },
         }
-        Raw::deserialize(d)
+        let c = Raw::deserialize(d)
             .map(|r| match r {
                 Raw::Fixed(x) => DistConfig::Fixed(x),
                 Raw::Pct { p50, p99 } => DistConfig::Pct { p50, p99 },
             })
             .map_err(|_| {
                 D::Error::custom("expected a duration like `5ms`, or `{ p50: 1ms, p99: 3ms }`")
-            })
+            })?;
+        let longest = match &c {
+            DistConfig::Fixed(x) => *x,
+            DistConfig::Pct { p99, .. } => *p99,
+        };
+        if longest > MAX_DURATION {
+            return Err(D::Error::custom(
+                "durations must be at most 1h (a request's hops are summed, so huge values overflow)",
+            ));
+        }
+        Ok(c)
     }
 }
+
+/// **Private.** Longest configurable cost. Samples are capped at 10 × p99, so one hop is
+/// at most 10 h and a chain's sum stays far from `Duration`'s limit.
+const MAX_DURATION: Duration = Duration::from_secs(3600);
 
 /// A static response override for a `"METHOD /path"` key in `routes:`.
 #[derive(Debug, Clone, Deserialize)]

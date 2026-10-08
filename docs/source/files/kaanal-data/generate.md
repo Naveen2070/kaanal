@@ -38,8 +38,10 @@ Field-pick priority (first match wins): **`example` → `enum` → `allOf` (merg
 
 ## Limits
 
-- `MAX_DEPTH = 16` — pathological nesting returns `null` instead of recursing forever.
+- `MAX_DEPTH = 16` — pathological nesting returns `null` instead of recursing forever. Shared with `warn.rs`, which warns at startup when a schema nests deeper (R6.2).
 - `MAX_RANDOM_ITEMS = 20` — `maxItems: 1000000` cannot build a huge array (`minItems` is still honoured).
+- `MAX_VALUES = 10_000` — values per body. Nested arrays multiply and `minItems` is honoured, so only a per-body budget bounds the size; past it, values are `null`. Array lengths are cut to the budget after the random draw, so seeds stay stable.
+- Length limits (`minLength`/`maxLength`) are skipped only for formats the generator builds (`email`, `uuid`, `date-time`, `date`, `uri`, `url`, `ipv4`); unknown formats such as `password` still get them.
 
 ## Unit tests in this file
 

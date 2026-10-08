@@ -119,12 +119,12 @@ fn override_needs_known_method_and_leading_slash() {
 
 #[test]
 fn override_status_must_be_a_real_http_status() {
-    for bad in ["99", "1000"] {
+    for bad in ["99", "100", "199", "1000"] {
         let err = check_yaml(&format!(
             "{GW_APP}routes:\n  \"GET /x\": {{ status: {bad}, body: 1 }}\n"
         ))
         .unwrap_err();
-        assert!(err.contains("between 100 and 599"), "{err}");
+        assert!(err.contains("between 200 and 599"), "{err}");
     }
 }
 

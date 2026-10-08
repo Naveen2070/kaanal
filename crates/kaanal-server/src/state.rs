@@ -186,9 +186,10 @@ impl AppState {
                 .split_once(' ')
                 .ok_or_else(|| format!("routes: '{spec}' must look like 'GET /path'"))?;
             let (m, p) = (m.to_uppercase(), p.trim().to_string());
-            if !(100..=599).contains(&ov.status) {
+            // 1xx is not a final response: hyper would turn it into its own 500 (R6.2).
+            if !(200..=599).contains(&ov.status) {
                 return Err(format!(
-                    "routes: '{spec}': status {} must be between 100 and 599",
+                    "routes: '{spec}': status {} must be between 200 and 599",
                     ov.status
                 ));
             }

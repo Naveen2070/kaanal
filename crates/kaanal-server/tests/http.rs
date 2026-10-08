@@ -10,9 +10,17 @@ pub struct Srv {
 }
 
 pub async fn start() -> Srv {
+    start_seeded(None).await
+}
+
+/// Like [`start`], optionally overriding the fixture's `seed:`.
+pub async fn start_seeded(seed: Option<u64>) -> Srv {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let cfg =
+    let mut cfg =
         Config::from_yaml(&std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap()).unwrap();
+    if let Some(seed) = seed {
+        cfg.seed = seed;
+    }
     let token = kaanal_server::new_token();
     let opts = ServeOpts {
         host: "127.0.0.1".parse().unwrap(),
@@ -524,4 +532,21 @@ async fn trace_shows_sub_millisecond_hops_and_names_the_failing_node() {
         .unwrap()
         .to_string();
     assert!(trace.ends_with(",db.error=504"), "{trace}");
+}
+
+#[tokio::test]
+async fn config_seed_changes_generated_bodies() {
+    let body = |s: Srv| async move { s.get("/users/42").await.json::<Value>().await.unwrap() };
+    let a = body(start_seeded(Some(1)).await).await;
+    assert_eq!(
+        a,
+        body(start_seeded(Some(1)).await).await,
+        "same seed, same data"
+    );
+    let b = body(start_seeded(Some(2)).await).await;
+    assert_ne!(
+        a["email"], b["email"],
+        "a new seed reshuffles the data: {a} vs {b}"
+    );
+    assert_eq!(b["id"], 42, "path params still win");
 }

@@ -275,3 +275,30 @@ fn names_and_email_describe_the_same_person() {
     }
     assert!(people.len() > 3, "people should still vary: {people:?}");
 }
+
+#[test]
+fn unknown_formats_still_get_length_limits() {
+    let s = json!({ "type": "string", "format": "password", "minLength": 12, "maxLength": 16 });
+    for seed in 0..50 {
+        let v = generate(&s, None, seed);
+        let n = v.as_str().unwrap().chars().count();
+        assert!((12..=16).contains(&n), "{v}");
+    }
+}
+
+#[test]
+fn huge_or_deeply_nested_arrays_are_bounded() {
+    // One array asking for a billion items.
+    let s =
+        json!({ "type": "array", "minItems": 1_000_000_000_u64, "items": { "type": "integer" } });
+    let v = generate(&s, None, 1);
+    assert!(v.as_array().unwrap().len() <= 10_000);
+
+    // Five nested levels of 20 items would be 3.2M values.
+    let mut s = json!({ "type": "integer" });
+    for _ in 0..5 {
+        s = json!({ "type": "array", "minItems": 20, "maxItems": 20, "items": s });
+    }
+    let text = generate(&s, None, 1).to_string();
+    assert!(text.len() < 1_000_000, "body is {} bytes", text.len());
+}

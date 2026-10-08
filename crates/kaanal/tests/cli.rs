@@ -33,9 +33,15 @@ struct Up {
 
 impl Up {
     fn start(name: &str) -> Up {
+        Up::start_with(name, &[])
+    }
+
+    fn start_with(name: &str, extra: &[&str]) -> Up {
         let dir = scratch(name);
         let child = bin()
-            .args(["up", "--port", "0", "-c"])
+            .args(["up", "--port", "0"])
+            .args(extra)
+            .arg("-c")
             .arg(fixture())
             .current_dir(&dir)
             .stdout(Stdio::null())
@@ -311,4 +317,63 @@ fn run_file_is_restricted_to_the_current_user_on_windows() {
     for other in ["everyone", "builtin\\users", "authenticated users"] {
         assert!(!acl.contains(other), "{other} must not have access: {acl}");
     }
+}
+
+#[test]
+fn cli_reaches_an_instance_bound_to_ipv6_loopback() {
+    let up = Up::start_with("ipv6", &["--host", "::1"]);
+    let out = up.run(&["status"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+#[test]
+fn bad_arguments_exit_1_not_2() {
+    // 2 means "not running" (R6.3); clap's default for usage errors is 2.
+    for args in [&["chaos", "set", "db", "--error", "70000"][..], &["nope"]] {
+        let out = bin().args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
+    }
+    let out = bin().arg("--help").output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn spec_text_cannot_drive_the_terminal() {
+    let dir = scratch("esc");
+    std::fs::write(
+        dir.join("openapi.yaml"),
+        "openapi: 3.0.3\ninfo: { title: t, version: \"1\" }\npaths:\n  /x:\n    get:\n      responses:\n        \"200\":\n          description: ok\n          content:\n            application/json:\n              schema: { type: object, properties: { \"\\x1b[31mx\": { type: string, pattern: \"^a\" } } }\n",
+    )
+    .unwrap();
+    let file = dir.join("kaanal.yaml");
+    std::fs::write(
+        &file,
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, spec: openapi.yaml }\nedges:\n  - { from: gw, to: app }\n",
+    )
+    .unwrap();
+    let out = bin().args(["validate", "-c"]).arg(&file).output().unwrap();
+    let err = stderr(&out);
+    assert!(
+        err.contains("?[31mx"),
+        "warning should name the field: {err:?}"
+    );
+    assert!(!err.contains('\u{1b}'), "{err:?}");
+}
+
+#[test]
+fn sample_project_validates() {
+    // The shipped example differs from the test fixture (lognormal costs, port 8080), so check it too.
+    let sample =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/nginx-server/kaanal.yaml");
+    let out = bin()
+        .args(["validate", "-c"])
+        .arg(&sample)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        stderr(&out).is_empty(),
+        "the sample should have no warnings: {}",
+        stderr(&out)
+    );
 }

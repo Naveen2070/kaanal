@@ -104,7 +104,8 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
                     let mut v = kaanal_data::generate(
                         schema,
                         None,
-                        stable_hash(&[owner.as_bytes(), path.as_bytes()]),
+                        // `seed:` is part of the key: same seed → same data; a new seed reshuffles it (NFR-10).
+                        stable_hash(&[&st.seed.to_le_bytes(), owner.as_bytes(), path.as_bytes()]),
                     );
                     kaanal_data::apply_params(&mut v, &params);
                     v
