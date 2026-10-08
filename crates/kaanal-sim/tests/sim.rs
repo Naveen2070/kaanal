@@ -104,10 +104,8 @@ fn zero_load_equals_live_exactly() {
     }
 }
 
-#[test]
-fn engine_matches_lindley_recursion() {
-    let t = topo(QUEUED);
-    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 80.0, 125)).unwrap();
+/// Asserts every request's queue wait at `app` equals the Lindley recursion, exactly.
+fn assert_lindley(t: &Topology, rep: &kaanal_sim::SimReport) {
     let app = t.id("app").unwrap();
     let (mut prev_a, mut prev_s, mut prev_w) = (0i128, 0i128, 0i128);
     for (k, r) in rep.requests.iter().enumerate() {
@@ -126,6 +124,13 @@ fn engine_matches_lindley_recursion() {
         assert_eq!(nanos(*wait), expected, "request {k}");
         (prev_a, prev_s, prev_w) = (a, nanos(hop.dur), expected);
     }
+}
+
+#[test]
+fn engine_matches_lindley_recursion() {
+    let t = topo(QUEUED);
+    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 80.0, 125)).unwrap();
+    assert_lindley(&t, &rep);
     assert!(rep.requests.len() > 9_000, "{}", rep.requests.len());
     let queued = rep
         .requests
@@ -136,9 +141,24 @@ fn engine_matches_lindley_recursion() {
 }
 
 #[test]
+fn simultaneous_events_keep_fifo_order() {
+    // 1e6 req/s: the mean gap is 1 µs, so ~0.05% of gaps round to 0 ns and arrivals tie with
+    // hop ends and with each other's timestamps. This pins FIFO queue order under equal times. The 800 ns fixed service keeps the queue busy (ρ = 0.8).
+    let t = topo(&QUEUED.replace("{ mean: 10ms }", "800ns"));
+    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 1e6, 1)).unwrap();
+    let ties = rep
+        .requests
+        .windows(2)
+        .filter(|w| w[0].arrival == w[1].arrival)
+        .count();
+    assert!(ties > 100, "the test must really produce ties: {ties}");
+    assert_lindley(&t, &rep);
+}
+
+#[test]
 fn same_seed_same_report() {
-    // Determinism, not tie coverage: with continuous arrival gaps exact ties are rare, so the
-    // (time, seq) rule is documented and reasoned about, not pinned by this test.
+    // Determinism only. FIFO queue order under equal timestamps is pinned by
+    // `simultaneous_events_keep_fifo_order`; the (time, seq) rule itself is reasoned, not tested.
     let t = topo(&QUEUED.replace("{ mean: 10ms }", "10ms"));
     let cfg = one_stream(&t, 90.0, 60);
     let a = run(&t, &ChaosState::default(), &cfg).unwrap();
@@ -341,6 +361,19 @@ fn utilization_divides_by_the_slot_count() {
     let rep = run(&t, &ChaosState::default(), &cfg).unwrap();
     let u = rep.nodes[t.id("app").unwrap()].utilization;
     assert!((u - 0.5).abs() < 0.03, "utilization {u}");
+}
+
+#[test]
+fn hand_edited_absurd_service_time_is_rejected_not_a_panic() {
+    let mut t = topo(QUEUED);
+    let app = t.id("app").unwrap();
+    t.nodes[app].proc = kaanal_core::Dist::Fixed(Duration::MAX);
+    let err = run(&t, &ChaosState::default(), &one_stream(&t, 1.0, 10)).unwrap_err();
+    assert!(err.contains("node 'app'") && err.contains("10h"), "{err}");
+    t.nodes[app].proc = kaanal_core::Dist::Exp {
+        mean: Duration::MAX,
+    };
+    assert!(run(&t, &ChaosState::default(), &one_stream(&t, 1.0, 10)).is_err());
 }
 
 #[test]

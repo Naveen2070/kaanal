@@ -53,7 +53,9 @@ struct NodeQ {
     busy: u32,
     /// Requests waiting for a slot, oldest first.
     queue: VecDeque<usize>,
-    /// Longest queue seen after warmup.
+    /// Longest queue seen when a request joined at or after warmup. It includes requests that
+    /// arrived before warmup and are still waiting; a queue that only drains after warmup
+    /// is not counted.
     max_queue: usize,
     /// Busy slot-nanoseconds inside the reporting window `[warmup, end]`, up to `since`.
     area: u128,
@@ -100,10 +102,19 @@ struct Sim<'a> {
     end: u64,
 }
 
-/// **Private.** Duration → virtual nanoseconds. Validation (duration ≤ 365 days, rate in
-/// 1e-6..=1e6) and the 1 h config cap keep every value far below `u64::MAX`.
+/// **Private.** Duration → virtual nanoseconds. Validation (duration ≤ 365 days, every
+/// service/net/chaos time ≤ 10 h) keeps each value far below `u64::MAX`.
 fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).expect("validated durations fit in u64 nanoseconds")
+}
+
+impl Sim<'_> {
+    /// **Private.** `now + d`, saturating. The expected worst accepted run reaches ~78% of
+    /// `u64::MAX` (2M requests of 2 h each through one slot), so this never triggers today; it keeps a
+    /// later cap increase from wrapping the clock and corrupting the heap order.
+    fn after(&self, d: u64) -> u64 {
+        self.now.saturating_add(d)
+    }
 }
 
 /// **Private.** Runs a validated config until the event queue drains.
@@ -169,7 +180,8 @@ impl Sim<'_> {
     /// **Private.** Schedules stream `s`'s next arrival, unless it falls at or after `end`.
     fn schedule_arrival(&mut self, s: usize) {
         let a = &mut self.arrivals[s];
-        let at = self.now + nanos(a.gap.sample(&mut a.rng));
+        let gap = nanos(a.gap.sample(&mut a.rng));
+        let at = self.after(gap);
         if at < self.end {
             self.push(at, Event::Arrival(s));
         }
@@ -231,7 +243,7 @@ impl Sim<'_> {
                 q.busy += 1;
             }
         }
-        self.push(self.now + dur, Event::HopDone(r));
+        self.push(self.after(dur), Event::HopDone(r));
     }
 
     /// **Private.** Request `r`'s hop ended: hand its slot to the head of the queue (or
@@ -245,7 +257,7 @@ impl Sim<'_> {
                 let i = self.reqs[q].next;
                 self.reqs[q].waits[i] = self.now - self.reqs[q].queued_at;
                 let dur = nanos(self.reqs[q].outcome.hops[i].dur);
-                self.push(self.now + dur, Event::HopDone(q));
+                self.push(self.after(dur), Event::HopDone(q));
             } else {
                 let (now, warmup, end) = (self.now, self.warmup, self.end);
                 let q = &mut self.nodes[node];

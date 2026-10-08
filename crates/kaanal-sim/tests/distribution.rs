@@ -1,6 +1,7 @@
 //! Zero-load drift check, statistical form (spec §5): the simulator's per-hop latency
-//! distributions match live `execute()` samples drawn for xs disjoint range of `n`.
-//! It keeps its meaning once the simulator's RNG stream diverges from live's (M3).
+//! distributions match live `execute()` samples drawn for a disjoint range of `n`.
+//! Today the simulator copies `execute()`'s hops, so this pins the RNG stream and the
+//! per-hop numbering, not queueing. It keeps its meaning once the simulator's RNG stream diverges from live's (M3).
 
 use kaanal_core::{ChainRequest, ChaosState, Config, Op, Topology, execute};
 use kaanal_sim::{SimConfig, Stream, run};

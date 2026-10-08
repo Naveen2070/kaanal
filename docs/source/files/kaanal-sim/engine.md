@@ -7,4 +7,6 @@ The event loop. A `BinaryHeap` of `(time, seq, event)` on a virtual clock in int
 3. **Hop done:** at a limited node the slot passes straight to the head of the queue (its wait is recorded), or is freed; then the request's next hop starts.
 4. **Report:** requests arriving before `warmup` are dropped; per-node stats come from the reported requests' hops. `utilization` = busy slot-time **inside the window `[warmup, duration]`** ÷ (slots × window), integrated as slots are taken and freed, so it never exceeds 1 (drain time after `duration` is not counted).
 
+All clock additions go through `Sim::after`, which saturates instead of wrapping (never triggered by an accepted run; it guards future cap increases).
+
 Model: a node's slot is busy only during its own hop (a tandem queueing network); "hold until downstream returns" is planned for M1. With no `concurrency` anywhere, every latency equals `execute()`'s `total()` exactly.

@@ -11,12 +11,16 @@ mod engine;
 
 use std::time::Duration;
 
-use kaanal_core::{ChainResult, ChaosState, Hop, NodeId, NodeKind, Op, Topology};
+use kaanal_core::{ChainResult, ChaosState, Dist, Hop, NodeId, NodeKind, Op, Topology};
 
 /// **Private.** Most expected arrivals per run. Every record is kept in memory (a few
-/// hundred bytes plus ~80 bytes per hop), so this bounds a typical run (5 hops) to about
-/// 1 GB; chains with many databases use more.
+/// hundred bytes plus ~90 bytes per hop), so this bounds a typical run (5 hops) to about
+/// 1 GB. It bounds arrivals, not memory: a service with 20 databases has ~43 hops per
+/// request and would need several GB at the cap (M1: bound arrivals × hops).
 const MAX_ARRIVALS: f64 = 2_000_000.0;
+/// **Private.** Largest single service/net time a topology may sample (the config's 1 h
+/// cap times the 10× exponential/lognormal tail cap).
+const MAX_SERVICE: Duration = Duration::from_hours(10);
 /// **Private.** Slowest stream: one arrival per ~11.6 days. Bounds the mean gap.
 const MIN_RATE_PER_S: f64 = 1e-6;
 /// **Private.** Fastest stream: a 1 µs mean gap. Above ~1e9 the gap rounds to 0 ns.
@@ -90,7 +94,8 @@ pub struct NodeStats {
     /// Busy slot-time inside the reporting window `[warmup, duration]` ÷ (slots × window), so
     /// it never exceeds 1; `0.0` for unlimited nodes.
     pub utilization: f64,
-    /// Longest queue seen after warmup.
+    /// Longest queue seen when a request joined at or after warmup (so it can include
+    /// requests that arrived earlier; a queue that only drains after warmup is not counted).
     pub max_queue: usize,
 }
 
@@ -100,10 +105,22 @@ pub struct NodeStats {
 /// Returns a message for: no streams; a rate that is not finite or outside
 /// 1e-6..=1e6 per second; an `entry` that is not a service node; a zero `duration`,
 /// `warmup ≥ duration`, or a duration over 365 days; duplicate `endpoint_key`s; or more
-/// than 2 000 000 expected arrivals; or a chaos `latency_add` over 1 h. An overloaded system (ρ ≥ 1) is not an error.
+/// than 2 000 000 expected arrivals; a chaos `latency_add` over 1 h; or a node or edge
+/// latency that can sample over 10 h (e.g. a config with `p50` above `p99`, which core
+/// turns into a fixed `p50` without the 1 h cap, or a hand-edited `Topology`).
+/// An overloaded system (ρ ≥ 1) is not an error.
 pub fn run(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<SimReport, String> {
     validate(topo, chaos, cfg)?;
     Ok(engine::simulate(topo, chaos, cfg))
+}
+
+/// **Private.** Largest value `d` can sample, in seconds (NaN if its parameters are NaN).
+fn worst_case_secs(d: &Dist) -> f64 {
+    match d {
+        Dist::Fixed(x) => x.as_secs_f64(),
+        Dist::LogNormal { cap_ms, .. } => cap_ms / 1000.0,
+        Dist::Exp { mean } => mean.as_secs_f64() * 10.0,
+    }
 }
 
 /// **Private.** Rejects inputs the engine cannot run safely (see [`run`]).
@@ -122,6 +139,25 @@ fn validate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<(), 
             "duration must be at most 365 days (got {:?})",
             cfg.duration
         ));
+    }
+    // `build()` caps config durations, but not everything: `{ p50: 100h, p99: 1ms }` falls
+    // back to `Fixed(100h)`. Name the culprit so the user can fix the YAML.
+    let too_long = |d: &Dist| {
+        let w = worst_case_secs(d);
+        w.is_nan() || w > MAX_SERVICE.as_secs_f64()
+    };
+    for n in &topo.nodes {
+        if too_long(&n.proc) || n.ops.iter().flatten().any(too_long) {
+            return Err(format!("node '{}': a latency can exceed 10h", n.name));
+        }
+    }
+    for e in &topo.edges {
+        if too_long(&e.net) {
+            return Err(format!(
+                "edge '{}' -> '{}': latency can exceed 10h",
+                topo.nodes[e.from].name, topo.nodes[e.to].name
+            ));
+        }
     }
     // min(): a HashMap has no order, and the error must name the same node every run.
     if let Some(id) = chaos
