@@ -28,3 +28,20 @@ jsonschema = "0.58"
 kaanal-core = { path = "crates/kaanal-core" }
 kaanal-data = { path = "crates/kaanal-data" }
 kaanal-server = { path = "crates/kaanal-server" }
+
+# Lint policy for every crate (each opts in with `[lints] workspace = true`).
+# Enforced by the pre-commit hook: clippy runs with `-D warnings`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Pedantic, with the lints that fight this codebase's idioms switched off.
+# Add a lint here (with a comment why) instead of sprinkling `#[allow]` in code.
+pedantic = { level = "warn", priority = -1 }
+# Docs: `# Errors` sections are required on public Result fns (missing_docs is on
+# per crate); `# Panics` would be noise for invariant `expect`s in handlers.
+missing_panics_doc = "allow"
+# These three flag deliberate style, not bugs:
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+similar_names = "allow"

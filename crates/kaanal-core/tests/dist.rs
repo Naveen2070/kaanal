@@ -16,6 +16,12 @@ fn sorted_samples_ms(d: &Dist, n: usize) -> Vec<f64> {
     v
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "test helper: sample counts and indices are small and positive"
+)]
 fn quantile(sorted: &[f64], q: f64) -> f64 {
     sorted[((sorted.len() as f64 - 1.0) * q).round() as usize]
 }

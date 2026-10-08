@@ -15,3 +15,6 @@ humantime-serde.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_distr.workspace = true
+
+[lints]
+workspace = true

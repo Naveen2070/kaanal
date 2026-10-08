@@ -1,8 +1,14 @@
+//! Warnings for schema keywords the generator does not honour.
+//!
+//! Generated values may violate ignored keywords, so each one becomes a one-line
+//! warning that `kaanal validate` and `kaanal up` print (rule R4.6). Keep
+//! [`IGNORED`] in sync with the generator: if it learns a keyword, remove it here.
+
 use serde_json::Value;
 
 use crate::ApiModel;
 
-/// Keywords the generator does not honour; generated values may violate them.
+/// **Private.** Keywords the generator does not honour; generated values may violate them.
 const IGNORED: [&str; 6] = [
     "not",
     "pattern",
@@ -20,6 +26,8 @@ pub fn unsupported_keywords(schema: &Value, at: &str) -> Vec<String> {
     out
 }
 
+/// **Private.** Recursive schema walk: flags ignored keywords and `maxLength` too
+/// small for a `format`, then descends into properties, items and combinators.
 fn walk(s: &Value, at: &str, out: &mut Vec<String>) {
     let Value::Object(m) = s else { return };
     for k in IGNORED {

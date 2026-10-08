@@ -1,7 +1,9 @@
 #!/bin/sh
-# Runs fmt check + tests before every commit. Enable: git config core.hooksPath .githooks
+# Runs fmt check + clippy + tests before every commit. Enable: git config core.hooksPath .githooks
 [ -f Cargo.toml ] || exit 0
 echo "pre-commit: cargo fmt --check"
 cargo fmt --all --check || { echo "fmt failed: run 'cargo fmt --all'"; exit 1; }
+echo "pre-commit: cargo clippy"
+cargo clippy --workspace --all-targets -- -D warnings || { echo "clippy failed"; exit 1; }
 echo "pre-commit: cargo test --workspace"
 cargo test --workspace --quiet || exit 1

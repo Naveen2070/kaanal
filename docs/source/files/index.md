@@ -1,0 +1,40 @@
+# Per-file documentation
+
+One page per source file: what the file does and what each function/type in it does. Grouped by crate.
+
+## [kaanal-core](kaanal-core/) (pure logic)
+
+| File | Page | Contents |
+|---|---|---|
+| `src/lib.rs` | [kaanal-core/lib.md](kaanal-core/lib.md) | Crate root, re-exports, `stable_hash` |
+| `src/config.rs` | [kaanal-core/config.md](kaanal-core/config.md) | `kaanal.yaml` parsing, `DistConfig`, `ConfigError` |
+| `src/topology.rs` | [kaanal-core/topology.md](kaanal-core/topology.md) | Graph build + all validation (DAG, one gateway, edge shapes) |
+| `src/dist.rs` | [kaanal-core/dist.md](kaanal-core/dist.md) | Fixed & lognormal latency distributions |
+| `src/chaos.rs` | [kaanal-core/chaos.md](kaanal-core/chaos.md) | `NodeChaos` / `ChaosState` runtime state |
+| `src/exec.rs` | [kaanal-core/exec.md](kaanal-core/exec.md) | The chain executor (`execute`), ops, hops, determinism |
+
+## [kaanal-data](kaanal-data/) (OpenAPI + data generation)
+
+| File | Page | Contents |
+|---|---|---|
+| `src/lib.rs` | [kaanal-data/lib.md](kaanal-data/lib.md) | Crate root, re-exports |
+| `src/api.rs` | [kaanal-data/api.md](kaanal-data/api.md) | OpenAPI 3.0 → `ApiModel`, `$ref` inlining with bomb guards |
+| `src/generate.rs` | [kaanal-data/generate.md](kaanal-data/generate.md) | Deterministic realistic JSON from a schema |
+| `src/warn.rs` | [kaanal-data/warn.md](kaanal-data/warn.md) | Ignored-keyword warnings |
+| `src/words.rs` | [kaanal-data/words.md](kaanal-data/words.md) | Name/city/word lists (en-IN) |
+
+## [kaanal-server](kaanal-server/) (HTTP)
+
+| File | Page | Contents |
+|---|---|---|
+| `src/lib.rs` | [kaanal-server/lib.md](kaanal-server/lib.md) | `serve`/`check`, router, port binding |
+| `src/control.rs` | [kaanal-server/control.md](kaanal-server/control.md) | Control API handlers + the auth/Host guard |
+| `src/mock.rs` | [kaanal-server/mock.md](kaanal-server/mock.md) | Mock request handler, trace header, CORS |
+| `src/state.rs` | [kaanal-server/state.md](kaanal-server/state.md) | `AppState::build` load pipeline, route conflicts |
+| `src/ui.html` | [../../web/web-ui.md](../../web/web-ui.md) | Embedded status page (documented with the web docs) |
+
+## [kaanal](kaanal/) (binary)
+
+| File | Page | Contents |
+|---|---|---|
+| `src/main.rs` | [kaanal/main.md](kaanal/main.md) | CLI, instance lock, run file, control-API client |

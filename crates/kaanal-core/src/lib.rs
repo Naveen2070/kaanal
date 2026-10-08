@@ -1,3 +1,16 @@
+//! Pure logic for the Kaanal infrastructure emulator.
+//!
+//! This crate owns everything that must stay deterministic and testable: `kaanal.yaml`
+//! parsing ([`Config`]), topology graph validation ([`Topology`]), latency
+//! distributions ([`Dist`]), live chaos state ([`ChaosState`]) and the call-chain
+//! executor ([`execute`]).
+//!
+//! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
+//! outcomes; it never sleeps. The server sleeps the durations it returns (live mode)
+//! or advances virtual time (the simulator), so both drivers share one cost model.
+
+#![warn(missing_docs)]
+
 pub mod chaos;
 pub mod config;
 pub mod dist;

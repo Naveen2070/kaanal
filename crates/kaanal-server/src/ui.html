@@ -148,7 +148,7 @@ setInterval(() => {
   }
 }, 1000);
 
-// ponytail: limitations. (1) Chaos set from the CLI shows here only after Clear or a reconnect; there is no
+// limitations: (1) Chaos set from the CLI shows here only after Clear or a reconnect; there is no
 // polling. Poll /__kaanal/chaos every few seconds if that confuses people. (2) Each open tab keeps one event
 // stream open; over HTTP/1.1 browsers allow ~6 connections per host, so many tabs can stall other requests
 // to this port. Close extra tabs.

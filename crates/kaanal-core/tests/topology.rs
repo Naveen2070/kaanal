@@ -1,6 +1,6 @@
 use kaanal_core::{Config, NodeKind, Topology, TopologyError};
 
-const BASE: &str = r#"
+const BASE: &str = r"
 version: 1
 nodes:
   nginx: { type: gateway }
@@ -9,7 +9,7 @@ nodes:
 edges:
   - { from: nginx, to: app }
   - { from: app, to: db }
-"#;
+";
 
 fn build(yaml: &str) -> Result<Topology, TopologyError> {
     Topology::build(&Config::from_yaml(yaml).unwrap())

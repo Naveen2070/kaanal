@@ -1,3 +1,9 @@
+//! The control API handlers and the security guard that stands in front of them.
+//!
+//! Every `/__kaanal/*` request passes [`guard`] before any handler or extractor
+//! runs: Host must be loopback with the bound port, and every route except
+//! `health`/`ui` needs the bearer token.
+
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,12 +24,13 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::state::AppState;
 
+/// **Private.** Uniform JSON error shape returned by handlers: `(status, {"error": msg})`.
 type Reject = (StatusCode, Json<Value>);
 
-/// Longest extra latency a chaos setting may add. A typo like 1e12 would otherwise hang every request.
+/// **Private.** Longest extra latency a chaos setting may add. A typo like 1e12 would otherwise hang every request.
 const MAX_LATENCY_MS: u64 = 300_000;
 
-// ponytail: error messages echo the node name from the URL path (`unknown node '...'`) unsanitized.
+// limitation: error messages echo the node name from the URL path (`unknown node '...'`) unsanitized.
 // It is JSON-encoded, so the browser UI is safe, and the CLI replaces control characters before printing.
 // Other clients that print it to a terminal must do the same.
 fn reject(code: StatusCode, msg: &str) -> Reject {
@@ -73,14 +80,18 @@ pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) ->
     resp
 }
 
+/// **Private.** Extracts `token=` from a query string; `xtoken=` or a bare `token` do not match.
 fn query_token(query: Option<&str>) -> Option<&str> {
     query?.split('&').find_map(|kv| kv.strip_prefix("token="))
 }
 
-// ponytail: limitation, by design (RULES R5.3). Even when `--host 0.0.0.0` exposes the server on the LAN,
+// limitation: by design (RULES R5.3). Even when `--host 0.0.0.0` exposes the server on the LAN,
 // control calls must use `localhost`, `127.0.0.1` or `[::1]` as Host with the bound port. Reaching the
 // control API by LAN IP or through a port-forward (container, SSH tunnel on another port) gets a 403.
 // Add an explicit allowed-hosts setting if that is ever needed.
+/// **Private.** True iff `host` is `localhost`/`127.0.0.1`/`[::1]` with no port or
+/// the bound port. Case-insensitive; rejects `localhost.evil.example` and
+/// `evil.example:8080@localhost`.
 fn host_allowed(host: &str, port: u16) -> bool {
     let host = host.to_ascii_lowercase();
     let (name, p) = match host.strip_prefix('[') {
@@ -102,6 +113,7 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// **Private.** The public JSON shape of a node's chaos settings.
 #[derive(Serialize)]
 struct ChaosView {
     latency_ms: u64,
@@ -113,7 +125,7 @@ struct ChaosView {
 impl From<&NodeChaos> for ChaosView {
     fn from(c: &NodeChaos) -> Self {
         ChaosView {
-            latency_ms: c.latency_add.as_millis() as u64,
+            latency_ms: u64::try_from(c.latency_add.as_millis()).unwrap_or(u64::MAX),
             error_rate: c.error_rate,
             error_status: c.error_status,
             down: c.down,
@@ -121,6 +133,10 @@ impl From<&NodeChaos> for ChaosView {
     }
 }
 
+/// The accepted body of `PUT /__kaanal/chaos/{node}`.
+///
+/// All fields are optional and merged into the node's existing settings;
+/// unknown keys are rejected.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChaosPatch {
@@ -130,6 +146,7 @@ pub struct ChaosPatch {
     down: Option<bool>,
 }
 
+/// `GET /__kaanal/topology` — nodes, edges and sorted route keys as JSON.
 pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
     let t = &st.topo;
     let nodes: Vec<Value> = t
@@ -151,6 +168,7 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({ "nodes": nodes, "edges": edges, "routes": st.route_keys }))
 }
 
+/// `GET /__kaanal/chaos` — all active chaos, keyed by node name.
 pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
     let chaos = st.chaos.read().expect("chaos lock poisoned");
     let map: Map<String, Value> = chaos
@@ -161,6 +179,14 @@ pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
     Json(Value::Object(map))
 }
 
+/// `PUT /__kaanal/chaos/{node}` — merges a [`ChaosPatch`] into the node's settings
+/// (omitted fields keep their values) and returns the merged state.
+///
+/// Validates ranges (`error_rate` 0–1, `error_status` 500–504, `latency_ms` ≤
+/// [`MAX_LATENCY_MS`]); unknown node → 404, bad body → 4xx from the extractor.
+///
+/// # Errors
+/// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
 pub async fn set_chaos(
     State(st): State<Arc<AppState>>,
     Path(node): Path<String>,
@@ -206,6 +232,10 @@ pub async fn set_chaos(
     Ok(Json(json!(ChaosView::from(&*c))))
 }
 
+/// `DELETE /__kaanal/chaos/{node}` — removes one node's chaos (204).
+///
+/// # Errors
+/// Returns [`Reject`] 404 for an unknown node name.
 pub async fn clear_node(
     State(st): State<Arc<AppState>>,
     Path(node): Path<String>,
@@ -222,12 +252,13 @@ pub async fn clear_node(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `DELETE /__kaanal/chaos` — wipes all chaos (204).
 pub async fn clear_all(State(st): State<Arc<AppState>>) -> StatusCode {
     st.chaos.write().expect("chaos lock poisoned").nodes.clear();
     StatusCode::NO_CONTENT
 }
 
-// ponytail: limitation: no cap on concurrent event streams. Each holds one broadcast receiver, and only a
+// limitation: no cap on concurrent event streams. Each holds one broadcast receiver, and only a
 // caller with the 256-bit token can open one. Add a connection limit if the token ever leaves the local user.
 pub async fn events(
     State(st): State<Arc<AppState>>,

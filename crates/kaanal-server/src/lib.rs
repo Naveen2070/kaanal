@@ -1,3 +1,13 @@
+//! The HTTP server: the only crate that knows HTTP.
+//!
+//! One axum router on one port serves both the control API (`/__kaanal/*`, guarded
+//! by token + Host checks) and the mock engine (every other path falls through to
+//! the mock handler). The engine itself — chain execution, data generation — is
+//! called synchronously inside the request handler; it is pure math and takes
+//! microseconds.
+
+#![warn(missing_docs)]
+
 mod control;
 mod mock;
 mod state;
@@ -12,21 +22,31 @@ use kaanal_core::Config;
 
 pub use state::Event;
 
+/// Options for [`serve`].
 pub struct ServeOpts {
+    /// Address to bind. `127.0.0.1` by default; anything else prints a warning upstream.
     pub host: IpAddr,
     /// 0 = let the OS choose (tests). Otherwise this port or the next free one up to +20.
     pub port: u16,
+    /// Bearer token the control API requires (see [`new_token`]).
     pub token: String,
 }
 
+/// A running server returned by [`serve`].
 pub struct BoundServer {
+    /// The address actually bound (after the +20 port search).
     pub addr: SocketAddr,
     /// Same warnings `check` returns, so `up` can print them.
     pub warnings: Vec<String>,
+    /// **Private.** The spawned `axum::serve` task.
     handle: tokio::task::JoinHandle<std::io::Result<()>>,
 }
 
 impl BoundServer {
+    /// Runs until the server stops (Ctrl+C is handled by the caller).
+    ///
+    /// # Errors
+    /// Returns the IO error that stopped the server (e.g. the listener died).
     pub async fn wait(self) -> std::io::Result<()> {
         self.handle.await.map_err(std::io::Error::other)?
     }
@@ -34,18 +54,30 @@ impl BoundServer {
 
 /// Validate everything `serve` would load (config, topology, specs, routes) without binding a port.
 /// `Ok` carries non-fatal warnings (ignored schema keywords).
+///
+/// # Errors
+/// Returns the first load error (bad config, unreadable or invalid spec, route conflict).
 pub fn check(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, String> {
     state::AppState::build(cfg, base_dir, String::new(), 0).map(|st| st.warnings)
 }
 
 /// 32 random bytes as hex. New on every `kaanal up`.
 pub fn new_token() -> String {
+    use std::fmt::Write as _;
     rand::random::<[u8; 32]>()
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .fold(String::with_capacity(64), |mut s, b| {
+            write!(s, "{b:02x}").expect("writing to a String cannot fail");
+            s
+        })
 }
 
+/// Binds the port, builds [`AppState`](state::AppState), spawns the axum server on
+/// the current tokio runtime, and returns its handle.
+///
+/// # Errors
+/// Returns a message if no port in `port..=port+20` is free or if
+/// [`AppState::build`](state::AppState::build) fails (bad config, specs or routes).
 pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, String> {
     let listener = bind(opts.host, opts.port).await?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
@@ -65,6 +97,7 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
     })
 }
 
+/// **Private.** Binds the requested port, else the next free one up to +20.
 async fn bind(host: IpAddr, port: u16) -> Result<tokio::net::TcpListener, String> {
     let tries: u16 = if port == 0 { 1 } else { 21 };
     let mut last = String::new();
@@ -80,6 +113,9 @@ async fn bind(host: IpAddr, port: u16) -> Result<tokio::net::TcpListener, String
     ))
 }
 
+/// **Private.** Builds the route table: control routes first (wrapped in the
+/// `guard` middleware via `route_layer`, so a new control route cannot forget
+/// authentication), then the mock fallback.
 fn router(st: Arc<state::AppState>) -> Router {
     Router::new()
         .route(

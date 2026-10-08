@@ -1,25 +1,39 @@
+//! `OpenAPI` 3.0.x → [`ApiModel`]: the list of endpoints the server will mock.
+//!
+//! One [`Endpoint`] per `path × method`, with the success response's JSON schema
+//! fully `$ref`-inlined so downstream code never resolves references. Phase one
+//! supports 3.0.x only; 3.1 is rejected with a clear message.
+
 use std::fmt;
 
 use serde_json::{Map, Value};
 
+/// One mockable endpoint.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Endpoint {
     /// Uppercase HTTP method.
     pub method: String,
-    /// OpenAPI path template; also valid matchit 0.8 syntax (`/users/{id}`).
+    /// `OpenAPI` path template; also valid matchit 0.8 syntax (`/users/{id}`).
     pub path: String,
+    /// Chosen success status: the lowest 2xx declared, else 200.
     pub status: u16,
     /// application/json response schema with every local `$ref` inlined. `None` = no JSON body.
     pub schema: Option<Value>,
 }
 
+/// A parsed `OpenAPI` document.
 #[derive(Debug, Clone)]
 pub struct ApiModel {
+    /// Every endpoint found in `paths`, in document order.
     pub endpoints: Vec<Endpoint>,
 }
 
+/// An `OpenAPI` parse error; the message names the operation (JSON pointer) when known.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ApiError(pub String);
+pub struct ApiError(
+    /// Human-readable description.
+    pub String,
+);
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -29,12 +43,22 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
+/// **Private.** HTTP methods recognised under a path item.
 const METHODS: [&str; 7] = ["get", "put", "post", "delete", "patch", "head", "options"];
-/// Max `$ref` expansions per response schema. Acyclic refs can still fan out
-/// exponentially (A -> 2x B -> 2x C ...); this caps time and memory.
+/// **Private.** Max `$ref` expansions per response schema. Acyclic refs can still
+/// fan out exponentially (A -> 2x B -> 2x C ...); this caps time and memory.
 const MAX_REF_EXPANSIONS: usize = 10_000;
 
 impl ApiModel {
+    /// Parses an `OpenAPI` 3.0.x document (YAML or JSON).
+    ///
+    /// Accepts an unquoted `openapi: 3.0` (which YAML reads as a number). Every
+    /// path must start with `/`; every local `$ref` in a response schema is
+    /// inlined.
+    ///
+    /// # Errors
+    /// Returns [`ApiError`] for non-3.0.x versions, missing `paths`, bad paths,
+    /// external or recursive `$ref`s, dangling refs, or ref-expansion bombs.
     pub fn from_openapi(src: &str) -> Result<ApiModel, ApiError> {
         let doc: Value = serde_yaml_ng::from_str(src)
             .map_err(|e| ApiError(format!("invalid YAML/JSON: {e}")))?;
@@ -74,7 +98,7 @@ impl ApiModel {
     }
 }
 
-/// Lowest 2xx response, and its application/json schema if it has one.
+/// **Private.** Lowest 2xx response, and its application/json schema if it has one.
 fn pick_response(op: &Value, doc: &Value, ptr: &str) -> Result<(u16, Option<Value>), ApiError> {
     let responses = op
         .get("responses")
@@ -107,8 +131,9 @@ fn pick_response(op: &Value, doc: &Value, ptr: &str) -> Result<(u16, Option<Valu
     Ok((status, schema))
 }
 
-/// Inline every local `$ref`. `stack` holds the refs being expanded on the current path,
-/// so any cycle fails on first revisit; `budget` caps total expansions.
+/// **Private.** Inline every local `$ref`. `stack` holds the refs being expanded on
+/// the current path, so any cycle fails on first revisit; `budget` caps total
+/// expansions.
 fn inline<'d>(
     v: &'d Value,
     doc: &'d Value,
@@ -151,6 +176,7 @@ fn inline<'d>(
     }
 }
 
+/// **Private.** Resolves a local (`#/...`) JSON-pointer ref; external refs are rejected.
 fn resolve_ref<'d>(r: &str, doc: &'d Value, ptr: &str) -> Result<&'d Value, ApiError> {
     let Some(pointer) = r.strip_prefix('#') else {
         return Err(ApiError(format!(

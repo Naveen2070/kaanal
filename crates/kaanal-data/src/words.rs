@@ -1,6 +1,12 @@
+//! **Private module.** Word lists for the data generator's heuristics.
+//!
+//! Synthetic-only source data (rule R5.7: no real-person datasets). Currently one
+//! locale pack, `en-IN`.
+
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
+/// Indian first names for `firstName`, `name` and email local parts.
 pub const FIRST: &[&str] = &[
     "Aarav",
     "Priya",
@@ -24,6 +30,7 @@ pub const FIRST: &[&str] = &[
     "Nithya",
 ];
 
+/// Indian surnames for `lastName`, `name` and emails.
 pub const LAST: &[&str] = &[
     "Sharma",
     "Iyer",
@@ -47,7 +54,7 @@ pub const LAST: &[&str] = &[
     "Verma",
 ];
 
-/// (city, state, pincode)
+/// (city, state, pincode) triples — `place()` picks one per object, so the fields always agree.
 pub const CITIES: &[(&str, &str, &str)] = &[
     ("Chennai", "Tamil Nadu", "600001"),
     ("Coimbatore", "Tamil Nadu", "641001"),
@@ -61,6 +68,7 @@ pub const CITIES: &[(&str, &str, &str)] = &[
     ("Kolkata", "West Bengal", "700001"),
 ];
 
+/// Street names for `address`.
 pub const STREETS: &[&str] = &[
     "MG Road",
     "Anna Salai",
@@ -72,6 +80,7 @@ pub const STREETS: &[&str] = &[
     "Station Road",
 ];
 
+/// Lorem words for fallback strings, descriptions and URI paths.
 pub const WORDS: &[&str] = &[
     "lorem",
     "ipsum",
@@ -95,6 +104,7 @@ pub const WORDS: &[&str] = &[
     "enim",
 ];
 
+/// Uniform random element from a list, using the caller's seeded RNG.
 pub fn pick<'a>(list: &[&'a str], rng: &mut ChaCha8Rng) -> &'a str {
     list[rng.random_range(0..list.len())]
 }

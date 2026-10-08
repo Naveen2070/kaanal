@@ -1,3 +1,10 @@
+//! The `kaanal` binary: CLI, process lifecycle, and a thin HTTP client for the
+//! control API.
+//!
+//! `up` and `validate` work locally; `status` and `chaos` find the running
+//! instance via `.kaanal/run.json` and call its control API (rule R2.6: every
+//! interface is a thin client, no per-interface logic).
+
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -8,10 +15,14 @@ use kaanal_core::Config;
 use kaanal_server::ServeOpts;
 use serde_json::{Map, Value, json};
 
+/// **Private.** Per-project state directory holding `run.json` and `lock`.
 const STATE_DIR: &str = ".kaanal";
+/// **Private.** Port + token + pid of the running instance.
 const RUN_FILE: &str = ".kaanal/run.json";
+/// **Private.** OS-locked file enforcing one instance per directory (rule R6.7).
 const LOCK_FILE: &str = ".kaanal/lock";
 
+/// **Private.** Top-level CLI shape for clap.
 #[derive(Parser)]
 #[command(
     name = "kaanal",
@@ -23,6 +34,7 @@ struct Cli {
     cmd: Cmd,
 }
 
+/// **Private.** Subcommands.
 #[derive(Subcommand)]
 enum Cmd {
     /// Start the emulator
@@ -34,7 +46,7 @@ enum Cmd {
         #[arg(long, default_value = "127.0.0.1")]
         host: IpAddr,
     },
-    /// Check config, topology and OpenAPI specs without starting
+    /// Check config, topology and `OpenAPI` specs without starting
     Validate {
         #[arg(short, long, default_value = "kaanal.yaml")]
         config: PathBuf,
@@ -48,6 +60,7 @@ enum Cmd {
     },
 }
 
+/// **Private.** `chaos` subcommands.
 #[derive(Subcommand)]
 enum ChaosCmd {
     /// Set chaos on a node, e.g. `kaanal chaos set db --error-rate 100% --error 503`
@@ -70,13 +83,15 @@ enum ChaosCmd {
     Clear { node: Option<String> },
 }
 
-/// Exit code (RULES R6.3: 1 error, 2 not running) and message for stderr.
+/// **Private.** Exit code (RULES R6.3: 1 error, 2 not running) and message for stderr.
 struct Fail(u8, String);
 
+/// **Private.** Shorthand for an exit-1 failure.
 fn err(msg: impl Into<String>) -> Fail {
     Fail(1, msg.into())
 }
 
+/// **Private.** Entry point: prints the failure message to stderr and returns the code.
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -87,6 +102,7 @@ fn main() -> ExitCode {
     }
 }
 
+/// **Private.** Subcommand dispatch.
 fn run(cli: Cli) -> Result<(), Fail> {
     match cli.cmd {
         Cmd::Validate { config } => {
@@ -147,6 +163,8 @@ fn run(cli: Cli) -> Result<(), Fail> {
     }
 }
 
+/// **Private.** Reads and parses the config; errors print as `file:line:col: msg`
+/// (R6.1). Also returns the config's directory, which spec files resolve against.
 fn load(path: &Path) -> Result<(Config, PathBuf), Fail> {
     let src = std::fs::read_to_string(path).map_err(|e| err(format!("{}: {e}", path.display())))?;
     let cfg = Config::from_yaml(&src).map_err(|e| {
@@ -162,6 +180,9 @@ fn load(path: &Path) -> Result<(Config, PathBuf), Fail> {
     Ok((cfg, dir))
 }
 
+/// **Private.** The `up` lifecycle: private state dir → instance lock → token →
+/// tokio runtime → serve → run file → wait for Ctrl+C → clean up the run file
+/// (only if it still holds our token).
 fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
     let (cfg, dir) = load(config)?;
     private_dir()?;
@@ -192,7 +213,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         write_run_file(port, &token)?;
         println!("Mocks: http://localhost:{port}");
         println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
-        // ponytail: limitation: only Ctrl+C removes run.json. Closing the window, SIGTERM (docker stop) or a
+        // limitation: only Ctrl+C removes run.json. Closing the window, SIGTERM (docker stop) or a
         // crash leaves it behind; that is harmless (later commands exit 2, the next `up` overwrites it).
         // Add a SIGTERM handler under #[cfg(unix)] if containers become a use case.
         let res = tokio::select! {
@@ -207,7 +228,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
     })
 }
 
-/// Creates `.kaanal` readable only by the current user, before any secret is written into it.
+/// **Private.** Creates `.kaanal` readable only by the current user, before any secret is written into it.
 /// Unix: mode 0700. Windows: the folder's ACL is replaced by one grant for the current user
 /// (inheritance removed), so files created inside never exist with a wider ACL.
 /// If that fails we warn and carry on: the token still protects the control API.
@@ -234,6 +255,8 @@ fn private_dir() -> Result<(), Fail> {
     Ok(())
 }
 
+/// **Private.** Replaces the directory's ACL with one grant for the current user,
+/// using System32 binaries by full path (a planted earlier-PATH exe is never run).
 #[cfg(windows)]
 fn restrict_to_current_user(dir: &str) -> Result<(), String> {
     use std::process::Command;
@@ -268,7 +291,7 @@ fn restrict_to_current_user(dir: &str) -> Result<(), String> {
     }
 }
 
-/// Exclusive advisory lock on `.kaanal/lock` (std `File::try_lock`, Rust 1.89+).
+/// **Private.** Exclusive advisory lock on `.kaanal/lock` (std `File::try_lock`, Rust 1.89+).
 fn lock_instance() -> Result<std::fs::File, Fail> {
     let f = std::fs::OpenOptions::new()
         .write(true)
@@ -288,6 +311,8 @@ fn lock_instance() -> Result<std::fs::File, Fail> {
     }
 }
 
+/// **Private.** Writes `{port, token, pid}` via temp file + rename, so a concurrent
+/// `status` never reads half a file.
 fn write_run_file(port: u16, token: &str) -> Result<(), Fail> {
     use std::io::Write;
     let body = json!({ "port": port, "token": token, "pid": std::process::id() }).to_string();
@@ -306,13 +331,16 @@ fn write_run_file(port: u16, token: &str) -> Result<(), Fail> {
         .map_err(|e| err(format!("{RUN_FILE}: {e}")))
 }
 
+/// **Private.** Reads `(port, token)` from the run file; any malformed piece → `None`.
 fn read_run() -> Option<(u16, String)> {
     let run: Value = serde_json::from_str(&std::fs::read_to_string(RUN_FILE).ok()?).ok()?;
     let port = u16::try_from(run["port"].as_u64()?).ok()?;
     Some((port, run["token"].as_str()?.to_string()))
 }
 
-/// Calls the running instance found via `.kaanal/run.json`. Exit 2 if it isn't running.
+/// **Private.** Calls the running instance found via `.kaanal/run.json`. Exit 2 if
+/// it isn't running. The client never follows redirects and never uses a proxy —
+/// either could forward the token.
 fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
     let (port, token) =
         read_run().ok_or_else(|| Fail(2, format!("kaanal is not running (no {RUN_FILE})")))?;
@@ -348,6 +376,7 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
     Ok(v)
 }
 
+/// **Private.** Prints the node table with each node's live chaos settings.
 fn status() -> Result<(), Fail> {
     let topo = call("GET", "/__kaanal/topology", None)?;
     let chaos = call("GET", "/__kaanal/chaos", None)?;
@@ -379,14 +408,14 @@ fn status() -> Result<(), Fail> {
     Ok(())
 }
 
-/// Server text may echo user input (e.g. a node name); never let it drive the terminal.
+/// **Private.** Server text may echo user input (e.g. a node name); never let it drive the terminal.
 fn clean(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { '?' } else { c })
         .collect()
 }
 
-/// Percent-encodes one URL path segment (RFC 3986 unreserved characters stay as they are).
+/// **Private.** Percent-encodes one URL path segment (RFC 3986 unreserved characters stay as they are).
 fn encode_segment(s: &str) -> String {
     s.bytes()
         .map(|b| {
@@ -399,6 +428,7 @@ fn encode_segment(s: &str) -> String {
         .collect()
 }
 
+/// **Private.** `300ms` / `2s` / bare number → milliseconds, with overflow checks.
 fn parse_ms(s: &str) -> Result<u64, String> {
     let t = s.trim();
     let (num, mult) = if let Some(n) = t.strip_suffix("ms") {
@@ -415,6 +445,7 @@ fn parse_ms(s: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("bad latency '{s}' (use e.g. 300ms or 2s)"))
 }
 
+/// **Private.** `10%` or `0.1` → a 0.0–1.0 rate.
 fn parse_rate(s: &str) -> Result<f64, String> {
     let t = s.trim();
     let v = match t.strip_suffix('%') {

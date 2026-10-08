@@ -1,3 +1,10 @@
+//! [`AppState`]: everything the running server knows, built once at startup.
+//!
+//! [`AppState::build`] is the full load pipeline shared by `serve` and `check`
+//! (`kaanal validate`): topology → `OpenAPI` specs → route table → overrides. Every
+//! problem is a fatal error with a precise message, or — for ignorable schema
+//! keywords — a collected warning.
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::RwLock;
@@ -9,53 +16,82 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
 
+/// Where a route's response body comes from.
 pub enum Body {
-    Generated { schema: Option<Value> },
+    /// Generated from an `OpenAPI` response schema (`None` = empty body).
+    Generated {
+        /// The inlined JSON schema, if the spec declares one.
+        schema: Option<Value>,
+    },
+    /// A static `routes:` override, returned verbatim.
     Static(Value),
 }
 
+/// One route: a `method + path` pair and how to answer it.
 pub struct Route {
+    /// Uppercase HTTP method.
     pub method: String,
     /// "GET /users/{id}" — chain RNG key and display name.
     pub key: String,
     /// Service owning the route; `None` = static-only route answered by the gateway.
     pub owner: Option<NodeId>,
+    /// The database operation this endpoint performs (inferred from method + path).
     pub op: Op,
+    /// HTTP status of a successful response.
     pub status: u16,
+    /// Generated schema or static body.
     pub body: Body,
     /// Requests seen so far; becomes `ChainRequest.n`.
     pub counter: AtomicU64,
 }
 
+/// One finished request, broadcast to `/__kaanal/events` subscribers.
 #[derive(Debug, Clone, Serialize)]
 pub struct Event {
+    /// Unix timestamp in milliseconds.
     pub ts_ms: u64,
+    /// Uppercase HTTP method.
     pub method: String,
+    /// Request path.
     pub path: String,
+    /// Response status.
     pub status: u16,
+    /// Measured wall-clock milliseconds (not the simulated sum — see the trace header).
     pub ms: u64,
     /// Nodes this request touched, in order.
     pub nodes: Vec<String>,
+    /// The node whose chaos failed the request, if any.
     pub failed_node: Option<String>,
 }
 
+/// Shared server state; one `Arc` clones into every handler.
 pub struct AppState {
+    /// The validated topology graph (immutable after build).
     pub topo: Topology,
+    /// Path router: each path maps to its method routes.
     pub paths: matchit::Router<Vec<Route>>,
+    /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status`.
     pub route_keys: Vec<String>,
+    /// Live chaos settings; written by the control API, read (briefly) per request.
     pub chaos: RwLock<ChaosState>,
+    /// Request-event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
     pub events: broadcast::Sender<Event>,
+    /// Bearer token the control API requires.
     pub token: String,
+    /// Master RNG seed from the config.
     pub seed: u64,
+    /// The bound port (after the +20 search), used by the Host guard.
     pub port: u16,
     /// Non-fatal findings from loading (ignored schema keywords); shown by `validate` and `up`.
     pub warnings: Vec<String>,
 }
 
+/// **Private.** Uppercase methods accepted in `routes:` override keys.
 const METHODS: [&str; 7] = ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
-/// Reject two paths that differ only in parameter names (`/users/{id}` vs `/users/{uid}`):
-/// the router would refuse the second with an unhelpful message.
+/// **Private.** Rejects two paths that differ only in parameter names
+/// (`/users/{id}` vs `/users/{uid}`): the router would refuse the second with an
+/// unhelpful message. Also reserves the `/__kaanal` namespace (rule R5.4).
 fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), String> {
     // A mock under /__kaanal would be served without CORS next to the control API (RULES R5.4).
     if path == "/__kaanal" || path.starts_with("/__kaanal/") {
@@ -87,6 +123,17 @@ fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), S
 }
 
 impl AppState {
+    /// Runs the full load pipeline: topology → spec files → spec routes → `routes:`
+    /// overrides → matchit router.
+    ///
+    /// Spec paths are resolved against `base_dir` (the config file's directory).
+    /// Routes are inserted in deterministic (`BTreeMap`) order so a conflict always
+    /// names the same path.
+    ///
+    /// # Errors
+    /// Returns a message (with file paths where relevant) for unreadable or invalid
+    /// specs, route conflicts between services, malformed override keys, or any
+    /// topology error. Nothing is served half-configured (rule R6.1).
     pub fn build(
         cfg: &Config,
         base_dir: &Path,

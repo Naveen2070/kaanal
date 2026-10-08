@@ -1,3 +1,11 @@
+//! The data generator: deterministic, realistic JSON from an `OpenAPI` 3.0 schema.
+//!
+//! Same seed → same output, always. Field-pick priority: `example` → `enum` →
+//! `allOf`/`oneOf`/`anyOf` → type, and within a type: `format` → field-name
+//! heuristic → constraints → fallback. Every field derives its own seed from
+//! `(parent_seed, name, index)`, so schema edits never reshuffle sibling values
+//! (rule R4.4).
+
 use rand::seq::IndexedRandom;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -5,19 +13,22 @@ use serde_json::{Map, Value, json};
 
 use crate::words;
 
+/// **Private.** Recursion ceiling; deeper nesting yields `null` instead of overflowing.
 const MAX_DEPTH: usize = 16;
+/// **Private.** Cap on random array length so `maxItems: 1000000` can't build a huge array.
 const MAX_RANDOM_ITEMS: u64 = 20;
-/// Timestamps are "the last 365 days before 2026-01-01", fixed so output never changes between runs.
+/// **Private.** Timestamps are "the last 365 days before 2026-01-01", fixed so output never changes between runs.
 const BASE_EPOCH: i64 = 1_767_225_600;
 
-/// Deterministic JSON for an OpenAPI 3.0 schema whose `$ref`s are already inlined.
+/// Deterministic JSON for an `OpenAPI` 3.0 schema whose `$ref`s are already inlined.
 /// Priority: example → enum → allOf/oneOf/anyOf → type (format → field-name heuristic → constraints → fallback).
 pub fn generate(schema: &Value, field: Option<&str>, seed: u64) -> Value {
     value_for(schema, field, seed, seed, 0)
 }
 
-/// FNV-1a 64 with a separator byte between parts. Same algorithm as `kaanal_core::stable_hash`
-/// (copied: this crate must not depend on core). Not a std hasher, so it never changes between Rust versions.
+/// **Private.** FNV-1a 64 with a separator byte between parts. Same algorithm as
+/// `kaanal_core::stable_hash` (copied: this crate must not depend on core). Not a
+/// std hasher, so it never changes between Rust versions.
 fn stable_hash(parts: &[&[u8]]) -> u64 {
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -32,8 +43,8 @@ fn stable_hash(parts: &[&[u8]]) -> u64 {
     h
 }
 
-/// Each child value gets its own seed from (parent seed, name, index), so adding or reordering
-/// schema properties never changes the values of the others.
+/// **Private.** Each child value gets its own seed from (parent seed, name, index),
+/// so adding or reordering schema properties never changes the values of the others.
 fn child_seed(parent: u64, name: &str, index: usize) -> u64 {
     stable_hash(&[
         &parent.to_le_bytes(),
@@ -61,6 +72,8 @@ pub fn apply_params(body: &mut Value, params: &[(String, String)]) {
     }
 }
 
+/// **Private.** The recursive dispatcher behind [`generate`].
+///
 /// `group` is the seed of the enclosing object: fields that must agree with each other
 /// (city, state, pincode, address) derive their shared choice from it, not from their own seeds.
 fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize) -> Value {
@@ -119,7 +132,7 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize
         }
         "array" => {
             let min = s.get("minItems").and_then(Value::as_u64).unwrap_or(1);
-            // ponytail: cap random length so `maxItems: 1000000` can't build a huge array; minItems is still honoured
+            // limitation: cap random length so `maxItems: 1000000` can't build a huge array; minItems is still honoured
             let max = s
                 .get("maxItems")
                 .and_then(Value::as_u64)
@@ -128,8 +141,9 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize
                 .max(min);
             let n = rng.random_range(min..=max);
             let items = s.get("items").cloned().unwrap_or(json!({}));
+            let n = usize::try_from(n).expect("length is capped by MAX_RANDOM_ITEMS");
             Value::Array(
-                (0..n as usize)
+                (0..n)
                     .map(|i| value_for(&items, None, child_seed(seed, "[]", i), group, depth + 1))
                     .collect(),
             )
@@ -141,7 +155,7 @@ fn value_for(s: &Value, field: Option<&str>, seed: u64, group: u64, depth: usize
     }
 }
 
-/// `id`, `userId`, `user_id`, `ID` are ids; `valid`, `paid`, `android` are not.
+/// **Private.** `id`, `userId`, `user_id`, `ID` are ids; `valid`, `paid`, `android` are not.
 fn is_id(field: Option<&str>) -> bool {
     let f = field.unwrap_or("");
     f.eq_ignore_ascii_case("id")
@@ -151,7 +165,7 @@ fn is_id(field: Option<&str>) -> bool {
         || f.ends_with("-id")
 }
 
-/// `firstName`, `first_name`, `first-name` → `firstname`
+/// **Private.** `firstName`, `first_name`, `first-name` → `firstname`
 fn norm(field: Option<&str>) -> String {
     field
         .unwrap_or("")
@@ -161,6 +175,8 @@ fn norm(field: Option<&str>) -> String {
         .collect()
 }
 
+/// **Private.** Integer value: heuristic ranges for known names (age, quantity, ids),
+/// bounded by `minimum`/`maximum` and their exclusive variants.
 fn int_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> i64 {
     let f = norm(field);
     let (mut lo, mut hi) = match f.as_str() {
@@ -190,11 +206,13 @@ fn int_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> i64 {
     rng.random_range(lo..=hi)
 }
 
-/// OpenAPI 3.0: `exclusiveMinimum: true` turns `minimum` into a strict bound.
+/// **Private.** `OpenAPI` 3.0: `exclusiveMinimum: true` turns `minimum` into a strict bound.
 fn exclusive(s: &Value, key: &str) -> bool {
     s.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+/// **Private.** Float value: lat/lng ranges for geo fields, money ranges for
+/// price-like names, bounds applied with one-cent slack for exclusive limits.
 fn number_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> Value {
     let f = norm(field);
     match f.as_str() {
@@ -226,11 +244,15 @@ fn number_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> Value {
     json!(round(v, 2).clamp(lo, hi))
 }
 
+/// **Private.** Rounds to `places` decimal digits.
 fn round(v: f64, places: i32) -> f64 {
     let p = 10f64.powi(places);
     (v * p).round() / p
 }
 
+/// **Private.** String value: `format` first, then the field-name heuristic, then a
+/// lorem word. Formats beat lengths (rule R4.5): `fit_length` is skipped for values
+/// that must stay well-formed.
 fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) -> String {
     let v = match s.get("format").and_then(Value::as_str).unwrap_or("") {
         "email" => email(rng),
@@ -252,7 +274,7 @@ fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) 
     if structured { v } else { fit_length(v, s) }
 }
 
-/// Heuristic fields whose value must stay well-formed (see `heuristic`).
+/// **Private.** Heuristic fields whose value must stay well-formed (see `heuristic`).
 fn keeps_format(f: &str, id_like: bool) -> bool {
     id_like
         || f.ends_with("email")
@@ -264,12 +286,15 @@ fn keeps_format(f: &str, id_like: bool) -> bool {
         )
 }
 
-/// The (city, state, pincode) of the object a field belongs to: same object, same place.
+/// **Private.** The (city, state, pincode) of the object a field belongs to: same
+/// object, same place.
 fn place(group: u64) -> (&'static str, &'static str, &'static str) {
     let i = stable_hash(&[&group.to_le_bytes(), b"place"]) % words::CITIES.len() as u64;
-    words::CITIES[i as usize]
+    words::CITIES[usize::try_from(i).expect("i < CITIES.len()")]
 }
 
+/// **Private.** The field-name dictionary. Returns `None` when nothing matches, so
+/// the caller falls back to a lorem word.
 fn heuristic(f: &str, id_like: bool, group: u64, rng: &mut ChaCha8Rng) -> Option<String> {
     Some(match f {
         "firstname" | "givenname" => words::pick(words::FIRST, rng).to_string(),
@@ -309,17 +334,23 @@ fn heuristic(f: &str, id_like: bool, group: u64, rng: &mut ChaCha8Rng) -> Option
     })
 }
 
+/// **Private.** `first.lastNN@example.com` — always a reserved domain (rule R5.7).
 fn email(rng: &mut ChaCha8Rng) -> String {
     let first = words::pick(words::FIRST, rng).to_lowercase();
     let last = words::pick(words::LAST, rng).to_lowercase();
     format!("{first}.{last}{}@example.com", rng.random_range(1..=99))
 }
 
+/// **Private.** A random UUID with the v4 version and variant bits set.
 fn uuid(rng: &mut ChaCha8Rng) -> String {
+    use std::fmt::Write as _;
     let mut b: [u8; 16] = rng.random();
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h: String = b.iter().fold(String::with_capacity(32), |mut s, x| {
+        write!(s, "{x:02x}").expect("writing to a String cannot fail");
+        s
+    });
     format!(
         "{}-{}-{}-{}-{}",
         &h[0..8],
@@ -330,12 +361,14 @@ fn uuid(rng: &mut ChaCha8Rng) -> String {
     )
 }
 
+/// **Private.** `n` random decimal digits (phone numbers).
 fn digits(rng: &mut ChaCha8Rng, n: usize) -> String {
     (0..n)
         .map(|_| char::from(b'0' + rng.random_range(0..10u8)))
         .collect()
 }
 
+/// **Private.** A 6–12 word lorem sentence, capitalised, ending with a full stop.
 fn sentence(rng: &mut ChaCha8Rng) -> String {
     let n = rng.random_range(6..=12);
     let mut s: Vec<&str> = (0..n).map(|_| words::pick(words::WORDS, rng)).collect();
@@ -344,6 +377,7 @@ fn sentence(rng: &mut ChaCha8Rng) -> String {
     format!("{first}{}.", s.join(" "))
 }
 
+/// **Private.** An RFC 3339 UTC timestamp within the 365 days before [`BASE_EPOCH`].
 fn date_time(rng: &mut ChaCha8Rng) -> String {
     let t = BASE_EPOCH - rng.random_range(0..365 * 86_400i64);
     let (days, secs) = (t.div_euclid(86_400), t.rem_euclid(86_400));
@@ -356,7 +390,7 @@ fn date_time(rng: &mut ChaCha8Rng) -> String {
     )
 }
 
-/// Days since 1970-01-01 → (year, month, day). Howard Hinnant's algorithm.
+/// **Private.** Days since 1970-01-01 → (year, month, day). Howard Hinnant's algorithm.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
@@ -364,15 +398,20 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    let d = u32::try_from(doy - (153 * mp + 2) / 5 + 1).expect("day in 1..=31");
+    let m = u32::try_from(if mp < 10 { mp + 3 } else { mp - 9 }).expect("month in 1..=12");
     let y = yoe + era * 400 + i64::from(m <= 2);
     (y, m, d)
 }
 
+/// **Private.** Applies `maxLength` (truncate) and `minLength` (pad with `x`) to a
+/// plain string. Never called on formatted or well-formed values.
 fn fit_length(mut v: String, s: &Value) -> String {
     if let Some(max) = s.get("maxLength").and_then(Value::as_u64) {
-        v = v.chars().take(max as usize).collect();
+        v = v
+            .chars()
+            .take(usize::try_from(max).unwrap_or(usize::MAX))
+            .collect();
     }
     if let Some(min) = s.get("minLength").and_then(Value::as_u64) {
         while (v.chars().count() as u64) < min {

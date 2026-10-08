@@ -29,7 +29,9 @@ fn parses_sample() {
     assert_eq!(cfg.routes["GET /health"].status, 200);
     match cfg.nodes["app"].proc.as_ref().unwrap() {
         kaanal_core::config::DistConfig::Fixed(d) => assert_eq!(*d, Duration::from_millis(5)),
-        other => panic!("expected fixed, got {other:?}"),
+        other @ kaanal_core::config::DistConfig::Pct { .. } => {
+            panic!("expected fixed, got {other:?}")
+        }
     }
 }
 

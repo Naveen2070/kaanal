@@ -1,0 +1,47 @@
+# `crates/kaanal/src/main.rs`
+
+The `kaanal` binary: clap CLI, process lifecycle, and a thin HTTP client for the control API.
+
+## What it does
+
+Two kinds of commands:
+
+- **Local**: `up` (run the server) and `validate` (dry-run the config).
+- **Remote**: `status` and `chaos set|clear` — thin clients that find the running instance via `.kaanal/run.json` and call its control API (rule R2.6: no per-interface logic).
+
+## Commands
+
+| Command | Behaviour |
+|---|---|
+| `up [-c config] [--port p] [--host ip]` | Locks the directory, starts the server, writes `.kaanal/run.json`, prints mock + UI URLs, runs until Ctrl+C. |
+| `validate [-c config]` | Runs `kaanal_server::check`; prints warnings to stderr, `ok: <file>` to stdout. |
+| `status` | Prints a node table with each node's live chaos settings. |
+| `chaos set <node> [--latency 300ms] [--error-rate 10%] [--error 503] [--down]` | PUTs a merged patch. With no flags → error "nothing to set" instead of sending an empty patch. |
+| `chaos clear [node]` | DELETE one node or all. |
+
+## Exit codes (rule R6.3)
+
+`0` ok · `1` error · `2` not running (no `run.json`, or the instance there is gone). Carried by `Fail(u8, String)`; `main` prints the message to stderr and returns the code.
+
+## Functions
+
+| Function | What it does |
+|---|---|
+| `main` / `run` | Entry and subcommand dispatch. |
+| `load(path)` | Reads + parses config; formats errors as `file:line:col: msg` (R6.1); returns the config's directory for resolving spec files. |
+| `up(config, port, host)` | Full lifecycle: `private_dir` → `lock_instance` → warn on non-loopback host → token → tokio multi-thread runtime → `serve` → `write_run_file` → `tokio::select!` on server-vs-Ctrl+C → remove `run.json` only if it still holds *our* token (a newer instance may have replaced it). |
+| `private_dir()` | Creates `.kaanal` private **before** any secret is written (rule R5.8): Unix 0700; Windows ACL replaced with a single grant for the current user. Failure on Windows warns and continues — the token still protects the API. |
+| `restrict_to_current_user(dir)` | Windows ACL via `whoami.exe` (SID lookup) and `icacls.exe` (inheritance removed, one full-control grant), both invoked by **full System32 path** so a planted earlier-PATH exe is never run. |
+| `lock_instance()` | Exclusive `File::try_lock` on `.kaanal/lock`, held for the process's life (rule R6.7). `WouldBlock` → "already running" with the port if known. The OS releases the lock even on a crash, so there is no stale-lock cleanup. |
+| `write_run_file(port, token)` | Writes `{port, token, pid}` via temp file + rename (a concurrent `status` never reads half a file); 0600 on Unix. |
+| `read_run()` | Reads `(port, token)` back; any malformed piece → `None`. |
+| `call(method, path, body)` | The control client. `ureq` agent hardened: **proxy disabled** (never leak the token through `HTTP(S)_PROXY`), **redirects disabled** (a redirect could forward the token), 2 s connect / 10 s total timeouts. Missing instance → exit 2; HTTP ≥ 300 → exit 1 with the server's `error` field. |
+| `status()` | Fetches topology + chaos and prints the aligned table. |
+| `clean(s)` | Replaces control characters with `?` — server text can echo user input (a node name) and must never drive the terminal. |
+| `encode_segment(s)` | Percent-encodes one URL path segment (RFC 3986 unreserved stay). Used for node names in control URLs. |
+| `parse_ms(s)` | `300ms` / `2s` / bare number → milliseconds, with overflow checks. |
+| `parse_rate(s)` | `10%` or `0.1` → 0.0–1.0. |
+
+## Unit tests in this file
+
+`latency_parsing`, `rate_parsing`, `clean_replaces_control_chars`, `path_segments_are_percent_encoded`. End-to-end: [../tests.md](../../tests.md#crateskaanaltestsclirs).

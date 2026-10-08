@@ -1,4 +1,5 @@
 use kaanal_data::ApiModel;
+use std::fmt::Write as _;
 
 const SPEC: &str = r##"
 openapi: 3.0.3
@@ -125,12 +126,14 @@ fn rejects_ref_expansion_bomb() {
     let levels = 30;
     let mut schemas = String::new();
     for i in 0..levels {
-        schemas.push_str(&format!(
+        write!(
+            schemas,
             "    S{i}:\n      type: object\n      properties:\n        a: {{ $ref: \"#/components/schemas/S{n}\" }}\n        b: {{ $ref: \"#/components/schemas/S{n}\" }}\n",
             n = i + 1
-        ));
+        )
+        .unwrap();
     }
-    schemas.push_str(&format!("    S{levels}: {{ type: string }}\n"));
+    writeln!(schemas, "    S{levels}: {{ type: string }}").unwrap();
     let spec = format!(
         "openapi: 3.0.3\ninfo: {{ title: t, version: \"1\" }}\npaths:\n  /x:\n    get:\n      responses:\n        \"200\":\n          description: x\n          content:\n            application/json:\n              schema: {{ $ref: \"#/components/schemas/S0\" }}\ncomponents:\n  schemas:\n{schemas}"
     );

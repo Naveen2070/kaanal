@@ -1,44 +1,78 @@
+//! The topology graph: nodes, edges, and all semantic validation of the config.
+//!
+//! [`Topology::build`] turns a parsed [`Config`] into a validated graph the
+//! executor can walk. Anything the executor would silently ignore or misinterpret
+//! is rejected at load with a named error (rules R2.7, R6.1).
+
 use std::collections::HashMap;
 use std::fmt;
 
 use crate::config::{Config, NodeKind};
 use crate::dist::Dist;
 
+/// Index of a node in [`Topology::nodes`].
 pub type NodeId = usize;
 
+/// A runtime node with its costs resolved to distributions.
 #[derive(Debug, Clone)]
 pub struct Node {
+    /// Node name from `kaanal.yaml`.
     pub name: String,
+    /// Gateway, service or database.
     pub kind: NodeKind,
+    /// Cosmetic flavor label (`postgres`, `nginx`, …).
     pub flavor: Option<String>,
+    /// `OpenAPI` spec file (service nodes only).
     pub spec: Option<String>,
+    /// Processing-time distribution (zero when unconfigured).
     pub proc: Dist,
     /// Database op costs, indexed by `Op as usize`: read, write, scan.
     pub ops: Option<[Dist; 3]>,
 }
 
+/// A dependency between two nodes, with its network latency.
 #[derive(Debug, Clone)]
 pub struct Edge {
+    /// Upstream node.
     pub from: NodeId,
+    /// Downstream node.
     pub to: NodeId,
+    /// Network latency distribution on this edge (zero when unconfigured).
     pub net: Dist,
 }
 
+/// A validated topology graph.
 #[derive(Debug, Clone)]
 pub struct Topology {
+    /// All nodes; a [`NodeId`] indexes this vector.
     pub nodes: Vec<Node>,
+    /// All edges.
     pub edges: Vec<Edge>,
+    /// The one gateway node.
     pub gateway: NodeId,
+    /// **Private.** name → id lookup.
     index: HashMap<String, NodeId>,
 }
 
+/// Why a topology was rejected. Every variant renders as human prose via `Display`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyError {
-    UnknownNode { edge: usize, name: String },
+    /// An edge references a node that does not exist; carries the edge number and the name.
+    UnknownNode {
+        /// 0-based index of the offending edge in `edges:`.
+        edge: usize,
+        /// The unknown node name.
+        name: String,
+    },
+    /// There must be exactly one gateway; carries how many were found (0 or more).
     GatewayCount(usize),
+    /// The graph is not a DAG; carries the cycle as node names (`a -> b -> a`).
     Cycle(Vec<String>),
+    /// A database node without `ops`; carries the node name.
     MissingOps(String),
+    /// A service with an `OpenAPI` spec but no edge from the gateway; carries the node name.
     MissingGatewayEdge(String),
+    /// Anything valid YAML but outside phase-one semantics (edge shapes, field placement).
     Unsupported(String),
 }
 
@@ -69,6 +103,16 @@ impl fmt::Display for TopologyError {
 impl std::error::Error for TopologyError {}
 
 impl Topology {
+    /// Builds and validates the graph.
+    ///
+    /// Checks, in order: field placement (`ops` on databases, `spec` on services
+    /// only), database ops present, exactly one gateway, edge endpoints exist, the
+    /// graph is a DAG, phase-one edge shapes (`gateway → service`, `service →
+    /// database`, no duplicates), and every service with a spec is reachable from
+    /// the gateway.
+    ///
+    /// # Errors
+    /// Returns the first [`TopologyError`] found; nothing is half-built.
     pub fn build(cfg: &Config) -> Result<Topology, TopologyError> {
         let mut nodes = Vec::new();
         let mut index = HashMap::new();
@@ -173,18 +217,22 @@ impl Topology {
         Ok(topo)
     }
 
+    /// Looks up a node by name.
     pub fn id(&self, name: &str) -> Option<NodeId> {
         self.index.get(name).copied()
     }
 
+    /// Iterates over the edges leaving a node, in config order.
     pub fn out_edges(&self, id: NodeId) -> impl Iterator<Item = &Edge> {
         self.edges.iter().filter(move |e| e.from == id)
     }
 
+    /// Finds the edge between two specific nodes, if any.
     pub fn edge(&self, from: NodeId, to: NodeId) -> Option<&Edge> {
         self.edges.iter().find(|e| e.from == from && e.to == to)
     }
 
+    /// **Private.** DFS cycle check with 3-colour marking.
     fn check_cycles(&self) -> Result<(), TopologyError> {
         // state: 0 = unvisited, 1 = on the current path, 2 = done
         fn visit(

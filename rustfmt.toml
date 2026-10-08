@@ -1,0 +1,9 @@
+# Kaanal formatting rules. Applied by `cargo fmt --all` and enforced by the
+# pre-commit hook. Keep to stable options only — contributors run stable Rust.
+edition = "2024"
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+newline_style = "Auto"
+use_field_init_shorthand = true
+use_try_shorthand = true

@@ -4,7 +4,7 @@ use kaanal_core::{
 };
 use std::time::Duration;
 
-const BASE: &str = r#"
+const BASE: &str = r"
 version: 1
 nodes:
   nginx: { type: gateway, proc: { p50: 1ms, p99: 3ms } }
@@ -13,7 +13,7 @@ nodes:
 edges:
   - { from: nginx, to: app, net: 1ms }
   - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }
-"#;
+";
 
 fn topo() -> Topology {
     Topology::build(&Config::from_yaml(BASE).unwrap()).unwrap()
