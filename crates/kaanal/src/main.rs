@@ -13,6 +13,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use kaanal_core::Config;
 use kaanal_server::ServeOpts;
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
 
 /// **Private.** Per-project state directory holding `run.json` and `lock`.
@@ -415,33 +416,23 @@ fn clean(s: &str) -> String {
         .collect()
 }
 
-/// **Private.** Percent-encodes one URL path segment (RFC 3986 unreserved characters stay as they are).
+/// **Private.** RFC 3986 unreserved characters; everything else in a path segment is escaped.
+const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
+/// **Private.** Percent-encodes one URL path segment.
 fn encode_segment(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
+    utf8_percent_encode(s, SEGMENT).to_string()
 }
 
-/// **Private.** `300ms` / `2s` / bare number → milliseconds, with overflow checks.
+/// **Private.** `300ms` / `2s` / `1m 30s` → milliseconds. A unit is required.
 fn parse_ms(s: &str) -> Result<u64, String> {
-    let t = s.trim();
-    let (num, mult) = if let Some(n) = t.strip_suffix("ms") {
-        (n, 1)
-    } else if let Some(n) = t.strip_suffix('s') {
-        (n, 1000)
-    } else {
-        (t, 1)
-    };
-    num.trim()
-        .parse::<u64>()
+    humantime::parse_duration(s.trim())
         .ok()
-        .and_then(|n| n.checked_mul(mult))
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
         .ok_or_else(|| format!("bad latency '{s}' (use e.g. 300ms or 2s)"))
 }
 
@@ -468,12 +459,13 @@ mod tests {
     fn latency_parsing() {
         assert_eq!(parse_ms("300ms"), Ok(300));
         assert_eq!(parse_ms("2s"), Ok(2000));
-        assert_eq!(parse_ms("15"), Ok(15));
+        assert_eq!(parse_ms("1m 30s"), Ok(90_000));
+        assert!(parse_ms("15").is_err(), "a unit is required");
         assert_eq!(parse_ms(" 40 ms "), Ok(40));
         assert!(parse_ms("-5ms").is_err());
         assert!(parse_ms("fast").is_err());
         assert!(parse_ms("").is_err());
-        assert!(parse_ms("1.5s").is_err());
+        assert_eq!(parse_ms("1.5s"), Ok(1500));
         assert!(parse_ms("99999999999999999999s").is_err());
     }
 

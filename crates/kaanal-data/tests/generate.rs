@@ -254,3 +254,24 @@ fn city_state_pincode_and_address_describe_the_same_place() {
     }
     assert!(by_city.len() > 3, "cities should still vary: {by_city:?}");
 }
+
+#[test]
+fn names_and_email_describe_the_same_person() {
+    let s = json!({ "type": "object", "properties": {
+        "firstName": { "type": "string" }, "lastName": { "type": "string" },
+        "name": { "type": "string" }, "email": { "type": "string", "format": "email" }
+    }});
+    let mut people = std::collections::HashSet::new();
+    for seed in 0..300 {
+        let v = generate(&s, None, seed);
+        let (first, last) = (
+            v["firstName"].as_str().unwrap(),
+            v["lastName"].as_str().unwrap(),
+        );
+        assert_eq!(v["name"], format!("{first} {last}"), "{v}");
+        let prefix = format!("{}.{}", first.to_lowercase(), last.to_lowercase());
+        assert!(v["email"].as_str().unwrap().starts_with(&prefix), "{v}");
+        people.insert(format!("{first} {last}"));
+    }
+    assert!(people.len() > 3, "people should still vary: {people:?}");
+}

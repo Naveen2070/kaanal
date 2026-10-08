@@ -6,10 +6,9 @@ Crate root of **kaanal-data**: OpenAPI parsing and deterministic data generation
 
 Declares private modules and re-exports the whole public surface:
 
-| Re-export                          | From       | What it is                                                                  |
-| ---------------------------------- | ---------- | --------------------------------------------------------------------------- |
-| `ApiModel`, `Endpoint`, `ApiError` | `api`      | Parsed OpenAPI 3.0 spec → endpoint list. See [api.md](api.md).              |
-| `generate`, `apply_params`         | `generate` | Deterministic mock JSON for a schema. See [generate.md](generate.md).       |
-| `unsupported_keywords`             | `warn`     | Warnings for schema keywords the generator ignores. See [warn.md](warn.md). |
+| Re-export                  | From       | What it is                                                            |
+| -------------------------- | ---------- | --------------------------------------------------------------------- |
+| `ApiModel`, `Endpoint`     | `api`      | Parsed OpenAPI 3.0 spec → endpoint list. See [api.md](api.md).        |
+| `generate`, `apply_params` | `generate` | Deterministic mock JSON for a schema. See [generate.md](generate.md). |
 
 `words` (name/city/word lists) stays private — see [words.md](words.md).

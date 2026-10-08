@@ -12,7 +12,7 @@ Holds the _current_ chaos settings, keyed by node. Written by the control API (`
 | ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NodeChaos`            | struct | Chaos settings for one node: `latency_add` (extra duration added to every visit of the node), `error_rate` (0.0–1.0 probability of failing), `error_status` (HTTP status to fail with), `down` (hard outage — every visit fails with 503 regardless of rate). |
 | `NodeChaos::default()` | impl   | All-off defaults: zero latency, 0% errors, `error_status: 503`, `down: false`. An all-default entry is _inert_ — it changes nothing, which `exec` tests rely on.                                                                                              |
-| `ChaosState`           | struct | `nodes: HashMap<NodeId, NodeChaos>`. Absent node = no chaos.                                                                                                                                                                                                  |
+| `ChaosState`           | type   | `HashMap<NodeId, NodeChaos>`. Absent node = no chaos.                                                                                                                                                                                                         |
 
 ## Invariants
 

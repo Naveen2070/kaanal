@@ -188,7 +188,7 @@ impl Walk<'_> {
     /// settings.
     fn node(&mut self, id: NodeId, kind: HopKind) -> Result<(), u16> {
         let roll: f64 = self.rng.random();
-        let c = self.chaos.nodes.get(&id);
+        let c = self.chaos.get(&id);
         if let Some(c) = c {
             if c.down {
                 return Err(503);

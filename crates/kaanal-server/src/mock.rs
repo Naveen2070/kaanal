@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use kaanal_core::{
     ChainOutcome, ChainRequest, ChainResult, HopKind, Topology, execute, stable_hash,
 };
+use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::state::{AppState, Body, Event};
@@ -62,7 +63,8 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let params: Vec<(String, String)> = matched
         .params
         .iter()
-        .map(|(k, v)| (k.to_string(), percent_decode(v)))
+        // Invalid escapes are kept as typed; invalid UTF-8 becomes U+FFFD.
+        .map(|(k, v)| (k.to_string(), percent_decode_str(v).decode_utf8_lossy().into_owned()))
         .collect();
 
     let started = Instant::now();
@@ -196,31 +198,6 @@ fn send_event(
     });
 }
 
-/// **Private.** `a%20b` -> `a b`. Invalid escapes are kept as typed; invalid UTF-8 becomes U+FFFD.
-fn percent_decode(raw: &str) -> String {
-    let src = raw.as_bytes();
-    let mut out = Vec::with_capacity(src.len());
-    let mut i = 0;
-    while i < src.len() {
-        let digit = |byte: u8| (byte as char).to_digit(16);
-        match (
-            src[i],
-            src.get(i + 1).and_then(|byte| digit(*byte)),
-            src.get(i + 2).and_then(|byte| digit(*byte)),
-        ) {
-            (b'%', Some(hi), Some(lo)) => {
-                out.push(u8::try_from(hi * 16 + lo).expect("two hex digits fit in a byte"));
-                i += 3;
-            }
-            (byte, _, _) => {
-                out.push(byte);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 /// **Private.** Adds permissive CORS headers (mock routes only) and exposes
 /// `x-kaanal-trace` to browsers.
 fn with_cors(mut r: Response) -> Response {
@@ -242,19 +219,4 @@ fn with_cors(mut r: Response) -> Response {
         HeaderValue::from_static("x-kaanal-trace"),
     );
     r
-}
-
-#[cfg(test)]
-mod tests {
-    use super::percent_decode;
-
-    #[test]
-    fn decodes_escapes_and_keeps_bad_ones() {
-        assert_eq!(percent_decode("a%20b"), "a b");
-        assert_eq!(percent_decode("%34%32"), "42");
-        assert_eq!(percent_decode("100%"), "100%");
-        assert_eq!(percent_decode("%zz"), "%zz");
-        assert_eq!(percent_decode("%C3%A9"), "é");
-        assert_eq!(percent_decode("%ff"), "\u{fffd}");
-    }
 }

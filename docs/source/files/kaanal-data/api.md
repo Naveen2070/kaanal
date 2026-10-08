@@ -14,7 +14,6 @@ Phase one supports **3.0.x only**; 3.1 is rejected with a clear message.
 | -------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Endpoint`           | struct | `method` (uppercase), `path` (OpenAPI template, also valid matchit 0.8 syntax), `status` (chosen 2xx), `schema` (response JSON schema with refs inlined; `None` = no JSON body). |
 | `ApiModel`           | struct | `endpoints: Vec<Endpoint>`.                                                                                                                                                      |
-| `ApiError`           | struct | Single message string; `Display` passes it through.                                                                                                                              |
 | `MAX_REF_EXPANSIONS` | const  | 10 000 — cap on `$ref` expansions per schema (see below).                                                                                                                        |
 
 ## Functions

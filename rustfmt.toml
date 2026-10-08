@@ -1,9 +1,7 @@
-# Kaanal formatting rules. Applied by `cargo fmt --all` and enforced by the
-# pre-commit hook. Keep to stable options only — contributors run stable Rust.
+# Kaanal formatting: rustfmt defaults plus these. Applied by `cargo fmt --all`,
+# enforced by the pre-commit hook. Stable options only.
+# `cargo fmt` reads the edition from Cargo.toml; this line covers plain `rustfmt <file>`
+# (editors, scripts), which would otherwise default to edition 2015.
 edition = "2024"
-max_width = 100
-tab_spaces = 4
-hard_tabs = false
-newline_style = "Auto"
 use_field_init_shorthand = true
 use_try_shorthand = true

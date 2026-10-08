@@ -35,7 +35,7 @@ fn run(t: &Topology, chaos: &ChaosState, n: u64) -> ChainOutcome {
 
 fn chaos_on(t: &Topology, node: &str, c: NodeChaos) -> ChaosState {
     let mut s = ChaosState::default();
-    s.nodes.insert(t.id(node).unwrap(), c);
+    s.insert(t.id(node).unwrap(), c);
     s
 }
 

@@ -4,8 +4,6 @@
 //! fully `$ref`-inlined so downstream code never resolves references. Phase one
 //! supports 3.0.x only; 3.1 is rejected with a clear message.
 
-use std::fmt;
-
 use serde_json::{Map, Value};
 
 /// One mockable endpoint.
@@ -28,21 +26,6 @@ pub struct ApiModel {
     pub endpoints: Vec<Endpoint>,
 }
 
-/// An `OpenAPI` parse error; the message names the operation (JSON pointer) when known.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ApiError(
-    /// Human-readable description.
-    pub String,
-);
-
-impl fmt::Display for ApiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for ApiError {}
-
 /// **Private.** HTTP methods recognised under a path item.
 const METHODS: [&str; 7] = ["get", "put", "post", "delete", "patch", "head", "options"];
 /// **Private.** Max `$ref` expansions per response schema. Acyclic refs can still
@@ -57,11 +40,11 @@ impl ApiModel {
     /// inlined.
     ///
     /// # Errors
-    /// Returns [`ApiError`] for non-3.0.x versions, missing `paths`, bad paths,
+    /// Returns a message for non-3.0.x versions, missing `paths`, bad paths,
     /// external or recursive `$ref`s, dangling refs, or ref-expansion bombs.
-    pub fn from_openapi(src: &str) -> Result<ApiModel, ApiError> {
-        let doc: Value = serde_yaml_ng::from_str(src)
-            .map_err(|e| ApiError(format!("invalid YAML/JSON: {e}")))?;
+    pub fn from_openapi(src: &str) -> Result<ApiModel, String> {
+        let doc: Value =
+            serde_yaml_ng::from_str(src).map_err(|e| format!("invalid YAML/JSON: {e}"))?;
         // `openapi: 3.0` (unquoted) parses as a YAML number, not a string.
         let version = match doc.get("openapi") {
             Some(Value::String(s)) => s.clone(),
@@ -69,18 +52,18 @@ impl ApiModel {
             None => String::new(),
         };
         if !version.starts_with("3.0") {
-            return Err(ApiError(format!(
+            return Err(format!(
                 "unsupported OpenAPI version '{version}' (phase one supports 3.0.x)"
-            )));
+            ));
         }
         let paths = doc
             .get("paths")
             .and_then(Value::as_object)
-            .ok_or_else(|| ApiError("missing 'paths'".into()))?;
+            .ok_or_else(|| String::from("missing 'paths'"))?;
         let mut endpoints = Vec::new();
         for (path, item) in paths {
             if !path.starts_with('/') {
-                return Err(ApiError(format!("path '{path}' must start with '/'")));
+                return Err(format!("path '{path}' must start with '/'"));
             }
             for m in METHODS {
                 let Some(op) = item.get(m) else { continue };
@@ -99,11 +82,11 @@ impl ApiModel {
 }
 
 /// **Private.** Lowest 2xx response, and its application/json schema if it has one.
-fn pick_response(op: &Value, doc: &Value, ptr: &str) -> Result<(u16, Option<Value>), ApiError> {
+fn pick_response(op: &Value, doc: &Value, ptr: &str) -> Result<(u16, Option<Value>), String> {
     let responses = op
         .get("responses")
         .and_then(Value::as_object)
-        .ok_or_else(|| ApiError(format!("{ptr}: missing 'responses'")))?;
+        .ok_or_else(|| format!("{ptr}: missing 'responses'"))?;
     let mut codes: Vec<(u16, &Value)> = responses
         .iter()
         .filter_map(|(k, v)| {
@@ -140,19 +123,17 @@ fn inline<'d>(
     ptr: &str,
     stack: &mut Vec<&'d str>,
     budget: &mut usize,
-) -> Result<Value, ApiError> {
+) -> Result<Value, String> {
     match v {
         Value::Object(map) => {
             if let Some(r) = map.get("$ref").and_then(Value::as_str) {
                 if stack.contains(&r) {
-                    return Err(ApiError(format!(
-                        "{ptr}: recursive $ref '{r}' is not supported"
-                    )));
+                    return Err(format!("{ptr}: recursive $ref '{r}' is not supported"));
                 }
                 if *budget == 0 {
-                    return Err(ApiError(format!(
+                    return Err(format!(
                         "{ptr}: too many $ref expansions (> {MAX_REF_EXPANSIONS})"
-                    )));
+                    ));
                 }
                 *budget -= 1;
                 stack.push(r);
@@ -177,12 +158,10 @@ fn inline<'d>(
 }
 
 /// **Private.** Resolves a local (`#/...`) JSON-pointer ref; external refs are rejected.
-fn resolve_ref<'d>(r: &str, doc: &'d Value, ptr: &str) -> Result<&'d Value, ApiError> {
+fn resolve_ref<'d>(r: &str, doc: &'d Value, ptr: &str) -> Result<&'d Value, String> {
     let Some(pointer) = r.strip_prefix('#') else {
-        return Err(ApiError(format!(
-            "{ptr}: external $ref '{r}' is not supported"
-        )));
+        return Err(format!("{ptr}: external $ref '{r}' is not supported"));
     };
     doc.pointer(pointer)
-        .ok_or_else(|| ApiError(format!("{ptr}: $ref '{r}' not found")))
+        .ok_or_else(|| format!("{ptr}: $ref '{r}' not found"))
 }

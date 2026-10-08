@@ -255,7 +255,7 @@ fn round(v: f64, places: i32) -> f64 {
 /// that must stay well-formed.
 fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) -> String {
     let v = match s.get("format").and_then(Value::as_str).unwrap_or("") {
-        "email" => email(rng),
+        "email" => email(rng, group),
         "uuid" => uuid(rng),
         "date-time" => date_time(rng),
         "date" => date_time(rng)[..10].to_string(),
@@ -293,18 +293,24 @@ fn place(group: u64) -> (&'static str, &'static str, &'static str) {
     words::CITIES[usize::try_from(i).expect("i < CITIES.len()")]
 }
 
+/// **Private.** The (first, last) name of the person an object describes: same
+/// object, same person, so `firstName`, `lastName`, `name` and `email` agree.
+fn person(group: u64) -> (&'static str, &'static str) {
+    let pick = |list: &[&'static str], tag: &[u8]| {
+        let i = stable_hash(&[&group.to_le_bytes(), tag]) % list.len() as u64;
+        list[usize::try_from(i).expect("i < list.len()")]
+    };
+    (pick(words::FIRST, b"first"), pick(words::LAST, b"last"))
+}
+
 /// **Private.** The field-name dictionary. Returns `None` when nothing matches, so
 /// the caller falls back to a lorem word.
 fn heuristic(f: &str, id_like: bool, group: u64, rng: &mut ChaCha8Rng) -> Option<String> {
     Some(match f {
-        "firstname" | "givenname" => words::pick(words::FIRST, rng).to_string(),
-        "lastname" | "surname" | "familyname" => words::pick(words::LAST, rng).to_string(),
-        "name" | "fullname" => format!(
-            "{} {}",
-            words::pick(words::FIRST, rng),
-            words::pick(words::LAST, rng)
-        ),
-        f if f.ends_with("email") => email(rng),
+        "firstname" | "givenname" => person(group).0.to_string(),
+        "lastname" | "surname" | "familyname" => person(group).1.to_string(),
+        "name" | "fullname" => format!("{} {}", person(group).0, person(group).1),
+        f if f.ends_with("email") => email(rng, group),
         f if f.ends_with("phone") || f == "mobile" => format!("+91 9{}", digits(rng, 9)),
         "city" => place(group).0.to_string(),
         "state" => place(group).1.to_string(),
@@ -334,10 +340,10 @@ fn heuristic(f: &str, id_like: bool, group: u64, rng: &mut ChaCha8Rng) -> Option
     })
 }
 
-/// **Private.** `first.lastNN@example.com` — always a reserved domain (rule R5.7).
-fn email(rng: &mut ChaCha8Rng) -> String {
-    let first = words::pick(words::FIRST, rng).to_lowercase();
-    let last = words::pick(words::LAST, rng).to_lowercase();
+/// **Private.** `first.lastNN@example.com` for the object's person — always a reserved domain (rule R5.7).
+fn email(rng: &mut ChaCha8Rng, group: u64) -> String {
+    let (first, last) = person(group);
+    let (first, last) = (first.to_lowercase(), last.to_lowercase());
     format!("{first}.{last}{}@example.com", rng.random_range(1..=99))
 }
 

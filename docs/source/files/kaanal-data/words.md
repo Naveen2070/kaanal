@@ -10,7 +10,7 @@ Synthetic-only source data (rule R5.7: no real-person datasets). Currently one l
 
 | Const     | Contents                                | Used for                                                                                                                        |
 | --------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `FIRST`   | 20 Indian first names (Aarav, Priya, …) | `firstName`, `name`, email local parts                                                                                          |
+| `FIRST`   | 20 Indian first names (Aarav, Priya, …) | `firstName`, `name`, email local parts — one person per object via `person()` in [generate](generate.md)                        |
 | `LAST`    | 20 Indian surnames (Sharma, Iyer, …)    | `lastName`, `name`, emails                                                                                                      |
 | `CITIES`  | 10 `(city, state, pincode)` triples     | `city`/`state`/`pincode`/`address` — always consistent because `place()` in [generate](generate.md) picks one triple per object |
 | `STREETS` | 8 street names                          | `address`                                                                                                                       |

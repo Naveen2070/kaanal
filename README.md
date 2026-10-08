@@ -77,7 +77,7 @@ Kaanal solves this with a **single YAML topology file** and an **OpenAPI 3.0 spe
 
 ## Try it
 
-Needs Rust 1.89 or newer.
+Needs Rust 1.99 or newer.
 
 ```bash
 cargo run -p kaanal -- up -c examples/nginx-server/kaanal.yaml
@@ -86,9 +86,8 @@ cargo run -p kaanal -- up -c examples/nginx-server/kaanal.yaml
 `kaanal up` binds to `127.0.0.1:8080` (or the next free port up to 8100) and prints:
 
 ```text
-kaanal up on 127.0.0.1:8080 (pid 12345)
-Mocks: http://127.0.0.1:8080
-UI:    http://127.0.0.1:8080/__kaanal/ui#token=64_character_hex_token
+Mocks: http://localhost:8080
+UI:    http://localhost:8080/__kaanal/ui#token=<64-character hex token>
 ```
 
 ### 1. Test a mock request
@@ -101,30 +100,22 @@ curl -i http://localhost:8080/users/42
 
 ```http
 HTTP/1.1 200 OK
-x-kaanal-trace: nginx.proc=1.0ms,net=1.0ms,app.proc=5.0ms,net=1.0ms,db.read=4.2ms
-access-control-allow-origin: *
 content-type: application/json
+x-kaanal-trace: nginx.proc=0.6ms,net=0.9ms,app.proc=3.0ms,net=1.1ms,db.read=2.7ms
+access-control-allow-origin: *
+access-control-expose-headers: x-kaanal-trace
 
-{
-  "id": 42,
-  "firstName": "Priya",
-  "lastName": "Iyer",
-  "email": "priya.iyer42@example.com",
-  "address": {
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600001",
-    "street": "Anna Salai"
-  }
-}
+{"city":"Coimbatore","createdAt":"2025-10-31T00:15:04Z","email":"karthik.bose67@example.com","firstName":"Karthik","id":42,"lastName":"Bose","phone":"+91 9695550062","pincode":"641001","state":"Tamil Nadu","status":"active"}
 ```
+
+(Some CORS and standard headers trimmed.)
 
 Notice:
 
 - `id: 42` was copied from the URL path parameter into the matching schema field.
-- City, state, and pincode describe a consistent, real place.
+- City, state, and pincode describe a consistent, real place; the name and email belong to the same person.
 - The `X-Kaanal-Trace` header reports the exact latency breakdown across simulated nodes.
-- Your client actually waited ~12.2 ms.
+- Your client actually waited the sum of the trace, ~8.3 ms.
 
 ### 2. Inject live chaos
 

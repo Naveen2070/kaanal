@@ -96,8 +96,9 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `exclusive_bounds_are_strict`                            | OpenAPI 3.0 boolean `exclusiveMinimum/Maximum`: int range collapses to exactly 2; floats stay strictly inside.                                                                  |
 | `length_limits_never_break_formats`                      | `maxLength: 8` doesn't truncate an email; `minLength: 50` doesn't pad a uuid; name-heuristic emails are also protected (rule R4.5).                                             |
 | `city_state_pincode_and_address_describe_the_same_place` | 300 seeds: one object always has a consistent (city, state, pincode) triple and the address ends in that city; cities still vary across seeds.                                  |
+| `names_and_email_describe_the_same_person`               | 300 seeds: `name` is `firstName lastName` and `email` starts with `first.last`; people still vary across seeds.                                                                 |
 
-## `crates/kaanal-data/tests/warnings.rs` — ignored-keyword warnings
+## `crates/kaanal-data/src/warn.rs` (unit) + `tests/warnings.rs` — ignored-keyword warnings
 
 | Test                                            | What it proves                                                                                                 |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -195,9 +196,8 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 
 ## Unit tests inside source files
 
-| Location                       | Tests                                                                                                                                                          |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kaanal/src/main.rs`           | `latency_parsing`, `rate_parsing` (input parsing incl. overflow/NaN), `clean_replaces_control_chars` (ANSI neutralising), `path_segments_are_percent_encoded`. |
-| `kaanal-server/src/control.rs` | `hosts` (Host guard incl. attack spellings), `constant_time_eq`, `token_comes_only_from_the_token_parameter`.                                                  |
-| `kaanal-server/src/mock.rs`    | `decodes_escapes_and_keeps_bad_ones` (percent decoding edge cases).                                                                                            |
-| `kaanal-data/src/generate.rs`  | `stable_hash_matches_core_algorithm` (pins the duplicated hash to core's vectors), `civil_dates` (epoch, BASE_EPOCH, leap day).                                |
+| Location                       | Tests                                                                                                                                                            |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kaanal/src/main.rs`           | `latency_parsing` (unit required), `rate_parsing` (incl. overflow/NaN), `clean_replaces_control_chars` (ANSI neutralising), `path_segments_are_percent_encoded`. |
+| `kaanal-server/src/control.rs` | `hosts` (Host guard incl. attack spellings), `constant_time_eq`, `token_comes_only_from_the_token_parameter`.                                                    |
+| `kaanal-data/src/generate.rs`  | `stable_hash_matches_core_algorithm` (pins the duplicated hash to core's vectors), `civil_dates` (epoch, BASE_EPOCH, leap day).                                  |

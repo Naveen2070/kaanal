@@ -77,7 +77,7 @@ fn picks_201_and_no_body_cases() {
 #[test]
 fn rejects_openapi_31() {
     let err = ApiModel::from_openapi(&SPEC.replace("3.0.3", "3.1.0")).unwrap_err();
-    assert!(err.to_string().contains("3.1.0"), "{err}");
+    assert!(err.contains("3.1.0"), "{err}");
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn rejects_external_ref() {
     let err =
         ApiModel::from_openapi(&SPEC.replace("#/components/schemas/User", "other.yaml#/User"))
             .unwrap_err();
-    assert!(err.to_string().contains("external $ref"), "{err}");
+    assert!(err.contains("external $ref"), "{err}");
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn rejects_recursive_schema() {
         "firstName: { type: string }\n        friend: { $ref: \"#/components/schemas/User\" }",
     );
     let err = ApiModel::from_openapi(&spec).unwrap_err();
-    assert!(err.to_string().contains("recursive"), "{err}");
+    assert!(err.contains("recursive"), "{err}");
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn rejects_missing_ref_target() {
         &SPEC.replace("#/components/schemas/User", "#/components/schemas/Nope"),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("not found"), "{err}");
+    assert!(err.contains("not found"), "{err}");
 }
 
 // Addition (not in plan): a self-referencing schema with fan-out 2 must fail
@@ -116,7 +116,7 @@ fn rejects_branching_recursive_schema_fast() {
         "firstName: { type: string }\n        left: { $ref: \"#/components/schemas/User\" }\n        right: { $ref: \"#/components/schemas/User\" }",
     );
     let err = ApiModel::from_openapi(&spec).unwrap_err();
-    assert!(err.to_string().contains("recursive"), "{err}");
+    assert!(err.contains("recursive"), "{err}");
 }
 
 // Addition (not in plan): an acyclic chain where each level references the next
@@ -138,7 +138,7 @@ fn rejects_ref_expansion_bomb() {
         "openapi: 3.0.3\ninfo: {{ title: t, version: \"1\" }}\npaths:\n  /x:\n    get:\n      responses:\n        \"200\":\n          description: x\n          content:\n            application/json:\n              schema: {{ $ref: \"#/components/schemas/S0\" }}\ncomponents:\n  schemas:\n{schemas}"
     );
     let err = ApiModel::from_openapi(&spec).unwrap_err();
-    assert!(err.to_string().contains("too many $ref"), "{err}");
+    assert!(err.contains("too many $ref"), "{err}");
 }
 
 #[test]
@@ -158,5 +158,5 @@ paths:
   users: { get: { responses: { \"200\": { description: ok } } } }
 ";
     let err = ApiModel::from_openapi(spec).unwrap_err();
-    assert!(err.to_string().contains("must start with '/'"), "{err}");
+    assert!(err.contains("must start with '/'"), "{err}");
 }

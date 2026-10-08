@@ -16,11 +16,10 @@ The mock request handler — the axum fallback that serves every non-control rou
 
 ## Other items
 
-| Item                | What it does                                                                                             |
-| ------------------- | -------------------------------------------------------------------------------------------------------- |
-| `percent_decode(s)` | Decodes `%XX` escapes in path params before use; invalid escapes kept as typed, invalid UTF-8 → U+FFFD.  |
-| `with_cors(resp)`   | Adds `Access-Control-Allow-Origin: *`, methods, headers, and exposes `x-kaanal-trace`. Mock routes only. |
+| Item              | What it does                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `with_cors(resp)` | Adds `Access-Control-Allow-Origin: *`, methods, headers, and exposes `x-kaanal-trace`. Mock routes only. |
 
 ## Unit tests in this file
 
-`decodes_escapes_and_keeps_bad_ones`. HTTP-level behaviour: [../tests.md](../../tests.md#crateskaanal-servertestshttprs).
+None; path params are decoded with `percent_encoding::percent_decode_str` (invalid escapes kept, invalid UTF-8 → U+FFFD). HTTP-level behaviour: [../tests.md](../../tests.md#crateskaanal-servertestshttprs).

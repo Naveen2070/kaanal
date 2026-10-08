@@ -20,8 +20,6 @@ use axum::routing::{get, put};
 use axum::{Router, middleware};
 use kaanal_core::Config;
 
-pub use state::Event;
-
 /// Options for [`serve`].
 pub struct ServeOpts {
     /// Address to bind. `127.0.0.1` by default; anything else prints a warning upstream.

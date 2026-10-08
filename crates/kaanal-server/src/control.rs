@@ -172,7 +172,6 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
 pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
     let chaos = st.chaos.read().expect("chaos lock poisoned");
     let map: Map<String, Value> = chaos
-        .nodes
         .iter()
         .map(|(id, c)| (st.topo.nodes[*id].name.clone(), json!(ChaosView::from(c))))
         .collect();
@@ -216,7 +215,7 @@ pub async fn set_chaos(
         ));
     }
     let mut chaos = st.chaos.write().expect("chaos lock poisoned");
-    let c = chaos.nodes.entry(id).or_default();
+    let c = chaos.entry(id).or_default();
     if let Some(ms) = p.latency_ms {
         c.latency_add = Duration::from_millis(ms);
     }
@@ -244,17 +243,13 @@ pub async fn clear_node(
         .topo
         .id(&node)
         .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))?;
-    st.chaos
-        .write()
-        .expect("chaos lock poisoned")
-        .nodes
-        .remove(&id);
+    st.chaos.write().expect("chaos lock poisoned").remove(&id);
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `DELETE /__kaanal/chaos` — wipes all chaos (204).
 pub async fn clear_all(State(st): State<Arc<AppState>>) -> StatusCode {
-    st.chaos.write().expect("chaos lock poisoned").nodes.clear();
+    st.chaos.write().expect("chaos lock poisoned").clear();
     StatusCode::NO_CONTENT
 }
 

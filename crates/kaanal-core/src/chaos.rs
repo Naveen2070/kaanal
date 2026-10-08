@@ -39,8 +39,4 @@ impl Default for NodeChaos {
 }
 
 /// Chaos settings of every node, keyed by node. An absent node has no chaos.
-#[derive(Debug, Clone, Default)]
-pub struct ChaosState {
-    /// Per-node settings; only nodes with active chaos appear.
-    pub nodes: HashMap<NodeId, NodeChaos>,
-}
+pub type ChaosState = HashMap<NodeId, NodeChaos>;

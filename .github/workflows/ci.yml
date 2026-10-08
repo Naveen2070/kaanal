@@ -17,6 +17,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@v2.9.2
+
       - name: Run cargo fmt check
         run: cargo fmt --all --check
 
@@ -41,5 +43,24 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2.9.2
+
       - name: Run cargo test
+        run: cargo test --workspace
+
+  msrv:
+    name: MSRV (Rust 1.99)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.99
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Keep in sync with `rust-version` in Cargo.toml.
+      - name: Build and test on the minimum supported Rust
         run: cargo test --workspace
