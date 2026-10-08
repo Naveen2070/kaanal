@@ -4,6 +4,7 @@ members = [
     "crates/kaanal-core",
     "crates/kaanal-data",
     "crates/kaanal-server",
+    "crates/kaanal-sim",
     "crates/kaanal",
 ]
 

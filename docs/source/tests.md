@@ -214,3 +214,35 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 | `kaanal/src/main.rs`           | `latency_parsing` (unit required), `rate_parsing` (incl. overflow/NaN), `clean_replaces_control_chars` (ANSI neutralising), `path_segments_are_percent_encoded`. |
 | `kaanal-server/src/control.rs` | `hosts` (Host guard incl. attack spellings), `constant_time_eq`, `token_comes_only_from_the_token_parameter`.                                                    |
 | `kaanal-data/src/generate.rs`  | `stable_hash_matches_core_algorithm` (pins the duplicated hash to core's vectors), `civil_dates` (epoch, BASE_EPOCH, leap day).                                  |
+
+## `crates/kaanal-sim/tests/sim.rs` — simulator engine
+
+| Test                                                      | What it pins                                                                                                                                                                     |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `zero_load_equals_live_exactly`                           | Fixture + sample, 3 endpoints, with and without 50% db errors: hops, latency and result equal `execute()` for the same `n`; no waits.                                            |
+| `engine_matches_lindley_recursion`                        | Single-slot M/M/1 at ρ = 0.8: every wait equals Lindley's recursion exactly, in ns; more than 1 000 requests queued.                                                             |
+| `same_seed_same_report`                                   | Fixed service times: identical reports on a re-run; seed 43 differs.                                                                                                             |
+| `down_gateway_completes_with_no_hops`                     | Zero-hop chains complete at arrival with 503.                                                                                                                                    |
+| `overload_grows_the_queue_but_finishes`                   | ρ = 1.5: max queue > 500, utilization in 0.95–1.0 (clipped to the window), every request completes.                                                                              |
+| `unlimited_nodes_report_zero_utilization_and_no_queue`    | A node without `concurrency` reports 0 utilization and an empty queue.                                                                                                           |
+| `warmup_requests_are_not_reported`                        | Requests before `warmup` are dropped, but counters keep running through it.                                                                                                      |
+| `request_counters_start_at_zero_and_run_on_consecutively` | Each stream's `n` is 0, 1, 2 … as in live mode.                                                                                                                                  |
+| `utilization_divides_by_the_slot_count`                   | 2 slots at 1.0 busy slot on average → utilization ≈ 0.5 (after warmup).                                                                                                          |
+| `absurd_chaos_latency_is_rejected_not_a_panic`            | A chaos `latency_add` over 1 h returns `Err` instead of overflowing the clock.                                                                                                   |
+| `rejects_bad_config`                                      | Each validation rule: no streams, bad rates (0, NaN, 1e7, 1e-7), non-service or missing entry, zero duration, warmup ≥ duration, > 365 days, duplicate keys, workload too large. |
+
+## `crates/kaanal-sim/tests/theory.rs` — queueing theory (NFR-11)
+
+| Test                              | What it pins                                                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mm1_matches_theory`              | Single slot, exponential 10 ms, ρ = 0.5 (~200k requests) and 0.8 (~600k, as high load is autocorrelated): mean latency within 5% of 1/(μ − λ). |
+| `mmc_matches_erlang_c`            | 3 slots, ρ = 0.7, ~400k requests: mean wait within 5% of Erlang C.                                                                             |
+| `md1_matches_pollaczek_khinchine` | Fixed 10 ms, ρ = 0.7, ~400k requests: mean wait within 5% of ρ/(2μ(1 − ρ)).                                                                    |
+| `tandem_matches_jackson`          | app μ = 100 → db μ = 200, λ = 50: latency within 5% of 1/(μ₁ − λ) + 1/(μ₂ − λ).                                                                |
+
+## `crates/kaanal-sim/tests/distribution.rs` and `bench.rs` — drift and NFR-05
+
+| Test                                  | What it pins                                                                                                                                                   |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `zero_load_matches_live_distribution` | Fixture + sample, `GET /users/{id}`: per-hop two-sample KS statistic is below the α = 0.001 critical value against live `execute()` samples for n ≥ 1 000 000. |
+| `one_million_requests`                | Ignored. NFR-05 measurement (1M simulated requests); run with `cargo test -p kaanal-sim --release --test bench -- --ignored --nocapture`.                      |

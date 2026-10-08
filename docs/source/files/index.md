@@ -33,6 +33,13 @@ One page per source file: what the file does and what each function/type in it d
 | `src/state.rs`   | [kaanal-server/state.md](kaanal-server/state.md)     | `AppState::build` load pipeline, route conflicts    |
 | `src/ui.html`    | [../../web/web-ui.md](../../web/web-ui.md)           | Embedded status page (documented with the web docs) |
 
+## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
+
+| File            | Page                                         | Contents                                     |
+| --------------- | -------------------------------------------- | -------------------------------------------- |
+| `src/lib.rs`    | [kaanal-sim/lib.md](kaanal-sim/lib.md)       | `run`, config and report types, validation   |
+| `src/engine.rs` | [kaanal-sim/engine.md](kaanal-sim/engine.md) | The event loop: arrivals, FIFO slots, report |
+
 ## [kaanal](kaanal/) (binary)
 
 | File          | Page                             | Contents                                         |

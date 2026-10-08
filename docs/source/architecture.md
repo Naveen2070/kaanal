@@ -43,12 +43,13 @@ flowchart TD
 
 ### Dependency Rules and Invariants
 
-| Crate               | Primary Role                                                                      | Prohibited Technologies                                              | Invariant                                                                             |
-| ------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **`kaanal-core`**   | Topology graph validation, latency distributions, chain execution, FNV-1a hash.   | No `tokio`, no `axum`, no filesystem/network IO, no wall-clock time. | Pure computation only; computes outcomes, never sleeps. (Rule R2.3)                   |
-| **`kaanal-data`**   | OpenAPI 3.0 parsing, `$ref` inlining, deterministic schema-driven data generator. | No dependency on `kaanal-core`, no HTTP, no async.                   | Maintains private FNV-1a hash algorithm pinned by cross-crate unit tests. (Rule R2.4) |
-| **`kaanal-server`** | Axum router, mock request handler, control API, SSE event bus, shared state.      | No CLI terminal logic, no direct argv parsing.                       | Only crate that speaks HTTP. (Rule R2.4)                                              |
-| **`kaanal`**        | CLI parsing via clap, directory locking, runfile management, control API client.  | No direct mock engine or database logic.                             | Thin client over control API. (Rule R2.6)                                             |
+| Crate               | Primary Role                                                                      | Prohibited Technologies                                              | Invariant                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **`kaanal-core`**   | Topology graph validation, latency distributions, chain execution, FNV-1a hash.   | No `tokio`, no `axum`, no filesystem/network IO, no wall-clock time. | Pure computation only; computes outcomes, never sleeps. (Rule R2.3)                       |
+| **`kaanal-data`**   | OpenAPI 3.0 parsing, `$ref` inlining, deterministic schema-driven data generator. | No dependency on `kaanal-core`, no HTTP, no async.                   | Maintains private FNV-1a hash algorithm pinned by cross-crate unit tests. (Rule R2.4)     |
+| **`kaanal-server`** | Axum router, mock request handler, control API, SSE event bus, shared state.      | No CLI terminal logic, no direct argv parsing.                       | Only crate that speaks HTTP. (Rule R2.4)                                                  |
+| **`kaanal-sim`**    | Discrete-event simulator: Poisson arrivals, per-node FIFO queues, virtual clock.  | No `tokio`, no IO, no timing model of its own.                       | Every service time comes from `kaanal_core::execute()`; depends on core only. (Rule R2.5) |
+| **`kaanal`**        | CLI parsing via clap, directory locking, runfile management, control API client.  | No direct mock engine or database logic.                             | Thin client over control API. (Rule R2.6)                                                 |
 
 ---
 
@@ -133,6 +134,8 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
 - **`Exp { mean }`**: Exponential (the queueing-theory default): $\text{mean} \times -\ln(1 - U)$ with $U$ uniform in $[0, 1)$, so $\ln(0)$ cannot occur.
 - **Tail Cap Safety**: Lognormal samples are clamped to $\min(\text{sample}, 10 \times p99)$ and exponential samples to $10 \times \text{mean}$. This prevents astronomical tail samples from indefinitely hanging a request.
 - **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.concurrency` carries it to the simulator; live mode has no queues, so `AppState::build` warns and ignores it until M1.
+
+**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays its hops through per-node FIFO queues (nodes with `concurrency`) on a virtual clock. At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
 
 ---
 
