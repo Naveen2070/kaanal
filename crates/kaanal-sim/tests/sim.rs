@@ -35,7 +35,11 @@ fn nanos(d: Duration) -> i128 {
     i128::try_from(d.as_nanos()).unwrap()
 }
 
-/// The Phase One fixture and the shipped sample, as (name, YAML).
+/// A gateway-less topology (R1.23): requests enter at `app`; `db` costs come from the
+/// postgres preset.
+const GATEWAYLESS: &str = "version: 1\nseed: 7\nnodes:\n  app: { type: service, proc: { p50: 5ms, p99: 20ms } }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }\n";
+
+/// The Phase One fixture, the shipped sample and a gateway-less topology, as (name, YAML).
 fn sample_configs() -> Vec<(&'static str, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     [
@@ -44,6 +48,7 @@ fn sample_configs() -> Vec<(&'static str, String)> {
     ]
     .into_iter()
     .map(|(name, p)| (name, std::fs::read_to_string(root.join(p)).unwrap()))
+    .chain([("gatewayless", GATEWAYLESS.to_string())])
     .collect()
 }
 
@@ -172,7 +177,7 @@ fn down_gateway_completes_with_no_hops() {
     let t = topo(QUEUED);
     let mut down = ChaosState::default();
     down.insert(
-        t.gateway,
+        t.gateway.unwrap(),
         NodeChaos {
             down: true,
             ..NodeChaos::default()
@@ -207,7 +212,7 @@ fn overload_grows_the_queue_but_finishes() {
 fn unlimited_nodes_report_zero_utilization_and_no_queue() {
     let t = topo(QUEUED);
     let rep = run(&t, &ChaosState::default(), &one_stream(&t, 50.0, 20)).unwrap();
-    let gw = &rep.nodes[t.gateway];
+    let gw = &rep.nodes[t.gateway.unwrap()];
     assert_eq!(
         (gw.utilization, gw.max_queue, gw.mean_wait),
         (0.0, 0, Duration::ZERO)
@@ -280,7 +285,7 @@ fn rejects_bad_config() {
         (
             {
                 let mut c = ok();
-                c.streams[0].entry = t.gateway;
+                c.streams[0].entry = t.gateway.unwrap();
                 c
             },
             "not a service",
@@ -409,4 +414,17 @@ fn absurd_chaos_latency_is_rejected_not_a_panic() {
     };
     let err = run(&t, &with(teapot), &one_stream(&t, 1.0, 10)).unwrap_err();
     assert!(err.contains("error_status"), "{err}");
+}
+
+#[test]
+fn a_monolith_can_be_the_entry_but_a_cache_cannot() {
+    let t = topo(
+        "version: 1\nnodes:\n  app: { type: service }\n  shop: { type: monolith, concurrency: 1, proc: 5ms }\n  c: { type: cache, flavor: redis }\n",
+    );
+    let mut cfg = one_stream(&t, 10.0, 10);
+    cfg.streams[0].entry = t.id("shop").unwrap();
+    assert!(run(&t, &ChaosState::default(), &cfg).is_ok());
+    cfg.streams[0].entry = t.id("c").unwrap();
+    let err = run(&t, &ChaosState::default(), &cfg).unwrap_err();
+    assert!(err.contains("not a service or monolith"), "{err}");
 }

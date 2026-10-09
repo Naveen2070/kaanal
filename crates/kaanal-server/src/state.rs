@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 
+use kaanal_core::config::RouteOverride;
 use kaanal_core::{ChaosState, Config, NodeId, Op, Topology};
 use kaanal_data::ApiModel;
 use serde::Serialize;
@@ -34,7 +35,7 @@ pub struct Route {
     pub method: String,
     /// "GET /users/{id}" — chain RNG key and display name.
     pub key: String,
-    /// Service owning the route; `None` = static-only route answered by the gateway.
+    /// Service or monolith owning the route; `None` = static-only route answered by the gateway.
     pub owner: Option<NodeId>,
     /// The database operation this endpoint performs (inferred from method + path).
     pub op: Op,
@@ -146,6 +147,74 @@ fn add_head_routes(by_path: &mut BTreeMap<String, Vec<Route>>) {
     }
 }
 
+/// **Private.** Applies one `routes:` entry: validates the key and status, then either
+/// overrides the route a service owns or adds a static-only route. Without a gateway
+/// nothing answers a route no service owns, so that is an error (R1.23).
+fn apply_override(
+    by_path: &mut BTreeMap<String, Vec<Route>>,
+    shapes: &mut HashMap<String, String>,
+    spec: &str,
+    ov: &RouteOverride,
+    has_gateway: bool,
+) -> Result<(), String> {
+    let (m, p) = spec
+        .split_once(' ')
+        .ok_or_else(|| format!("routes: '{spec}' must look like 'GET /path'"))?;
+    let (m, p) = (m.to_uppercase(), p.trim().to_string());
+    // 1xx is not a final response: hyper would turn it into its own 500 (R6.2).
+    if !(200..=599).contains(&ov.status) {
+        return Err(format!(
+            "routes: '{spec}': status {} must be between 200 and 599",
+            ov.status
+        ));
+    }
+    if !METHODS.contains(&m.as_str()) {
+        return Err(format!("routes: '{spec}': unknown method '{m}'"));
+    }
+    if !p.starts_with('/') {
+        return Err(format!("routes: '{spec}': path must start with '/'"));
+    }
+    check_shape(shapes, &p)?;
+    let routes = by_path.entry(p.clone()).or_default();
+    if let Some(r) = routes.iter_mut().find(|r| r.method == m) {
+        r.status = ov.status;
+        r.body = Body::Static(ov.body.clone());
+        return Ok(());
+    }
+    // R6.8: a HEAD override of a path the service owns keeps GET's owner and op, so the
+    // service hop is not lost (and it is not a gateway-only static route).
+    if m == "HEAD"
+        && let Some(get) = routes.iter().find(|r| r.method == "GET")
+    {
+        let head = Route {
+            key: format!("HEAD {p}"),
+            op: get.op,
+            method: m,
+            owner: get.owner,
+            status: ov.status,
+            body: Body::Static(ov.body.clone()),
+            counter: AtomicU64::new(0),
+        };
+        routes.push(head);
+        return Ok(());
+    }
+    if !has_gateway {
+        return Err(format!(
+            "routes: '{spec}': static route needs a gateway or a service that owns it"
+        ));
+    }
+    routes.push(Route {
+        key: format!("{m} {p}"),
+        op: Op::infer(&m, &p),
+        method: m,
+        owner: None,
+        status: ov.status,
+        body: Body::Static(ov.body.clone()),
+        counter: AtomicU64::new(0),
+    });
+    Ok(())
+}
+
 impl AppState {
     /// Runs the full load pipeline: topology → spec files → spec routes → `routes:`
     /// overrides → matchit router.
@@ -213,40 +282,7 @@ impl AppState {
         }
 
         for (spec, ov) in &cfg.routes {
-            let (m, p) = spec
-                .split_once(' ')
-                .ok_or_else(|| format!("routes: '{spec}' must look like 'GET /path'"))?;
-            let (m, p) = (m.to_uppercase(), p.trim().to_string());
-            // 1xx is not a final response: hyper would turn it into its own 500 (R6.2).
-            if !(200..=599).contains(&ov.status) {
-                return Err(format!(
-                    "routes: '{spec}': status {} must be between 200 and 599",
-                    ov.status
-                ));
-            }
-            if !METHODS.contains(&m.as_str()) {
-                return Err(format!("routes: '{spec}': unknown method '{m}'"));
-            }
-            if !p.starts_with('/') {
-                return Err(format!("routes: '{spec}': path must start with '/'"));
-            }
-            check_shape(&mut shapes, &p)?;
-            let routes = by_path.entry(p.clone()).or_default();
-            match routes.iter_mut().find(|r| r.method == m) {
-                Some(r) => {
-                    r.status = ov.status;
-                    r.body = Body::Static(ov.body.clone());
-                }
-                None => routes.push(Route {
-                    key: format!("{m} {p}"),
-                    op: Op::infer(&m, &p),
-                    method: m,
-                    owner: None,
-                    status: ov.status,
-                    body: Body::Static(ov.body.clone()),
-                    counter: AtomicU64::new(0),
-                }),
-            }
+            apply_override(&mut by_path, &mut shapes, spec, ov, topo.gateway.is_some())?;
         }
 
         let mut route_keys: Vec<String> =

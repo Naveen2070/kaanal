@@ -582,3 +582,27 @@ async fn config_seed_changes_generated_bodies() {
     );
     assert_eq!(b["id"], 42, "path params still win");
 }
+
+#[tokio::test]
+async fn gatewayless_requests_enter_at_the_service() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let cfg = Config::from_yaml(
+        "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml, proc: 1ms }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: db, net: 1ms }\n",
+    )
+    .unwrap();
+    let opts = ServeOpts {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        token: kaanal_server::new_token(),
+    };
+    let s = kaanal_server::serve(&cfg, &dir, opts).await.unwrap();
+    let r = reqwest::get(format!("http://127.0.0.1:{}/users/42", s.addr.port()))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let trace = r.headers()["x-kaanal-trace"].to_str().unwrap().to_string();
+    assert!(
+        trace.starts_with("app.proc=") && trace.contains("db.read="),
+        "{trace}"
+    );
+}

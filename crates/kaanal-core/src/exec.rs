@@ -1,7 +1,7 @@
 //! The chain executor: computes what a request would experience.
 //!
-//! Given a request, [`execute`] walks the topology path `gateway → service →
-//! databases`, sampling distributions and applying chaos at each node. It is pure:
+//! Given a request, [`execute`] walks the topology path `[gateway →] entry → its
+//! dependencies`, sampling distributions and applying chaos at each node. It is pure:
 //! no sleeping, no IO. The live server sleeps the returned total; the simulator
 //! advances virtual time (rule R2.5: one cost model, two drivers).
 
@@ -11,6 +11,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::chaos::ChaosState;
+use crate::config::NodeKind;
 use crate::dist::Dist;
 use crate::stable_hash;
 use crate::topology::{NodeId, Topology};
@@ -52,7 +53,7 @@ impl Op {
 pub enum HopKind {
     /// Network latency on an edge.
     Net,
-    /// Processing time on a gateway or service node.
+    /// Processing time on a gateway, service or monolith node.
     Proc,
     /// A database operation on a data node.
     Op(Op),
@@ -101,7 +102,7 @@ impl ChainOutcome {
 
 /// The input to one [`execute`] call.
 pub struct ChainRequest<'a> {
-    /// Service that owns the route; `None` = static route answered by the gateway itself.
+    /// Service or monolith that owns the route; `None` = static route answered by the gateway (the server rejects a static route at load when there is no gateway).
     pub entry: Option<NodeId>,
     /// The database operation this endpoint performs.
     pub op: Op,
@@ -148,19 +149,23 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    /// **Private.** Gateway proc → net → service proc → (net → db op) per out-edge;
-    /// stops at the first failing node.
+    /// **Private.** Gateway proc (when there is a gateway) → net → entry proc →
+    /// (net → op) per out-edge of the entry; stops at the first failing node.
     fn run(&mut self, req: &ChainRequest) -> ChainResult {
         let topo = self.topo;
-        let gw = topo.gateway;
-        if let Err(status) = self.node(gw, HopKind::Proc) {
+        if let Some(gw) = topo.gateway
+            && let Err(status) = self.node(gw, HopKind::Proc)
+        {
             return ChainResult::Err { node: gw, status };
         }
         let Some(svc) = req.entry else {
             return ChainResult::Ok;
         };
-        let net = topo.edge(gw, svc).map_or(Dist::ZERO, |e| e.net.clone());
-        self.net(svc, &net);
+        // Without a gateway (R1.23) the request enters at the owner: no gateway hop, no net hop.
+        if let Some(gw) = topo.gateway {
+            let net = topo.edge(gw, svc).map_or(Dist::ZERO, |e| e.net.clone());
+            self.net(svc, &net);
+        }
         if let Err(status) = self.node(svc, HopKind::Proc) {
             return ChainResult::Err { node: svc, status };
         }
@@ -200,7 +205,12 @@ impl Walk<'_> {
         let topo = self.topo;
         let n = &topo.nodes[id];
         let dist = match kind {
-            HopKind::Op(op) => n.ops.as_ref().map_or(&Dist::ZERO, |o| &o[op as usize]),
+            // D4: only databases are charged op costs until A2; inline monolith ops and the
+            // other kinds are zero-cost op hops (they still draw their error roll).
+            HopKind::Op(op) if n.kind == NodeKind::Database => {
+                n.ops.as_ref().map_or(&Dist::ZERO, |o| &o[op as usize])
+            }
+            HopKind::Op(_) => &Dist::ZERO,
             _ => &n.proc,
         };
         let dur = dist.sample(self.rng) + c.map_or(Duration::ZERO, |c| c.latency_add);

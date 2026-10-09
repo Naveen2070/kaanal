@@ -25,7 +25,7 @@ pub use config::{Config, ConfigError, NodeKind};
 pub use dist::Dist;
 pub use exec::{ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, execute};
 pub use schema::config_schema;
-pub use topology::{Edge, Node, NodeId, Topology, TopologyError};
+pub use topology::{CacheModel, Edge, Node, NodeId, Topology, TopologyError};
 
 /// FNV-1a 64 over the parts, with a separator byte between parts.
 /// Stable across platforms and Rust versions (std hashers are not).

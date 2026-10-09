@@ -424,7 +424,7 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
 fn status() -> Result<(), Fail> {
     let topo = call("GET", "/__kaanal/topology", None)?;
     let chaos = call("GET", "/__kaanal/chaos", None)?;
-    println!("{:<12} {:<10} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
+    println!("{:<12} {:<12} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
     for n in topo["nodes"].as_array().into_iter().flatten() {
         let name = n["name"].as_str().unwrap_or("");
         let c = &chaos[name];
@@ -441,7 +441,7 @@ fn status() -> Result<(), Fail> {
         };
         let flavor = n["flavor"].as_str().unwrap_or("-");
         let line = format!(
-            "{:<12} {:<10} {:<10} {}",
+            "{:<12} {:<12} {:<10} {}",
             name,
             n["type"].as_str().unwrap_or(""),
             flavor,

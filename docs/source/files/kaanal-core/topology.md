@@ -4,28 +4,37 @@ The topology graph: nodes, edges, and all semantic validation of the config.
 
 ## What it does
 
-`Topology::build` turns a parsed `Config` into a validated graph the executor can walk. Anything the executor would silently ignore or misinterpret is **rejected at load** with a named error (rule R2.7, R6.1).
+`Topology::build` turns a parsed `Config` into a validated graph the executor can walk: at most one gateway, the caller → dependency edge table, no unknown, self or duplicate edges, no cycles, and op/cache costs completed from flavor presets. Anything the executor would silently ignore or misinterpret is **rejected at load** with a named error (rule R1.23, R1.24, R2.7, R6.1).
 
 ## Types
 
-| Item            | Kind       | What it does                                                                                                                                                                                                                   |
-| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NodeId`        | type alias | `usize` — index into `Topology::nodes`.                                                                                                                                                                                        |
-| `Node`          | struct     | Runtime node: `name`, `kind`, `flavor`, `spec`, `proc` distribution, `ops: Option<[Dist; 3]>` (read/write/scan, indexed by `Op as usize`), `concurrency: Option<NonZeroU32>` (most simultaneous own hops; `None` = unlimited). |
-| `Edge`          | struct     | `from`, `to`, `net` latency distribution.                                                                                                                                                                                      |
-| `Topology`      | struct     | `nodes`, `edges`, `gateway` (the one gateway's id), private `index` (name → id).                                                                                                                                               |
-| `TopologyError` | enum       | Every rejection reason, each with human `Display`: `UnknownNode { edge, name }`, `GatewayCount(n)`, `Cycle(path)`, `MissingOps(name)`, `MissingGatewayEdge(name)`, `Unsupported(msg)`.                                         |
+| Item            | Kind       | What it does                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NodeId`        | type alias | `usize` — index into `Topology::nodes`.                                                                                                                                                                                                                                                                                                                                                    |
+| `Node`          | struct     | Runtime node: `name`, `kind`, `flavor`, `spec`, `proc` distribution, `ops: Option<[Dist; 3]>` (read/write/scan, indexed by `Op as usize`; databases always, monoliths with `ops` or a `flavor`), `cache: Option<CacheModel>`, `concurrency: Option<NonZeroU32>` (most simultaneous own hops; `None` = unlimited). Inline monolith ops and cache costs are carried but not walked until A2. |
+| `CacheModel`    | struct     | A cache node's `hit_ratio` (0..=1), `hit` and `miss` costs, presets applied.                                                                                                                                                                                                                                                                                                               |
+| `Edge`          | struct     | `from` (caller), `to` (dependency), `net` latency distribution, `calls` (calls per request, `NonZeroU32`; used by chains from A2).                                                                                                                                                                                                                                                         |
+| `Topology`      | struct     | `nodes`, `edges`, `gateway: Option<NodeId>` (`None` = no gateway, R1.23), private `index` (name → id).                                                                                                                                                                                                                                                                                     |
+| `TopologyError` | enum       | Every rejection reason, each with human `Display`: `UnknownNode { edge, name }`, `SecondGateway(name)`, `NoEntry`, `SelfLoop { edge, name }`, `DuplicateEdge { edge, from, to }`, `Cycle(path)`, `ForbiddenEdge { edge, from, to, from_kind, to_kind }`, `MissingOps(name)`, `MissingCache(name)`, `MissingGatewayEdge(name)`.                                                             |
 
 ## `Topology::build` checks, in order
 
-Field placement (`ops` on a service, `spec` on a gateway) is no longer checked here: each node kind has its own strict struct, so it is a parse error in [config.md](config.md).
+Field placement (`ops` on a service, `spec` on a gateway) is not checked here: each node kind has its own strict struct, so it is a parse error in [config.md](config.md).
 
-1. **Database ops present, presets fill gaps** (monolith too when it sets `ops`/`flavor`; private `ops_of` via [presets.md](presets.md)) → `MissingOps`.
-2. **Exactly one gateway** → else `GatewayCount(0 or n)`.
-3. **Edge endpoints exist** → else `UnknownNode` (reports which edge number).
-4. **DAG** — `check_cycles` runs an iterative-entry DFS with 3-colour marking (0 unvisited / 1 on path / 2 done); revisiting a colour-1 node reports the cycle as a readable path (`cycle: a -> b -> a`).
-5. **Phase-one edge shapes**: every edge must be `gateway → service` or `service → database`; anything else → `Unsupported`. Duplicate edges are also rejected.
-6. **Reachability**: a service with an OpenAPI `spec` but no edge from the gateway → `MissingGatewayEdge` (its routes would never be walked).
+1. **Per node:** op costs complete, presets fill gaps (databases always; monoliths when they set `ops` or `flavor`; private `ops_of` via [presets.md](presets.md)) → `MissingOps`. Cache costs complete (`hit_ratio`, `hit`, `miss`, or a flavor) → `MissingCache`. A second gateway → `SecondGateway` (names the second one).
+2. **Somewhere to enter:** with no gateway there must be at least one service or monolith → else `NoEntry`. A lone gateway is fine (it answers static routes).
+3. **Per edge:** both endpoints exist → `UnknownNode` (reports which edge number); not a self edge → `SelfLoop`; not a repeated caller → dependency pair → `DuplicateEdge`.
+4. **DAG** — `check_cycles` is an iterative DFS with 3-colour marking (0 unvisited / 1 on path / 2 done) and an explicit stack, so a long chain of services cannot overflow the call stack (R6.12). Revisiting a colour-1 node reports the cycle as a readable path (`cycle: a -> b -> a`). It runs before the edge table so a cycle is reported as one.
+5. **Edge table (R1.24)** → `ForbiddenEdge`, whose message lists what the caller may call:
+
+| Caller                              | May call                                                           |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `gateway`                           | `service`, `monolith`, `auth`                                      |
+| `service`, `monolith`               | `service`, `monolith`, `database`, `cache`, `external-api`, `auth` |
+| `auth`                              | `service`, `monolith`, `database`, `cache`, `external-api`         |
+| `database`, `cache`, `external-api` | nothing (leaves)                                                   |
+
+6. **Reachability:** with a gateway, a service or monolith with an OpenAPI `spec` but no edge from the gateway → `MissingGatewayEdge` (its routes would never be walked).
 
 ## Lookup methods
 

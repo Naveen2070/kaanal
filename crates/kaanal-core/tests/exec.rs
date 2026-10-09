@@ -215,7 +215,7 @@ fn gateway_down_fails_static_route_with_no_hops() {
     assert_eq!(
         out.result,
         ChainResult::Err {
-            node: t.gateway,
+            node: t.gateway.unwrap(),
             status: 503
         }
     );
@@ -263,4 +263,53 @@ fn chaos_validate_enforces_the_shared_limits() {
         error_status: 504,
         ..at_cap
     }));
+}
+
+#[test]
+fn gatewayless_walk_starts_at_the_owner() {
+    let t = Topology::build(
+        &Config::from_yaml(
+            "version: 1\nnodes:\n  app: { type: service, proc: 2ms }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:\n  - { from: app, to: db, net: 1ms }\n",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let out = execute(&t, &ChaosState::default(), &req(&t, 0));
+    let kinds: Vec<(&str, HopKind)> = out
+        .hops
+        .iter()
+        .map(|h| (t.nodes[h.node].name.as_str(), h.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("app", HopKind::Proc),
+            ("db", HopKind::Net),
+            ("db", HopKind::Op(Op::Read))
+        ]
+    );
+    assert_eq!(out.total(), Duration::from_millis(4));
+    assert_eq!(out.result, ChainResult::Ok);
+}
+
+#[test]
+fn monolith_and_other_callees_cost_nothing_until_a2() {
+    // D4: only databases are charged op costs. A monolith with inline ops, a cache and an
+    // external API called by the entry are zero-cost op hops (each still draws its error roll).
+    let t = Topology::build(
+        &Config::from_yaml(
+            "version: 1\nnodes:\n  app: { type: service, proc: 2ms }\n  shop: { type: monolith, flavor: mysql }\n  c: { type: cache, flavor: redis }\n  ext: { type: external-api }\nedges:\n  - { from: app, to: shop }\n  - { from: app, to: c }\n  - { from: app, to: ext }\n",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let out = execute(&t, &ChaosState::default(), &req(&t, 0));
+    let ops: Vec<Duration> = out
+        .hops
+        .iter()
+        .filter(|h| matches!(h.kind, HopKind::Op(_)))
+        .map(|h| h.dur)
+        .collect();
+    assert_eq!(ops, [Duration::ZERO; 3]);
+    assert_eq!(out.total(), Duration::from_millis(2));
 }

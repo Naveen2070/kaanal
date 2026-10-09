@@ -43,8 +43,31 @@ fn malformed_route_key_is_rejected() {
 
 #[test]
 fn topology_errors_surface() {
-    let err = check_yaml("version: 1\nnodes:\n  app: { type: service }\n").unwrap_err();
-    assert!(err.contains("gateway"), "{err}");
+    let err = check_yaml("version: 1\nnodes:\n  a: { type: gateway }\n  b: { type: gateway }\n")
+        .unwrap_err();
+    assert!(err.contains("at most one gateway"), "{err}");
+}
+
+#[test]
+fn gatewayless_topology_validates() {
+    check_yaml(
+        "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: db }\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn static_route_without_gateway_is_rejected() {
+    let base = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\nroutes:\n";
+    let err = check_yaml(&format!("{base}  \"GET /health\": {{ body: 1 }}\n")).unwrap_err();
+    assert!(
+        err.contains(
+            "routes: 'GET /health': static route needs a gateway or a service that owns it"
+        ),
+        "{err}"
+    );
+    // Overriding a route the service owns is fine: it still has an owner.
+    check_yaml(&format!("{base}  \"GET /users/{{id}}\": {{ body: 1 }}\n")).unwrap();
 }
 
 #[test]
@@ -156,4 +179,23 @@ fn concurrency_warns_that_live_mode_ignores_it() {
         "{warnings:?}"
     );
     assert!(c[1].starts_with("node 'app': "), "{warnings:?}");
+}
+
+#[test]
+fn head_override_keeps_the_owning_service() {
+    // R6.8: a HEAD override of an owned path is not a gateway-only static route, so it
+    // loads with or without a gateway.
+    let nodes = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\n";
+    let routes = "routes:\n  \"HEAD /users/{id}\": { status: 204 }\n";
+    check_yaml(&format!("{nodes}{routes}")).unwrap();
+    check_yaml(&format!(
+        "{nodes}  gw: {{ type: gateway }}\nedges:\n  - {{ from: gw, to: app }}\n{routes}"
+    ))
+    .unwrap();
+    // A different method on an owned path is still a static route: it needs a gateway.
+    let err = check_yaml(&format!(
+        "{nodes}routes:\n  \"PATCH /users/{{id}}\": {{ status: 204 }}\n"
+    ))
+    .unwrap_err();
+    assert!(err.contains("static route needs a gateway"), "{err}");
 }

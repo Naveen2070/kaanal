@@ -31,7 +31,7 @@ const MAX_SIM_DURATION: Duration = Duration::from_hours(365 * 24);
 /// One open Poisson arrival stream: one endpoint receiving `rate_per_s` requests per second.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stream {
-    /// The service that owns the route (the live router's `route.owner`); passed to
+    /// The service or monolith that owns the route (the live router's `route.owner`); passed to
     /// `execute` as `Some(entry)`.
     pub entry: NodeId,
     /// The database operation this endpoint performs.
@@ -100,7 +100,7 @@ pub struct NodeStats {
 ///
 /// # Errors
 /// Returns a message for: no streams; a rate that is not finite or outside
-/// 1e-6..=1e6 per second; an `entry` that is not a service node; a zero `duration`,
+/// 1e-6..=1e6 per second; an `entry` that is not a service or monolith node; a zero `duration`,
 /// `warmup ≥ duration`, or a duration over 365 days; duplicate `endpoint_key`s; or more
 /// than 2 000 000 expected arrivals; a chaos entry that [`kaanal_core::NodeChaos::validate`] rejects
 /// (e.g. `latency_add` over 5 min); or a node or edge
@@ -178,10 +178,10 @@ fn validate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<(), 
             ));
         }
         match topo.nodes.get(s.entry) {
-            Some(n) if n.kind == NodeKind::Service => {}
+            Some(n) if matches!(n.kind, NodeKind::Service | NodeKind::Monolith) => {}
             Some(n) => {
                 return Err(format!(
-                    "stream {i}: entry '{}' is not a service node",
+                    "stream {i}: entry '{}' is not a service or monolith node",
                     n.name
                 ));
             }

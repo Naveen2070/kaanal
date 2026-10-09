@@ -18,9 +18,9 @@
 ## `AppState::build` pipeline
 
 1. **Topology** — `Topology::build(cfg)`; any `TopologyError` aborts. Each node with `concurrency` adds a warning (the simulator honours it, live mode does not yet; M1).
-2. **Specs** — for each service node with `spec`, reads the file (relative to the config's directory) and parses `ApiModel::from_openapi`. Warnings (ignored keywords) are collected, prefixed with the file name.
+2. **Specs** — for each service or monolith node with `spec`, reads the file (relative to the config's directory) and parses `ApiModel::from_openapi`. Warnings (ignored keywords) are collected, prefixed with the file name.
 3. **Spec routes** — each endpoint becomes a `Route`. Two services defining the same `method + path` → error naming both owners. `check_shape` (below) runs on every path.
-4. **Overrides** — each `routes:` entry is validated (`"METHOD /path"` shape, known method, leading slash, status 200–599; 1xx is not a final response) and either **replaces** an existing spec route's status/body (same shape, same param names) or **adds** a static-only route.
+4. **Overrides** — each `routes:` entry is validated (`"METHOD /path"` shape, known method, leading slash, status 200–599; 1xx is not a final response) and either **replaces** an existing spec route's status/body (same shape, same param names) or **adds** a static-only route. A `HEAD` override of a path with a `GET` becomes a HEAD route with GET's owner and op (R6.8). Without a gateway, any other `routes:` key no spec owns is an error: "static route needs a gateway or a service that owns it" (R1.23). The per-entry work lives in the private `apply_override`.
 5. **HEAD routes** — after `route_keys` is collected, `add_head_routes` gives every path that has `GET` but no `HEAD` a synthesised `HEAD /p` route: GET's owner, op, status and body (including a `routes:` override), but its own key and its own counter, so HEAD probes never shift GET's chain sequence (rule R6.8). These routes are not listed in `route_keys`.
 6. **Router** — paths go into `matchit::Router` in `BTreeMap` order, so a conflict always names the same path deterministically.
 

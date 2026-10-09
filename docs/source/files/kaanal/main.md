@@ -7,7 +7,7 @@ The `kaanal` binary: clap CLI, process lifecycle, and a thin HTTP client for the
 Two kinds of commands:
 
 - **Local**: `up` (run the server) and `validate` (dry-run the config).
-- **Remote**: `status` and `chaos set|clear` — thin clients that find the running instance via `.kaanal/run.json` and call its control API (rule R2.6: no per-interface logic).
+- **Remote**: `status` and `chaos set|clear` — thin clients that find the running instance via `.kaanal/run.json` and call its control API (rule R2.6: no per-interface logic). `status` prints a 12-wide TYPE column so `external-api` fits.
 
 ## Commands
 

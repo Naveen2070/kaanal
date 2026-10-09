@@ -54,35 +54,49 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 
 ## `crates/kaanal-core/tests/topology.rs` — graph validation
 
-| Test                                             | What it proves                                                                                     |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `builds_base`                                    | Happy path: 3 nodes, gateway identified, name lookups, edge lookups, `out_edges` order.            |
-| `rejects_cycle`                                  | `db → app` closing a loop fails with `Cycle(["app","db","app"])`.                                  |
-| `rejects_unknown_node_in_edge`                   | An edge to `redis` (undefined) fails naming the edge number and the name.                          |
-| `rejects_two_gateways` / `rejects_zero_gateways` | Exactly one gateway is required; both directions fail with `GatewayCount`.                         |
-| `rejects_database_without_ops`                   | A database with no flavor needs `ops: read/write/scan`.                                            |
-| `rejects_service_spec_without_gateway_edge`      | A service with a spec unreachable from the gateway is an error (its routes would never be walked). |
-| `rejects_service_calling_service_in_phase_one`   | `service → service` edges are `Unsupported` — phase one walks only gateway → service → database.   |
-| `errors_display_human_text`                      | Error `Display` is human prose (`cycle: a -> b -> a`).                                             |
-| `rejects_duplicate_edge`                         | The same from→to pair twice is rejected.                                                           |
-| `rejects_edges_the_executor_would_ignore`        | `gateway → database` direct edges are rejected, not silently skipped.                              |
+| Test                                                      | What it proves                                                                                                                                            |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `builds_base`                                             | Happy path: 3 nodes, gateway identified (`Option`), name lookups, edge lookups, `out_edges` order.                                                        |
+| `rejects_cycle`                                           | `db → app` closing a loop fails with `Cycle(["app","db","app"])`.                                                                                         |
+| `rejects_unknown_node_in_edge`                            | An edge to `redis` (undefined) fails naming the edge number and the name.                                                                                 |
+| `second_gateway_is_rejected_by_name`                      | A second gateway fails with `SecondGateway` naming it (the first is kept).                                                                                |
+| `rejects_database_without_ops`                            | A database with no flavor needs `ops: read/write/scan`.                                                                                                   |
+| `gateway_is_optional`                                     | Service → database with no gateway builds, as does a lone monolith with a flavor (inline ops); `gateway` is `None`.                                       |
+| `rejects_service_spec_without_gateway_edge`               | A service with a spec unreachable from the gateway is an error (its routes would never be walked).                                                        |
+| `services_may_call_services`                              | `service → service` is allowed (R1.24); the caller has two out-edges.                                                                                     |
+| `errors_display_human_text`                               | Error `Display` is human prose (`cycle: a -> b -> a`).                                                                                                    |
+| `rejects_duplicate_edge`                                  | The same from→to pair twice is `DuplicateEdge` with its edge number.                                                                                      |
+| `rejects_edges_the_executor_would_ignore`                 | `gateway → database` is `ForbiddenEdge` naming the caller.                                                                                                |
+| `a_long_chain_of_services_does_not_overflow_the_stack`    | R6.12: 20 000 services in a line load and closing the chain reports a 20 001-name cycle, on a 256 KiB thread stack (a recursive check would overflow it). |
+| `cycle_path_starts_at_the_loop_not_the_dfs_root`          | `x → y → z → y` reports `y -> z -> y`, not a path from the DFS root.                                                                                      |
+| `a_cycle_only_reachable_from_a_later_start_node_is_found` | A loop in a second component (`c ⇄ d`) is found after a clean chain.                                                                                      |
+| `edge_table_matches_r1_24`                                | Every kind-to-kind pair is allowed or `ForbiddenEdge` exactly per the R1.24 table.                                                                        |
+| `forbidden_edge_names_what_is_allowed`                    | The error text lists what the caller may call (`nothing` for leaves).                                                                                     |
+| `a_topology_needs_somewhere_to_enter`                     | No gateway, service or monolith (empty, or only a database) is `NoEntry`; a lone gateway is fine.                                                         |
+| `self_and_duplicate_edges_are_rejected`                   | `SelfLoop` and `DuplicateEdge`, each with its edge number.                                                                                                |
+| `cycle_through_auth_is_rejected`                          | A cycle through an `auth` node is reported as `svc -> auth -> svc`.                                                                                       |
+| `monolith_works_both_ways`                                | Inline ops, database edges and both are accepted; partial `ops` without a flavor is `MissingOps`.                                                         |
+| `cache_costs_come_from_the_flavor_or_the_user`            | Cache hit/miss come from the flavor preset unless the user gives them; a cache with neither is `MissingCache`.                                            |
+| `edge_call_ratio_is_carried`                              | `calls: 3` is carried onto the edge; the default is 1.                                                                                                    |
 
 ## `crates/kaanal-core/tests/exec.rs` — the chain executor
 
-| Test                                            | What it proves                                                                                                                                                                           |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `same_inputs_same_outcome`                      | Same `(seed, endpoint, n)` → identical outcome (determinism, rule R4.1).                                                                                                                 |
-| `different_n_gives_different_timings`           | The request counter changes the draws.                                                                                                                                                   |
-| `happy_path_visits_gateway_service_db_in_order` | Exact hop sequence `nginx.proc → net → app.proc → net → db.read`, result `Ok`, and `total()` equals the hop sum.                                                                         |
-| `error_rate_one_always_fails_at_that_node`      | 100 requests all fail at `db` with 504; the 4 hops before it still count toward the delay.                                                                                               |
-| `down_node_returns_503`                         | `down` on `app` → 503 at `app`, walk stops after 2 hops.                                                                                                                                 |
-| `error_rate_zero_never_fails`                   | 1000 requests with a zero-rate chaos entry all succeed.                                                                                                                                  |
-| `latency_add_lands_on_that_node`                | +100 ms chaos appears in the db op hop's duration.                                                                                                                                       |
-| `inert_chaos_entry_does_not_change_timings`     | An all-default chaos entry leaves the outcome bit-identical — the error roll is always drawn, so chaos settings never shift the timing RNG.                                              |
-| `static_route_only_touches_gateway`             | `entry: None` walks only the gateway proc hop.                                                                                                                                           |
-| `op_inference`                                  | `GET /users/{id}` → read, `GET /users` → scan, POST/DELETE → write; case-insensitive; `Op::name()`.                                                                                      |
-| `gateway_down_fails_static_route_with_no_hops`  | Gateway chaos applies even to static routes, failing before any hop is recorded.                                                                                                         |
-| `chaos_validate_enforces_the_shared_limits`     | R6.9: `NodeChaos::validate` accepts defaults and the exact caps (5 min, rate 1.0, status 500/504) and rejects 300 001 ms, rate 1.5 / -0.1, status 418 / 505; `MAX_LATENCY_ADD` is 300 s. |
+| Test                                               | What it proves                                                                                                                                                                           |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `same_inputs_same_outcome`                         | Same `(seed, endpoint, n)` → identical outcome (determinism, rule R4.1).                                                                                                                 |
+| `different_n_gives_different_timings`              | The request counter changes the draws.                                                                                                                                                   |
+| `happy_path_visits_gateway_service_db_in_order`    | Exact hop sequence `nginx.proc → net → app.proc → net → db.read`, result `Ok`, and `total()` equals the hop sum.                                                                         |
+| `error_rate_one_always_fails_at_that_node`         | 100 requests all fail at `db` with 504; the 4 hops before it still count toward the delay.                                                                                               |
+| `down_node_returns_503`                            | `down` on `app` → 503 at `app`, walk stops after 2 hops.                                                                                                                                 |
+| `error_rate_zero_never_fails`                      | 1000 requests with a zero-rate chaos entry all succeed.                                                                                                                                  |
+| `latency_add_lands_on_that_node`                   | +100 ms chaos appears in the db op hop's duration.                                                                                                                                       |
+| `inert_chaos_entry_does_not_change_timings`        | An all-default chaos entry leaves the outcome bit-identical — the error roll is always drawn, so chaos settings never shift the timing RNG.                                              |
+| `static_route_only_touches_gateway`                | `entry: None` walks only the gateway proc hop.                                                                                                                                           |
+| `op_inference`                                     | `GET /users/{id}` → read, `GET /users` → scan, POST/DELETE → write; case-insensitive; `Op::name()`.                                                                                      |
+| `gateway_down_fails_static_route_with_no_hops`     | Gateway chaos applies even to static routes, failing before any hop is recorded.                                                                                                         |
+| `chaos_validate_enforces_the_shared_limits`        | R6.9: `NodeChaos::validate` accepts defaults and the exact caps (5 min, rate 1.0, status 500/504) and rejects 300 001 ms, rate 1.5 / -0.1, status 418 / 505; `MAX_LATENCY_ADD` is 300 s. |
+| `gatewayless_walk_starts_at_the_owner`             | No gateway: hops are `app.proc`, `db` net, `db` read; no gateway hop, no gateway net hop; total 4 ms.                                                                                    |
+| `monolith_and_other_callees_cost_nothing_until_a2` | D4: the entry calling a flavored monolith, a cache and an external API gets three zero-duration op hops; only databases are charged op costs.                                            |
 
 ## `crates/kaanal-data/tests/api.rs` — OpenAPI parsing
 
@@ -150,23 +164,26 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 
 ## `crates/kaanal-server/tests/state.rs` — load pipeline (no HTTP)
 
-| Test                                                     | What it proves                                                                            |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `fixture_config_is_valid`                                | The shared fixture passes `check`.                                                        |
-| `missing_spec_file_is_reported_with_path`                | A missing spec file errors, naming the file path.                                         |
-| `same_route_in_two_services_conflicts`                   | Two services defining `GET /users/{id}` → error naming both.                              |
-| `malformed_route_key_is_rejected`                        | A `routes:` key without `"METHOD /path"` shape fails.                                     |
-| `topology_errors_surface`                                | A missing gateway surfaces through `check` with "gateway" in the message.                 |
-| `spec_on_non_service_is_rejected`                        | `spec` on a gateway is an unknown-field parse error.                                      |
-| `unsupported_keywords_become_warnings`                   | The `pattern` keyword in `openapi-warn.yaml` becomes exactly one warning naming the file. |
-| `clean_config_has_no_warnings`                           | The clean fixture produces zero warnings.                                                 |
-| `concurrency_warns_that_live_mode_ignores_it`            | One warning per node with `concurrency`, naming the node and saying "simulator only".     |
-| `token_is_64_hex_and_random`                             | `new_token`: 64 hex chars, two calls differ.                                              |
-| `override_differing_only_in_param_name_is_a_clear_error` | `GET /users/{x}` vs spec's `GET /users/{id}` → error naming both spellings.               |
-| `override_with_same_param_name_replaces_the_spec_route`  | Same shape, same names → override merges cleanly.                                         |
-| `override_needs_known_method_and_leading_slash`          | `FOO /x` and `GET users` each fail with targeted messages.                                |
-| `override_status_must_be_a_real_http_status`             | Status 99, 100, 199 and 1000 are rejected (200–599 only).                                 |
-| `control_namespace_is_reserved`                          | `routes:` can never claim `/__kaanal` or anything under it.                               |
+| Test                                                     | What it proves                                                                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fixture_config_is_valid`                                | The shared fixture passes `check`.                                                                                                                                                   |
+| `missing_spec_file_is_reported_with_path`                | A missing spec file errors, naming the file path.                                                                                                                                    |
+| `same_route_in_two_services_conflicts`                   | Two services defining `GET /users/{id}` → error naming both.                                                                                                                         |
+| `malformed_route_key_is_rejected`                        | A `routes:` key without `"METHOD /path"` shape fails.                                                                                                                                |
+| `topology_errors_surface`                                | Two gateways surface through `check` with "at most one gateway".                                                                                                                     |
+| `spec_on_non_service_is_rejected`                        | `spec` on a gateway is an unknown-field parse error.                                                                                                                                 |
+| `unsupported_keywords_become_warnings`                   | The `pattern` keyword in `openapi-warn.yaml` becomes exactly one warning naming the file.                                                                                            |
+| `clean_config_has_no_warnings`                           | The clean fixture produces zero warnings.                                                                                                                                            |
+| `concurrency_warns_that_live_mode_ignores_it`            | One warning per node with `concurrency`, naming the node and saying "simulator only".                                                                                                |
+| `token_is_64_hex_and_random`                             | `new_token`: 64 hex chars, two calls differ.                                                                                                                                         |
+| `override_differing_only_in_param_name_is_a_clear_error` | `GET /users/{x}` vs spec's `GET /users/{id}` → error naming both spellings.                                                                                                          |
+| `override_with_same_param_name_replaces_the_spec_route`  | Same shape, same names → override merges cleanly.                                                                                                                                    |
+| `override_needs_known_method_and_leading_slash`          | `FOO /x` and `GET users` each fail with targeted messages.                                                                                                                           |
+| `override_status_must_be_a_real_http_status`             | Status 99, 100, 199 and 1000 are rejected (200–599 only).                                                                                                                            |
+| `control_namespace_is_reserved`                          | `routes:` can never claim `/__kaanal` or anything under it.                                                                                                                          |
+| `gatewayless_topology_validates`                         | Service → database with no gateway passes `check`.                                                                                                                                   |
+| `static_route_without_gateway_is_rejected`               | Without a gateway a `routes:` key no service owns fails "static route needs a gateway or a service that owns it"; overriding an owned route is fine.                                 |
+| `head_override_keeps_the_owning_service`                 | R6.8: a `HEAD` override of an owned path loads with or without a gateway (it keeps GET's owner); a `PATCH` on an owned path with no gateway is still a static route and is rejected. |
 
 ## `crates/kaanal-server/tests/http.rs` — end-to-end HTTP
 
@@ -218,6 +235,7 @@ _Embedded UI page:_
 | `ui_controls_have_accessible_names_and_dark_form_controls`                  | `color-scheme: light dark`, aria labels, `role="alert"`.                                                                  |
 | `ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters` | Structural guards on the page's JS: separate status/error elements, fixed-size counter buckets, node names as `Map` keys. |
 | `config_seed_changes_generated_bodies`                                      | Same `seed:` → same `/users/42` body; a different `seed:` → different data (path `id` still 42).                          |
+| `gatewayless_requests_enter_at_the_service`                                 | No gateway: `GET /users/42` returns 200 and the trace starts at `app.proc=` and includes `db.read=` (no gateway hop).     |
 
 ## `crates/kaanal/tests/cli.rs` — binary end-to-end
 
@@ -253,7 +271,7 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 
 | Test                                                      | What it pins                                                                                                                                                                                                                             |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `zero_load_equals_live_exactly`                           | Fixture + sample, 3 endpoints, with and without 50% db errors: hops, latency and result equal `execute()` for the same `n`; no waits.                                                                                                    |
+| `zero_load_equals_live_exactly`                           | Fixture + sample + a gateway-less topology, 3 endpoints, with and without 50% db errors: hops, latency and result equal `execute()` for the same `n`; no waits.                                                                          |
 | `engine_matches_lindley_recursion`                        | Single-slot M/M/1 at ρ = 0.8: every wait equals Lindley's recursion exactly, in ns; more than 1 000 requests queued.                                                                                                                     |
 | `simultaneous_events_keep_fifo_order`                     | 1e6 req/s with an 800 ns service: hundreds of arrivals tie at the same nanosecond, yet every wait still equals the Lindley recursion (FIFO under ties).                                                                                  |
 | `hand_edited_absurd_service_time_is_rejected_not_a_panic` | A built `Topology` edited to a `Duration::MAX` service time (or exponential mean) returns `Err` naming the node and "10h", not a panic (the same guard catches a YAML `p50` above `p99`, which core turns into an uncapped fixed `p50`). |
@@ -266,6 +284,7 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 | `request_counters_start_at_zero_and_run_on_consecutively` | Each stream's `n` is 0, 1, 2 … as in live mode.                                                                                                                                                                                          |
 | `utilization_divides_by_the_slot_count`                   | 2 slots at 1.0 busy slot on average → utilization ≈ 0.5 (after warmup).                                                                                                                                                                  |
 | `absurd_chaos_latency_is_rejected_not_a_panic`            | Same limits as live mode (R6.9): `latency_add` of exactly 5 min runs; 5 min + 1 ms and `error_status: 418` return `Err` naming the field instead of overflowing the clock.                                                               |
+| `a_monolith_can_be_the_entry_but_a_cache_cannot`          | A stream may enter at a monolith; entering at a cache is rejected with "not a service or monolith".                                                                                                                                      |
 | `rejects_bad_config`                                      | Each validation rule: no streams, bad rates (0, NaN, 1e7, 1e-7), non-service or missing entry, zero duration, warmup ≥ duration, > 365 days, duplicate keys, workload too large.                                                         |
 
 ## `crates/kaanal-sim/tests/theory.rs` — queueing theory (NFR-11)
@@ -276,6 +295,7 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 | `mmc_matches_erlang_c`            | 3 slots, ρ = 0.7, ~400k requests: mean wait within 5% of Erlang C.                                                                             |
 | `md1_matches_pollaczek_khinchine` | Fixed 10 ms, ρ = 0.7, ~400k requests: mean wait within 5% of ρ/(2μ(1 − ρ)).                                                                    |
 | `tandem_matches_jackson`          | app μ = 100 → db μ = 200, λ = 50: latency within 5% of 1/(μ₁ − λ) + 1/(μ₂ − λ).                                                                |
+| `gatewayless_mm1_matches_theory`  | No gateway node, one slot, exponential 10 ms, ρ = 0.5: mean sojourn within 5% of 1/(μ−λ); queueing does not depend on a gateway (R1.23).       |
 
 ## `crates/kaanal-sim/tests/distribution.rs` and `bench.rs` — drift and NFR-05
 

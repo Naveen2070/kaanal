@@ -1,4 +1,8 @@
-use kaanal_core::{Config, NodeKind, Topology, TopologyError};
+use std::fmt::Write as _;
+
+use kaanal_core::config::CacheFlavor;
+use kaanal_core::topology::CacheModel;
+use kaanal_core::{Config, Dist, NodeKind, Topology, TopologyError, presets};
 
 const BASE: &str = r"
 version: 1
@@ -19,11 +23,11 @@ fn build(yaml: &str) -> Result<Topology, TopologyError> {
 fn builds_base() {
     let t = build(BASE).unwrap();
     assert_eq!(t.nodes.len(), 3);
-    assert_eq!(t.nodes[t.gateway].name, "nginx");
+    assert_eq!(t.nodes[t.gateway.unwrap()].name, "nginx");
     let app = t.id("app").unwrap();
     let db = t.id("db").unwrap();
     assert_eq!(t.nodes[db].kind, NodeKind::Database);
-    assert!(t.edge(t.gateway, app).is_some());
+    assert!(t.edge(t.gateway.unwrap(), app).is_some());
     assert_eq!(t.out_edges(app).map(|e| e.to).collect::<Vec<_>>(), vec![db]);
 }
 
@@ -49,15 +53,31 @@ fn rejects_unknown_node_in_edge() {
 }
 
 #[test]
-fn rejects_two_gateways() {
+fn second_gateway_is_rejected_by_name() {
     let yaml = BASE.replace("nodes:\n", "nodes:\n  lb: { type: gateway }\n");
-    assert_eq!(build(&yaml).unwrap_err(), TopologyError::GatewayCount(2));
+    assert_eq!(
+        build(&yaml).unwrap_err(),
+        TopologyError::SecondGateway("nginx".into())
+    );
 }
 
 #[test]
-fn rejects_zero_gateways() {
-    let yaml = BASE.replace("nginx: { type: gateway }", "nginx: { type: service }");
-    assert_eq!(build(&yaml).unwrap_err(), TopologyError::GatewayCount(0));
+fn gateway_is_optional() {
+    // R1.23: service -> database with no gateway, and a lone monolith, both build.
+    let t = build(
+        "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: db }\n",
+    )
+    .unwrap();
+    assert_eq!(t.gateway, None);
+    let t = build(
+        "version: 1\nnodes:\n  shop: { type: monolith, spec: openapi.yaml, flavor: mysql }\n",
+    )
+    .unwrap();
+    assert_eq!(t.gateway, None);
+    assert!(
+        t.nodes[0].ops.is_some(),
+        "flavor gives the monolith inline ops"
+    );
 }
 
 #[test]
@@ -82,13 +102,11 @@ fn rejects_service_spec_without_gateway_edge() {
 }
 
 #[test]
-fn rejects_service_calling_service_in_phase_one() {
-    let yaml = BASE.replace("nodes:\n", "nodes:\n  auth: { type: service }\n")
-        + "  - { from: app, to: auth }\n";
-    assert!(matches!(
-        build(&yaml).unwrap_err(),
-        TopologyError::Unsupported(_)
-    ));
+fn services_may_call_services() {
+    let yaml = BASE.replace("nodes:\n", "nodes:\n  users: { type: service }\n")
+        + "  - { from: app, to: users }\n";
+    let t = build(&yaml).unwrap();
+    assert_eq!(t.out_edges(t.id("app").unwrap()).count(), 2);
 }
 
 #[test]
@@ -99,22 +117,254 @@ fn errors_display_human_text() {
 
 #[test]
 fn rejects_duplicate_edge() {
-    let yaml = format!(
-        "{BASE}  - {{ from: app, to: db }}
-"
-    );
-    assert!(
-        matches!(build(&yaml).unwrap_err(), TopologyError::Unsupported(m) if m.contains("duplicate"))
-    );
+    let yaml = format!("{BASE}  - {{ from: app, to: db }}\n");
+    assert!(matches!(
+        build(&yaml).unwrap_err(),
+        TopologyError::DuplicateEdge { edge: 2, .. }
+    ));
 }
 
 #[test]
 fn rejects_edges_the_executor_would_ignore() {
-    let yaml = format!(
-        "{BASE}  - {{ from: nginx, to: db }}
-"
+    let yaml = format!("{BASE}  - {{ from: nginx, to: db }}\n");
+    assert!(matches!(
+        build(&yaml).unwrap_err(),
+        TopologyError::ForbiddenEdge { from, to_kind: NodeKind::Database, .. } if from == "nginx"
+    ));
+}
+
+const KINDS: &str = "version: 1
+nodes:
+  gw:     { type: gateway }
+  svc:    { type: service }
+  svc2:   { type: service }
+  mono:   { type: monolith }
+  mono2:  { type: monolith }
+  db:     { type: database, flavor: postgres }
+  db2:    { type: database, flavor: mysql }
+  cache:  { type: cache, flavor: redis }
+  cache2: { type: cache, flavor: memcached }
+  ext:    { type: external-api }
+  ext2:   { type: external-api }
+  auth:   { type: auth }
+  auth2:  { type: auth }
+";
+
+/// `KINDS` plus one edge `from -> to`.
+fn with_edge(from: &str, to: &str) -> Result<Topology, TopologyError> {
+    build(&format!(
+        "{KINDS}edges:\n  - {{ from: {from}, to: {to} }}\n"
+    ))
+}
+
+#[test]
+fn edge_table_matches_r1_24() {
+    let kinds = ["gw", "svc", "mono", "db", "cache", "ext", "auth"];
+    let allowed = |from: &str, to: &str| match from {
+        "gw" => matches!(to, "svc" | "mono" | "auth"),
+        "svc" | "mono" => matches!(to, "svc" | "mono" | "db" | "cache" | "ext" | "auth"),
+        "auth" => matches!(to, "svc" | "mono" | "db" | "cache" | "ext"),
+        _ => false,
+    };
+    for from in kinds {
+        for to in kinds {
+            if (from, to) == ("gw", "gw") {
+                continue; // one gateway only: covered by the self-loop and second-gateway tests
+            }
+            // Twins (svc2, …) stand in for "another node of the same kind".
+            let target = if from == to {
+                format!("{to}2")
+            } else {
+                to.to_string()
+            };
+            let got = with_edge(from, &target);
+            if allowed(from, to) {
+                assert!(got.is_ok(), "{from} -> {target}: {got:?}");
+            } else {
+                assert!(
+                    matches!(got, Err(TopologyError::ForbiddenEdge { .. })),
+                    "{from} -> {target}: {got:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn forbidden_edge_names_what_is_allowed() {
+    assert_eq!(
+        with_edge("db", "svc").unwrap_err().to_string(),
+        "edge #0: database 'db' cannot call service 'svc'; database may call: nothing"
     );
+    let e = with_edge("gw", "db").unwrap_err();
     assert!(
-        matches!(build(&yaml).unwrap_err(), TopologyError::Unsupported(m) if m.contains("nginx"))
+        e.to_string()
+            .ends_with("gateway may call: service, monolith, auth"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_topology_needs_somewhere_to_enter() {
+    assert_eq!(
+        build("version: 1\nnodes: {}\n").unwrap_err(),
+        TopologyError::NoEntry
+    );
+    assert_eq!(
+        build("version: 1\nnodes:\n  db: { type: database, flavor: postgres }\n").unwrap_err(),
+        TopologyError::NoEntry
+    );
+    // A gateway alone is fine: it answers static routes.
+    assert!(build("version: 1\nnodes:\n  gw: { type: gateway }\n").is_ok());
+}
+
+#[test]
+fn self_and_duplicate_edges_are_rejected() {
+    assert_eq!(
+        with_edge("svc", "svc").unwrap_err(),
+        TopologyError::SelfLoop {
+            edge: 0,
+            name: "svc".into()
+        }
+    );
+    let yaml = format!("{KINDS}edges:\n  - {{ from: svc, to: db }}\n  - {{ from: svc, to: db }}\n");
+    assert_eq!(
+        build(&yaml).unwrap_err(),
+        TopologyError::DuplicateEdge {
+            edge: 1,
+            from: "svc".into(),
+            to: "db".into()
+        }
+    );
+}
+
+#[test]
+fn cycle_through_auth_is_rejected() {
+    let yaml =
+        format!("{KINDS}edges:\n  - {{ from: svc, to: auth }}\n  - {{ from: auth, to: svc }}\n");
+    assert_eq!(
+        build(&yaml).unwrap_err(),
+        TopologyError::Cycle(vec!["svc".into(), "auth".into(), "svc".into()])
+    );
+}
+
+#[test]
+fn a_long_chain_of_services_does_not_overflow_the_stack() {
+    // R6.12: the cycle check is iterative. 20 000 services in a line, built from YAML text
+    // (a flat mapping is not deeply nested), then closed into a cycle.
+    let n = 20_000;
+    let mut yaml = String::from("version: 1\nnodes:\n");
+    for i in 0..n {
+        writeln!(yaml, "  s{i}: {{ type: service }}").unwrap();
+    }
+    yaml.push_str("edges:\n");
+    for i in 0..n - 1 {
+        writeln!(yaml, "  - {{ from: s{i}, to: s{} }}", i + 1).unwrap();
+    }
+    let ok = Config::from_yaml(&yaml).unwrap();
+    writeln!(yaml, "  - {{ from: s{}, to: s0 }}", n - 1).unwrap();
+    let cyclic = Config::from_yaml(&yaml).unwrap();
+    // A 256 KiB stack: a recursive check (one frame per edge) overflows it deterministically,
+    // in debug and release alike; the iterative one does not care.
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            assert!(Topology::build(&ok).is_ok());
+            let Err(TopologyError::Cycle(path)) = Topology::build(&cyclic) else {
+                panic!("expected a cycle");
+            };
+            assert_eq!(path.len(), n + 1);
+            assert_eq!((path[0].as_str(), path[n].as_str()), ("s0", "s0"));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn cycle_path_starts_at_the_loop_not_the_dfs_root() {
+    // x -> y -> z -> y: the DFS starts at x, but the reported cycle is y -> z -> y.
+    let yaml = "version: 1\nnodes:\n  x: { type: service }\n  y: { type: service }\n  z: { type: service }\nedges:\n  - { from: x, to: y }\n  - { from: y, to: z }\n  - { from: z, to: y }\n";
+    assert_eq!(
+        build(yaml).unwrap_err(),
+        TopologyError::Cycle(vec!["y".into(), "z".into(), "y".into()])
+    );
+}
+
+#[test]
+fn a_cycle_only_reachable_from_a_later_start_node_is_found() {
+    // a is a clean chain; the loop sits in a separate component that starts at node c.
+    let yaml = "version: 1\nnodes:\n  a: { type: service }\n  b: { type: service }\n  c: { type: service }\n  d: { type: service }\nedges:\n  - { from: a, to: b }\n  - { from: c, to: d }\n  - { from: d, to: c }\n";
+    assert_eq!(
+        build(yaml).unwrap_err(),
+        TopologyError::Cycle(vec!["c".into(), "d".into(), "c".into()])
+    );
+}
+
+#[test]
+fn monolith_works_both_ways() {
+    let base = "version: 1\nnodes:\n  db: { type: database, flavor: postgres }\n";
+    // Inline ops only.
+    let t = build(&format!(
+        "{base}  shop: {{ type: monolith, ops: {{ read: 1ms, write: 2ms, scan: 3ms }} }}\n"
+    ))
+    .unwrap();
+    assert!(t.nodes[t.id("shop").unwrap()].ops.is_some());
+    // Calls a database, no ops of its own.
+    let t = build(&format!(
+        "{base}  shop: {{ type: monolith }}\nedges:\n  - {{ from: shop, to: db }}\n"
+    ))
+    .unwrap();
+    let shop = t.id("shop").unwrap();
+    assert!(t.nodes[shop].ops.is_none());
+    assert_eq!(t.out_edges(shop).count(), 1);
+    // Both: allowed in A1; A2's chain rules pick which one an endpoint uses.
+    let t = build(&format!(
+        "{base}  shop: {{ type: monolith, flavor: mysql }}\nedges:\n  - {{ from: shop, to: db }}\n"
+    ))
+    .unwrap();
+    let shop = t.id("shop").unwrap();
+    assert!(t.nodes[shop].ops.is_some() && t.out_edges(shop).count() == 1);
+    // Partial ops without a flavor are incomplete.
+    assert_eq!(
+        build(&format!(
+            "{base}  shop: {{ type: monolith, ops: {{ read: 1ms }} }}\n"
+        ))
+        .unwrap_err(),
+        TopologyError::MissingOps("shop".into())
+    );
+}
+
+#[test]
+fn cache_costs_come_from_the_flavor_or_the_user() {
+    let t = build(
+        "version: 1\nnodes:\n  app: { type: service }\n  c: { type: cache, flavor: redis, hit_ratio: 0.5 }\nedges:\n  - { from: app, to: c }\n",
+    )
+    .unwrap();
+    let preset = presets::cache_defaults(CacheFlavor::Redis);
+    assert_eq!(
+        t.nodes[t.id("c").unwrap()].cache,
+        Some(CacheModel {
+            hit_ratio: 0.5,
+            hit: Dist::from_config(Some(&preset.hit)),
+            miss: Dist::from_config(Some(&preset.miss)),
+        })
+    );
+    assert_eq!(
+        build("version: 1\nnodes:\n  app: { type: service }\n  c: { type: cache, hit: 1ms }\n")
+            .unwrap_err(),
+        TopologyError::MissingCache("c".into())
+    );
+}
+
+#[test]
+fn edge_call_ratio_is_carried() {
+    let t = build(&format!(
+        "{KINDS}edges:\n  - {{ from: svc, to: db, calls: 3 }}\n  - {{ from: svc, to: cache }}\n"
+    ))
+    .unwrap();
+    assert_eq!(
+        t.edges.iter().map(|e| e.calls.get()).collect::<Vec<_>>(),
+        [3, 1]
     );
 }

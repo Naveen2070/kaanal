@@ -130,3 +130,20 @@ fn tandem_matches_jackson() {
     let got = mean_secs(rep.requests.iter().map(|r| r.latency));
     assert_close(got, 1.0 / (MU - lam) + 1.0 / (mu2 - lam), "tandem sojourn");
 }
+
+#[test]
+fn gatewayless_mm1_matches_theory() {
+    // R1.23: no gateway node; requests enter at `app`. Queueing must not change.
+    let t = topo(
+        "version: 1\nnodes:\n  app: { type: service, concurrency: 1, proc: { mean: 10ms } }\n",
+    );
+    assert_eq!(t.gateway, None);
+    let lam = 50.0;
+    let rep = sim(&t, lam, 200_000.0);
+    let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+    assert_close(
+        got,
+        1.0 / (MU - lam),
+        "gateway-less M/M/1 sojourn at ρ = 0.5",
+    );
+}

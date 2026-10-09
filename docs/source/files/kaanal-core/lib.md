@@ -22,7 +22,7 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 | `config`   | `Config`, `ConfigError`, `NodeKind`                                              |
 | `dist`     | `Dist`                                                                           |
 | `exec`     | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `execute` |
-| `topology` | `Edge`, `Node`, `NodeId`, `Topology`, `TopologyError`                            |
+| `topology` | `CacheModel`, `Edge`, `Node`, `NodeId`, `Topology`, `TopologyError`              |
 
 ## Notes
 

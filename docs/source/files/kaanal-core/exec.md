@@ -4,20 +4,20 @@ The chain executor — the heart of the engine. Given a request, it computes _wh
 
 ## What it does
 
-`execute()` walks the topology path `gateway → service → databases`, sampling distributions and applying chaos at each node. It is **pure**: no sleeping, no IO. The live server sleeps the returned total (`mock.rs`); the future simulator will advance virtual time instead (rule R2.5: one cost model, two drivers).
+`execute()` walks the topology path `[gateway →] entry → its dependencies`, sampling distributions and applying chaos at each node. It is **pure**: no sleeping, no IO. The live server sleeps the returned total (`mock.rs`); the future simulator will advance virtual time instead (rule R2.5: one cost model, two drivers).
 
-## Walk order (phase one)
+## Walk order
 
 ```
-gateway.proc                     ← always, even for static routes
-net(gateway → service)           ← only if the route has an owning service
-service.proc
-for each out-edge of service:    ← every database the service points at, once
-    net(service → database)
-    database.op(Op)              ← read / write / scan
+gateway.proc                     ← only when there is a gateway; always then, even for static routes
+net(gateway → entry)             ← only with a gateway, and only if the route has an owner
+entry.proc                       ← service or monolith that owns the route
+for each out-edge of the entry:   ← every dependency it points at, once
+    net(entry → dependency)
+    dependency.op(Op)            ← read / write / scan (databases; zero-cost for every other kind, including a monolith with inline ops (D4: only databases are charged op costs until A2))
 ```
 
-The first failing node stops the walk and its error status becomes the result; hops already spent still count toward the total delay.
+Without a gateway (R1.23) the request enters at the owner: no gateway hop and no net hop. Edges from the entry to non-database nodes (including a monolith with inline ops) are walked as zero-cost op hops until A2 (D4); they still draw their error roll. The first failing node stops the walk and its error status becomes the result; hops already spent still count toward the total delay.
 
 ## Items
 
