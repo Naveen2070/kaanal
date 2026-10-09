@@ -1,19 +1,23 @@
 //! Parsing of `kaanal.yaml` into typed config.
 //!
-//! This module only parses; semantic validation (one gateway, DAG, edge shapes)
-//! happens in [`crate::topology`], route/spec wiring in the server crate.
-//! Unknown fields are rejected everywhere, so a typo fails loudly at load.
+//! `nodes:` is a map of `type`-tagged nodes (rule R1.15). Each kind is its own struct
+//! with `deny_unknown_fields`, so a field on the wrong kind fails at load. This module
+//! parses and checks single values (ranges, `p50 ≤ p99`, URL shape); graph rules
+//! (gateway count, edge table, DAG, ops that presets must complete) live in
+//! [`crate::topology`], route/spec wiring in the server crate. The editor JSON Schema is
+//! derived from these types ([`crate::schema`]).
 
 use std::fmt;
 use std::num::NonZeroU32;
 use std::time::Duration;
 
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 
 /// The parsed `kaanal.yaml` file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Config schema version. Must be `1`.
@@ -26,7 +30,7 @@ pub struct Config {
     pub port: u16,
     /// Nodes by name, in file order (deterministic error messages).
     pub nodes: IndexMap<String, NodeConfig>,
-    /// Dependency edges between nodes.
+    /// Dependency edges, caller → dependency.
     #[serde(default)]
     pub edges: Vec<EdgeConfig>,
     /// Static route overrides, keyed by `"METHOD /path"`.
@@ -39,70 +43,368 @@ fn default_port() -> u16 {
     8080
 }
 
-/// The kind of a topology node (`type:` in YAML, lowercase).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// The kind of a topology node (`type:` in YAML).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
-    /// Entry point of every request path; exactly one per topology.
+    /// A reverse proxy / API gateway / load balancer; optional, at most one.
     Gateway,
-    /// A backend service; may carry an `OpenAPI` `spec`.
+    /// A backend service; may carry an `OpenAPI` `spec`. Never has `ops`.
     Service,
+    /// A service that may also run its own `ops` (an inline database).
+    Monolith,
     /// A data store with `ops` costs (read/write/scan).
     Database,
+    /// A cache with a hit ratio and hit/miss costs.
+    Cache,
+    /// A third-party HTTP API.
+    ExternalApi,
+    /// An identity provider (login and token issue).
+    Auth,
 }
 
-/// One node in `nodes:`.
-#[derive(Debug, Clone, Deserialize)]
+impl NodeKind {
+    /// The YAML spelling (`external-api`), also used in status output and messages.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NodeKind::Gateway => "gateway",
+            NodeKind::Service => "service",
+            NodeKind::Monolith => "monolith",
+            NodeKind::Database => "database",
+            NodeKind::Cache => "cache",
+            NodeKind::ExternalApi => "external-api",
+            NodeKind::Auth => "auth",
+        }
+    }
+}
+
+impl fmt::Display for NodeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One node in `nodes:`. `type` selects the kind; each kind rejects fields it does not have.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum NodeConfig {
+    /// A reverse proxy / API gateway / load balancer.
+    Gateway(GatewayConfig),
+    /// A backend service with an optional `OpenAPI` spec; never has `ops`.
+    Service(ServiceConfig),
+    /// A service that may also run its own read/write/scan (`ops`), or call databases.
+    Monolith(MonolithConfig),
+    /// A data store with read/write/scan costs.
+    Database(DatabaseConfig),
+    /// A cache with a hit ratio and hit/miss costs.
+    Cache(CacheConfig),
+    /// A third-party HTTP API (payments, email, …).
+    ExternalApi(ExternalApiConfig),
+    /// An identity provider: login and token issue.
+    Auth(AuthConfig),
+}
+
+impl NodeConfig {
+    /// The node's kind.
+    pub fn kind(&self) -> NodeKind {
+        match self {
+            NodeConfig::Gateway(_) => NodeKind::Gateway,
+            NodeConfig::Service(_) => NodeKind::Service,
+            NodeConfig::Monolith(_) => NodeKind::Monolith,
+            NodeConfig::Database(_) => NodeKind::Database,
+            NodeConfig::Cache(_) => NodeKind::Cache,
+            NodeConfig::ExternalApi(_) => NodeKind::ExternalApi,
+            NodeConfig::Auth(_) => NodeKind::Auth,
+        }
+    }
+
+    /// Processing time per request (gateway, service, monolith, external-api, auth).
+    pub fn proc(&self) -> Option<&DistConfig> {
+        match self {
+            NodeConfig::Gateway(n) => n.proc.as_ref(),
+            NodeConfig::Service(n) => n.proc.as_ref(),
+            NodeConfig::Monolith(n) => n.proc.as_ref(),
+            NodeConfig::ExternalApi(n) => n.proc.as_ref(),
+            NodeConfig::Auth(n) => n.proc.as_ref(),
+            NodeConfig::Database(_) | NodeConfig::Cache(_) => None,
+        }
+    }
+
+    /// `OpenAPI` spec file, relative to the config's directory (service, monolith).
+    pub fn spec(&self) -> Option<&str> {
+        match self {
+            NodeConfig::Service(n) => n.spec.as_deref(),
+            NodeConfig::Monolith(n) => n.spec.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Most own hops that may run at once; `None` = unlimited.
+    pub fn concurrency(&self) -> Option<NonZeroU32> {
+        match self {
+            NodeConfig::Gateway(n) => n.concurrency,
+            NodeConfig::Service(n) => n.concurrency,
+            NodeConfig::Monolith(n) => n.concurrency,
+            NodeConfig::Database(n) => n.concurrency,
+            NodeConfig::Cache(n) => n.concurrency,
+            NodeConfig::ExternalApi(n) => n.concurrency,
+            NodeConfig::Auth(n) => n.concurrency,
+        }
+    }
+
+    /// The `flavor` label: free text on a gateway, a preset name on databases,
+    /// monoliths and caches.
+    pub fn flavor(&self) -> Option<&str> {
+        match self {
+            NodeConfig::Gateway(n) => n.flavor.as_deref(),
+            NodeConfig::Monolith(n) => n.flavor.map(DbFlavor::as_str),
+            NodeConfig::Database(n) => n.flavor.map(DbFlavor::as_str),
+            NodeConfig::Cache(n) => n.flavor.map(CacheFlavor::as_str),
+            _ => None,
+        }
+    }
+}
+
+/// A reverse proxy / API gateway / load balancer (nginx, Envoy). Optional, at most one.
+/// With one, every request pays its `proc` first and it answers static routes.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct NodeConfig {
-    /// Node kind (YAML key `type`).
-    #[serde(rename = "type")]
-    pub kind: NodeKind,
-    /// Cosmetic label (`postgres`, `redis`, …) shown in status output.
-    #[serde(default)]
+pub struct GatewayConfig {
+    /// Cosmetic label shown in status output (`nginx`, `envoy`); not a preset.
     pub flavor: Option<String>,
-    /// Processing-time distribution for gateway/service nodes.
-    #[serde(default)]
+    /// Processing time per request.
     pub proc: Option<DistConfig>,
-    /// `OpenAPI` spec file (relative to the config's directory); service nodes only.
-    #[serde(default)]
-    pub spec: Option<String>,
-    /// Operation costs; required on database nodes, invalid elsewhere.
-    #[serde(default)]
-    pub ops: Option<OpsConfig>,
-    /// Most of this node's own hops (proc/op) that may run at once; absent = unlimited.
-    /// Honoured by the simulator; live mode warns and ignores it until M1.
-    #[serde(default)]
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
     pub concurrency: Option<NonZeroU32>,
 }
 
-/// Per-operation latency costs of a database node. All three are required.
-#[derive(Debug, Clone, Deserialize)]
+/// A backend service. Without a gateway, requests for the routes in its `spec` enter here.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct OpsConfig {
-    /// Cost of reading one row.
-    pub read: DistConfig,
-    /// Cost of a write.
-    pub write: DistConfig,
-    /// Cost of a list/search.
-    pub scan: DistConfig,
+pub struct ServiceConfig {
+    /// `OpenAPI` 3.0 spec file, relative to this config file.
+    pub spec: Option<String>,
+    /// Processing time per request.
+    pub proc: Option<DistConfig>,
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
+    pub concurrency: Option<NonZeroU32>,
 }
 
-/// One entry in `edges:`.
-#[derive(Debug, Clone, Deserialize)]
+/// A service that can also be its own database: with `ops` (or a `flavor`) it has inline
+/// read/write/scan costs; with edges to databases it behaves as a service. Both together
+/// are allowed.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MonolithConfig {
+    /// `OpenAPI` 3.0 spec file, relative to this config file.
+    pub spec: Option<String>,
+    /// Processing time per request.
+    pub proc: Option<DistConfig>,
+    /// Inline read/write/scan costs; any op left out comes from `flavor`. Used once
+    /// endpoint chains land.
+    pub ops: Option<OpsConfig>,
+    /// Preset that fills inline ops the user left out (estimates).
+    pub flavor: Option<DbFlavor>,
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
+    pub concurrency: Option<NonZeroU32>,
+}
+
+/// A data store with read/write/scan costs.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DatabaseConfig {
+    /// Read/write/scan costs. Required in full unless `flavor` fills the gaps.
+    pub ops: Option<OpsConfig>,
+    /// Preset that fills ops the user left out (estimates).
+    pub flavor: Option<DbFlavor>,
+    /// Connection pool. Accepted and validated; no effect yet (capacity limits come later).
+    pub pool: Option<PoolConfig>,
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
+    pub concurrency: Option<NonZeroU32>,
+}
+
+/// A cache in front of slower nodes. Its costs are used once endpoint chains land.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CacheConfig {
+    /// Preset for `hit_ratio`, `hit` and `miss` (estimates).
+    pub flavor: Option<CacheFlavor>,
+    /// Share of lookups that hit, 0 to 1.
+    #[serde(default, deserialize_with = "ratio")]
+    #[schemars(extend("minimum" = 0, "maximum" = 1))]
+    pub hit_ratio: Option<f64>,
+    /// Cost of a hit.
+    pub hit: Option<DistConfig>,
+    /// Cost of finding out it is a miss.
+    pub miss: Option<DistConfig>,
+    /// Entry lifetime. Accepted and validated; no effect yet.
+    #[serde(default, with = "humantime_serde")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub ttl: Option<Duration>,
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
+    pub concurrency: Option<NonZeroU32>,
+}
+
+/// A third-party HTTP API (payments, email). Targets come from config only.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalApiConfig {
+    /// Response time of the API.
+    pub proc: Option<DistConfig>,
+    /// Baseline share of failing calls, 0 to 1. Accepted and validated; no effect yet.
+    #[serde(default, deserialize_with = "ratio")]
+    #[schemars(extend("minimum" = 0, "maximum" = 1))]
+    pub error_rate: Option<f64>,
+    /// Token-bucket limit. Accepted and validated; no effect yet.
+    pub rate_limit: Option<RateLimitConfig>,
+    /// Real upstream URL to forward to. Accepted and validated; no effect yet.
+    #[serde(default, deserialize_with = "http_url")]
+    #[schemars(extend("pattern" = "^https?://.+"))]
+    pub proxy: Option<String>,
+    /// Connection pool. Accepted and validated; no effect yet.
+    pub pool: Option<PoolConfig>,
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
+    pub concurrency: Option<NonZeroU32>,
+}
+
+/// An identity provider. Its login endpoint and token keys come in a later release.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AuthConfig {
+    /// Cost of one login or token check.
+    pub proc: Option<DistConfig>,
+    /// Accounts that can log in; usernames are unique. Accepted and validated; no effect yet.
+    #[serde(default, deserialize_with = "unique_users")]
+    pub users: Vec<UserConfig>,
+    /// Lifetime of issued tokens, at most 1 day (default 1h). Accepted and validated; no
+    /// effect yet.
+    #[serde(default, deserialize_with = "token_ttl")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub token_ttl: Option<Duration>,
+    /// Most requests this node serves at once; absent = unlimited. The simulator honours
+    /// it; live mode warns and ignores it for now.
+    pub concurrency: Option<NonZeroU32>,
+}
+
+/// Read/write/scan costs. Without a `flavor`, all three are required.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpsConfig {
+    /// Cost of reading one row (`GET /users/{id}`).
+    pub read: Option<DistConfig>,
+    /// Cost of an insert, update or delete.
+    pub write: Option<DistConfig>,
+    /// Cost of a list or search (`GET /users`).
+    pub scan: Option<DistConfig>,
+}
+
+/// Database flavors with preset op costs (estimates, see [`crate::presets`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DbFlavor {
+    /// `PostgreSQL`.
+    Postgres,
+    /// `MySQL` (`InnoDB`).
+    Mysql,
+    /// `MongoDB`.
+    Mongodb,
+}
+
+impl DbFlavor {
+    /// The YAML spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DbFlavor::Postgres => "postgres",
+            DbFlavor::Mysql => "mysql",
+            DbFlavor::Mongodb => "mongodb",
+        }
+    }
+}
+
+/// Cache flavors with a preset hit ratio and costs (estimates, see [`crate::presets`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheFlavor {
+    /// Redis.
+    Redis,
+    /// Memcached.
+    Memcached,
+}
+
+impl CacheFlavor {
+    /// The YAML spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CacheFlavor::Redis => "redis",
+            CacheFlavor::Memcached => "memcached",
+        }
+    }
+}
+
+/// A connection pool (`database`, `external-api`).
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PoolConfig {
+    /// Connections in the pool, at least 1.
+    pub size: NonZeroU32,
+    /// Requests that may wait for a free connection (default 0).
+    #[serde(default)]
+    pub queue: u32,
+    /// Status returned when the queue is full, 500–504 (default 503).
+    #[serde(default = "default_overflow", deserialize_with = "status_5xx")]
+    #[schemars(extend("minimum" = 500, "maximum" = 504))]
+    pub overflow_status: u16,
+}
+
+/// A token bucket: refills `rps` per second, holds at most `burst`.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    /// Requests per second, above 0.
+    #[serde(deserialize_with = "positive_rps")]
+    #[schemars(extend("exclusiveMinimum" = 0))]
+    pub rps: f64,
+    /// Largest burst, at least 1.
+    pub burst: NonZeroU32,
+}
+
+/// One account on an `auth` node (synthetic accounts only).
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UserConfig {
+    /// Login name, unique per node.
+    pub username: String,
+    /// Plain-text password.
+    pub password: String,
+    /// Roles put into issued tokens.
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+/// One entry in `edges:` (caller → dependency).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EdgeConfig {
-    /// Name of the upstream node.
+    /// Name of the calling node.
     pub from: String,
-    /// Name of the downstream node.
+    /// Name of the node it calls.
     pub to: String,
     /// Network latency on this edge; absent means zero.
     #[serde(default)]
     pub net: Option<DistConfig>,
+    /// Calls per request along this edge (call ratio), at least 1. Used once endpoint
+    /// chains land.
+    #[serde(default = "default_calls")]
+    pub calls: NonZeroU32,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DistConfig {
     /// A single fixed duration, parsed with `humantime`.
     Fixed(Duration),
@@ -110,7 +412,7 @@ pub enum DistConfig {
     Pct {
         /// 50th percentile (median).
         p50: Duration,
-        /// 99th percentile.
+        /// 99th percentile; never below `p50`.
         p99: Duration,
     },
     /// Exponential with this mean (`{ mean: 5ms }`); see [`crate::Dist::Exp`].
@@ -158,12 +460,13 @@ impl<'de> Deserialize<'de> for DistConfig {
                     "expected a duration like `5ms`, `{ p50: 1ms, p99: 3ms }` or `{ mean: 5ms }`",
                 )
             })?;
+        // Closes the M0 review question: `{ p50: 100h, p99: 1ms }` used to slip past the cap.
         if let DistConfig::Pct { p50, p99 } = &c
             && p50 > p99
         {
-            return Err(D::Error::custom(
-                "p50 must not be above p99 (it would become an uncapped fixed value)",
-            ));
+            return Err(D::Error::custom(format!(
+                "p50 ({p50:?}) is above p99 ({p99:?}); p50 must be at most p99"
+            )));
         }
         let longest = match &c {
             DistConfig::Fixed(x) => *x,
@@ -183,8 +486,11 @@ impl<'de> Deserialize<'de> for DistConfig {
 /// at most 10 h and a chain's sum stays far from `Duration`'s limit.
 const MAX_DURATION: Duration = Duration::from_secs(3600);
 
+/// **Private.** Longest `token_ttl`.
+const MAX_TOKEN_TTL: Duration = Duration::from_hours(24);
+
 /// A static response override for a `"METHOD /path"` key in `routes:`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RouteOverride {
     /// HTTP status to return. Defaults to 200.
@@ -198,6 +504,89 @@ pub struct RouteOverride {
 /// **Private.** serde default for [`RouteOverride::status`].
 fn default_status() -> u16 {
     200
+}
+
+/// **Private.** serde default for [`PoolConfig::overflow_status`].
+fn default_overflow() -> u16 {
+    503
+}
+
+/// **Private.** serde default for [`EdgeConfig::calls`].
+fn default_calls() -> NonZeroU32 {
+    NonZeroU32::MIN
+}
+
+/// **Private.** `hit_ratio` and `error_rate`: a probability in 0..=1.
+fn ratio<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let v = f64::deserialize(d)?;
+    if (0.0..=1.0).contains(&v) {
+        Ok(Some(v))
+    } else {
+        Err(D::Error::custom(format!(
+            "must be between 0 and 1 (got {v})"
+        )))
+    }
+}
+
+/// **Private.** `rate_limit.rps`: finite and above 0.
+fn positive_rps<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    let v = f64::deserialize(d)?;
+    if v > 0.0 && v.is_finite() {
+        Ok(v)
+    } else {
+        Err(D::Error::custom(format!("rps must be above 0 (got {v})")))
+    }
+}
+
+/// **Private.** `pool.overflow_status`: a 5xx Kaanal can answer with.
+fn status_5xx<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let s = u16::deserialize(d)?;
+    if (500..=504).contains(&s) {
+        Ok(s)
+    } else {
+        Err(D::Error::custom(format!(
+            "overflow_status must be between 500 and 504 (got {s})"
+        )))
+    }
+}
+
+/// **Private.** `proxy`: `http://` or `https://` followed by something.
+fn http_url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let s = String::deserialize(d)?;
+    let rest = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"));
+    if rest.is_some_and(|r| !r.is_empty()) {
+        Ok(Some(s))
+    } else {
+        Err(D::Error::custom(format!(
+            "proxy must be an http(s) URL like https://api.example.com (got '{s}')"
+        )))
+    }
+}
+
+/// **Private.** `token_ttl`: a duration of at most 1 day.
+fn token_ttl<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+    let v: Duration = humantime_serde::deserialize(d)?;
+    if v <= MAX_TOKEN_TTL {
+        Ok(Some(v))
+    } else {
+        Err(D::Error::custom("token_ttl must be at most 1 day"))
+    }
+}
+
+/// **Private.** `users`: no two accounts share a username.
+fn unique_users<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<UserConfig>, D::Error> {
+    let users = Vec::<UserConfig>::deserialize(d)?;
+    for (i, u) in users.iter().enumerate() {
+        if users[..i].iter().any(|o| o.username == u.username) {
+            return Err(D::Error::custom(format!(
+                "duplicate username '{}'",
+                u.username
+            )));
+        }
+    }
+    Ok(users)
 }
 
 /// A config parse error with an optional YAML position.

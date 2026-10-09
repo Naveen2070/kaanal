@@ -4,14 +4,16 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-core](kaanal-core/) (pure logic)
 
-| File              | Page                                               | Contents                                                     |
-| ----------------- | -------------------------------------------------- | ------------------------------------------------------------ |
-| `src/lib.rs`      | [kaanal-core/lib.md](kaanal-core/lib.md)           | Crate root, re-exports, `stable_hash`                        |
-| `src/config.rs`   | [kaanal-core/config.md](kaanal-core/config.md)     | `kaanal.yaml` parsing, `DistConfig`, `ConfigError`           |
-| `src/topology.rs` | [kaanal-core/topology.md](kaanal-core/topology.md) | Graph build + all validation (DAG, one gateway, edge shapes) |
-| `src/dist.rs`     | [kaanal-core/dist.md](kaanal-core/dist.md)         | Fixed & lognormal latency distributions                      |
-| `src/chaos.rs`    | [kaanal-core/chaos.md](kaanal-core/chaos.md)       | `NodeChaos` / `ChaosState` runtime state                     |
-| `src/exec.rs`     | [kaanal-core/exec.md](kaanal-core/exec.md)         | The chain executor (`execute`), ops, hops, determinism       |
+| File              | Page                                               | Contents                                                              |
+| ----------------- | -------------------------------------------------- | --------------------------------------------------------------------- |
+| `src/lib.rs`      | [kaanal-core/lib.md](kaanal-core/lib.md)           | Crate root, re-exports, `stable_hash`                                 |
+| `src/config.rs`   | [kaanal-core/config.md](kaanal-core/config.md)     | `kaanal.yaml` parsing: tagged node kinds, `DistConfig`, `ConfigError` |
+| `src/presets.rs`  | [kaanal-core/presets.md](kaanal-core/presets.md)   | Flavor presets (estimates) and gap filling                            |
+| `src/schema.rs`   | [kaanal-core/schema.md](kaanal-core/schema.md)     | JSON Schema of `kaanal.yaml` (schemars)                               |
+| `src/topology.rs` | [kaanal-core/topology.md](kaanal-core/topology.md) | Graph build + all validation (DAG, one gateway, edge shapes)          |
+| `src/dist.rs`     | [kaanal-core/dist.md](kaanal-core/dist.md)         | Fixed & lognormal latency distributions                               |
+| `src/chaos.rs`    | [kaanal-core/chaos.md](kaanal-core/chaos.md)       | `NodeChaos` / `ChaosState` runtime state                              |
+| `src/exec.rs`     | [kaanal-core/exec.md](kaanal-core/exec.md)         | The chain executor (`execute`), ops, hops, determinism                |
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)
 

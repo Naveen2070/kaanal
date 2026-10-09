@@ -8,8 +8,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::config::{Config, NodeKind};
+use crate::config::{Config, NodeConfig, NodeKind};
 use crate::dist::Dist;
+use crate::presets;
 
 /// Index of a node in [`Topology::nodes`].
 pub type NodeId = usize;
@@ -71,11 +72,11 @@ pub enum TopologyError {
     GatewayCount(usize),
     /// The graph is not a DAG; carries the cycle as node names (`a -> b -> a`).
     Cycle(Vec<String>),
-    /// A database node without `ops`; carries the node name.
+    /// A database (or monolith with inline ops) missing an op and no flavor to fill it; carries the node name.
     MissingOps(String),
     /// A service with an `OpenAPI` spec but no edge from the gateway; carries the node name.
     MissingGatewayEdge(String),
-    /// Anything valid YAML but outside phase-one semantics (edge shapes, field placement).
+    /// Anything valid YAML but outside phase-one semantics (edge shapes).
     Unsupported(String),
 }
 
@@ -89,9 +90,10 @@ impl fmt::Display for TopologyError {
                 write!(f, "expected exactly 1 gateway node, found {n}")
             }
             TopologyError::Cycle(path) => write!(f, "cycle: {}", path.join(" -> ")),
-            TopologyError::MissingOps(n) => {
-                write!(f, "database node '{n}' needs ops: read, write, scan")
-            }
+            TopologyError::MissingOps(n) => write!(
+                f,
+                "node '{n}' needs ops: read, write and scan (or a flavor: postgres, mysql or mongodb)"
+            ),
             TopologyError::MissingGatewayEdge(n) => {
                 write!(
                     f,
@@ -105,11 +107,25 @@ impl fmt::Display for TopologyError {
 
 impl std::error::Error for TopologyError {}
 
+/// **Private.** A node's op costs: the user's values, gaps filled from the flavor
+/// preset (R1.25). Databases always have ops; monoliths when they set `ops` or `flavor`.
+fn ops_of(name: &str, n: &NodeConfig) -> Result<Option<[Dist; 3]>, TopologyError> {
+    let (flavor, ops) = match n {
+        NodeConfig::Database(d) => (d.flavor, d.ops.as_ref()),
+        NodeConfig::Monolith(m) if m.ops.is_some() || m.flavor.is_some() => {
+            (m.flavor, m.ops.as_ref())
+        }
+        _ => return Ok(None),
+    };
+    let ops = presets::resolve_ops(flavor, ops)
+        .ok_or_else(|| TopologyError::MissingOps(name.to_string()))?;
+    Ok(Some(ops.map(|d| Dist::from_config(Some(&d)))))
+}
+
 impl Topology {
     /// Builds and validates the graph.
     ///
-    /// Checks, in order: field placement (`ops` on databases, `spec` on services
-    /// only), database ops present, exactly one gateway, edge endpoints exist, the
+    /// Checks, in order: database ops present (presets fill gaps), exactly one gateway, edge endpoints exist, the
     /// graph is a DAG, phase-one edge shapes (`gateway → service`, `service →
     /// database`, no duplicates), and every service with a spec is reachable from
     /// the gateway.
@@ -120,34 +136,16 @@ impl Topology {
         let mut nodes = Vec::new();
         let mut index = HashMap::new();
         for (name, n) in &cfg.nodes {
-            if n.ops.is_some() && n.kind != NodeKind::Database {
-                return Err(TopologyError::Unsupported(format!(
-                    "node '{name}': ops is only valid on database nodes"
-                )));
-            }
-            if n.spec.is_some() && n.kind != NodeKind::Service {
-                return Err(TopologyError::Unsupported(format!(
-                    "node '{name}': spec is only valid on service nodes"
-                )));
-            }
-            let ops = match (n.kind, &n.ops) {
-                (NodeKind::Database, None) => return Err(TopologyError::MissingOps(name.clone())),
-                (_, Some(o)) => Some([
-                    Dist::from_config(Some(&o.read)),
-                    Dist::from_config(Some(&o.write)),
-                    Dist::from_config(Some(&o.scan)),
-                ]),
-                (_, None) => None,
-            };
+            let ops = ops_of(name, n)?;
             index.insert(name.clone(), nodes.len());
             nodes.push(Node {
                 name: name.clone(),
-                kind: n.kind,
-                flavor: n.flavor.clone(),
-                spec: n.spec.clone(),
-                proc: Dist::from_config(n.proc.as_ref()),
+                kind: n.kind(),
+                flavor: n.flavor().map(str::to_string),
+                spec: n.spec().map(str::to_string),
+                proc: Dist::from_config(n.proc()),
                 ops,
-                concurrency: n.concurrency,
+                concurrency: n.concurrency(),
             });
         }
 

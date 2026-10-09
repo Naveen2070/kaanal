@@ -40,6 +40,7 @@ clap = { version = "4", features = ["derive"] }
 ureq = { version = "3", default-features = false, features = ["json"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 jsonschema = { version = "0.58", default-features = false }
+schemars = { version = "1.2", features = ["indexmap2"] }
 kaanal-core = { path = "crates/kaanal-core" }
 kaanal-data = { path = "crates/kaanal-data" }
 kaanal-server = { path = "crates/kaanal-server" }

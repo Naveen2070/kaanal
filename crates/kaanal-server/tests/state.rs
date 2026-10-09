@@ -49,9 +49,11 @@ fn topology_errors_surface() {
 
 #[test]
 fn spec_on_non_service_is_rejected() {
-    let err = check_yaml("version: 1\nnodes:\n  gw: { type: gateway, spec: openapi.yaml }\n")
-        .unwrap_err();
-    assert!(err.contains("service nodes"), "{err}");
+    // `spec` is not a gateway field, so the config itself fails to parse (R1.15).
+    let err =
+        Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, spec: openapi.yaml }\n")
+            .unwrap_err();
+    assert!(err.msg.contains("unknown field `spec`"), "{err}");
 }
 
 #[test]

@@ -152,7 +152,7 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
         .map(|n| {
             json!({
                 "name": n.name,
-                "type": format!("{:?}", n.kind).to_lowercase(),
+                "type": n.kind.as_str(),
                 "flavor": n.flavor,
             })
         })

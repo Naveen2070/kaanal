@@ -118,21 +118,3 @@ fn rejects_edges_the_executor_would_ignore() {
         matches!(build(&yaml).unwrap_err(), TopologyError::Unsupported(m) if m.contains("nginx"))
     );
 }
-
-#[test]
-fn rejects_ops_on_non_database_and_spec_on_non_service() {
-    let yaml = BASE.replace(
-        "app:   { type: service,",
-        "app:   { type: service, ops: { read: 1ms, write: 1ms, scan: 1ms },",
-    );
-    assert!(
-        matches!(build(&yaml).unwrap_err(), TopologyError::Unsupported(m) if m.contains("ops"))
-    );
-    let yaml = BASE.replace(
-        "nginx: { type: gateway }",
-        "nginx: { type: gateway, spec: x.yaml }",
-    );
-    assert!(
-        matches!(build(&yaml).unwrap_err(), TopologyError::Unsupported(m) if m.contains("spec"))
-    );
-}

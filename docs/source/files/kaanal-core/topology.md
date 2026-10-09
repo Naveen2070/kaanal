@@ -18,13 +18,14 @@ The topology graph: nodes, edges, and all semantic validation of the config.
 
 ## `Topology::build` checks, in order
 
-1. **Field placement**: `ops` only on `database` nodes, `spec` only on `service` nodes.
-2. **Database ops**: a database without `ops` → `MissingOps`.
-3. **Exactly one gateway** → else `GatewayCount(0 or n)`.
-4. **Edge endpoints exist** → else `UnknownNode` (reports which edge number).
-5. **DAG** — `check_cycles` runs an iterative-entry DFS with 3-colour marking (0 unvisited / 1 on path / 2 done); revisiting a colour-1 node reports the cycle as a readable path (`cycle: a -> b -> a`).
-6. **Phase-one edge shapes**: every edge must be `gateway → service` or `service → database`; anything else → `Unsupported`. Duplicate edges are also rejected.
-7. **Reachability**: a service with an OpenAPI `spec` but no edge from the gateway → `MissingGatewayEdge` (its routes would never be walked).
+Field placement (`ops` on a service, `spec` on a gateway) is no longer checked here: each node kind has its own strict struct, so it is a parse error in [config.md](config.md).
+
+1. **Database ops present, presets fill gaps** (monolith too when it sets `ops`/`flavor`; private `ops_of` via [presets.md](presets.md)) → `MissingOps`.
+2. **Exactly one gateway** → else `GatewayCount(0 or n)`.
+3. **Edge endpoints exist** → else `UnknownNode` (reports which edge number).
+4. **DAG** — `check_cycles` runs an iterative-entry DFS with 3-colour marking (0 unvisited / 1 on path / 2 done); revisiting a colour-1 node reports the cycle as a readable path (`cycle: a -> b -> a`).
+5. **Phase-one edge shapes**: every edge must be `gateway → service` or `service → database`; anything else → `Unsupported`. Duplicate edges are also rejected.
+6. **Reachability**: a service with an OpenAPI `spec` but no edge from the gateway → `MissingGatewayEdge` (its routes would never be walked).
 
 ## Lookup methods
 

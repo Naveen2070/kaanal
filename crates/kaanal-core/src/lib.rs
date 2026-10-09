@@ -1,9 +1,10 @@
 //! Pure logic for the Kaanal infrastructure emulator.
 //!
 //! This crate owns everything that must stay deterministic and testable: `kaanal.yaml`
-//! parsing ([`Config`]), topology graph validation ([`Topology`]), latency
-//! distributions ([`Dist`]), live chaos state ([`ChaosState`]) and the call-chain
-//! executor ([`execute`]).
+//! parsing ([`Config`]), topology graph validation ([`Topology`]), flavor presets
+//! ([`presets`]), the editor JSON Schema ([`config_schema`]), latency distributions
+//! ([`Dist`]), live chaos state ([`ChaosState`]) and the call-chain executor
+//! ([`execute`]).
 //!
 //! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
 //! outcomes; it never sleeps. The server sleeps the durations it returns (live mode)
@@ -15,12 +16,15 @@ pub mod chaos;
 pub mod config;
 pub mod dist;
 pub mod exec;
+pub mod presets;
+pub mod schema;
 pub mod topology;
 
 pub use chaos::{ChaosState, MAX_LATENCY_ADD, NodeChaos};
 pub use config::{Config, ConfigError, NodeKind};
 pub use dist::Dist;
 pub use exec::{ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, execute};
+pub use schema::config_schema;
 pub use topology::{Edge, Node, NodeId, Topology, TopologyError};
 
 /// FNV-1a 64 over the parts, with a separator byte between parts.
