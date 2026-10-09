@@ -8,6 +8,7 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | -------------------------------- | ----------------------------- | -------------------------------------------------------------------------- |
 | [user-guide.md](user-guide.md)   | Everyone                      | Install, `kaanal.yaml`, CLI, the embedded status page                      |
 | [control-api.md](control-api.md) | Test authors, tooling writers | The `/__kaanal/*` HTTP API, request/response reference                     |
+| [nodes.md](nodes.md)             | Everyone                      | Every node kind, its fields, the edge table and presets                    |
 | [concepts.md](concepts.md)       | Everyone                      | Topology, call chains, chaos, determinism — what Kaanal actually simulates |
 | [web-ui.md](web-ui.md)           | Users of the status page      | The embedded `/__kaanal/ui` page, feature by feature                       |
 

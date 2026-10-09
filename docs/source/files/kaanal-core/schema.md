@@ -18,3 +18,7 @@ Builds a JSON Schema (draft 2020-12) from the `schemars::JsonSchema` derives on 
 ## Notes
 
 Each node kind becomes one branch of `$defs.NodeConfig.oneOf`, and each branch carries `properties.type.const` (the kind's YAML name) and `additionalProperties: false`. The diagnostics added later rely on this layout; `schema_has_one_branch_per_kind` pins it.
+
+## Committed copy
+
+`crates/kaanal-core/kaanal.schema.json`, checked by `committed_schema_matches_the_types` as JSON values (line endings do not matter). Regenerate with `KAANAL_BLESS=1 cargo test -p kaanal-core --test schema`, then review the diff. Every field needs a doc comment (it becomes the description); inert fields say "no effect yet". `kaanal schema` prints the same document. Publishing URL default: `https://kaanal.naveenr.in/schema/v1.json` (not published in A1).

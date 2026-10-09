@@ -78,11 +78,11 @@ flowchart LR
 
 During `Topology::build`, the graph is verified against strict rules:
 
-1. **Single Gateway Invariant**: Exactly one node must have `type: gateway`. Zero or multiple gateways fail with `TopologyError::GatewayCount` (rule R2.7).
-2. **Phase One Edge Shapes**: Edges must follow either `gateway -> service` or `service -> database`. Direct `gateway -> database` links and `service -> service` links are rejected (rule R1.4, R2.7).
+1. **Optional Gateway**: At most one node may have `type: gateway`; with none, requests enter at the `service` or `monolith` that owns the route. More than one fails the load (rule R2.7).
+2. **Edge Table** (R1.24, `callees` in the topology module): `gateway` may call `service`, `monolith`, `auth`; `service` and `monolith` may call `service`, `monolith`, `database`, `cache`, `external-api`, `auth`; `auth` may call `service`, `monolith`, `database`, `cache`, `external-api`; `database`, `cache` and `external-api` call nothing. Any other edge is rejected, naming what the caller may call. Config errors are positioned (file, line, column, node, field) by `diagnostics` on the error path only.
 3. **Cycle Rejection**: The graph must be a strict DAG. Cycle detection executes an iterative depth-first search (DFS) with 3-color vertex marking (unvisited, active path, completed). Detected cycles fail with `TopologyError::Cycle` listing the cycle path (`cycle: a -> b -> a`).
-4. **Reachability**: Any `service` node specifying an OpenAPI `spec` must have an incoming edge from the gateway. Unreachable services fail with `TopologyError::MissingGatewayEdge`.
-5. **Node Attribute Affinity**: `ops` is permitted only on `database` nodes (and is mandatory for them); `spec` is permitted only on `service` nodes. Misplaced fields fail with clear errors.
+4. **Reachability**: When there is a gateway, any `service` or `monolith` node specifying an OpenAPI `spec` must have an incoming edge from it. Unreachable services fail with `TopologyError::MissingGatewayEdge`.
+5. **Node Attribute Affinity**: each kind is its own strict struct, so a field on the wrong kind (`ops` on a service, `spec` on a gateway) is a parse error. A `database` must end up with all three ops (its own or from a flavor preset).
 
 ---
 

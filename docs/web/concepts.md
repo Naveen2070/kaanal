@@ -4,9 +4,9 @@ What Kaanal actually simulates, in plain terms.
 
 ## Topology
 
-Your system is a graph of **nodes** (`gateway`, `service`, `database`) connected by **edges** (dependencies). The graph must be acyclic and have exactly one gateway; anything Kaanal can't simulate is rejected when the file loads, with a message naming the problem — never silently ignored.
+Your system is a graph of **nodes** (`gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`) connected by **edges** (dependencies). The graph must be acyclic and have at most one gateway; anything Kaanal can't simulate is rejected when the file loads, with a message naming the problem — never silently ignored.
 
-Phase one walks `gateway → service → database`. More node kinds (cache, external API, auth) are on the roadmap.
+Requests enter at the gateway, or at the service that owns the route when there is none; today the walk is entry → its dependencies (endpoint chains come next).
 
 ## Call chains
 

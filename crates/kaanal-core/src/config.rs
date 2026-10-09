@@ -3,7 +3,7 @@
 //! `nodes:` is a map of `type`-tagged nodes (rule R1.15). Each kind is its own struct
 //! with `deny_unknown_fields`, so a field on the wrong kind fails at load. This module
 //! parses and checks single values (ranges, `p50 ≤ p99`, URL shape); graph rules
-//! (gateway count, edge table, DAG, ops that presets must complete) live in
+//! (optional gateway, edge table, DAG, ops that presets must complete) live in
 //! [`crate::topology`], route/spec wiring in the server crate. The editor JSON Schema is
 //! derived from these types ([`crate::schema`]).
 
@@ -29,6 +29,7 @@ pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
     /// Nodes by name, in file order (deterministic error messages).
+    #[serde(deserialize_with = "unique_nodes")]
     pub nodes: IndexMap<String, NodeConfig>,
     /// Dependency edges, caller → dependency.
     #[serde(default)]
@@ -281,8 +282,8 @@ pub struct AuthConfig {
     /// Accounts that can log in; usernames are unique. Accepted and validated; no effect yet.
     #[serde(default, deserialize_with = "unique_users")]
     pub users: Vec<UserConfig>,
-    /// Lifetime of issued tokens, at most 1 day (default 1h). Accepted and validated; no
-    /// effect yet.
+    /// Lifetime of issued tokens, at most 1 day (default 1h). Accepted and validated;
+    /// no effect yet.
     #[serde(default, deserialize_with = "token_ttl")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub token_ttl: Option<Duration>,
@@ -575,6 +576,34 @@ fn token_ttl<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Err
     }
 }
 
+/// **Private.** `nodes`: a map in file order where each name is defined once (a plain
+/// map would silently keep the last definition).
+fn unique_nodes<'de, D: Deserializer<'de>>(d: D) -> Result<IndexMap<String, NodeConfig>, D::Error> {
+    struct Nodes;
+    impl<'de> serde::de::Visitor<'de> for Nodes {
+        type Value = IndexMap<String, NodeConfig>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a map of node names to nodes")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut m: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut out = IndexMap::new();
+            while let Some((name, node)) = m.next_entry::<String, NodeConfig>()? {
+                if out.contains_key(&name) {
+                    return Err(A::Error::custom(format!("duplicate node '{name}'")));
+                }
+                out.insert(name, node);
+            }
+            Ok(out)
+        }
+    }
+    d.deserialize_map(Nodes)
+}
+
 /// **Private.** `users`: no two accounts share a username.
 fn unique_users<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<UserConfig>, D::Error> {
     let users = Vec::<UserConfig>::deserialize(d)?;
@@ -623,23 +652,27 @@ impl Config {
     /// # Errors
     /// Returns [`ConfigError`] (with line/column when the parser knows them) for
     /// malformed YAML, unknown fields, bad values, or an unsupported `version`.
+    /// When parsing fails inside `nodes:`, the error is re-placed at the real node and
+    /// field (see [`crate::diagnostics`]).
     pub fn from_yaml(src: &str) -> Result<Config, ConfigError> {
         // Windows editors may save a UTF-8 BOM; YAML parsers reject it.
         let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         let cfg: Config = serde_yaml_ng::from_str(src).map_err(|e| {
             let loc = e.location();
-            ConfigError {
+            let serde_err = ConfigError {
                 line: loc.as_ref().map(serde_yaml_ng::Location::line),
                 col: loc.as_ref().map(serde_yaml_ng::Location::column),
                 msg: e.to_string(),
-            }
+            };
+            // R1.15: serde loses positions inside tagged nodes; recover them (error path only).
+            crate::diagnostics::explain(src, serde_err)
         })?;
         if cfg.version != 1 {
-            return Err(ConfigError {
-                line: None,
-                col: None,
-                msg: format!("unsupported config version {} (expected 1)", cfg.version),
-            });
+            return Err(crate::diagnostics::Located::new(
+                crate::diagnostics::keys(&["version"]),
+                format!("unsupported config version {} (expected 1)", cfg.version),
+            )
+            .in_source(src));
         }
         Ok(cfg)
     }

@@ -6,6 +6,10 @@ The topology graph: nodes, edges, and all semantic validation of the config.
 
 `Topology::build` turns a parsed `Config` into a validated graph the executor can walk: at most one gateway, the caller → dependency edge table, no unknown, self or duplicate edges, no cycles, and op/cache costs completed from flavor presets. Anything the executor would silently ignore or misinterpret is **rejected at load** with a named error (rule R1.23, R1.24, R2.7, R6.1).
 
+## Error places
+
+`TopologyError::located(cfg)` returns a `Located` (path + message) so `kaanal validate` can print `file:line:col`. `UnknownNode` points at the `from`/`to` name in its edge; `SelfLoop`, `DuplicateEdge` and `ForbiddenEdge` at the edge entry; `Cycle` at the edge that closes it; `SecondGateway`, `MissingOps`, `MissingCache` and `MissingGatewayEdge` at the node key; `NoEntry` at `nodes`. See [diagnostics.md](diagnostics.md).
+
 ## Types
 
 | Item            | Kind       | What it does                                                                                                                                                                                                                                                                                                                                                                               |

@@ -267,7 +267,7 @@ fn fields_belong_to_their_kind() {
     ] {
         let err = Config::from_yaml(&format!("version: 1\nnodes:\n  n: {node}\n")).unwrap_err();
         assert!(
-            err.msg.contains(&format!("unknown field `{field}`")),
+            err.msg.contains(&format!("unknown field '{field}'")),
             "{node}: {err}"
         );
     }

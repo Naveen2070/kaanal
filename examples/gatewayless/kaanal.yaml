@@ -1,0 +1,10 @@
+# A backend with no gateway: requests enter at the service that owns the route.
+# The database costs come from the postgres preset (estimates); write ops: to override.
+version: 1
+seed: 42
+port: 8080
+nodes:
+  app: { type: service, spec: openapi.yaml, proc: { p50: 5ms, p99: 20ms } }
+  db:  { type: database, flavor: postgres }
+edges:
+  - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }

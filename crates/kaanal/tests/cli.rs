@@ -377,3 +377,75 @@ fn sample_project_validates() {
         stderr(&out)
     );
 }
+
+#[test]
+fn validate_places_errors_in_later_nodes_and_edges() {
+    let dir = scratch("positions");
+    let file = dir.join("kaanal.yaml");
+    std::fs::write(
+        &file,
+        "version: 1
+nodes:
+  app: { type: service }
+  db: { type: database, flavor: postgres, bogus: 1 }
+",
+    )
+    .unwrap();
+    let out = bin().args(["validate", "-c"]).arg(&file).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = stderr(&out);
+    assert!(
+        err.contains("kaanal.yaml:4:") && err.contains("node 'db': unknown field 'bogus'"),
+        "{err}"
+    );
+    std::fs::write(
+        &file,
+        "version: 1
+nodes:
+  a: { type: service }
+  b: { type: service }
+edges:
+  - { from: a, to: b }
+  - { from: b, to: a }
+",
+    )
+    .unwrap();
+    let out = bin().args(["validate", "-c"]).arg(&file).output().unwrap();
+    assert!(
+        stderr(&out).contains("kaanal.yaml:7:5: cycle: a -> b -> a"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn schema_prints_the_committed_schema() {
+    let out = bin().arg("schema").output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let printed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let committed: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../kaanal-core/kaanal.schema.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(printed, committed);
+}
+
+#[test]
+fn gatewayless_example_validates() {
+    let sample =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gatewayless/kaanal.yaml");
+    let out = bin()
+        .args(["validate", "-c"])
+        .arg(&sample)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        stderr(&out).is_empty(),
+        "no warnings expected: {}",
+        stderr(&out)
+    );
+}

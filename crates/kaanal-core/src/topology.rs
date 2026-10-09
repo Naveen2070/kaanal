@@ -11,6 +11,7 @@ use std::fmt;
 use std::num::NonZeroU32;
 
 use crate::config::{Config, NodeConfig, NodeKind};
+use crate::diagnostics::{Located, PathSeg, keys};
 use crate::dist::Dist;
 use crate::presets;
 
@@ -185,6 +186,43 @@ impl fmt::Display for TopologyError {
                 )
             }
         }
+    }
+}
+
+impl TopologyError {
+    /// This error with its place in `kaanal.yaml`: the edge entry (or the unknown name in
+    /// it), the edge that closes a cycle, the node, or `nodes` itself.
+    pub fn located(&self, cfg: &Config) -> Located {
+        let edge = |i: usize| vec![PathSeg::Key("edges".into()), PathSeg::Index(i)];
+        let path = match self {
+            TopologyError::UnknownNode { edge: i, name } => {
+                let field = if cfg.edges.get(*i).is_some_and(|e| e.from == *name) {
+                    "from"
+                } else {
+                    "to"
+                };
+                let mut p = edge(*i);
+                p.push(PathSeg::Key(field.into()));
+                p
+            }
+            TopologyError::SelfLoop { edge: i, .. }
+            | TopologyError::DuplicateEdge { edge: i, .. }
+            | TopologyError::ForbiddenEdge { edge: i, .. } => edge(*i),
+            TopologyError::Cycle(names) => match names.as_slice() {
+                [.., from, to] => cfg
+                    .edges
+                    .iter()
+                    .position(|e| &e.from == from && &e.to == to)
+                    .map_or_else(|| keys(&["edges"]), edge),
+                _ => keys(&["edges"]),
+            },
+            TopologyError::SecondGateway(n)
+            | TopologyError::MissingOps(n)
+            | TopologyError::MissingCache(n)
+            | TopologyError::MissingGatewayEdge(n) => keys(&["nodes", n]),
+            TopologyError::NoEntry => keys(&["nodes"]),
+        };
+        Located::new(path, self.to_string())
     }
 }
 

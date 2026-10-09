@@ -19,6 +19,7 @@ use std::sync::Arc;
 use axum::routing::{get, put};
 use axum::{Router, middleware};
 use kaanal_core::Config;
+use kaanal_core::diagnostics::Located;
 
 /// Options for [`serve`].
 pub struct ServeOpts {
@@ -54,8 +55,9 @@ impl BoundServer {
 /// `Ok` carries non-fatal warnings (ignored schema keywords, nodes with `concurrency`).
 ///
 /// # Errors
-/// Returns the first load error (bad config, unreadable or invalid spec, route conflict).
-pub fn check(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, String> {
+/// Returns the first load error (bad config, unreadable or invalid spec, route conflict),
+/// with its place in `kaanal.yaml` (see [`Located::in_source`]).
+pub fn check(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, Located> {
     state::AppState::build(cfg, base_dir, String::new(), 0).map(|st| st.warnings)
 }
 
@@ -74,11 +76,15 @@ pub fn new_token() -> String {
 /// the current tokio runtime, and returns its handle.
 ///
 /// # Errors
-/// Returns a message if no port in `port..=port+20` is free or if
+/// Returns a [`Located`] error if no port in `port..=port+20` is free or if
 /// building server state fails (bad config, specs or routes).
-pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, String> {
-    let listener = bind(opts.host, opts.port).await?;
-    let addr = listener.local_addr().map_err(|e| e.to_string())?;
+pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, Located> {
+    let listener = bind(opts.host, opts.port)
+        .await
+        .map_err(|e| Located::new(Vec::new(), e))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| Located::new(Vec::new(), e.to_string()))?;
     let st = Arc::new(state::AppState::build(
         cfg,
         base_dir,

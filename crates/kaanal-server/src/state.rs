@@ -11,6 +11,7 @@ use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 
 use kaanal_core::config::RouteOverride;
+use kaanal_core::diagnostics::{Located, keys};
 use kaanal_core::{ChaosState, Config, NodeId, Op, Topology};
 use kaanal_data::ApiModel;
 use serde::Serialize;
@@ -224,16 +225,16 @@ impl AppState {
     /// names the same path.
     ///
     /// # Errors
-    /// Returns a message (with file paths where relevant) for unreadable or invalid
-    /// specs, route conflicts between services, malformed override keys, or any
+    /// Returns a [`Located`] error (path into `kaanal.yaml` + message, with file paths
+    /// where relevant) for unreadable or invalid specs, route conflicts between services, malformed override keys, or any
     /// topology error. Nothing is served half-configured (rule R6.1).
     pub fn build(
         cfg: &Config,
         base_dir: &Path,
         token: String,
         port: u16,
-    ) -> Result<AppState, String> {
-        let topo = Topology::build(cfg).map_err(|e| e.to_string())?;
+    ) -> Result<AppState, Located> {
+        let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
         // BTreeMap: deterministic order, so a router conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
@@ -249,24 +250,28 @@ impl AppState {
 
         for (id, node) in topo.nodes.iter().enumerate() {
             let Some(spec) = &node.spec else { continue };
+            let at = keys(&["nodes", node.name.as_str(), "spec"]);
             let file = base_dir.join(spec);
-            let src =
-                std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-            let api =
-                ApiModel::from_openapi(&src).map_err(|e| format!("{}: {e}", file.display()))?;
+            let src = std::fs::read_to_string(&file)
+                .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
+            let api = ApiModel::from_openapi(&src)
+                .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
             warnings.extend(
                 api.warnings()
                     .into_iter()
                     .map(|w| format!("{}: {w}", file.display())),
             );
             for ep in api.endpoints {
-                check_shape(&mut shapes, &ep.path)?;
+                check_shape(&mut shapes, &ep.path).map_err(|m| Located::new(at.clone(), m))?;
                 let routes = by_path.entry(ep.path.clone()).or_default();
                 if let Some(other) = routes.iter().find(|r| r.method == ep.method) {
                     let owner = other.owner.map_or("?", |o| topo.nodes[o].name.as_str());
-                    return Err(format!(
-                        "route {} {} defined by both '{owner}' and '{}'",
-                        ep.method, ep.path, node.name
+                    return Err(Located::new(
+                        at.clone(),
+                        format!(
+                            "route {} {} defined by both '{owner}' and '{}'",
+                            ep.method, ep.path, node.name
+                        ),
                     ));
                 }
                 routes.push(Route {
@@ -282,7 +287,8 @@ impl AppState {
         }
 
         for (spec, ov) in &cfg.routes {
-            apply_override(&mut by_path, &mut shapes, spec, ov, topo.gateway.is_some())?;
+            apply_override(&mut by_path, &mut shapes, spec, ov, topo.gateway.is_some())
+                .map_err(|m| Located::new(keys(&["routes", spec.as_str()]), m))?;
         }
 
         let mut route_keys: Vec<String> =
@@ -294,7 +300,7 @@ impl AppState {
         for (p, routes) in by_path {
             paths
                 .insert(p.clone(), routes)
-                .map_err(|e| format!("route '{p}': {e}"))?;
+                .map_err(|e| Located::new(Vec::new(), format!("route '{p}': {e}")))?;
         }
         let (events, _) = broadcast::channel(1024);
         Ok(AppState {

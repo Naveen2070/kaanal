@@ -1,0 +1,715 @@
+{
+  "$defs": {
+    "CacheFlavor": {
+      "description": "Cache flavors with a preset hit ratio and costs (estimates, see [`crate::presets`]).",
+      "oneOf": [
+        {
+          "const": "redis",
+          "description": "Redis.",
+          "type": "string"
+        },
+        {
+          "const": "memcached",
+          "description": "Memcached.",
+          "type": "string"
+        }
+      ]
+    },
+    "DbFlavor": {
+      "description": "Database flavors with preset op costs (estimates, see [`crate::presets`]).",
+      "oneOf": [
+        {
+          "const": "postgres",
+          "description": "`PostgreSQL`.",
+          "type": "string"
+        },
+        {
+          "const": "mysql",
+          "description": "`MySQL` (`InnoDB`).",
+          "type": "string"
+        },
+        {
+          "const": "mongodb",
+          "description": "`MongoDB`.",
+          "type": "string"
+        }
+      ]
+    },
+    "Distribution": {
+      "description": "A latency: `5ms` (fixed), `{ p50, p99 }` (lognormal fitted to both, p50 at most p99) or `{ mean }` (exponential). At most 1h.",
+      "oneOf": [
+        {
+          "description": "A duration with a unit: `5ms`, `1.5s`, `2h`.",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "p50": {
+              "description": "A duration with a unit: `5ms`, `1.5s`, `2h`.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
+            "p99": {
+              "description": "A duration with a unit: `5ms`, `1.5s`, `2h`.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "p50",
+            "p99"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "mean": {
+              "description": "A duration with a unit: `5ms`, `1.5s`, `2h`.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mean"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EdgeConfig": {
+      "additionalProperties": false,
+      "description": "One entry in `edges:` (caller → dependency).",
+      "properties": {
+        "calls": {
+          "default": 1,
+          "description": "Calls per request along this edge (call ratio), at least 1. Used once endpoint\nchains land.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "from": {
+          "description": "Name of the calling node.",
+          "type": "string"
+        },
+        "net": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Network latency on this edge; absent means zero."
+        },
+        "to": {
+          "description": "Name of the node it calls.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "NodeConfig": {
+      "description": "One node in `nodes:`. `type` selects the kind; each kind rejects fields it does not have.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A reverse proxy / API gateway / load balancer.",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "flavor": {
+              "description": "Cosmetic label shown in status output (`nginx`, `envoy`); not a preset.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Processing time per request."
+            },
+            "type": {
+              "const": "gateway",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A backend service with an optional `OpenAPI` spec; never has `ops`.",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Processing time per request."
+            },
+            "spec": {
+              "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A service that may also run its own read/write/scan (`ops`), or call databases.",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "flavor": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DbFlavor"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Preset that fills inline ops the user left out (estimates)."
+            },
+            "ops": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OpsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inline read/write/scan costs; any op left out comes from `flavor`. Used once\nendpoint chains land."
+            },
+            "proc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Processing time per request."
+            },
+            "spec": {
+              "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "monolith",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A data store with read/write/scan costs.",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "flavor": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DbFlavor"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Preset that fills ops the user left out (estimates)."
+            },
+            "ops": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OpsConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Read/write/scan costs. Required in full unless `flavor` fills the gaps."
+            },
+            "pool": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoolConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Connection pool. Accepted and validated; no effect yet (capacity limits come later)."
+            },
+            "type": {
+              "const": "database",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A cache with a hit ratio and hit/miss costs.",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "flavor": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CacheFlavor"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Preset for `hit_ratio`, `hit` and `miss` (estimates)."
+            },
+            "hit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cost of a hit."
+            },
+            "hit_ratio": {
+              "default": null,
+              "description": "Share of lookups that hit, 0 to 1.",
+              "format": "double",
+              "maximum": 1,
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "miss": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cost of finding out it is a miss."
+            },
+            "ttl": {
+              "default": null,
+              "description": "Entry lifetime. Accepted and validated; no effect yet.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
+            "type": {
+              "const": "cache",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A third-party HTTP API (payments, email, …).",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "error_rate": {
+              "default": null,
+              "description": "Baseline share of failing calls, 0 to 1. Accepted and validated; no effect yet.",
+              "format": "double",
+              "maximum": 1,
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "pool": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoolConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Connection pool. Accepted and validated; no effect yet."
+            },
+            "proc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Response time of the API."
+            },
+            "proxy": {
+              "default": null,
+              "description": "Real upstream URL to forward to. Accepted and validated; no effect yet.",
+              "pattern": "^https?://.+",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit. Accepted and validated; no effect yet."
+            },
+            "type": {
+              "const": "external-api",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An identity provider: login and token issue.",
+          "properties": {
+            "concurrency": {
+              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
+              "format": "uint32",
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cost of one login or token check."
+            },
+            "token_ttl": {
+              "default": null,
+              "description": "Lifetime of issued tokens, at most 1 day (default 1h). Accepted and validated;\nno effect yet.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
+            "type": {
+              "const": "auth",
+              "type": "string"
+            },
+            "users": {
+              "description": "Accounts that can log in; usernames are unique. Accepted and validated; no effect yet.",
+              "items": {
+                "$ref": "#/$defs/UserConfig"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "OpsConfig": {
+      "additionalProperties": false,
+      "description": "Read/write/scan costs. Without a `flavor`, all three are required.",
+      "properties": {
+        "read": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cost of reading one row (`GET /users/{id}`)."
+        },
+        "scan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cost of a list or search (`GET /users`)."
+        },
+        "write": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Cost of an insert, update or delete."
+        }
+      },
+      "type": "object"
+    },
+    "PoolConfig": {
+      "additionalProperties": false,
+      "description": "A connection pool (`database`, `external-api`).",
+      "properties": {
+        "overflow_status": {
+          "default": 503,
+          "description": "Status returned when the queue is full, 500–504 (default 503).",
+          "format": "uint16",
+          "maximum": 504,
+          "minimum": 500,
+          "type": "integer"
+        },
+        "queue": {
+          "default": 0,
+          "description": "Requests that may wait for a free connection (default 0).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "description": "Connections in the pool, at least 1.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size"
+      ],
+      "type": "object"
+    },
+    "RateLimitConfig": {
+      "additionalProperties": false,
+      "description": "A token bucket: refills `rps` per second, holds at most `burst`.",
+      "properties": {
+        "burst": {
+          "description": "Largest burst, at least 1.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "rps": {
+          "description": "Requests per second, above 0.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "rps",
+        "burst"
+      ],
+      "type": "object"
+    },
+    "RouteOverride": {
+      "additionalProperties": false,
+      "description": "A static response override for a `\"METHOD /path\"` key in `routes:`.",
+      "properties": {
+        "body": {
+          "default": null,
+          "description": "Response body, returned verbatim."
+        },
+        "status": {
+          "default": 200,
+          "description": "HTTP status to return. Defaults to 200.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "UserConfig": {
+      "additionalProperties": false,
+      "description": "One account on an `auth` node (synthetic accounts only).",
+      "properties": {
+        "password": {
+          "description": "Plain-text password.",
+          "type": "string"
+        },
+        "roles": {
+          "default": [],
+          "description": "Roles put into issued tokens.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "Login name, unique per node.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "password"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The parsed `kaanal.yaml` file.",
+  "properties": {
+    "edges": {
+      "description": "Dependency edges, caller → dependency.",
+      "items": {
+        "$ref": "#/$defs/EdgeConfig"
+      },
+      "type": "array"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/NodeConfig"
+      },
+      "description": "Nodes by name, in file order (deterministic error messages).",
+      "type": "object"
+    },
+    "port": {
+      "default": 8080,
+      "description": "Port for the HTTP server (mock + control API share it). Defaults to 8080.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "routes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RouteOverride"
+      },
+      "description": "Static route overrides, keyed by `\"METHOD /path\"`.",
+      "type": "object"
+    },
+    "seed": {
+      "default": 0,
+      "description": "Master RNG seed: same seed → same data, timings and failure patterns.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "Config schema version. Must be `1`.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "nodes"
+  ],
+  "title": "Config",
+  "type": "object"
+}

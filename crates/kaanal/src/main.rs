@@ -1,7 +1,7 @@
 //! The `kaanal` binary: CLI, process lifecycle, and a thin HTTP client for the
 //! control API.
 //!
-//! `up` and `validate` work locally; `status` and `chaos` find the running
+//! `up`, `validate` and `schema` work locally; `status` and `chaos` find the running
 //! instance via `.kaanal/run.json` and call its control API (rule R2.6: every
 //! interface is a thin client, no per-interface logic).
 
@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use kaanal_core::Config;
+use kaanal_core::{Config, ConfigError};
 use kaanal_server::ServeOpts;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
@@ -52,6 +52,8 @@ enum Cmd {
         #[arg(short, long, default_value = "kaanal.yaml")]
         config: PathBuf,
     },
+    /// Print the JSON Schema for kaanal.yaml (point your editor's YAML plugin at it)
+    Schema,
     /// Show nodes and active chaos of the running instance
     Status,
     /// Change chaos on the running instance
@@ -120,13 +122,19 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), Fail> {
     match cli.cmd {
         Cmd::Validate { config } => {
-            let (cfg, dir) = load(&config)?;
+            let (cfg, dir, src) = load(&config)?;
             let warnings = kaanal_server::check(&cfg, &dir)
-                .map_err(|e| err(format!("{}: {e}", config.display())))?;
+                .map_err(|e| config_err(&config, &e.in_source(&src)))?;
             for w in warnings {
                 eprintln!("warning: {}", clean(&w));
             }
             println!("ok: {}", config.display());
+            Ok(())
+        }
+        Cmd::Schema => {
+            let text = serde_json::to_string_pretty(&kaanal_core::config_schema())
+                .map_err(|e| err(e.to_string()))?;
+            println!("{text}");
             Ok(())
         }
         Cmd::Up { config, port, host } => up(&config, port, host),
@@ -177,28 +185,32 @@ fn run(cli: Cli) -> Result<(), Fail> {
     }
 }
 
+/// **Private.** `file:line:col: msg` when the error has a position, else `file: msg` (R6.1).
+fn config_err(path: &Path, e: &ConfigError) -> Fail {
+    // With a position, Display is `line:col: msg`, giving `file:line:col: msg`.
+    let sep = if e.line.is_some() { ":" } else { ": " };
+    err(format!("{}{sep}{e}", path.display()))
+}
+
 /// **Private.** Reads and parses the config; errors print as `file:line:col: msg`
-/// (R6.1). Also returns the config's directory, which spec files resolve against.
-fn load(path: &Path) -> Result<(Config, PathBuf), Fail> {
+/// (R6.1). Also returns the config's directory, which spec files resolve against, and
+/// the source, so later errors can be placed in it.
+fn load(path: &Path) -> Result<(Config, PathBuf, String), Fail> {
     let src = std::fs::read_to_string(path).map_err(|e| err(format!("{}: {e}", path.display())))?;
-    let cfg = Config::from_yaml(&src).map_err(|e| {
-        // With a position, Display is `line:col: msg`, giving `file:line:col: msg` (R6.1).
-        let sep = if e.line.is_some() { ":" } else { ": " };
-        err(format!("{}{sep}{e}", path.display()))
-    })?;
+    let cfg = Config::from_yaml(&src).map_err(|e| config_err(path, &e))?;
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
         .to_path_buf();
-    Ok((cfg, dir))
+    Ok((cfg, dir, src))
 }
 
 /// **Private.** The `up` lifecycle: private state dir → instance lock → token →
 /// tokio runtime → serve → run file → wait for Ctrl+C → clean up the run file
 /// (only if it still holds our token).
 fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
-    let (cfg, dir) = load(config)?;
+    let (cfg, dir, src) = load(config)?;
     private_dir()?;
     // Held until this process exits. The OS releases it even if we crash, so there is no stale lock,
     // and two `up` runs started at the same instant cannot both get past this point.
@@ -219,7 +231,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         };
         let server = kaanal_server::serve(&cfg, &dir, opts)
             .await
-            .map_err(|e| err(format!("{}: {e}", config.display())))?;
+            .map_err(|e| config_err(config, &e.in_source(&src)))?;
         let port = server.addr.port();
         for w in &server.warnings {
             eprintln!("warning: {}", clean(w));

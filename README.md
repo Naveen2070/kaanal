@@ -1,8 +1,8 @@
 # Kaanal
 
-_Kaanal_ (கானல், Tamil for "mirage") is a single binary that pretends to be your backend: OpenAPI mocks with realistic data, simulated gateway → service → database timing, and live chaos.
+_Kaanal_ (கானல், Tamil for "mirage") is a single binary that pretends to be your backend: OpenAPI mocks with realistic data, simulated service → database timing (with an optional gateway in front), and live chaos.
 
-Status: Phase One (pre-release). Site: [https://kaanal.naveenr.in](https://kaanal.naveenr.in)
+Status: M1 (pre-release). Site: [https://kaanal.naveenr.in](https://kaanal.naveenr.in)
 
 ```mermaid
 flowchart TD
@@ -166,11 +166,30 @@ routes:                  # Optional static overrides
 ```
 
 - **`nodes`**:
-  - `gateway`: Exactly one entry point per topology.
-  - `service`: Backend microservice hosting an OpenAPI 3.0 `spec`.
-  - `database`: Data store with configured costs for `read`, `write`, and `scan` operations. Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
+  - `gateway`: Optional proxy in front (at most one); every request pays its `proc` first.
+  - `service`: Backend microservice hosting an OpenAPI 3.0 `spec`; the entry point when there is no gateway.
+  - `monolith`: A service that can also run its own `ops` (an inline database).
+  - `database`: Data store with configured costs for `read`, `write`, and `scan` operations; `flavor: postgres | mysql | mongodb` fills the ones you leave out (estimates).
+  - `cache`: Hit ratio plus hit and miss costs; `flavor: redis | memcached`.
+  - `external-api`: A third-party HTTP API with its own response time.
+  - `auth`: An identity provider (login and token issue). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
 - Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
-- **`edges`**: Directed dependency graph. In Phase One, requests flow `gateway -> service -> database`.
+- **`edges`**: Directed dependency graph, limited to an edge table (see [nodes.md](docs/web/nodes.md)). No cycles; `calls: N` sets calls per request. Today a request is charged the entry node and its dependencies' database costs; endpoint chains come next.
+
+A gateway-less example lives in `examples/gatewayless`:
+
+```yaml
+version: 1
+seed: 42
+nodes:
+  app: { type: service, spec: openapi.yaml, proc: { p50: 5ms, p99: 20ms } }
+  db:  { type: database, flavor: postgres }
+edges:
+  - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }
+```
+
+Every node kind and field is documented in [docs/web/nodes.md](docs/web/nodes.md).
+
 - **`routes`**: Static route overrides that take precedence over generated OpenAPI schemas.
 
 Check configs without starting:
@@ -189,6 +208,7 @@ All CLI commands run from the project directory where `kaanal up` was executed:
 | --------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `kaanal up [-c config] [--port port] [--host host]` | Start the mock server in foreground.                                           |
 | `kaanal validate [-c config]`                       | Validate topology, YAML syntax, and OpenAPI specs.                             |
+| `kaanal schema`                                     | Print the JSON Schema for editor autocomplete.                                 |
 | `kaanal status`                                     | Show running nodes and active chaos settings.                                  |
 | `kaanal chaos set <node> [flags]`                   | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--down`). |
 | `kaanal chaos clear [node]`                         | Clear chaos on one node or all nodes.                                          |

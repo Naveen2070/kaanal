@@ -2,7 +2,7 @@
 
 Every test in the workspace, grouped by file. Run all with `cargo test --workspace` (must pass before any task is done — rule R7.1).
 
-Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/fixtures/`: `kaanal.yaml` (gateway `nginx` → service `app` → database `db`, all 1 ms costs, seed 42, two static route overrides), `openapi.yaml` (users/orders spec), `openapi-warn.yaml` (spec containing an ignored `pattern` keyword).
+Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/fixtures/`: `kaanal.yaml` (gateway `nginx` → service `app` → database `db`, all 1 ms costs, seed 42, two static route overrides), `openapi.yaml` (users/orders spec), `openapi-warn.yaml` (spec containing an ignored `pattern` keyword). The shipped examples `examples/nginx-server` and `examples/gatewayless` (no gateway) are validated separately.
 
 ---
 
@@ -29,6 +29,32 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `node_kind_names_match_yaml`                                 | `NodeKind::as_str()` and `Display` give the YAML spelling (`external-api`, `monolith`).                                                                                                                |
 | `keyword_named_nodes_load`                                   | Nodes named `true`, `null`, `yes`, `on`, `1` load under their literal name.                                                                                                                            |
 | `schema_has_one_branch_per_kind`                             | The JSON Schema has one `$defs.NodeConfig.oneOf` branch per kind, in order, each with `additionalProperties: false` (diagnostics rely on this layout).                                                 |
+
+## `crates/kaanal-core/tests/diagnostics.rs` — error positions
+
+| Test                                                        | What it proves                                                                                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unknown_field_in_the_second_node_is_reported_at_its_key`   | An unknown field in the second node is placed at its key, listing the valid fields.                                                                                 |
+| `spike_cases_point_at_the_problem`                          | Missing nested field, bad value, bad duration, nested unknown field, unknown type and missing type each get the right line:col and node name.                       |
+| `comments_crlf_and_bom_do_not_move_positions`               | Comments shift lines as expected; CRLF + BOM give the same error as LF.                                                                                             |
+| `errors_outside_nodes_keep_serdes_position`                 | An error before `nodes:` keeps serde's line even if a node below is bad.                                                                                            |
+| `anchors_and_merge_keys_fall_back_cleanly`                  | `<<` merge keys are reported as unknown fields; an undefined alias is an error, not a panic.                                                                        |
+| `nodes_named_like_yaml_keywords_are_found`                  | Nodes named `true`, `null`, `yes`, `on`, `1` are located.                                                                                                           |
+| `graph_errors_point_at_the_edge_or_node`                    | Forbidden edge, cycle, unknown node name, second gateway and empty topology are placed at the edge, name, node key or `nodes`.                                      |
+| `located_without_a_place_has_no_position`                   | An empty or unmatched path gives no position; a version error is placed at `version`.                                                                               |
+| `explain_never_panics_or_flips_the_verdict`                 | Mutation sweep (line deletions, truncations, duplicates, indents, `;`) plus odd shapes: no panic, serde-accepted input stays accepted, reported lines are in range. |
+| `huge_source_falls_back_to_serdes_position`                 | A source over 1 MiB (or with a line over 8 KiB) still returns serde's positioned error.                                                                             |
+| `deep_block_nesting_does_not_overflow_the_stack`            | 500k nested block sequences on one line fall back to serde's error instead of building a huge tree.                                                                 |
+| `scalars_serde_reads_as_strings_do_not_hide_the_real_error` | `password: 12345` is valid to serde; the real error in a later node is still the one reported.                                                                      |
+
+## `crates/kaanal-core/tests/schema.rs` — the published schema
+
+| Test                                          | What it proves                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `committed_schema_matches_the_types`          | `kaanal.schema.json` equals `config_schema()` as JSON values; `KAANAL_BLESS=1` rewrites it. |
+| `shipped_configs_validate_against_the_schema` | Every `examples/*/kaanal.yaml` and the server fixture validate against the schema.          |
+| `every_schema_field_has_a_description`        | Every property in the schema has a non-empty description (a doc comment).                   |
+| `inert_fields_say_they_have_no_effect_yet`    | The accepted-but-unused fields (`pool`, `ttl`, `users`, ...) say "no effect yet".           |
 
 ## `crates/kaanal-core/tests/presets.rs` — flavor presets
 
@@ -166,6 +192,7 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 
 | Test                                                     | What it proves                                                                                                                                                                       |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `load_errors_carry_their_yaml_place`                     | A bad spec path is placed at `nodes.app.spec`; a static route with no gateway is placed at its `routes:` key.                                                                        |
 | `fixture_config_is_valid`                                | The shared fixture passes `check`.                                                                                                                                                   |
 | `missing_spec_file_is_reported_with_path`                | A missing spec file errors, naming the file path.                                                                                                                                    |
 | `same_route_in_two_services_conflicts`                   | Two services defining `GET /users/{id}` → error naming both.                                                                                                                         |
@@ -243,6 +270,7 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 
 | Test                                                           | What it proves                                                                                                                                                                                                                                    |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_places_errors_in_later_nodes_and_edges`              | `validate` prints `file:line:col` for an unknown field in the second node and for the edge that closes a cycle.                                                                                                                                   |
 | `validate_ok`                                                  | Fixture config → exit 0.                                                                                                                                                                                                                          |
 | `validate_cycle_fails_with_message`                            | A cycle config → exit 1 with "cycle" on stderr.                                                                                                                                                                                                   |
 | `validate_bad_yaml_shows_file_line_col`                        | `kaanal.yaml:2:` prefix in the error (rule R6.1).                                                                                                                                                                                                 |
@@ -258,6 +286,8 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 | `bad_arguments_exit_1_not_2`                                   | Usage errors (`--error 70000`, unknown subcommand) exit 1, not clap's 2 ("not running"); `--help` exits 0.                                                                                                                                        |
 | `spec_text_cannot_drive_the_terminal`                          | An ESC sequence in a spec property name reaches the warning as `?[31m…`, never as a raw escape.                                                                                                                                                   |
 | `sample_project_validates`                                     | `examples/nginx-server/kaanal.yaml` validates with no warnings.                                                                                                                                                                                   |
+| `gatewayless_example_validates`                                | `examples/gatewayless/kaanal.yaml` (service -> postgres database, no gateway) validates with no warnings.                                                                                                                                         |
+| `schema_prints_the_committed_schema`                           | `kaanal schema` exits 0 and prints JSON equal to `kaanal.schema.json`.                                                                                                                                                                            |
 
 ## Unit tests inside source files
 

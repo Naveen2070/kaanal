@@ -1,4 +1,5 @@
 use kaanal_core::Config;
+use kaanal_core::diagnostics::keys;
 use std::path::{Path, PathBuf};
 
 fn fixtures() -> PathBuf {
@@ -6,7 +7,9 @@ fn fixtures() -> PathBuf {
 }
 
 fn check_yaml(yaml: &str) -> Result<(), String> {
-    kaanal_server::check(&Config::from_yaml(yaml).unwrap(), &fixtures()).map(|_| ())
+    kaanal_server::check(&Config::from_yaml(yaml).unwrap(), &fixtures())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[test]
@@ -76,7 +79,7 @@ fn spec_on_non_service_is_rejected() {
     let err =
         Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, spec: openapi.yaml }\n")
             .unwrap_err();
-    assert!(err.msg.contains("unknown field `spec`"), "{err}");
+    assert!(err.msg.contains("unknown field 'spec'"), "{err}");
 }
 
 #[test]
@@ -198,4 +201,26 @@ fn head_override_keeps_the_owning_service() {
     ))
     .unwrap_err();
     assert!(err.contains("static route needs a gateway"), "{err}");
+}
+
+#[test]
+fn load_errors_carry_their_yaml_place() {
+    let src = "version: 1
+nodes:
+  app: { type: service, spec: missing.yaml }
+";
+    let err = kaanal_server::check(&Config::from_yaml(src).unwrap(), &fixtures()).unwrap_err();
+    assert_eq!(err.path, keys(&["nodes", "app", "spec"]));
+    let e = err.in_source(src);
+    assert_eq!((e.line, e.col), (Some(3), Some(25)), "{e}");
+    // Review focus 1: a static route with no gateway is placed at its key.
+    let src = "version: 1
+nodes:
+  app: { type: service, spec: openapi.yaml }
+routes:
+  \"GET /health\": { body: 1 }
+";
+    let err = kaanal_server::check(&Config::from_yaml(src).unwrap(), &fixtures()).unwrap_err();
+    assert!(err.msg.contains("static route needs a gateway"), "{err}");
+    assert_eq!(err.in_source(src).line, Some(5));
 }

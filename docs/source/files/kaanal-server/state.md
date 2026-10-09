@@ -4,7 +4,7 @@
 
 ## What it does
 
-`AppState::build` is the full load pipeline shared by `serve` and `check` (`kaanal validate`): topology → OpenAPI specs → route table → overrides. Every problem is a fatal error with a precise message (file paths included) or, for ignorable schema keywords, a collected warning.
+`AppState::build` is the full load pipeline shared by `serve` and `check` (`kaanal validate`): topology → OpenAPI specs → route table → overrides. Every problem is a fatal `Located` error (a path into `kaanal.yaml` plus a precise message, file paths included) or, for ignorable schema keywords, a collected warning.
 
 ## Types
 
@@ -23,6 +23,10 @@
 4. **Overrides** — each `routes:` entry is validated (`"METHOD /path"` shape, known method, leading slash, status 200–599; 1xx is not a final response) and either **replaces** an existing spec route's status/body (same shape, same param names) or **adds** a static-only route. A `HEAD` override of a path with a `GET` becomes a HEAD route with GET's owner and op (R6.8). Without a gateway, any other `routes:` key no spec owns is an error: "static route needs a gateway or a service that owns it" (R1.23). The per-entry work lives in the private `apply_override`.
 5. **HEAD routes** — after `route_keys` is collected, `add_head_routes` gives every path that has `GET` but no `HEAD` a synthesised `HEAD /p` route: GET's owner, op, status and body (including a `routes:` override), but its own key and its own counter, so HEAD probes never shift GET's chain sequence (rule R6.8). These routes are not listed in `route_keys`.
 6. **Router** — paths go into `matchit::Router` in `BTreeMap` order, so a conflict always names the same path deterministically.
+
+## Error places
+
+`build` returns `Located`: topology errors use `TopologyError::located`; spec file and route-conflict errors use `nodes.<n>.spec`; `routes:` errors (including a static route with no gateway) use `routes.<key>`; the router insert has an empty path (no position).
 
 ## `check_shape`
 
