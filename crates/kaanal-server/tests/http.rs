@@ -606,3 +606,27 @@ async fn gatewayless_requests_enter_at_the_service() {
         "{trace}"
     );
 }
+
+#[tokio::test]
+async fn a_lone_monolith_serves_its_spec() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let cfg = Config::from_yaml(
+        "version: 1
+nodes:
+  app: { type: monolith, spec: openapi.yaml, proc: 1ms, flavor: postgres }
+",
+    )
+    .unwrap();
+    let opts = ServeOpts {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        token: kaanal_server::new_token(),
+    };
+    let s = kaanal_server::serve(&cfg, &dir, opts).await.unwrap();
+    let r = reqwest::get(format!("http://127.0.0.1:{}/users/42", s.addr.port()))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let trace = r.headers()["x-kaanal-trace"].to_str().unwrap().to_string();
+    assert!(trace.starts_with("app.proc="), "{trace}");
+}

@@ -263,6 +263,7 @@ _Embedded UI page:_
 | `ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters` | Structural guards on the page's JS: separate status/error elements, fixed-size counter buckets, node names as `Map` keys. |
 | `config_seed_changes_generated_bodies`                                      | Same `seed:` → same `/users/42` body; a different `seed:` → different data (path `id` still 42).                          |
 | `gatewayless_requests_enter_at_the_service`                                 | No gateway: `GET /users/42` returns 200 and the trace starts at `app.proc=` and includes `db.read=` (no gateway hop).     |
+| `a_lone_monolith_serves_its_spec`                                           | A topology of one `monolith` with a spec and no gateway serves its routes over HTTP and traces its own `proc`.            |
 
 ## `crates/kaanal/tests/cli.rs` — binary end-to-end
 
