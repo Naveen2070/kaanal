@@ -245,7 +245,8 @@ fn int_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> i64 {
         _ if is_id(field) => (1, 99_999),
         _ => (0, 1000),
     };
-    if let Some(m) = int_bound(s, "minimum", true) {
+    let min = int_bound(s, "minimum", true);
+    if let Some(m) = min {
         lo = m;
         if hi < lo {
             hi = lo.saturating_add(1000);
@@ -253,7 +254,15 @@ fn int_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> i64 {
     }
     if let Some(m) = int_bound(s, "maximum", false) {
         hi = m;
-        lo = lo.min(hi);
+        if lo > hi {
+            // A lone maximum below the default range moves the range (as `number_for` does);
+            // an explicit minimum above the maximum is contradictory, so it collapses to it.
+            lo = if min.is_some() {
+                hi
+            } else {
+                hi.saturating_sub(1000)
+            };
+        }
     }
     rng.random_range(lo..=hi)
 }

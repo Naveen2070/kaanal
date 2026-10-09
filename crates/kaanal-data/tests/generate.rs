@@ -329,6 +329,12 @@ fn whole_number_float_and_fractional_integer_bounds_are_honoured() {
         assert_eq!(generate(&excl, None, seed), json!(3));
         assert!(huge_ok.is_valid(&generate(&huge, None, seed)));
     }
+    // A lone maximum below the default range moves the range instead of pinning to it.
+    let lone = json!({ "type": "integer", "maximum": -5 });
+    let seen: std::collections::BTreeSet<i64> = (0..200)
+        .map(|seed| generate(&lone, None, seed).as_i64().unwrap())
+        .collect();
+    assert!(seen.len() > 1 && seen.iter().all(|v| *v <= -5), "{seen:?}");
     // A minimum past i64::MAX saturates instead of being ignored or panicking.
     let past = json!({ "type": "integer", "minimum": u64::MAX });
     assert_eq!(generate(&past, None, 1), json!(i64::MAX));
