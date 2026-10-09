@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 use crate::ApiModel;
-use crate::generate::MAX_DEPTH;
+use crate::generate::{MAX_DEPTH, MAX_MIN_LENGTH, count, merge_all_of};
 
 /// **Private.** Keywords the generator does not honour; generated values may violate them.
 const IGNORED: [&str; 6] = [
@@ -32,15 +32,25 @@ fn unsupported_keywords(schema: &Value, at: &str) -> Vec<String> {
 /// Nesting past the generator's `MAX_DEPTH` warns once: those values are `null` (R6.2).
 fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
     let Value::Object(m) = s else { return };
-    if depth > MAX_DEPTH {
-        // Named by endpoint only (`at` before the first ` .field`), so a branching schema warns once.
-        let endpoint = at.split(" .").next().unwrap_or(at);
-        let msg = format!(
-            "{endpoint}: schema nests deeper than {MAX_DEPTH} levels; deeper values are null"
-        );
+    // Named by endpoint only (`at` before the first ` .field`), so a branching schema warns once.
+    let endpoint = at.split(" .").next().unwrap_or(at);
+    let mut once = |msg: String| {
         if !out.contains(&msg) {
             out.push(msg);
         }
+    };
+    if m.contains_key("allOf") {
+        // Walk what the generator generates: the merged schema, at the same depth.
+        let (merged, conflicts) = merge_all_of(s);
+        if !conflicts.is_empty() {
+            once(format!("{endpoint}: allOf types conflict; first wins"));
+        }
+        return walk(&merged, at, out, depth);
+    }
+    if depth > MAX_DEPTH {
+        once(format!(
+            "{endpoint}: schema nests deeper than {MAX_DEPTH} levels; deeper values are null"
+        ));
         return;
     }
     for k in IGNORED {
@@ -48,19 +58,27 @@ fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
             out.push(format!("{at}: '{k}' is not supported and is ignored"));
         }
     }
-    if let (Some(format), Some(max)) = (
-        m.get("format").and_then(Value::as_str),
-        m.get("maxLength").and_then(Value::as_u64),
-    ) {
+    let (min, max) = (count(s, "minLength", true), count(s, "maxLength", false));
+    if let Some(min) = min.filter(|m| *m > MAX_MIN_LENGTH) {
+        out.push(format!(
+            "{at}: minLength {min} is capped at {MAX_MIN_LENGTH}; values are shorter"
+        ));
+    }
+    if let Some(format) = m.get("format").and_then(Value::as_str) {
         let need = match format {
             "uuid" => 36,
             "date-time" => 20,
             "date" => 10,
             _ => 0,
         };
-        if max < need {
+        if let Some(max) = max.filter(|m| *m < need) {
             out.push(format!(
                 "{at}: maxLength {max} is smaller than a '{format}' value ({need}); the format wins"
+            ));
+        }
+        if let Some(min) = min.filter(|m| need > 0 && *m > need) {
+            out.push(format!(
+                "{at}: minLength {min} is larger than a '{format}' value ({need}); the format wins"
             ));
         }
     }
@@ -74,7 +92,7 @@ fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
             walk(v, at, out, depth + 1);
         }
     }
-    for k in ["allOf", "oneOf", "anyOf"] {
+    for k in ["oneOf", "anyOf"] {
         if let Some(Value::Array(parts)) = m.get(k) {
             for p in parts {
                 walk(p, at, out, depth + 1);
@@ -137,6 +155,37 @@ mod tests {
             w[0].contains("maxLength 10") && w[0].contains("uuid"),
             "{w:?}"
         );
+    }
+
+    #[test]
+    fn flags_min_length_over_the_cap_or_the_format() {
+        let s = json!({ "type": "object", "properties": {
+            "bio": { "type": "string", "minLength": 20_000 },
+            "id": { "type": "string", "format": "uuid", "minLength": 50 },
+            "ok": { "type": "string", "minLength": 10_000 },
+            "mail": { "type": "string", "format": "email", "minLength": 50 }
+        }});
+        let w = unsupported_keywords(&s, "GET /m");
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(
+            w[0].contains(".bio") && w[0].contains("capped at 10000"),
+            "{w:?}"
+        );
+        assert!(
+            w[1].contains(".id") && w[1].contains("minLength 50") && w[1].contains("uuid"),
+            "{w:?}"
+        );
+    }
+
+    #[test]
+    fn allof_type_conflict_warns_once_per_endpoint() {
+        let clash = json!({ "allOf": [ { "type": "string" }, { "type": "integer" } ] });
+        let s = json!({ "type": "object", "properties": { "a": clash, "b": clash } });
+        let w = unsupported_keywords(&s, "GET /c");
+        assert_eq!(w, vec!["GET /c: allOf types conflict; first wins"]);
+        let same =
+            json!({ "allOf": [ { "type": "string" }, { "type": "string", "maxLength": 3 } ] });
+        assert_eq!(unsupported_keywords(&same, "GET /c"), Vec::<String>::new());
     }
 
     #[test]

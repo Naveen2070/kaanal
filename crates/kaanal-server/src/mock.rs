@@ -46,17 +46,8 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
                 .into_response(),
         );
     };
-    // HEAD answers like GET unless the spec defines HEAD itself (hyper strips the body).
-    let route = matched
-        .value
-        .iter()
-        .find(|r| r.method == method)
-        .or_else(|| {
-            (method == "HEAD")
-                .then(|| matched.value.iter().find(|r| r.method == "GET"))
-                .flatten()
-        });
-    let Some(route) = route else {
+    // A HEAD with no spec entry was given its own copy of GET at build time (R6.8); hyper strips the body.
+    let Some(route) = matched.value.iter().find(|r| r.method == method) else {
         let body = Json(json!({ "error": "method not allowed", "path": path }));
         return cors((StatusCode::METHOD_NOT_ALLOWED, body).into_response());
     };
@@ -129,7 +120,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let nodes = touched_nodes(&outcome, failed.as_deref(), &st.topo);
     send_event(&st, method, path, status, started, nodes, failed);
 
-    with_cors(resp)
+    cors(resp)
 }
 
 /// **Private.** The `X-Kaanal-Trace` value: comma-separated hops with one decimal

@@ -90,6 +90,11 @@ fn huge_durations_are_rejected_with_a_position() {
     assert!(Config::from_yaml(yaml).is_err());
     let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: 1h }\n";
     assert!(Config::from_yaml(yaml).is_ok());
+    // p50 above p99 would become an uncapped Fixed(p50); equal is fine.
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: { p50: 100h, p99: 1ms } }\n";
+    assert!(Config::from_yaml(yaml).is_err());
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: { p50: 1ms, p99: 1ms } }\n";
+    assert!(Config::from_yaml(yaml).is_ok());
 }
 
 #[test]

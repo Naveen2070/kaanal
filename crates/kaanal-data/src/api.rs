@@ -65,9 +65,12 @@ impl ApiModel {
             if !path.starts_with('/') {
                 return Err(format!("path '{path}' must start with '/'"));
             }
+            let item_ptr = format!("/paths/{}", path.replace('~', "~0").replace('/', "~1"));
+            // A path-item `$ref` is followed (external ones fail), never dropped (R6.10e).
+            let item = deref(item, &doc, &item_ptr)?;
             for m in METHODS {
                 let Some(op) = item.get(m) else { continue };
-                let ptr = format!("/paths/{}/{m}", path.replace('~', "~0").replace('/', "~1"));
+                let ptr = format!("{item_ptr}/{m}");
                 let (status, schema) = pick_response(op, &doc, &ptr)?;
                 endpoints.push(Endpoint {
                     method: m.to_uppercase(),
@@ -100,10 +103,7 @@ fn pick_response(op: &Value, doc: &Value, ptr: &str) -> Result<(u16, Option<Valu
     let Some(&(status, resp)) = codes.first() else {
         return Ok((200, None));
     };
-    let resp = match resp.get("$ref").and_then(Value::as_str) {
-        Some(r) => resolve_ref(r, doc, ptr)?,
-        None => resp,
-    };
+    let resp = deref(resp, doc, ptr)?;
     let schema = match resp.pointer("/content/application~1json/schema") {
         Some(s) => {
             let mut budget = MAX_REF_EXPANSIONS;
@@ -155,6 +155,20 @@ fn inline<'d>(
         )),
         other => Ok(other.clone()),
     }
+}
+
+/// **Private.** Follows a `$ref` chain (`A -> B -> target`) to a value that is not a ref.
+/// A ref seen twice is a cycle and fails, so `A -> B -> A` cannot hang (R6.10e).
+fn deref<'d>(mut v: &'d Value, doc: &'d Value, ptr: &str) -> Result<&'d Value, String> {
+    let mut seen: Vec<&str> = Vec::new();
+    while let Some(r) = v.get("$ref").and_then(Value::as_str) {
+        if seen.contains(&r) {
+            return Err(format!("{ptr}: recursive $ref '{r}' is not supported"));
+        }
+        seen.push(r);
+        v = resolve_ref(r, doc, ptr)?;
+    }
+    Ok(v)
 }
 
 /// **Private.** Resolves a local (`#/...`) JSON-pointer ref; external refs are rejected.

@@ -25,9 +25,6 @@ const MAX_SERVICE: Duration = Duration::from_hours(10);
 const MIN_RATE_PER_S: f64 = 1e-6;
 /// **Private.** Fastest stream: a 1 µs mean gap. Above ~1e9 the gap rounds to 0 ns.
 const MAX_RATE_PER_S: f64 = 1e6;
-/// **Private.** Largest `latency_add` accepted in `chaos` (same 1 h cap as config durations).
-/// With the 2 M arrival cap this keeps the virtual clock far inside `u64` nanoseconds.
-const MAX_LATENCY_ADD: Duration = Duration::from_hours(1);
 /// **Private.** Longest simulated time; keeps the virtual clock far inside `u64` nanoseconds.
 const MAX_SIM_DURATION: Duration = Duration::from_hours(365 * 24);
 
@@ -105,13 +102,16 @@ pub struct NodeStats {
 /// Returns a message for: no streams; a rate that is not finite or outside
 /// 1e-6..=1e6 per second; an `entry` that is not a service node; a zero `duration`,
 /// `warmup ≥ duration`, or a duration over 365 days; duplicate `endpoint_key`s; or more
-/// than 2 000 000 expected arrivals; a chaos `latency_add` over 1 h; or a node or edge
+/// than 2 000 000 expected arrivals; a chaos entry that [`kaanal_core::NodeChaos::validate`] rejects
+/// (e.g. `latency_add` over 5 min); or a node or edge
 /// latency that can sample over 10 h (e.g. a config with `p50` above `p99`, which core
 /// turns into a fixed `p50` without the 1 h cap, or a hand-edited `Topology`).
+/// A run whose virtual clock would pass `u64::MAX` ns (about 584 years, e.g. 2M requests of
+/// 9 h each through one slot) is also an error, never a silently wrong report.
 /// An overloaded system (ρ ≥ 1) is not an error.
 pub fn run(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<SimReport, String> {
     validate(topo, chaos, cfg)?;
-    Ok(engine::simulate(topo, chaos, cfg))
+    engine::simulate(topo, chaos, cfg)
 }
 
 /// **Private.** Largest value `d` can sample, in seconds (NaN if its parameters are NaN).
@@ -159,16 +159,15 @@ fn validate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<(), 
             ));
         }
     }
+    // The same limits live mode enforces (R6.9); the 5 min latency cap, with the 2 M arrival
+    // cap, keeps the virtual clock far inside `u64` nanoseconds.
     // min(): a HashMap has no order, and the error must name the same node every run.
-    if let Some(id) = chaos
+    if let Some((id, e)) = chaos
         .iter()
-        .filter(|(_, c)| c.latency_add > MAX_LATENCY_ADD)
-        .map(|(id, _)| id)
+        .filter_map(|(id, c)| c.validate().err().map(|e| (*id, e)))
         .min()
     {
-        return Err(format!(
-            "chaos on node {id}: latency_add must be at most 1h"
-        ));
+        return Err(format!("chaos on node {id}: {e}"));
     }
     let mut expected = 0.0;
     for (i, s) in cfg.streams.iter().enumerate() {

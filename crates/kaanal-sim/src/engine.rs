@@ -2,6 +2,7 @@
 //! virtual clock in integer nanoseconds. Service times come from `execute()`; this
 //! module only adds FIFO queueing at nodes with `concurrency`.
 
+use std::cell::Cell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::num::NonZeroU32;
@@ -100,6 +101,8 @@ struct Sim<'a> {
     warmup: u64,
     /// Arrivals stop here (ns).
     end: u64,
+    /// Set when an event time would pass `u64::MAX` ns; the run is then abandoned.
+    overflow: Cell<bool>,
 }
 
 /// **Private.** Duration → virtual nanoseconds. Validation (duration ≤ 365 days, every
@@ -109,16 +112,24 @@ fn nanos(d: Duration) -> u64 {
 }
 
 impl Sim<'_> {
-    /// **Private.** `now + d`, saturating. The expected worst accepted run reaches ~78% of
-    /// `u64::MAX` (2M requests of 2 h each through one slot), so this never triggers today; it keeps a
-    /// later cap increase from wrapping the clock and corrupting the heap order.
+    /// **Private.** `now + d`. On overflow it flags the run as failed (and returns `u64::MAX`)
+    /// instead of letting the clock pin, which would silently collapse `(time, seq)` ordering.
+    /// Validation bounds arrivals but not arrivals × service time: 2M requests of 9 h through
+    /// one slot passes `validate` and overflows here.
     fn after(&self, d: u64) -> u64 {
-        self.now.saturating_add(d)
+        self.now.checked_add(d).unwrap_or_else(|| {
+            self.overflow.set(true);
+            u64::MAX
+        })
     }
 }
 
 /// **Private.** Runs a validated config until the event queue drains.
-pub(crate) fn simulate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> SimReport {
+pub(crate) fn simulate(
+    topo: &Topology,
+    chaos: &ChaosState,
+    cfg: &SimConfig,
+) -> Result<SimReport, String> {
     let mut sim = Sim {
         topo,
         chaos,
@@ -156,6 +167,7 @@ pub(crate) fn simulate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> 
             .collect(),
         warmup: nanos(cfg.warmup),
         end: nanos(cfg.duration),
+        overflow: Cell::new(false),
     };
     for s in 0..cfg.streams.len() {
         sim.schedule_arrival(s);
@@ -166,8 +178,11 @@ pub(crate) fn simulate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> 
             Event::Arrival(s) => sim.arrive(s),
             Event::HopDone(r) => sim.hop_done(r),
         }
+        if sim.overflow.get() {
+            return Err("simulated clock overflow (about 584 years): the workload queues for too long, lower the rate or the service times".into());
+        }
     }
-    sim.report()
+    Ok(sim.report())
 }
 
 impl Sim<'_> {

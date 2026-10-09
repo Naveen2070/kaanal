@@ -27,9 +27,6 @@ use crate::state::AppState;
 /// **Private.** Uniform JSON error shape returned by handlers: `(status, {"error": msg})`.
 type Reject = (StatusCode, Json<Value>);
 
-/// **Private.** Longest extra latency a chaos setting may add. A typo like 1e12 would otherwise hang every request.
-const MAX_LATENCY_MS: u64 = 300_000;
-
 // limitation: error messages echo the node name from the URL path (`unknown node '...'`) unsanitized.
 // It is JSON-encoded, so the browser UI is safe, and the CLI replaces control characters before printing.
 // Other clients that print it to a terminal must do the same.
@@ -181,8 +178,9 @@ pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
 /// `PUT /__kaanal/chaos/{node}` — merges a [`ChaosPatch`] into the node's settings
 /// (omitted fields keep their values) and returns the merged state.
 ///
-/// Validates ranges (`error_rate` 0–1, `error_status` 500–504, `latency_ms` ≤
-/// [`MAX_LATENCY_MS`]); unknown node → 404, bad body → 4xx from the extractor.
+/// The merged result is checked by [`NodeChaos::validate`] (`error_rate` 0–1, `error_status`
+/// 500–504, `latency_ms` ≤ 300 000) before it is stored; a bad patch → 400 and nothing
+/// changes. Unknown node → 404, bad body → 4xx from the extractor.
 ///
 /// # Errors
 /// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
@@ -196,26 +194,9 @@ pub async fn set_chaos(
         .id(&node)
         .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))?;
     let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    if p.error_rate.is_some_and(|r| !(0.0..=1.0).contains(&r)) {
-        return Err(reject(
-            StatusCode::BAD_REQUEST,
-            "error_rate must be between 0 and 1",
-        ));
-    }
-    if p.error_status.is_some_and(|s| !(500..=504).contains(&s)) {
-        return Err(reject(
-            StatusCode::BAD_REQUEST,
-            "error_status must be 500-504",
-        ));
-    }
-    if p.latency_ms.is_some_and(|ms| ms > MAX_LATENCY_MS) {
-        return Err(reject(
-            StatusCode::BAD_REQUEST,
-            &format!("latency_ms must be at most {MAX_LATENCY_MS}"),
-        ));
-    }
     let mut chaos = st.chaos.write().expect("chaos lock poisoned");
-    let c = chaos.entry(id).or_default();
+    // Merge into a copy and validate it, so a bad patch changes nothing (limits live in core, R6.9).
+    let mut c = chaos.get(&id).cloned().unwrap_or_default();
     if let Some(ms) = p.latency_ms {
         c.latency_add = Duration::from_millis(ms);
     }
@@ -228,7 +209,11 @@ pub async fn set_chaos(
     if let Some(d) = p.down {
         c.down = d;
     }
-    Ok(Json(json!(ChaosView::from(&*c))))
+    c.validate()
+        .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
+    let view = json!(ChaosView::from(&c));
+    chaos.insert(id, c);
+    Ok(Json(view))
 }
 
 /// `DELETE /__kaanal/chaos/{node}` — removes one node's chaos (204).

@@ -8,10 +8,13 @@ use std::time::Duration;
 
 use crate::topology::NodeId;
 
+/// Longest extra latency chaos may add to a node (5 min). A typo like 1e12 ms would
+/// otherwise hang every request (live) or overflow the virtual clock (simulator).
+pub const MAX_LATENCY_ADD: Duration = Duration::from_secs(300);
+
 /// Chaos settings for one node.
 ///
-/// The control API validates ranges before anything lands here
-/// (`error_rate` within 0.0–1.0, `error_status` within 500–504);
+/// Every driver checks [`NodeChaos::validate`] before anything lands here (rule R6.9);
 /// the executor trusts the values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeChaos {
@@ -35,6 +38,30 @@ impl Default for NodeChaos {
             error_status: 503,
             down: false,
         }
+    }
+}
+
+impl NodeChaos {
+    /// The one set of chaos limits, shared by the control API and the simulator (rule R6.9):
+    /// `latency_add` at most [`MAX_LATENCY_ADD`], `error_rate` within 0..=1, `error_status`
+    /// within 500–504 (4xx is for pins and cycle states, not random chaos).
+    ///
+    /// # Errors
+    /// A message naming the first field out of range.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.latency_add > MAX_LATENCY_ADD {
+            return Err(format!(
+                "latency_add must be at most {} ms (5 min)",
+                MAX_LATENCY_ADD.as_millis()
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.error_rate) {
+            return Err("error_rate must be between 0 and 1".into());
+        }
+        if !(500..=504).contains(&self.error_status) {
+            return Err("error_status must be 500-504".into());
+        }
+        Ok(())
     }
 }
 

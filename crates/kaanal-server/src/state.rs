@@ -17,6 +17,7 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 /// Where a route's response body comes from.
+#[derive(Clone)]
 pub enum Body {
     /// Generated from an `OpenAPI` response schema (`None` = empty body).
     Generated {
@@ -70,7 +71,7 @@ pub struct AppState {
     pub topo: Topology,
     /// Path router: each path maps to its method routes.
     pub paths: matchit::Router<Vec<Route>>,
-    /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status`.
+    /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status` (synthesised HEAD routes excluded).
     pub route_keys: Vec<String>,
     /// Live chaos settings; written by the control API, read (briefly) per request.
     pub chaos: RwLock<ChaosState>,
@@ -118,6 +119,29 @@ fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), S
         None => {
             shapes.insert(shape, path.to_string());
             Ok(())
+        }
+    }
+}
+
+/// **Private.** R6.8: a path with GET but no HEAD gets a `HEAD /p` route that answers like
+/// GET (owner, op, status, body, `routes:` override) under its own key and counter, so
+/// HEAD probes never shift GET's chain sequence.
+fn add_head_routes(by_path: &mut BTreeMap<String, Vec<Route>>) {
+    for (p, routes) in by_path {
+        if routes.iter().any(|r| r.method == "HEAD") {
+            continue;
+        }
+        if let Some(get) = routes.iter().find(|r| r.method == "GET") {
+            let head = Route {
+                method: "HEAD".into(),
+                key: format!("HEAD {p}"),
+                owner: get.owner,
+                op: get.op,
+                status: get.status,
+                body: get.body.clone(),
+                counter: AtomicU64::new(0),
+            };
+            routes.push(head);
         }
     }
 }
@@ -228,6 +252,8 @@ impl AppState {
         let mut route_keys: Vec<String> =
             by_path.values().flatten().map(|r| r.key.clone()).collect();
         route_keys.sort();
+        // After `route_keys`, so synthesised HEAD routes are not listed (R6.8).
+        add_head_routes(&mut by_path);
         let mut paths = matchit::Router::new();
         for (p, routes) in by_path {
             paths

@@ -44,7 +44,7 @@ Everything lives in `crates/kaanal-core/src/dist.rs` (distributions) and `exec.r
 
 ## Change generated data
 
-Generator: `crates/kaanal-data/src/generate.rs`. Priority order is `example → enum → allOf/oneOf/anyOf → type (format → field-name heuristic → constraints → fallback)`.
+Generator: `crates/kaanal-data/src/generate.rs`. An `allOf` is merged into one schema first (`merge_all_of`); then the priority order is `example → enum → oneOf/anyOf → type (format → field-name heuristic → constraints → fallback)`.
 
 - Field-name heuristics live in `heuristic()`; word lists in `words.rs`.
 - If you add support for a schema keyword that was previously ignored, remove it from `IGNORED` in `warn.rs` — the warning list and the generator must stay in sync.

@@ -158,6 +158,13 @@ impl<'de> Deserialize<'de> for DistConfig {
                     "expected a duration like `5ms`, `{ p50: 1ms, p99: 3ms }` or `{ mean: 5ms }`",
                 )
             })?;
+        if let DistConfig::Pct { p50, p99 } = &c
+            && p50 > p99
+        {
+            return Err(D::Error::custom(
+                "p50 must not be above p99 (it would become an uncapped fixed value)",
+            ));
+        }
         let longest = match &c {
             DistConfig::Fixed(x) => *x,
             DistConfig::Pct { p99, .. } => *p99,

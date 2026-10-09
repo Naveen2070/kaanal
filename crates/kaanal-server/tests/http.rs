@@ -177,6 +177,33 @@ async fn head_answers_like_get_without_a_body() {
 }
 
 #[tokio::test]
+async fn head_has_its_own_counter_and_never_shifts_get() {
+    // R6.8: with 50% db errors, each GET's outcome depends on GET's counter alone.
+    let status = |r: reqwest::Response| r.status().as_u16();
+    let plain = start().await;
+    plain.put_chaos("db", json!({ "error_rate": 0.5 })).await;
+    let mut want = Vec::new();
+    for _ in 0..8 {
+        want.push(status(plain.get("/users/42").await));
+    }
+    let mixed = start().await;
+    mixed.put_chaos("db", json!({ "error_rate": 0.5 })).await;
+    let mut got = Vec::new();
+    for _ in 0..8 {
+        got.push(status(mixed.get("/users/42").await));
+        let head = mixed
+            .client
+            .head(format!("{}/users/42", mixed.base))
+            .send()
+            .await
+            .unwrap();
+        assert!(head.status() == 200 || head.status() == 503);
+    }
+    assert_eq!(got, want, "HEADs between GETs must not change GET outcomes");
+    assert!(want.contains(&200) && want.contains(&503), "{want:?}");
+}
+
+#[tokio::test]
 async fn percent_encoded_path_param_is_decoded_before_use() {
     let s = start().await;
     // %34%32 is "42"
@@ -368,6 +395,11 @@ async fn bad_chaos_values_are_4xx_with_json_errors() {
     assert_eq!(rate.status(), 400);
     let slow = s.put_chaos("db", json!({ "latency_ms": 300_001 })).await;
     assert_eq!(slow.status(), 400);
+    // A rejected patch changes nothing.
+    let all: Value = s.get_authed("/__kaanal/chaos").await.json().await.unwrap();
+    assert_eq!(all, json!({}));
+    let cap = s.put_chaos("db", json!({ "latency_ms": 300_000 })).await;
+    assert_eq!(cap.status(), 200);
 }
 
 #[tokio::test]

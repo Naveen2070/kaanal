@@ -65,7 +65,9 @@ fn same_seed_same_samples() {
 #[test]
 fn stable_hash_is_fixed_and_separates_parts() {
     assert_eq!(stable_hash(&[]), 0xcbf2_9ce4_8422_2325);
-    assert_eq!(stable_hash(&[b"a", b"bc"]), stable_hash(&[b"a", b"bc"]));
+    // Non-empty known answer: pins the byte loop and the separator, not just the offset.
+    // The same vector is in kaanal-data's copy (generate.rs), so the two stay identical (R4.4).
+    assert_eq!(stable_hash(&[b"a", b"bc"]), 0xa0a3_542c_19b9_00ab);
     assert_ne!(stable_hash(&[b"ab", b"c"]), stable_hash(&[b"a", b"bc"]));
 }
 

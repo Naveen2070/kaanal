@@ -221,3 +221,46 @@ fn gateway_down_fails_static_route_with_no_hops() {
     );
     assert_eq!(out.hops, []);
 }
+
+#[test]
+fn chaos_validate_enforces_the_shared_limits() {
+    // R6.9: one set of limits for live mode and the simulator.
+    let ok = |c: NodeChaos| c.validate().is_ok();
+    assert!(ok(NodeChaos::default()));
+    let at_cap = NodeChaos {
+        latency_add: kaanal_core::MAX_LATENCY_ADD,
+        error_rate: 1.0,
+        error_status: 500,
+        down: true,
+    };
+    assert!(ok(at_cap.clone()));
+    assert_eq!(kaanal_core::MAX_LATENCY_ADD, Duration::from_secs(300));
+    for bad in [
+        NodeChaos {
+            latency_add: Duration::from_millis(300_001),
+            ..NodeChaos::default()
+        },
+        NodeChaos {
+            error_rate: 1.5,
+            ..NodeChaos::default()
+        },
+        NodeChaos {
+            error_rate: -0.1,
+            ..NodeChaos::default()
+        },
+        NodeChaos {
+            error_status: 418,
+            ..NodeChaos::default()
+        },
+        NodeChaos {
+            error_status: 505,
+            ..NodeChaos::default()
+        },
+    ] {
+        assert!(!ok(bad.clone()), "{bad:?}");
+    }
+    assert!(ok(NodeChaos {
+        error_status: 504,
+        ..at_cap
+    }));
+}

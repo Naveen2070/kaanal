@@ -377,16 +377,36 @@ fn hand_edited_absurd_service_time_is_rejected_not_a_panic() {
 }
 
 #[test]
+fn clock_overflow_is_an_error_not_a_silently_wrong_report() {
+    // 9 h per request through one slot: 600k arrivals queue up to ~5.4e6 h = 6e2 years > u64 ns.
+    let mut t = topo(QUEUED);
+    let app = t.id("app").unwrap();
+    t.nodes[app].proc = kaanal_core::Dist::Fixed(Duration::from_hours(9));
+    let err = run(&t, &ChaosState::default(), &one_stream(&t, 1000.0, 600)).unwrap_err();
+    assert!(err.contains("clock overflow"), "{err}");
+}
+
+#[test]
 fn absurd_chaos_latency_is_rejected_not_a_panic() {
+    // The live limits (R6.9): latency_add over 5 min, or a non-5xx status, is an error.
     let t = topo(QUEUED);
-    let mut chaos = ChaosState::default();
-    chaos.insert(
-        t.id("app").unwrap(),
-        NodeChaos {
-            latency_add: Duration::from_hours(2),
-            ..NodeChaos::default()
-        },
-    );
-    let err = run(&t, &chaos, &one_stream(&t, 1.0, 10)).unwrap_err();
+    let app = t.id("app").unwrap();
+    let with = |c: NodeChaos| ChaosState::from([(app, c)]);
+    let cap = NodeChaos {
+        latency_add: Duration::from_secs(300),
+        ..NodeChaos::default()
+    };
+    assert!(run(&t, &with(cap.clone()), &one_stream(&t, 1.0, 10)).is_ok());
+    let over = NodeChaos {
+        latency_add: Duration::from_secs(300) + Duration::from_millis(1),
+        ..NodeChaos::default()
+    };
+    let err = run(&t, &with(over), &one_stream(&t, 1.0, 10)).unwrap_err();
     assert!(err.contains("latency_add"), "{err}");
+    let teapot = NodeChaos {
+        error_status: 418,
+        ..cap
+    };
+    let err = run(&t, &with(teapot), &one_stream(&t, 1.0, 10)).unwrap_err();
+    assert!(err.contains("error_status"), "{err}");
 }

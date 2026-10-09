@@ -17,7 +17,7 @@ pub mod dist;
 pub mod exec;
 pub mod topology;
 
-pub use chaos::{ChaosState, NodeChaos};
+pub use chaos::{ChaosState, MAX_LATENCY_ADD, NodeChaos};
 pub use config::{Config, ConfigError, NodeKind};
 pub use dist::Dist;
 pub use exec::{ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, execute};

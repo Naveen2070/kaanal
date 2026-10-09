@@ -141,6 +141,51 @@ fn rejects_ref_expansion_bomb() {
     assert!(err.contains("too many $ref"), "{err}");
 }
 
+const REFS: &str = r##"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /chain:
+    get: { responses: { "200": { $ref: "#/components/responses/A" } } }
+  /alias: { $ref: "#/paths/~1chain" }
+components:
+  responses:
+    A: { $ref: "#/components/responses/B" }
+    B:
+      description: ok
+      content: { application/json: { schema: { type: object, properties: { id: { type: integer } } } } }
+"##;
+
+#[test]
+fn response_ref_chains_are_followed() {
+    let m = ApiModel::from_openapi(REFS).unwrap();
+    let chain = find(&m, "GET", "/chain").schema.as_ref().unwrap();
+    assert_eq!(chain["properties"]["id"]["type"], "integer");
+}
+
+#[test]
+fn response_ref_cycle_fails_instead_of_hanging() {
+    let spec = REFS.replace(
+        "    B:\n      description: ok",
+        "    B: { $ref: \"#/components/responses/A\" }\n    C:\n      description: ok",
+    );
+    let err = ApiModel::from_openapi(&spec).unwrap_err();
+    assert!(err.contains("recursive $ref"), "{err}");
+}
+
+#[test]
+fn path_item_refs_are_followed_or_fail_loudly() {
+    let m = ApiModel::from_openapi(REFS).unwrap();
+    let alias = find(&m, "GET", "/alias");
+    assert_eq!(alias.schema, find(&m, "GET", "/chain").schema);
+    let err =
+        ApiModel::from_openapi(&REFS.replace("#/paths/~1chain", "other.yaml#/x")).unwrap_err();
+    assert!(
+        err.contains("/paths/~1alias") && err.contains("external $ref"),
+        "{err}"
+    );
+}
+
 #[test]
 fn accepts_unquoted_numeric_version() {
     let spec = "openapi: 3.0
