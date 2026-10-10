@@ -1,7 +1,8 @@
 //! NFR-05 measurement: 1M simulated requests. Not a CI test (depends on machine and
 //! profile). Run with `cargo test -p kaanal-sim --release --test bench -- --ignored --nocapture`.
 
-use kaanal_core::{ChaosState, Config, Op, Topology};
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
+use kaanal_core::{ChaosState, Config, Topology};
 use kaanal_sim::{SimConfig, Stream, run};
 use std::time::{Duration, Instant};
 
@@ -15,10 +16,10 @@ fn one_million_requests() {
         .unwrap(),
     )
     .unwrap();
+    let spec = RouteSpec::inferred("GET /users/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
     let cfg = SimConfig {
         streams: vec![Stream {
-            entry: t.id("app").unwrap(),
-            op: Op::Read,
             endpoint_key: "GET /users/{id}".into(),
             rate_per_s: 1_000.0,
         }],
@@ -27,7 +28,7 @@ fn one_million_requests() {
         seed: 1,
     };
     let start = Instant::now();
-    let rep = run(&t, &ChaosState::default(), &cfg).unwrap();
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
     let took = start.elapsed();
     println!(
         "NFR-05: {} simulated requests in {took:.2?}",

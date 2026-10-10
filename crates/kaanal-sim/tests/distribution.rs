@@ -3,9 +3,12 @@
 //! Today the simulator copies `execute()`'s hops, so this pins the RNG stream and the
 //! per-hop numbering, not queueing. It keeps its meaning once the simulator's RNG stream diverges from live's (M3).
 
-use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::{ChainRequest, ChaosState, Config, Op, Topology, execute};
+mod common;
+
+use common::{CHAIN_ROUTES, CHAINS, compiled};
+use kaanal_core::{ChainRequest, ChaosState, Config, Hop, execute};
 use kaanal_sim::{SimConfig, Stream, run};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -32,6 +35,18 @@ fn ks_d(mut xs: Vec<f64>, mut ys: Vec<f64>) -> f64 {
     gap
 }
 
+/// Durations in ms grouped by `(node, kind)`: shapes vary with cache hits and repeats, so
+/// hop indices do not line up between requests.
+fn by_kind<'a>(hops: impl Iterator<Item = &'a Hop>) -> BTreeMap<(usize, String), Vec<f64>> {
+    let mut out: BTreeMap<(usize, String), Vec<f64>> = BTreeMap::new();
+    for h in hops {
+        out.entry((h.node, format!("{:?}", h.kind)))
+            .or_default()
+            .push(h.dur.as_secs_f64() * 1e3);
+    }
+    out
+}
+
 #[test]
 #[expect(
     clippy::cast_precision_loss,
@@ -39,72 +54,77 @@ fn ks_d(mut xs: Vec<f64>, mut ys: Vec<f64>) -> f64 {
 )]
 fn zero_load_matches_live_distribution() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for p in [
-        "../kaanal-server/tests/fixtures/kaanal.yaml",
-        "../../examples/nginx-server/kaanal.yaml",
-    ] {
-        let cfg = Config::from_yaml(&std::fs::read_to_string(root.join(p)).unwrap()).unwrap();
-        let t = Topology::build(&cfg).unwrap();
+    let app_routes = vec![("GET /users/{id}", "app")];
+    let configs = [
+        (
+            "fixture",
+            std::fs::read_to_string(root.join("../kaanal-server/tests/fixtures/kaanal.yaml"))
+                .unwrap(),
+            app_routes.clone(),
+        ),
+        (
+            "example",
+            std::fs::read_to_string(root.join("../../examples/nginx-server/kaanal.yaml")).unwrap(),
+            app_routes,
+        ),
+        ("chains", CHAINS.to_string(), CHAIN_ROUTES.to_vec()),
+    ];
+    for (p, yaml, routes) in configs {
+        let seed = Config::from_yaml(&yaml).unwrap().seed;
+        let (t, e) = compiled(&yaml, &routes);
         let chaos = ChaosState::default();
         let key = "GET /users/{id}";
         let sc = SimConfig {
             streams: vec![Stream {
-                entry: t.id("app").unwrap(),
-                op: Op::Read,
                 endpoint_key: key.into(),
                 rate_per_s: 1.0,
             }],
             duration: Duration::from_secs(5_000),
             warmup: Duration::ZERO,
-            seed: cfg.seed,
+            seed,
         };
-        let rep = run(&t, &chaos, &sc).unwrap();
-        let eps = compile(
-            &t,
-            &[RouteSpec {
-                key: key.into(),
-                owner: t.id("app").unwrap(),
-                op: Op::Read,
-            }],
-            EndpointsInput::default(),
-        )
-        .unwrap();
+        let rep = run(&t, &e, &chaos, &sc).unwrap();
         let live: Vec<_> = (1_000_000..1_005_000u64)
             .map(|n| {
                 execute(
                     &t,
                     &chaos,
                     &ChainRequest {
-                        endpoint: eps.get(key).unwrap(),
+                        endpoint: e.get(key).unwrap(),
                         n,
-                        seed: cfg.seed,
+                        seed,
                     },
                 )
             })
             .collect();
-        // Without chaos every chain has the same shape, so hop i is the same (node, kind).
-        let hops = live[0].hops.len();
-        for i in 0..hops {
-            let sim_ms: Vec<f64> = rep
-                .requests
+        let sim_ms = by_kind(
+            rep.requests
                 .iter()
-                .map(|r| r.hops[i].0.dur.as_secs_f64() * 1e3)
-                .collect();
-            let live_ms: Vec<f64> = live
-                .iter()
-                .map(|o| o.hops[i].dur.as_secs_f64() * 1e3)
-                .collect();
-            let (n_sim, n_live) = (sim_ms.len() as f64, live_ms.len() as f64);
+                .flat_map(|r| r.hops.iter().map(|(h, _)| h)),
+        );
+        let live_ms = by_kind(live.iter().flat_map(|o| o.hops.iter()));
+        let mut compared = 0;
+        // A kind that is common on one side must exist on the other.
+        for (side, a, b) in [("sim", &sim_ms, &live_ms), ("live", &live_ms, &sim_ms)] {
+            for (k, xs) in a {
+                assert!(
+                    xs.len() < 500 || b.contains_key(k),
+                    "{p}: {k:?} is common in {side} but absent from the other"
+                );
+            }
+        }
+        for (k, xs) in &sim_ms {
+            let Some(ys) = live_ms.get(k) else { continue };
+            if xs.len() < 500 || ys.len() < 500 {
+                continue;
+            }
+            let (n_sim, n_live) = (xs.len() as f64, ys.len() as f64);
             // α = 0.001 critical value for the two-sample KS test.
             let crit = 1.949 * ((n_sim + n_live) / (n_sim * n_live)).sqrt();
-            let hop = &live[0].hops[i];
-            let stat = ks_d(sim_ms, live_ms);
-            assert!(
-                stat < crit,
-                "{p}: hop {i} ({:?} at node {}): D = {stat:.4} ≥ {crit:.4}",
-                hop.kind,
-                hop.node
-            );
+            let stat = ks_d(xs.clone(), ys.clone());
+            assert!(stat < crit, "{p}: {k:?}: D = {stat:.4} ≥ {crit:.4}");
+            compared += 1;
         }
+        assert!(compared > 0, "{p}: nothing was compared");
     }
 }

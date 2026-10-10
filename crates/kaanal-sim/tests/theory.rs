@@ -1,7 +1,8 @@
 //! The simulator against closed-form queueing theory (NFR-11, R7.3). All runs are
 //! seeded, so each test is deterministic; the 5% tolerance checks the model.
 
-use kaanal_core::{ChaosState, Config, HopKind, Op, Topology};
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
+use kaanal_core::{ChaosState, Config, Endpoints, HopKind, Topology};
 use kaanal_sim::{SimConfig, SimReport, Stream, run};
 use std::time::Duration;
 
@@ -20,11 +21,16 @@ fn single(c: u32, proc: &str) -> Topology {
 
 /// Runs one stream at `rate` long enough for ~`requests` reported requests (10% warmup).
 fn sim(t: &Topology, rate: f64, requests: f64) -> SimReport {
+    let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
+    let e = compile(t, &[spec], EndpointsInput::default()).unwrap();
+    sim_with(t, &e, rate, requests)
+}
+
+/// Like [`sim`], for endpoints the caller compiled (`GET /x/{id}` must be one of them).
+fn sim_with(t: &Topology, e: &Endpoints, rate: f64, requests: f64) -> SimReport {
     let duration = requests / rate / 0.9;
     let cfg = SimConfig {
         streams: vec![Stream {
-            entry: t.id("app").unwrap(),
-            op: Op::Read,
             endpoint_key: "GET /x/{id}".into(),
             rate_per_s: rate,
         }],
@@ -32,7 +38,7 @@ fn sim(t: &Topology, rate: f64, requests: f64) -> SimReport {
         warmup: Duration::from_secs_f64(duration * 0.1),
         seed: 7,
     };
-    run(t, &ChaosState::default(), &cfg).unwrap()
+    run(t, e, &ChaosState::default(), &cfg).unwrap()
 }
 
 fn mean_secs(xs: impl Iterator<Item = Duration>) -> f64 {
@@ -145,5 +151,27 @@ fn gatewayless_mm1_matches_theory() {
         got,
         1.0 / (MU - lam),
         "gateway-less M/M/1 sojourn at ρ = 0.5",
+    );
+}
+
+#[test]
+fn two_way_fork_join_matches_nelson_tantawi() {
+    // Every request forks to two identical M/M/1 servers and joins. For K = 2 the mean
+    // response time is exact (Flatto & Hahn 1984; Nelson & Tantawi 1985):
+    // R2 = (12 − ρ) / 8 × 1 / (μ − λ). Same 5% tolerance as the other theory tests (R7.5);
+    // 400k requests because the max of two queues varies more than one queue at ρ = 0.5.
+    let src = "version: 1\nnodes:\n  app: { type: service }\n  s1: { type: service, concurrency: 1, proc: { mean: 10ms } }\n  s2: { type: service, concurrency: 1, proc: { mean: 10ms } }\nedges:\n  - { from: app, to: s1 }\n  - { from: app, to: s2 }\nendpoints:\n  \"GET /x/{id}\": { chain: [ { parallel: [ s1, s2 ] } ] }\n";
+    let cfg = Config::from_yaml(src).unwrap();
+    let t = Topology::build(&cfg).unwrap();
+    let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::inline(&cfg)).unwrap();
+    let lam = 50.0;
+    let rep = sim_with(&t, &e, lam, 400_000.0);
+    let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+    let rho = lam / MU;
+    assert_close(
+        got,
+        (12.0 - rho) / 8.0 / (MU - lam),
+        "2-way fork-join sojourn at ρ = 0.5",
     );
 }

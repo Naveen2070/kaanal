@@ -1,9 +1,10 @@
 //! Discrete-event simulator: the second driver of the core cost model (rule R2.5).
 //!
 //! [`run`] feeds open Poisson arrival streams through a [`Topology`] on a virtual
-//! clock. Every service time comes from [`kaanal_core::execute`], exactly as in live
-//! mode; this crate only adds FIFO queueing at nodes that set `concurrency`. It has
-//! no timing model of its own, so live mode and the simulator cannot drift apart.
+//! clock. Every service time comes from [`kaanal_core::execute`]'s plan, exactly as in
+//! live mode; this crate replays it with fork/join and FIFO queueing at nodes that set
+//! `concurrency`. It has no timing model of its own, so live mode and the simulator
+//! cannot drift apart.
 
 #![warn(missing_docs)]
 
@@ -12,14 +13,13 @@ mod engine;
 use std::sync::Arc;
 use std::time::Duration;
 
-use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::{ChainResult, ChaosState, Dist, Endpoint, Hop, NodeId, NodeKind, Op, Topology};
+use kaanal_core::{ChainResult, ChaosState, Dist, Endpoint, Endpoints, Hop, Topology};
 
-/// **Private.** Most expected arrivals per run. Every record is kept in memory (a few
-/// hundred bytes plus ~90 bytes per hop), so this bounds a typical run (5 hops) to about
-/// 1 GB. It bounds arrivals, not memory: a service with 20 databases has ~43 hops per
-/// request and would need several GB at the cap (M1: bound arrivals × hops).
-const MAX_ARRIVALS: f64 = 2_000_000.0;
+/// **Private.** Most hop records one run may produce (R6.13): expected reported (post-warmup) arrivals × the most
+/// hops each stream's chain can take (`Seq::hops`, repeats included). A record costs about
+/// 100 bytes per hop plus a few hundred per request, so the cap bounds a run near 2–3 GB.
+/// Start value; tune once measured.
+const MAX_HOP_RECORDS: f64 = 20_000_000.0;
 /// **Private.** Largest single service/net time a topology may sample (the config's 1 h
 /// cap times the 10× exponential/lognormal tail cap).
 const MAX_SERVICE: Duration = Duration::from_hours(10);
@@ -30,15 +30,11 @@ const MAX_RATE_PER_S: f64 = 1e6;
 /// **Private.** Longest simulated time; keeps the virtual clock far inside `u64` nanoseconds.
 const MAX_SIM_DURATION: Duration = Duration::from_hours(365 * 24);
 
-/// One open Poisson arrival stream: one endpoint receiving `rate_per_s` requests per second.
+/// One open Poisson stream on a compiled endpoint: its key (`"METHOD /path"`, as live mode)
+/// and its rate. Any compiled endpoint can be a stream, static ones included.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stream {
-    /// The service or monolith that owns the route (the live router's `route.owner`); passed to
-    /// `execute` as `Some(entry)`.
-    pub entry: NodeId,
-    /// The database operation this endpoint performs.
-    pub op: Op,
-    /// Live format `"METHOD /path-template"`, e.g. `"GET /users/{id}"`: part of the seed.
+    /// The endpoint's key, e.g. `"GET /users/{id}"`: part of the seed.
     pub endpoint_key: String,
     /// Mean arrivals per second (exponential gaps).
     pub rate_per_s: f64,
@@ -79,14 +75,21 @@ pub struct RequestRecord {
     pub latency: Duration,
     /// Ok, or where the chain failed (from `execute`).
     pub result: ChainResult,
-    /// `execute`'s hops in order, each with the queue wait before it started.
+    /// The hops that ran, in plan order, each with the queue wait before it: `start` is the
+    /// actual offset from arrival; a hop whose branch a failure cancelled is cut at the
+    /// failure instant (one that had not started is absent). Equals `execute()`'s hops at
+    /// zero load, with one documented exception: when two failing branches tie at the same
+    /// instant through zero-duration hops, the simulator may pick a different winner than
+    /// live (see `engine.md`, D17 limit).
     pub hops: Vec<(Hop, Duration)>,
 }
 
 /// Per-node statistics over the reported requests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeStats {
-    /// Own hops (proc, op, cache lookup) of reported requests at this node.
+    /// Own hops (not `Net`) of reported requests that started at this node, including a
+    /// cancelled hop that began at the failure instant (it held its slot) but is absent from
+    /// the record.
     pub completed: u64,
     /// Mean queue wait before those hops.
     pub mean_wait: Duration,
@@ -102,18 +105,24 @@ pub struct NodeStats {
 ///
 /// # Errors
 /// Returns a message for: no streams; a rate that is not finite or outside
-/// 1e-6..=1e6 per second; an `entry` that is not a service or monolith node; a zero `duration`,
+/// 1e-6..=1e6 per second; an `endpoint_key` that is not a compiled endpoint; a zero `duration`,
 /// `warmup ≥ duration`, or a duration over 365 days; duplicate `endpoint_key`s; or more
-/// than 2 000 000 expected arrivals; a chaos entry that [`kaanal_core::NodeChaos::validate`] rejects
+/// than 20 000 000 expected hop records (arrivals × the most hops of each stream's chain);
+/// a chaos entry that [`kaanal_core::NodeChaos::validate`] rejects
 /// (e.g. `latency_add` over 5 min); or a node or edge
 /// latency that can sample over 10 h (e.g. a config with `p50` above `p99`, which core
 /// turns into a fixed `p50` without the 1 h cap, or a hand-edited `Topology`).
 /// A run whose virtual clock would pass `u64::MAX` ns (about 584 years, e.g. 2M requests of
 /// 9 h each through one slot) is also an error, never a silently wrong report.
 /// An overloaded system (ρ ≥ 1) is not an error.
-pub fn run(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<SimReport, String> {
-    let endpoints = validate(topo, chaos, cfg)?;
-    engine::simulate(topo, &endpoints, chaos, cfg)
+pub fn run(
+    topo: &Topology,
+    endpoints: &Endpoints,
+    chaos: &ChaosState,
+    cfg: &SimConfig,
+) -> Result<SimReport, String> {
+    let streams = validate(topo, endpoints, chaos, cfg)?;
+    engine::simulate(topo, &streams, chaos, cfg).map(|(report, _)| report)
 }
 
 /// **Private.** Largest value `d` can sample, in seconds (NaN if its parameters are NaN).
@@ -128,6 +137,7 @@ fn worst_case_secs(d: &Dist) -> f64 {
 /// **Private.** Rejects inputs the engine cannot run safely (see [`run`]).
 fn validate(
     topo: &Topology,
+    endpoints: &Endpoints,
     chaos: &ChaosState,
     cfg: &SimConfig,
 ) -> Result<Vec<Arc<Endpoint>>, String> {
@@ -180,7 +190,8 @@ fn validate(
     {
         return Err(format!("chaos on node {id}: {e}"));
     }
-    let mut expected = 0.0;
+    let (mut arrivals, mut records) = (0.0, 0.0);
+    let mut out = Vec::with_capacity(cfg.streams.len());
     for (i, s) in cfg.streams.iter().enumerate() {
         if !(MIN_RATE_PER_S..=MAX_RATE_PER_S).contains(&s.rate_per_s) {
             return Err(format!(
@@ -188,16 +199,9 @@ fn validate(
                 s.rate_per_s
             ));
         }
-        match topo.nodes.get(s.entry) {
-            Some(n) if matches!(n.kind, NodeKind::Service | NodeKind::Monolith) => {}
-            Some(n) => {
-                return Err(format!(
-                    "stream {i}: entry '{}' is not a service or monolith node",
-                    n.name
-                ));
-            }
-            None => return Err(format!("stream {i}: entry {} is not a node", s.entry)),
-        }
+        let Some(ep) = endpoints.get(&s.endpoint_key) else {
+            return Err(format!("stream {i}: unknown endpoint '{}'", s.endpoint_key));
+        };
         if cfg.streams[..i]
             .iter()
             .any(|o| o.endpoint_key == s.endpoint_key)
@@ -207,28 +211,21 @@ fn validate(
                 s.endpoint_key
             ));
         }
-        expected += s.rate_per_s * cfg.duration.as_secs_f64();
+        // Only requests arriving after warmup are recorded, so only they count.
+        let a = s.rate_per_s * cfg.duration.saturating_sub(cfg.warmup).as_secs_f64();
+        arrivals += a;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "hop counts are capped at 100 000 (E13)"
+        )]
+        let hops = ep.chain.hops as f64;
+        records += a * hops;
+        out.push(Arc::clone(ep));
     }
-    if expected > MAX_ARRIVALS {
+    if records > MAX_HOP_RECORDS {
         return Err(format!(
-            "workload too large: about {expected:.0} arrivals (max {MAX_ARRIVALS:.0})"
+            "workload too large: about {arrivals:.0} arrivals with up to {records:.0} hops in total (max {MAX_HOP_RECORDS:.0}); lower the rate, the duration or the chain length"
         ));
     }
-    // A2 shim (Task 3 → removed in Task 5): each stream runs its owner's default chain.
-    let routes: Vec<RouteSpec> = cfg
-        .streams
-        .iter()
-        .map(|s| RouteSpec {
-            key: s.endpoint_key.clone(),
-            owner: s.entry,
-            op: s.op,
-        })
-        .collect();
-    let eps = compile(topo, &routes, EndpointsInput::default()).map_err(|e| e.msg)?;
-    // `compile` made one endpoint per stream key, and the keys were checked unique above.
-    Ok(cfg
-        .streams
-        .iter()
-        .map(|s| Arc::clone(eps.get(&s.endpoint_key).expect("compiled above")))
-        .collect())
+    Ok(out)
 }

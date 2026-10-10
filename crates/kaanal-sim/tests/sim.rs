@@ -1,5 +1,9 @@
-use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::{ChainRequest, ChaosState, Config, HopKind, NodeChaos, Op, Topology, execute};
+mod common;
+
+use common::{CHAIN_ROUTES, CHAINS, compiled};
+use kaanal_core::{
+    ChainRequest, ChainResult, ChaosState, Config, Endpoints, HopKind, NodeChaos, Topology, execute,
+};
 use kaanal_sim::{SimConfig, Stream, run};
 use std::path::Path;
 use std::time::Duration;
@@ -8,21 +12,20 @@ use std::time::Duration;
 const QUEUED: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, concurrency: 1, proc: { mean: 10ms } }\nedges:\n  - { from: gw, to: app }\n";
 
 /// The spec routes owned by `app` in the fixture and the sample (same openapi.yaml).
-const ENDPOINTS: [(&str, &str); 3] = [
-    ("GET", "/users"),
-    ("GET", "/users/{id}"),
-    ("POST", "/orders"),
+const APP_ROUTES: [(&str, &str); 3] = [
+    ("GET /users", "app"),
+    ("GET /users/{id}", "app"),
+    ("POST /orders", "app"),
 ];
 
-fn topo(yaml: &str) -> Topology {
-    Topology::build(&Config::from_yaml(yaml).unwrap()).unwrap()
+/// Compiles `GET /users/{id}` on `app` for `yaml`.
+fn topo(yaml: &str) -> (Topology, Endpoints) {
+    compiled(yaml, &[("GET /users/{id}", "app")])
 }
 
-fn one_stream(t: &Topology, rate: f64, secs: u64) -> SimConfig {
+fn one_stream(rate: f64, secs: u64) -> SimConfig {
     SimConfig {
         streams: vec![Stream {
-            entry: t.id("app").unwrap(),
-            op: Op::Read,
             endpoint_key: "GET /users/{id}".into(),
             rate_per_s: rate,
         }],
@@ -40,72 +43,77 @@ fn nanos(d: Duration) -> i128 {
 /// postgres preset.
 const GATEWAYLESS: &str = "version: 1\nseed: 7\nnodes:\n  app: { type: service, proc: { p50: 5ms, p99: 20ms } }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }\n";
 
-/// The Phase One fixture, the shipped sample and a gateway-less topology, as (name, YAML).
-fn sample_configs() -> Vec<(&'static str, String)> {
+/// (name, YAML, the `(key, owner)` routes it streams).
+type Sample = (&'static str, String, Vec<(&'static str, &'static str)>);
+
+/// The Phase One fixture, the shipped sample, a gateway-less topology and the A2 chains.
+fn sample_configs() -> Vec<Sample> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    [
-        ("fixture", "../kaanal-server/tests/fixtures/kaanal.yaml"),
-        ("example", "../../examples/nginx-server/kaanal.yaml"),
+    let file = |p: &str| std::fs::read_to_string(root.join(p)).unwrap();
+    vec![
+        (
+            "fixture",
+            file("../kaanal-server/tests/fixtures/kaanal.yaml"),
+            APP_ROUTES.to_vec(),
+        ),
+        (
+            "example",
+            file("../../examples/nginx-server/kaanal.yaml"),
+            APP_ROUTES.to_vec(),
+        ),
+        ("gatewayless", GATEWAYLESS.to_string(), APP_ROUTES.to_vec()),
+        ("chains", CHAINS.to_string(), CHAIN_ROUTES.to_vec()),
     ]
-    .into_iter()
-    .map(|(name, p)| (name, std::fs::read_to_string(root.join(p)).unwrap()))
-    .chain([("gatewayless", GATEWAYLESS.to_string())])
-    .collect()
 }
 
 #[test]
 fn zero_load_equals_live_exactly() {
-    for (name, yaml) in sample_configs() {
-        let cfg = Config::from_yaml(&yaml).unwrap();
-        let t = Topology::build(&cfg).unwrap();
-        let mut flaky_db = ChaosState::default();
-        flaky_db.insert(
-            t.id("db").unwrap(),
-            NodeChaos {
-                error_rate: 0.5,
-                ..NodeChaos::default()
-            },
-        );
-        for chaos in [ChaosState::default(), flaky_db] {
+    for (name, yaml, routes) in sample_configs() {
+        let seed = Config::from_yaml(&yaml).unwrap().seed;
+        let (t, e) = compiled(&yaml, &routes);
+        // Failing databases, external APIs and caches (a failing cache is a miss, E9).
+        let flaky: ChaosState = ["db", "pay", "c"]
+            .iter()
+            .filter_map(|n| t.id(n))
+            .map(|id| {
+                (
+                    id,
+                    NodeChaos {
+                        error_rate: 0.5,
+                        ..NodeChaos::default()
+                    },
+                )
+            })
+            .collect();
+        for chaos in [ChaosState::default(), flaky] {
             let sc = SimConfig {
-                streams: ENDPOINTS
+                streams: routes
                     .iter()
-                    .map(|(m, p)| Stream {
-                        entry: t.id("app").unwrap(),
-                        op: Op::infer(m, p),
-                        endpoint_key: format!("{m} {p}"),
+                    .map(|(k, _)| Stream {
+                        endpoint_key: (*k).to_string(),
                         rate_per_s: 1.0,
                     })
                     .collect(),
                 duration: Duration::from_secs(2_000),
                 warmup: Duration::ZERO,
-                seed: cfg.seed,
+                seed,
             };
-            let rep = run(&t, &chaos, &sc).unwrap();
-            let routes: Vec<RouteSpec> = sc
-                .streams
-                .iter()
-                .map(|s| RouteSpec {
-                    key: s.endpoint_key.clone(),
-                    owner: s.entry,
-                    op: s.op,
-                })
-                .collect();
-            let eps = compile(&t, &routes, EndpointsInput::default()).unwrap();
+            let rep = run(&t, &e, &chaos, &sc).unwrap();
             assert!(rep.requests.len() > 5_000, "{name}: {}", rep.requests.len());
+            let mut cut = 0;
             for r in &rep.requests {
-                let s = &sc.streams[r.stream];
+                let key = &sc.streams[r.stream].endpoint_key;
                 let live = execute(
                     &t,
                     &chaos,
                     &ChainRequest {
-                        endpoint: eps.get(&s.endpoint_key).unwrap(),
+                        endpoint: e.get(key).unwrap(),
                         n: r.n,
-                        seed: cfg.seed,
+                        seed,
                     },
                 );
+                let at = format!("{name} {key} n={}", r.n);
                 let hops: Vec<_> = r.hops.iter().map(|(h, _)| h.clone()).collect();
-                let at = format!("{name} {} n={}", s.endpoint_key, r.n);
                 assert_eq!(hops, live.hops, "{at}");
                 assert!(
                     r.hops.iter().all(|(_, w)| w.is_zero()),
@@ -113,6 +121,16 @@ fn zero_load_equals_live_exactly() {
                 );
                 assert_eq!(r.latency, live.total(), "{at}");
                 assert_eq!(r.result, live.result, "{at}");
+                cut += usize::from(
+                    live.fail
+                        .is_some_and(|f| !live.plan.cancelled_by(f).is_empty()),
+                );
+            }
+            if name == "chains" && !chaos.is_empty() {
+                assert!(
+                    cut > 100,
+                    "failures inside parallel must be exercised: {cut}"
+                );
             }
         }
     }
@@ -142,8 +160,8 @@ fn assert_lindley(t: &Topology, rep: &kaanal_sim::SimReport) {
 
 #[test]
 fn engine_matches_lindley_recursion() {
-    let t = topo(QUEUED);
-    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 80.0, 125)).unwrap();
+    let (t, e) = topo(QUEUED);
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(80.0, 125)).unwrap();
     assert_lindley(&t, &rep);
     assert!(rep.requests.len() > 9_000, "{}", rep.requests.len());
     let queued = rep
@@ -158,8 +176,8 @@ fn engine_matches_lindley_recursion() {
 fn simultaneous_events_keep_fifo_order() {
     // 1e6 req/s: the mean gap is 1 µs, so ~0.05% of gaps round to 0 ns and arrivals tie with
     // hop ends and with each other's timestamps. This pins FIFO queue order under equal times. The 800 ns fixed service keeps the queue busy (ρ = 0.8).
-    let t = topo(&QUEUED.replace("{ mean: 10ms }", "800ns"));
-    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 1e6, 1)).unwrap();
+    let (t, e) = topo(&QUEUED.replace("{ mean: 10ms }", "800ns"));
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(1e6, 1)).unwrap();
     let ties = rep
         .requests
         .windows(2)
@@ -173,17 +191,23 @@ fn simultaneous_events_keep_fifo_order() {
 fn same_seed_same_report() {
     // Determinism only. FIFO queue order under equal timestamps is pinned by
     // `simultaneous_events_keep_fifo_order`; the (time, seq) rule itself is reasoned, not tested.
-    let t = topo(&QUEUED.replace("{ mean: 10ms }", "10ms"));
-    let cfg = one_stream(&t, 90.0, 60);
-    let a = run(&t, &ChaosState::default(), &cfg).unwrap();
-    assert_eq!(a, run(&t, &ChaosState::default(), &cfg).unwrap());
-    let b = run(&t, &ChaosState::default(), &SimConfig { seed: 43, ..cfg }).unwrap();
+    let (t, e) = topo(&QUEUED.replace("{ mean: 10ms }", "10ms"));
+    let cfg = one_stream(90.0, 60);
+    let a = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+    assert_eq!(a, run(&t, &e, &ChaosState::default(), &cfg).unwrap());
+    let b = run(
+        &t,
+        &e,
+        &ChaosState::default(),
+        &SimConfig { seed: 43, ..cfg },
+    )
+    .unwrap();
     assert_ne!(a, b, "a different seed gives a different run");
 }
 
 #[test]
 fn down_gateway_completes_with_no_hops() {
-    let t = topo(QUEUED);
+    let (t, e) = topo(QUEUED);
     let mut down = ChaosState::default();
     down.insert(
         t.gateway.unwrap(),
@@ -192,22 +216,19 @@ fn down_gateway_completes_with_no_hops() {
             ..NodeChaos::default()
         },
     );
-    let rep = run(&t, &down, &one_stream(&t, 10.0, 10)).unwrap();
+    let rep = run(&t, &e, &down, &one_stream(10.0, 10)).unwrap();
     assert_ne!(rep.requests.len(), 0, "the stream must produce requests");
     for r in &rep.requests {
         assert!(r.hops.is_empty() && r.latency.is_zero(), "{r:?}");
-        assert!(matches!(
-            r.result,
-            kaanal_core::ChainResult::Err { status: 503, .. }
-        ));
+        assert!(matches!(r.result, ChainResult::Err { status: 503, .. }));
     }
 }
 
 #[test]
 fn overload_grows_the_queue_but_finishes() {
-    let t = topo(QUEUED);
+    let (t, e) = topo(QUEUED);
     // ρ = 1.5: arrivals outpace the single slot.
-    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 150.0, 20)).unwrap();
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(150.0, 20)).unwrap();
     let app = &rep.nodes[t.id("app").unwrap()];
     assert!(app.max_queue > 500, "{app:?}");
     assert!(
@@ -219,8 +240,8 @@ fn overload_grows_the_queue_but_finishes() {
 
 #[test]
 fn unlimited_nodes_report_zero_utilization_and_no_queue() {
-    let t = topo(QUEUED);
-    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 50.0, 20)).unwrap();
+    let (t, e) = topo(QUEUED);
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(50.0, 20)).unwrap();
     let gw = &rep.nodes[t.gateway.unwrap()];
     assert_eq!(
         (gw.utilization, gw.max_queue, gw.mean_wait),
@@ -231,10 +252,10 @@ fn unlimited_nodes_report_zero_utilization_and_no_queue() {
 
 #[test]
 fn warmup_requests_are_not_reported() {
-    let t = topo(QUEUED);
-    let mut cfg = one_stream(&t, 50.0, 20);
+    let (t, e) = topo(QUEUED);
+    let mut cfg = one_stream(50.0, 20);
     cfg.warmup = Duration::from_secs(10);
-    let rep = run(&t, &ChaosState::default(), &cfg).unwrap();
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
     assert!(rep.requests.iter().all(|r| r.arrival >= cfg.warmup));
     assert!(
         rep.requests.first().unwrap().n > 0,
@@ -243,13 +264,9 @@ fn warmup_requests_are_not_reported() {
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one table of cases, one per validation rule"
-)]
 fn rejects_bad_config() {
-    let t = topo(QUEUED);
-    let ok = || one_stream(&t, 10.0, 10);
+    let (t, e) = topo(QUEUED);
+    let ok = || one_stream(10.0, 10);
     let cases: Vec<(SimConfig, &str)> = vec![
         (
             {
@@ -294,18 +311,10 @@ fn rejects_bad_config() {
         (
             {
                 let mut c = ok();
-                c.streams[0].entry = t.gateway.unwrap();
+                c.streams[0].endpoint_key = "GET /nope".into();
                 c
             },
-            "not a service",
-        ),
-        (
-            {
-                let mut c = ok();
-                c.streams[0].entry = 99;
-                c
-            },
-            "not a node",
+            "unknown endpoint",
         ),
         (
             {
@@ -351,7 +360,7 @@ fn rejects_bad_config() {
         ),
     ];
     for (cfg, want) in cases {
-        let err = run(&t, &ChaosState::default(), &cfg).unwrap_err();
+        let err = run(&t, &e, &ChaosState::default(), &cfg).unwrap_err();
         assert!(err.contains(want), "want '{want}' in: {err}");
     }
 }
@@ -360,8 +369,8 @@ fn rejects_bad_config() {
 fn request_counters_start_at_zero_and_run_on_consecutively() {
     // Live mode's per-endpoint counter starts at 0; the zero-load test replays each record's own `n`,
     // so this is what pins the sim to live's numbering.
-    let t = topo(QUEUED);
-    let rep = run(&t, &ChaosState::default(), &one_stream(&t, 50.0, 20)).unwrap();
+    let (t, e) = topo(QUEUED);
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(50.0, 20)).unwrap();
     let ns: Vec<u64> = rep.requests.iter().map(|r| r.n).collect();
     assert_eq!(ns, (0..ns.len() as u64).collect::<Vec<_>>());
 }
@@ -369,71 +378,414 @@ fn request_counters_start_at_zero_and_run_on_consecutively() {
 #[test]
 fn utilization_divides_by_the_slot_count() {
     // 2 slots, 10 ms exponential service, 100 req/s: 1.0 busy slot on average, so 0.5 per slot.
-    let t = topo(&QUEUED.replace("concurrency: 1", "concurrency: 2"));
-    let mut cfg = one_stream(&t, 100.0, 200);
+    let (t, e) = topo(&QUEUED.replace("concurrency: 1", "concurrency: 2"));
+    let mut cfg = one_stream(100.0, 200);
     cfg.warmup = Duration::from_secs(10);
-    let rep = run(&t, &ChaosState::default(), &cfg).unwrap();
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
     let u = rep.nodes[t.id("app").unwrap()].utilization;
     assert!((u - 0.5).abs() < 0.03, "utilization {u}");
 }
 
 #[test]
 fn hand_edited_absurd_service_time_is_rejected_not_a_panic() {
-    let mut t = topo(QUEUED);
+    let (mut t, e) = topo(QUEUED);
     let app = t.id("app").unwrap();
     t.nodes[app].proc = kaanal_core::Dist::Fixed(Duration::MAX);
-    let err = run(&t, &ChaosState::default(), &one_stream(&t, 1.0, 10)).unwrap_err();
+    let err = run(&t, &e, &ChaosState::default(), &one_stream(1.0, 10)).unwrap_err();
     assert!(err.contains("node 'app'") && err.contains("10h"), "{err}");
     t.nodes[app].proc = kaanal_core::Dist::Exp {
         mean: Duration::MAX,
     };
-    assert!(run(&t, &ChaosState::default(), &one_stream(&t, 1.0, 10)).is_err());
+    assert!(run(&t, &e, &ChaosState::default(), &one_stream(1.0, 10)).is_err());
 }
 
 #[test]
 fn clock_overflow_is_an_error_not_a_silently_wrong_report() {
     // 9 h per request through one slot: 600k arrivals queue up to ~5.4e6 h = 6e2 years > u64 ns.
-    let mut t = topo(QUEUED);
+    let (mut t, e) = topo(QUEUED);
     let app = t.id("app").unwrap();
     t.nodes[app].proc = kaanal_core::Dist::Fixed(Duration::from_hours(9));
-    let err = run(&t, &ChaosState::default(), &one_stream(&t, 1000.0, 600)).unwrap_err();
+    let err = run(&t, &e, &ChaosState::default(), &one_stream(1000.0, 600)).unwrap_err();
     assert!(err.contains("clock overflow"), "{err}");
 }
 
 #[test]
 fn absurd_chaos_latency_is_rejected_not_a_panic() {
     // The live limits (R6.9): latency_add over 5 min, or a non-5xx status, is an error.
-    let t = topo(QUEUED);
+    let (t, e) = topo(QUEUED);
     let app = t.id("app").unwrap();
     let with = |c: NodeChaos| ChaosState::from([(app, c)]);
     let cap = NodeChaos {
         latency_add: Duration::from_secs(300),
         ..NodeChaos::default()
     };
-    assert!(run(&t, &with(cap.clone()), &one_stream(&t, 1.0, 10)).is_ok());
+    assert!(run(&t, &e, &with(cap.clone()), &one_stream(1.0, 10)).is_ok());
     let over = NodeChaos {
         latency_add: Duration::from_secs(300) + Duration::from_millis(1),
         ..NodeChaos::default()
     };
-    let err = run(&t, &with(over), &one_stream(&t, 1.0, 10)).unwrap_err();
+    let err = run(&t, &e, &with(over), &one_stream(1.0, 10)).unwrap_err();
     assert!(err.contains("latency_add"), "{err}");
     let teapot = NodeChaos {
         error_status: 418,
         ..cap
     };
-    let err = run(&t, &with(teapot), &one_stream(&t, 1.0, 10)).unwrap_err();
+    let err = run(&t, &e, &with(teapot), &one_stream(1.0, 10)).unwrap_err();
     assert!(err.contains("error_status"), "{err}");
 }
 
 #[test]
-fn a_monolith_can_be_the_entry_but_a_cache_cannot() {
-    let t = topo(
-        "version: 1\nnodes:\n  app: { type: service }\n  shop: { type: monolith, concurrency: 1, proc: 5ms }\n  c: { type: cache, flavor: redis }\n",
+fn streams_name_compiled_endpoints() {
+    // D15: any compiled endpoint may be a stream, a static one included.
+    let (t, e) = compiled(
+        "version: 1\nnodes:\n  gw: { type: gateway, proc: 1ms }\n  shop: { type: monolith, proc: 5ms }\nedges:\n  - { from: gw, to: shop }\nendpoints:\n  \"GET /health\": { override: { body: 1 } }\n",
+        &[("GET /shop/{id}", "shop")],
     );
-    let mut cfg = one_stream(&t, 10.0, 10);
-    cfg.streams[0].entry = t.id("shop").unwrap();
-    assert!(run(&t, &ChaosState::default(), &cfg).is_ok());
-    cfg.streams[0].entry = t.id("c").unwrap();
-    let err = run(&t, &ChaosState::default(), &cfg).unwrap_err();
-    assert!(err.contains("not a service or monolith"), "{err}");
+    let stream = |key: &str| SimConfig {
+        streams: vec![Stream {
+            endpoint_key: key.into(),
+            rate_per_s: 10.0,
+        }],
+        duration: Duration::from_secs(10),
+        warmup: Duration::ZERO,
+        seed: 1,
+    };
+    let none = ChaosState::default();
+    let rep = run(&t, &e, &none, &stream("GET /shop/{id}")).unwrap();
+    assert_ne!(rep.requests.len(), 0);
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| r.latency == Duration::from_millis(6)),
+        "gw 1 ms + shop 5 ms"
+    );
+    let rep = run(&t, &e, &none, &stream("GET /health")).unwrap();
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| r.hops.len() == 1 && r.latency == Duration::from_millis(1))
+    );
+    let err = run(&t, &e, &none, &stream("GET /nope")).unwrap_err();
+    assert_eq!(err, "stream 0: unknown endpoint 'GET /nope'");
+}
+
+#[test]
+fn hop_budget_counts_chain_length() {
+    // R6.13: app.proc + 100 × (net + svc.proc + 100 × (net + db op)) = 20 201 hops per request.
+    let (t, e) = compiled(
+        "version: 1\nnodes:\n  app: { type: service }\n  svc: { type: service }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: svc }\n  - { from: svc, to: db }\nendpoints:\n  \"GET /x\": { chain: [ { call: svc, repeat: 100, chain: [ { call: db, repeat: 100 } ] } ] }\n",
+        &[("GET /x", "app")],
+    );
+    assert_eq!(e.get("GET /x").unwrap().chain.hops, 20_201);
+    let cfg = SimConfig {
+        streams: vec![Stream {
+            endpoint_key: "GET /x".into(),
+            rate_per_s: 1.0,
+        }],
+        duration: Duration::from_secs(1_000),
+        warmup: Duration::ZERO,
+        seed: 1,
+    };
+    let err = run(&t, &e, &ChaosState::default(), &cfg).unwrap_err();
+    assert_eq!(
+        err,
+        "workload too large: about 1000 arrivals with up to 20201000 hops in total (max 20000000); lower the rate, the duration or the chain length"
+    );
+}
+
+#[test]
+fn hop_budget_sums_streams_and_skips_warmup() {
+    // Two 20 201-hop endpoints. Each stream alone is under 20 M records at 0.6 req/s, the sum
+    // is not; and a warmup shrinks the count to the reported arrivals only.
+    let chain = "chain: [ { call: svc, repeat: 100, chain: [ { call: db, repeat: 100 } ] } ]";
+    let (t, e) = compiled(
+        &format!(
+            "version: 1\nnodes:\n  app: {{ type: service }}\n  svc: {{ type: service }}\n  db: {{ type: database, flavor: postgres }}\nedges:\n  - {{ from: app, to: svc }}\n  - {{ from: svc, to: db }}\nendpoints:\n  \"GET /x\": {{ {chain} }}\n  \"GET /y\": {{ {chain} }}\n"
+        ),
+        &[("GET /x", "app"), ("GET /y", "app")],
+    );
+    let stream = |key: &str, rate_per_s| Stream {
+        endpoint_key: key.into(),
+        rate_per_s,
+    };
+    let cfg = |streams, warmup| SimConfig {
+        streams,
+        duration: Duration::from_secs(1_000),
+        warmup: Duration::from_secs(warmup),
+        seed: 1,
+    };
+    let none = ChaosState::default();
+    let err = run(
+        &t,
+        &e,
+        &none,
+        &cfg(vec![stream("GET /x", 0.6), stream("GET /y", 0.6)], 0),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("about 1200 arrivals with up to 24241200 hops"),
+        "{err}"
+    );
+    let err = run(&t, &e, &none, &cfg(vec![stream("GET /x", 1.2)], 100)).unwrap_err();
+    assert!(
+        err.contains("about 1080 arrivals with up to 21817080 hops"),
+        "only post-warmup arrivals count: {err}"
+    );
+}
+
+#[test]
+fn zero_cost_failure_ties_are_a_documented_limit() {
+    // D17's known gap: both branches fail at t0 = 0. Live breaks the tie toward the lower
+    // branch (`s`). The simulator reaches branch 1's `Fail` first, and branch 0's path to `s`
+    // runs through a 0 ns hop, so it only reaches its `Fail` after a winner is set and is not
+    // seen. If this test fails because the simulator now agrees with live, the gap is closed:
+    // update `engine.md`, `lib.rs` and this test.
+    let (t, e) = compiled(
+        "version: 1\nnodes:\n  app: { type: service }\n  z: { type: service }\n  s: { type: external-api }\n  a: { type: external-api }\nedges:\n  - { from: app, to: z }\n  - { from: app, to: s }\n  - { from: app, to: a }\nendpoints:\n  \"GET /x\": { chain: [ { parallel: [ [ z, s ], [ a ] ] } ] }\n",
+        &[("GET /x", "app")],
+    );
+    let (s, a) = (t.id("s").unwrap(), t.id("a").unwrap());
+    let chaos = ChaosState::from([
+        (
+            s,
+            NodeChaos {
+                down: true,
+                ..NodeChaos::default()
+            },
+        ),
+        (
+            a,
+            NodeChaos {
+                error_rate: 1.0,
+                error_status: 500,
+                ..NodeChaos::default()
+            },
+        ),
+    ]);
+    let cfg = rare();
+    let rep = run(&t, &e, &chaos, &cfg).unwrap();
+    assert_ne!(rep.requests.len(), 0);
+    for r in &rep.requests {
+        let live = execute(
+            &t,
+            &chaos,
+            &ChainRequest {
+                endpoint: e.get("GET /x").unwrap(),
+                n: r.n,
+                seed: cfg.seed,
+            },
+        );
+        assert_eq!(
+            live.result,
+            ChainResult::Err {
+                node: s,
+                status: 503
+            }
+        );
+        assert_eq!(
+            r.result,
+            ChainResult::Err {
+                node: a,
+                status: 500
+            }
+        );
+    }
+}
+
+/// One stream on `GET /x` at 0.01 req/s for 10 000 s: about 100 requests, rarely overlapping.
+fn rare() -> SimConfig {
+    SimConfig {
+        streams: vec![Stream {
+            endpoint_key: "GET /x".into(),
+            rate_per_s: 0.01,
+        }],
+        duration: Duration::from_secs(10_000),
+        warmup: Duration::ZERO,
+        seed: 3,
+    }
+}
+
+#[test]
+fn cancelled_siblings_keep_their_slot_but_queued_ones_leave() {
+    // Each request calls `slow` (one slot, 10 ms) twice in parallel next to a branch that
+    // fails at 5 ms. The running call keeps its slot to 10 ms (cut to 5 ms in the record);
+    // the queued call leaves its queue and never runs.
+    let (t, e) = compiled(
+        "version: 1\nnodes:\n  app: { type: service }\n  slow: { type: external-api, concurrency: 1, proc: 10ms }\n  wait: { type: external-api, proc: 5ms }\n  bad: { type: external-api }\nedges:\n  - { from: app, to: slow }\n  - { from: app, to: wait }\n  - { from: app, to: bad }\nendpoints:\n  \"GET /x\": { chain: [ { parallel: [ slow, slow, [ wait, bad ] ] } ] }\n",
+        &[("GET /x", "app")],
+    );
+    let (slow, bad) = (t.id("slow").unwrap(), t.id("bad").unwrap());
+    let down = ChaosState::from([(
+        bad,
+        NodeChaos {
+            down: true,
+            ..NodeChaos::default()
+        },
+    )]);
+    let cfg = rare();
+    let rep = run(&t, &e, &down, &cfg).unwrap();
+    assert!(rep.requests.len() > 50, "{}", rep.requests.len());
+    let mut busy = Duration::ZERO;
+    for r in &rep.requests {
+        assert_eq!(r.latency, Duration::from_millis(5));
+        assert_eq!(
+            r.result,
+            ChainResult::Err {
+                node: bad,
+                status: 503
+            }
+        );
+        let ran: Vec<_> = r
+            .hops
+            .iter()
+            .filter(|(h, _)| h.node == slow && h.kind == HopKind::Proc)
+            .collect();
+        assert_eq!(
+            ran.len(),
+            1,
+            "one call runs, the queued one never does: {r:?}"
+        );
+        for (h, _) in ran {
+            assert_eq!(
+                h.start + h.dur,
+                Duration::from_millis(5),
+                "cut at the failure: {h:?}"
+            );
+            let from = r.arrival + h.start;
+            busy += cfg
+                .duration
+                .min(from + Duration::from_millis(10))
+                .saturating_sub(from);
+        }
+    }
+    // Utilization counts the full 10 ms of every call that started: the slot was kept.
+    let util = rep.nodes[slow].utilization;
+    assert!(
+        (util * cfg.duration.as_secs_f64() - busy.as_secs_f64()).abs() < 1e-9,
+        "{util} vs {busy:?}"
+    );
+}
+
+/// `app` with fixed-cost external APIs: `a` 3 ms, `s` 4 ms.
+const FORK: &str = "version: 1\nnodes:\n  app: { type: service }\n  a: { type: external-api, proc: 3ms }\n  s: { type: external-api, proc: 4ms }\nedges:\n  - { from: app, to: a }\n  - { from: app, to: s }\nendpoints:\n";
+
+#[test]
+fn fork_join_ends_with_the_slowest_branch() {
+    let (t, e) = compiled(
+        &format!("{FORK}  \"GET /x\": {{ chain: [ {{ parallel: [ a, s ] }} ] }}\n"),
+        &[("GET /x", "app")],
+    );
+    let rep = run(&t, &e, &ChaosState::default(), &rare()).unwrap();
+    assert_ne!(rep.requests.len(), 0);
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| r.latency == Duration::from_millis(4))
+    );
+}
+
+#[test]
+fn one_slot_serializes_parallel_branches() {
+    let yaml = FORK.replace("proc: 4ms }", "proc: 4ms, concurrency: 1 }");
+    let (t, e) = compiled(
+        &format!("{yaml}  \"GET /x\": {{ chain: [ {{ parallel: [ s, s, s ] }} ] }}\n"),
+        &[("GET /x", "app")],
+    );
+    let rep = run(&t, &e, &ChaosState::default(), &rare()).unwrap();
+    let s = t.id("s").unwrap();
+    let first = &rep.requests[0];
+    let at_s: Vec<(Duration, Duration)> = first
+        .hops
+        .iter()
+        .filter(|(h, _)| h.node == s && h.kind == HopKind::Proc)
+        .map(|(h, w)| (h.start, *w))
+        .collect();
+    let ms = Duration::from_millis;
+    assert_eq!(
+        at_s,
+        [(ms(0), ms(0)), (ms(4), ms(4)), (ms(8), ms(8))],
+        "FIFO in branch order"
+    );
+    assert_eq!(first.latency, ms(12));
+    assert!(rep.requests.iter().all(|r| r.latency >= ms(12)));
+}
+
+#[test]
+fn failure_ties_go_to_the_lowest_branch_like_live() {
+    // Both branches fail at 2 ms. The higher branch reaches its Fail first in event order
+    // (its 2 ms hop was scheduled before the lower branch's second 1 ms hop), so the lower
+    // branch must replace it at the same instant (D17).
+    let (t, e) = compiled(
+        "version: 1\nnodes:\n  app: { type: service }\n  p: { type: external-api, proc: 1ms }\n  q: { type: external-api, proc: 2ms }\n  s: { type: external-api }\n  a: { type: external-api }\nedges:\n  - { from: app, to: p }\n  - { from: app, to: q }\n  - { from: app, to: s }\n  - { from: app, to: a }\nendpoints:\n  \"GET /x\": { chain: [ { parallel: [ [ p, p, s ], [ q, a ] ] } ] }\n",
+        &[("GET /x", "app")],
+    );
+    let (s, a) = (t.id("s").unwrap(), t.id("a").unwrap());
+    let chaos = ChaosState::from([
+        (
+            s,
+            NodeChaos {
+                down: true,
+                ..NodeChaos::default()
+            },
+        ),
+        (
+            a,
+            NodeChaos {
+                error_rate: 1.0,
+                error_status: 500,
+                ..NodeChaos::default()
+            },
+        ),
+    ]);
+    let cfg = rare();
+    let rep = run(&t, &e, &chaos, &cfg).unwrap();
+    assert_ne!(rep.requests.len(), 0);
+    for r in &rep.requests {
+        assert_eq!(
+            r.result,
+            ChainResult::Err {
+                node: s,
+                status: 503
+            }
+        );
+        let live = execute(
+            &t,
+            &chaos,
+            &ChainRequest {
+                endpoint: e.get("GET /x").unwrap(),
+                n: r.n,
+                seed: cfg.seed,
+            },
+        );
+        let hops: Vec<_> = r.hops.iter().map(|(h, _)| h.clone()).collect();
+        assert_eq!((hops, r.latency), (live.hops.clone(), live.total()));
+    }
+}
+
+#[test]
+fn branch_waits_under_load() {
+    // R7.6: the queueing branch is exercised by parallel blocks, not only by sequences.
+    let (t, e) = compiled(
+        "version: 1\nnodes:\n  app: { type: service }\n  s: { type: service, concurrency: 1, proc: { mean: 10ms } }\nedges:\n  - { from: app, to: s }\nendpoints:\n  \"GET /x\": { chain: [ { parallel: [ s, s ] } ] }\n",
+        &[("GET /x", "app")],
+    );
+    let cfg = SimConfig {
+        streams: vec![Stream {
+            endpoint_key: "GET /x".into(),
+            rate_per_s: 30.0,
+        }],
+        duration: Duration::from_secs(100),
+        warmup: Duration::from_secs(10),
+        seed: 9,
+    };
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+    let s = t.id("s").unwrap();
+    assert!(
+        rep.requests.iter().all(|r| r
+            .hops
+            .iter()
+            .any(|(h, w)| h.node == s && h.kind == HopKind::Proc && !w.is_zero())),
+        "the second branch always queues behind the first"
+    );
+    assert!(rep.nodes[s].mean_wait > Duration::ZERO);
 }
