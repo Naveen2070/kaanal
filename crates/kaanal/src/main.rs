@@ -1,7 +1,7 @@
 //! The `kaanal` binary: CLI, process lifecycle, and a thin HTTP client for the
 //! control API.
 //!
-//! `up`, `validate` and `schema` work locally; `status` and `chaos` find the running
+//! `up`, `validate`, `schema` and `endpoints` work locally; `status` and `chaos` find the running
 //! instance via `.kaanal/run.json` and call its control API (rule R2.6: every
 //! interface is a thin client, no per-interface logic).
 
@@ -11,8 +11,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use kaanal_core::chain::skeleton;
+use kaanal_core::config::parse_endpoints;
 use kaanal_core::diagnostics::Located;
-use kaanal_core::{Config, ConfigError};
+use kaanal_core::{Config, ConfigError, EndpointsConfig};
 use kaanal_server::ServeOpts;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
@@ -55,6 +57,14 @@ enum Cmd {
     },
     /// Print the JSON Schema for kaanal.yaml (point your editor's YAML plugin at it)
     Schema,
+    /// Print skeleton endpoint entries for spec routes that have none (add-only)
+    Endpoints {
+        #[arg(short, long, default_value = "kaanal.yaml")]
+        config: PathBuf,
+        /// Append them to the endpoints file (creates kaanal.endpoints.yaml when kaanal.yaml has no endpoints:)
+        #[arg(long)]
+        write: bool,
+    },
     /// Show nodes and active chaos of the running instance
     Status,
     /// Change chaos on the running instance
@@ -139,6 +149,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
             Ok(())
         }
         Cmd::Up { config, port, host } => up(&config, port, host),
+        Cmd::Endpoints { config, write } => endpoints(&config, write),
         Cmd::Status => status(),
         Cmd::Chaos {
             cmd:
@@ -272,6 +283,104 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
     })
 }
 
+/// **Private.** First line of every block `kaanal endpoints` adds (D22).
+const SKELETON_HEADER: &str = "# Added by kaanal endpoints";
+/// **Private.** The file `kaanal endpoints --write` creates when `endpoints:` is absent.
+const DEFAULT_ENDPOINTS_FILE: &str = "kaanal.endpoints.yaml";
+
+/// **Private.** `kaanal endpoints [--write]` (E3, D22): skeleton entries for spec routes
+/// missing from `endpoints:`. Add-only: it appends to an external file (refusing if the
+/// result would not parse with every old key), creates `kaanal.endpoints.yaml` when there is
+/// no `endpoints:` key, and only prints for an inline map (R1.17: kaanal.yaml is never rewritten).
+fn endpoints(config: &Path, write: bool) -> Result<(), Fail> {
+    let (cfg, dir, src) = load(config)?;
+    let (topo, routes) =
+        kaanal_server::spec_routes(&cfg, &dir).map_err(|e| located_err(config, &src, &e))?;
+    let (file, old, keys): (Option<PathBuf>, String, Vec<String>) = match &cfg.endpoints {
+        Some(EndpointsConfig::Inline(m)) => (None, String::new(), m.keys().cloned().collect()),
+        Some(EndpointsConfig::File(p)) => {
+            let f = dir.join(p);
+            let old = match std::fs::read_to_string(&f) {
+                Ok(t) => t,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(e) => return Err(err(format!("{}: {e}", f.display()))),
+            };
+            let keys = parse_endpoints(&old)
+                .map_err(|e| config_err(&f, &e))?
+                .into_keys()
+                .collect();
+            (Some(f), old, keys)
+        }
+        None => (None, String::new(), Vec::new()),
+    };
+    let lines = skeleton(&topo, &routes, &keys);
+    if lines.is_empty() {
+        println!("nothing to add: every spec route has an entry");
+        return Ok(());
+    }
+    let block = |nl: &str| {
+        std::iter::once(SKELETON_HEADER)
+            .chain(lines.iter().map(String::as_str))
+            .fold(String::new(), |mut s, l| {
+                s.push_str(l);
+                s.push_str(nl);
+                s
+            })
+    };
+    // Spec paths and node names are user text: never let them drive the terminal.
+    let show = || println!("{}", clean_lines(&block("\n")));
+    match (write, &cfg.endpoints, file) {
+        (false, ..) => show(),
+        (true, Some(EndpointsConfig::Inline(_)), _) => {
+            show();
+            eprintln!(
+                "note: endpoints: is inline in {}; paste these lines under it (kaanal never rewrites it)",
+                config.display()
+            );
+        }
+        (true, _, Some(f)) => {
+            let nl = if old.contains("\r\n") { "\r\n" } else { "\n" };
+            let mut text = old.clone();
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push_str(nl);
+            }
+            text.push_str(&block(nl));
+            // Safety net (D22): the appended file must parse and keep every old entry.
+            let back = parse_endpoints(&text).map_err(|e| {
+                err(format!(
+                    "{}: refusing to append, the result would not parse: {e}",
+                    f.display()
+                ))
+            })?;
+            if let Some(k) = keys.iter().find(|k| !back.contains_key(*k)) {
+                return Err(err(format!(
+                    "{}: refusing to append, entry '{k}' would be lost",
+                    f.display()
+                )));
+            }
+            std::fs::write(&f, text).map_err(|e| err(format!("{}: {e}", f.display())))?;
+            println!("appended {} entries to {}", lines.len(), f.display());
+        }
+        (true, _, None) => {
+            let f = dir.join(DEFAULT_ENDPOINTS_FILE);
+            if f.exists() {
+                return Err(err(format!(
+                    "{} exists but {} has no endpoints: key; add `endpoints: {DEFAULT_ENDPOINTS_FILE}` to it, or move the file away",
+                    f.display(),
+                    config.display()
+                )));
+            }
+            std::fs::write(&f, block("\n")).map_err(|e| err(format!("{}: {e}", f.display())))?;
+            println!(
+                "wrote {} entries to {}; add this line to {}: endpoints: {DEFAULT_ENDPOINTS_FILE}",
+                lines.len(),
+                f.display(),
+                config.display()
+            );
+        }
+    }
+    Ok(())
+}
 /// **Private.** Creates `.kaanal` readable only by the current user, before any secret is written into it.
 /// Unix: mode 0700. Windows: the folder's ACL is replaced by one grant for the current user
 /// (inheritance removed), so files created inside never exist with a wider ACL.

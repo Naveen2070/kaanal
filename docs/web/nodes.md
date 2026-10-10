@@ -4,13 +4,13 @@ Every node kind you can put under `nodes:`, its fields, and what each field does
 
 Fields marked **active now** change the simulation. Fields marked **not active yet** are accepted and checked (a bad value is still an error) so your file will not need rewriting later, but they have no effect on timing yet.
 
-> **Latency is optimistic for deeper topologies.** Today a request is charged the entry node's `proc` and the database op costs. A `proc` on a node below the entry (a service called by another service, an external API, an auth node) is accepted but not charged until endpoint chains arrive, so a topology with callees below the entry reports lower latency than the real thing would show.
+How a request walks these nodes, and how to change the walk per route, is in the [endpoints reference](endpoints.md).
 
 Durations are `5ms`, `{ p50: 4ms, p99: 20ms }` or `{ mean: 5ms }`, as described in the [user guide](user-guide.md).
 
 ## `gateway`
 
-A reverse proxy, API gateway or load balancer. Optional, at most one. With a gateway, every request pays its `proc` first and it answers static endpoints (an `endpoints:` entry with `override` and no owning service).
+A reverse proxy, API gateway or load balancer. Optional, at most one. With a gateway, every request pays its `proc` first, then runs its auth calls, and it answers static endpoints (an `endpoints:` entry with `override` and no owning service).
 
 ```yaml
 nginx: { type: gateway, flavor: nginx, proc: 1ms }
@@ -30,11 +30,11 @@ A backend service. It may carry an OpenAPI 3.0 `spec`. Without a gateway, the ro
 app: { type: service, spec: openapi.yaml, proc: { p50: 5ms, p99: 20ms } }
 ```
 
-| Field         | Meaning                                                                                 | Default   | Status                                    |
-| ------------- | --------------------------------------------------------------------------------------- | --------- | ----------------------------------------- |
-| `spec`        | OpenAPI 3.0 file, relative to the config file                                           | none      | active now                                |
-| `proc`        | Processing time per request; charged on the entry node, on others used from A2 (chains) | zero      | active now (entry), used from A2 (chains) |
-| `concurrency` | Most requests served at once                                                            | unlimited | active now                                |
+| Field         | Meaning                                                                | Default   | Status     |
+| ------------- | ---------------------------------------------------------------------- | --------- | ---------- |
+| `spec`        | OpenAPI 3.0 file, relative to the config file                          | none      | active now |
+| `proc`        | Processing time per request, charged wherever a chain reaches the node | zero      | active now |
+| `concurrency` | Most requests served at once                                           | unlimited | active now |
 
 ## `monolith`
 
@@ -44,13 +44,13 @@ A service that can also be its own database. With `ops` or a `flavor` it has inl
 core: { type: monolith, spec: openapi.yaml, proc: 3ms, flavor: mysql, ops: { read: 1ms } }
 ```
 
-| Field         | Meaning                                                                                 | Default   | Status                                    |
-| ------------- | --------------------------------------------------------------------------------------- | --------- | ----------------------------------------- |
-| `spec`        | OpenAPI 3.0 file, relative to the config file                                           | none      | active now                                |
-| `proc`        | Processing time per request; charged on the entry node, on others used from A2 (chains) | zero      | active now (entry), used from A2 (chains) |
-| `ops`         | Inline `read`, `write`, `scan` costs; any you leave out comes from `flavor`             | none      | used once endpoint chains arrive          |
-| `flavor`      | Preset that fills `ops` you left out: `postgres`, `mysql`, `mongodb`                    | none      | used once endpoint chains arrive          |
-| `concurrency` | Most requests served at once                                                            | unlimited | active now                                |
+| Field         | Meaning                                                                     | Default   | Status     |
+| ------------- | --------------------------------------------------------------------------- | --------- | ---------- |
+| `spec`        | OpenAPI 3.0 file, relative to the config file                               | none      | active now |
+| `proc`        | Processing time per request, charged wherever a chain reaches the node      | zero      | active now |
+| `ops`         | Inline `read`, `write`, `scan` costs; any you leave out comes from `flavor` | none      | active now |
+| `flavor`      | Preset that fills `ops` you left out: `postgres`, `mysql`, `mongodb`        | none      | active now |
+| `concurrency` | Most requests served at once                                                | unlimited | active now |
 
 ## `database`
 
@@ -77,10 +77,10 @@ cache: { type: cache, flavor: redis, hit_ratio: 0.8 }
 
 | Field         | Meaning                                                        | Default     | Status                               |
 | ------------- | -------------------------------------------------------------- | ----------- | ------------------------------------ |
-| `flavor`      | Preset for `hit_ratio`, `hit` and `miss`: `redis`, `memcached` | none        | used once endpoint chains arrive     |
-| `hit_ratio`   | Share of lookups that hit, 0 to 1                              | from flavor | used once endpoint chains arrive     |
-| `hit`         | Cost of a hit                                                  | from flavor | used once endpoint chains arrive     |
-| `miss`        | Cost of finding out it is a miss                               | from flavor | used once endpoint chains arrive     |
+| `flavor`      | Preset for `hit_ratio`, `hit` and `miss`: `redis`, `memcached` | none        | active now                           |
+| `hit_ratio`   | Share of lookups that hit, 0 to 1                              | from flavor | active now                           |
+| `hit`         | Cost of a hit                                                  | from flavor | active now                           |
+| `miss`        | Cost of finding out it is a miss                               | from flavor | active now                           |
 | `ttl`         | Entry lifetime                                                 | none        | accepted and checked, not active yet |
 | `concurrency` | Most requests served at once                                   | unlimited   | active now                           |
 
@@ -94,7 +94,7 @@ pay: { type: external-api, proc: 50ms, error_rate: 0.01 }
 
 | Field         | Meaning                                                | Default   | Status                               |
 | ------------- | ------------------------------------------------------ | --------- | ------------------------------------ |
-| `proc`        | Response time of the API                               | zero      | used from A2 (chains)                |
+| `proc`        | Response time of the API                               | zero      | active now                           |
 | `error_rate`  | Baseline share of failing calls, 0 to 1                | none      | accepted and checked, not active yet |
 | `rate_limit`  | Token bucket: `rps` (above 0) and `burst` (at least 1) | none      | accepted and checked, not active yet |
 | `proxy`       | Real upstream URL (`http://` or `https://`)            | none      | accepted and checked, not active yet |
@@ -109,16 +109,16 @@ An identity provider: login and token issue.
 login: { type: auth, proc: 5ms, token_ttl: 2h, users: [{ username: alice, password: secret, roles: [admin] }] }
 ```
 
-| Field         | Meaning                                                           | Default   | Status                  |
-| ------------- | ----------------------------------------------------------------- | --------- | ----------------------- |
-| `proc`        | Cost of one login or token check                                  | zero      | used from A2 (chains)   |
-| `users`       | Accounts that can log in (`username` unique, `password`, `roles`) | none      | used from sub-project E |
-| `token_ttl`   | Lifetime of issued tokens, at most 1 day                          | 1h        | used from sub-project E |
-| `concurrency` | Most requests served at once                                      | unlimited | active now              |
+| Field         | Meaning                                                                        | Default   | Status                  |
+| ------------- | ------------------------------------------------------------------------------ | --------- | ----------------------- |
+| `proc`        | Cost of one login or token check (an auth node's own calls are not walked yet) | zero      | active now              |
+| `users`       | Accounts that can log in (`username` unique, `password`, `roles`)              | none      | used from sub-project E |
+| `token_ttl`   | Lifetime of issued tokens, at most 1 day                                       | 1h        | used from sub-project E |
+| `concurrency` | Most requests served at once                                                   | unlimited | active now              |
 
 ## Edges: who may call whom
 
-An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; used once endpoint chains arrive). No cycles, no self edges, no duplicate edges.
+An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). No cycles, no self edges, no duplicate edges.
 
 | From                                | May call                                                           |
 | ----------------------------------- | ------------------------------------------------------------------ |

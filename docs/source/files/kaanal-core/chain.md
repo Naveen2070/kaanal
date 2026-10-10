@@ -58,6 +58,10 @@ Warnings (not errors): a stale entry (no spec route, no `override`), a `HEAD` en
 A stale entry is skipped, so a broken `chain:` in it only warns, but its `error_map` keys and statuses are still checked at load. Routes passed to `compile` must have unique keys (the server rejects duplicates first; a duplicate trips a debug assertion).
 Two limits to know: the default body of every node is built, used or not, so an edge with `calls: 1000` to a cache stores 1 000 cache steps (A2 Task 3 revisits this), and `compile` does not check that two routes differ only in parameter names (`/users/{id}` vs `/users/{uid}`) or use the reserved `/__kaanal` prefix; the server keeps that check (A2 Task 4).
 
+## Skeletons
+
+`skeleton(topo, routes, existing)` returns the lines `kaanal endpoints` prints: one `"KEY": {} # owner NODE, op OP` per spec route that has no entry, sorted. `existing` is a list of keys, not the entry map, so the binary needs no `indexmap` dependency. Keys match after `normalize` (method upper-cased, path trimmed); the key is written as a JSON string, which is a valid YAML double-quoted scalar. HEAD copies are never listed.
+
 ## HEAD copies
 
 Every `GET` endpoint without a `HEAD` gets a `HEAD` copy with its own key (own draws), flagged `synthesized` and not listed. An explicit `HEAD` entry for a spec `GET` route uses that route's owner and op.

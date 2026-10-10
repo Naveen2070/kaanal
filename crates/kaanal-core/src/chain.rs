@@ -8,7 +8,7 @@
 //! through `Arc`. They fix no op: a database step runs the op of whoever called it (E10),
 //! so one body serves reads and writes.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1028,6 +1028,28 @@ impl Compiler<'_> {
             });
         }
     }
+}
+
+/// Skeleton `endpoints:` lines for spec routes with no entry yet (E3, D22): one
+/// `"KEY": {} # owner NODE, op OP` line per route, sorted. `existing` keys match after
+/// normalizing the method's case and the path's spaces; HEAD copies are never listed.
+pub fn skeleton(topo: &Topology, routes: &[RouteSpec], existing: &[String]) -> Vec<String> {
+    let have: BTreeSet<String> = existing.iter().filter_map(|k| normalize(k)).collect();
+    let mut out: Vec<String> = routes
+        .iter()
+        .filter(|r| !have.contains(&r.key))
+        .map(|r| {
+            // A JSON string is a valid YAML double-quoted key, escapes included.
+            let key = serde_json::Value::String(r.key.clone());
+            format!(
+                "{key}: {{}} # owner {}, op {}",
+                topo.nodes[r.owner].name,
+                r.op.name()
+            )
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 /// **Private.** `"get /x"` → `"GET /x"`; `None` if it is not `METHOD /path`.

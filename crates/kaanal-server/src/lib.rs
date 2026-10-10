@@ -18,8 +18,9 @@ use std::sync::Arc;
 
 use axum::routing::{get, put};
 use axum::{Router, middleware};
-use kaanal_core::Config;
+use kaanal_core::chain::RouteSpec;
 use kaanal_core::diagnostics::Located;
+use kaanal_core::{Config, Topology};
 
 /// Options for [`serve`].
 pub struct ServeOpts {
@@ -62,6 +63,16 @@ impl BoundServer {
 /// with its place in `kaanal.yaml` (see [`Located::in_source`]).
 pub fn check(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, Located> {
     state::AppState::build(cfg, base_dir, String::new(), 0).map(|st| st.warnings)
+}
+
+/// The spec routes of `cfg` (key, owner, inferred op) and its topology, for
+/// `kaanal endpoints`. Spec paths resolve against `base_dir`, as in [`check`].
+///
+/// # Errors
+/// A topology error, an unreadable or invalid spec, or a route defined by two services,
+/// placed in `kaanal.yaml`.
+pub fn spec_routes(cfg: &Config, base_dir: &Path) -> Result<(Topology, Vec<RouteSpec>), Located> {
+    state::spec_routes(cfg, base_dir)
 }
 
 /// 32 random bytes as hex. New on every `kaanal up`.

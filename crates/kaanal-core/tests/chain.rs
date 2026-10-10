@@ -1,5 +1,7 @@
 use indexmap::IndexMap;
-use kaanal_core::chain::{EndpointsInput, MAX_HOPS, RouteSpec, Seq, Step, compile, resolve_error};
+use kaanal_core::chain::{
+    EndpointsInput, MAX_HOPS, RouteSpec, Seq, Step, compile, resolve_error, skeleton,
+};
 use kaanal_core::config::ErrorMapping;
 use kaanal_core::{Config, ConfigError, Endpoints, Op, Topology};
 use serde_json::json;
@@ -606,4 +608,23 @@ fn an_edge_with_calls_is_one_cache_step_with_a_repeat() {
     let get = eps.get("GET /users/{id}").unwrap();
     let body = outline(&t, &get.body);
     assert_eq!(body.matches("cache(cache?)*3").count(), 1, "{body}");
+}
+
+#[test]
+fn skeleton_lists_missing_spec_routes_sorted() {
+    let (t, _) = ok("");
+    let routes: Vec<RouteSpec> = ROUTES
+        .iter()
+        .map(|(k, o)| RouteSpec::inferred(k, t.id(o).unwrap()))
+        .collect();
+    // Existing keys match after normalizing (method case, path spaces): `post /users` covers `POST /users`.
+    assert_eq!(
+        skeleton(&t, &routes, &["post /users".to_string()]),
+        [
+            r#""GET /orders/{id}": {} # owner orders, op read"#,
+            r#""GET /users/{id}": {} # owner app, op read"#,
+            r#""POST /orders": {} # owner orders, op write"#,
+        ]
+    );
+    assert_eq!(skeleton(&t, &routes, &[]).len(), 4);
 }

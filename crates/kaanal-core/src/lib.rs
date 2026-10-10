@@ -24,7 +24,7 @@ pub mod presets;
 pub mod schema;
 pub mod topology;
 
-pub use chain::{Endpoint, Endpoints, EndpointsInput, RouteSpec, compile, resolve_error};
+pub use chain::{Endpoint, Endpoints, EndpointsInput, RouteSpec, compile, resolve_error, skeleton};
 pub use chaos::{ChaosState, MAX_LATENCY_ADD, NodeChaos};
 pub use config::{Config, ConfigError, Determinism, EndpointsConfig, NodeKind, SeedSource};
 pub use diagnostics::{Located, PathSeg};

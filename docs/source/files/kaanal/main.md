@@ -6,7 +6,7 @@ The `kaanal` binary: clap CLI, process lifecycle, and a thin HTTP client for the
 
 Two kinds of commands:
 
-- **Local**: `up` (run the server), `validate` (dry-run the config) and `schema` (print the JSON Schema).
+- **Local**: `up` (run the server), `validate` (dry-run the config), `schema` (print the JSON Schema) and `endpoints` (skeleton entries for spec routes).
 - **Remote**: `status` and `chaos set|clear` — thin clients that find the running instance via `.kaanal/run.json` and call its control API (rule R2.6: no per-interface logic). `status` prints a 12-wide TYPE column so `external-api` fits.
 
 ## Commands
@@ -16,9 +16,18 @@ Two kinds of commands:
 | `up [-c config] [--port p] [--host ip]`                                        | Locks the directory, starts the server, writes `.kaanal/run.json`, prints mock + UI URLs, runs until Ctrl+C.                                            |
 | `validate [-c config]`                                                         | Runs `kaanal_server::check`; prints warnings to stderr, `ok: <file>` to stdout.                                                                         |
 | `schema`                                                                       | Prints `kaanal_core::config_schema()` as pretty JSON (editor autocomplete). The `# yaml-language-server: $schema=` header is written by `init` (later). |
-| `status`                                                                       | Prints a node table with each node's live chaos settings.                                                                                               |
+| `endpoints [-c config] [--write]`                                              | Prints skeleton lines for spec routes with no entry (see the table below). Add-only.                                                                    |
 | `chaos set <node> [--latency 300ms] [--error-rate 10%] [--error 503] [--down]` | PUTs a merged patch. With no flags → error "nothing to set" instead of sending an empty patch.                                                          |
 | `chaos clear [node]`                                                           | DELETE one node or all.                                                                                                                                 |
+
+### `endpoints` cases
+
+| `endpoints:` in kaanal.yaml | No `--write`     | `--write`                                                                                                  |
+| --------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| a file path                 | Prints the block | Appends it (CRLF kept if the file uses it); refuses if the result would not parse or would lose an old key |
+| an inline map               | Prints the block | Prints it too, with a note on stderr; `kaanal.yaml` is never rewritten (R1.17)                             |
+| absent                      | Prints the block | Creates `kaanal.endpoints.yaml` and says which line to add; refuses if that file already exists            |
+| every route covered         | `nothing to add` | `nothing to add`                                                                                           |
 
 ## Exit codes (rule R6.3)
 

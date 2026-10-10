@@ -6,7 +6,7 @@ What Kaanal actually simulates, in plain terms.
 
 Your system is a graph of **nodes** (`gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`) connected by **edges** (dependencies). The graph must be acyclic and have at most one gateway; anything Kaanal can't simulate is rejected when the file loads, with a message naming the problem — never silently ignored.
 
-Requests enter at the gateway, or at the service that owns the route when there is none; today the walk is entry → its dependencies (endpoint chains come next).
+Requests enter at the gateway, or at the service that owns the route when there is none, then follow the endpoint's chain (by default every node reachable from the owner). See the [endpoints reference](endpoints.md) to change it.
 
 ## Call chains
 
@@ -23,14 +23,14 @@ GET /users/42
   total       12.2 ms    ← the client really waits this long
 ```
 
-The breakdown comes back in the `X-Kaanal-Trace` response header, and the total is what your frontend experiences — so loading states, spinners and timeouts behave like they will in production.
+Calls inside a `parallel` block run side by side, so the block costs as much as its slowest branch; a cache hit skips the rest of the sequence it is in. The breakdown comes back in the `X-Kaanal-Trace` response header, and the total is what your frontend experiences — so loading states, spinners and timeouts behave like they will in production.
 
 Costs can be fixed (`5ms`), long-tailed (`{ p50: 4ms, p99: 20ms }` — most reads are ~4 ms, one in a hundred is ~20 ms, capped at 10×p99) or exponential (`{ mean: 5ms }`, as in queueing theory, capped at 10×mean).
 A node may also set `concurrency: N` (how many requests it serves at once, the rest queue). The simulator honours it; live mode warns and ignores it until M1.
 
 ## Operations
 
-Each database hop is one of three operations, inferred from the endpoint: `GET /users/{id}` → **read** (one row), `GET /users` → **scan** (a list), everything else → **write**. Each has its own cost in the node's `ops`.
+Each database hop is one of three operations, inferred from the endpoint: `GET /users/{id}` → **read** (one row), `GET /users` → **scan** (a list), everything else → **write**. Each has its own cost in the node's `ops`. The operation flows down the chain: an endpoint's `op:` applies to every database step below it, `op:` on a single step changes just that step, and `via:` uses the op of the endpoint it points at.
 
 ## Chaos
 
@@ -55,7 +55,7 @@ By default (`determinism: controlled`) this holds on every run. With `determinis
 
 ## Generated data
 
-Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. An `override` on an `endpoints:` entry beats generation entirely.
+Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. An `override:` in `endpoints:` beats generation entirely.
 
 All data is synthetic; emails use `example.com`.
 

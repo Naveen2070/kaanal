@@ -34,6 +34,14 @@ A ready-made playground config lives in `crates/kaanal-server/tests/fixtures/` (
 3. Give it a cost in the chain executor (`core/src/exec.rs`). Rule R2.5: timing/failure logic lives **once** in core; never re-implement it in the server or (later) the simulator.
 4. Tests: topology validation in `core/tests/topology.rs`, chain behaviour in `core/tests/exec.rs`.
 
+## Add a step kind
+
+1. Add the visitor in `crates/kaanal-core/src/config.rs` and its schema in `schema.rs` (every new field needs a doc comment; the schema test fails otherwise).
+2. Resolve it in `chain.rs`: compile it into a step, and count it against the limits.
+3. Walk it in `exec.rs`, with a new draw tag so existing seeds keep their numbers.
+4. The simulator needs nothing unless the step adds a new `PlanItem`.
+5. Tests: `core/tests/chain.rs` (compile), `core/tests/semantics.rs` (timeline) and the drift tests in `kaanal-sim`.
+
 ## Change the cost model (latency, errors)
 
 Everything lives in `crates/kaanal-core/src/dist.rs` (distributions) and `exec.rs` (the walk). Keep these invariants, they are tested:

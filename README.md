@@ -175,7 +175,7 @@ endpoints:               # Optional per-endpoint overrides
   - `external-api`: A third-party HTTP API with its own response time.
   - `auth`: An identity provider (login and token issue). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
 - Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
-- **`edges`**: Directed dependency graph, limited to an edge table (see [nodes.md](docs/web/nodes.md)). No cycles; `calls: N` sets calls per request. Today a request is charged the entry node and its dependencies' database costs; endpoint chains come next.
+- **`edges`**: Directed dependency graph, limited to an edge table (see [nodes.md](docs/web/nodes.md)). No cycles; `calls: N` sets calls per request. Each request follows its endpoint's chain: by default every node reachable from the owner is charged; `endpoints:` customises it (see [endpoints.md](docs/web/endpoints.md)).
 
 A gateway-less example lives in `examples/gatewayless`:
 
@@ -210,6 +210,7 @@ All CLI commands run from the project directory where `kaanal up` was executed:
 | `kaanal up [-c config] [--port port] [--host host]` | Start the mock server in foreground.                                           |
 | `kaanal validate [-c config]`                       | Validate topology, YAML syntax, and OpenAPI specs.                             |
 | `kaanal schema`                                     | Print the JSON Schema for editor autocomplete.                                 |
+| `kaanal endpoints [--write]`                        | Add skeleton entries for spec routes to the endpoints file (append-only).      |
 | `kaanal status`                                     | Show running nodes and active chaos settings.                                  |
 | `kaanal chaos set <node> [flags]`                   | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--down`). |
 | `kaanal chaos clear [node]`                         | Clear chaos on one node or all nodes.                                          |

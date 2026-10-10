@@ -11,6 +11,7 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | [nodes.md](nodes.md)             | Everyone                      | Every node kind, its fields, the edge table and presets                    |
 | [concepts.md](concepts.md)       | Everyone                      | Topology, call chains, chaos, determinism — what Kaanal actually simulates |
 | [web-ui.md](web-ui.md)           | Users of the status page      | The embedded `/__kaanal/ui` page, feature by feature                       |
+| [endpoints.md](endpoints.md)     | Everyone                      | Endpoint chains, error maps, determinism and kaanal endpoints              |
 
 ## Conventions for these docs
 

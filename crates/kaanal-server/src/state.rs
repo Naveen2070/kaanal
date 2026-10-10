@@ -121,6 +121,16 @@ struct Specs {
     info: BTreeMap<String, (u16, Option<Value>)>,
 }
 
+/// The topology and its spec routes, read exactly as [`AppState::build`] reads them.
+pub(crate) fn spec_routes(
+    cfg: &Config,
+    base_dir: &Path,
+) -> Result<(Topology, Vec<RouteSpec>), Located> {
+    let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
+    let specs = load_specs(&topo, base_dir, &mut HashMap::new(), &mut Vec::new())?;
+    Ok((topo, specs.routes))
+}
+
 /// **Private.** Reads every node's spec: path shapes, conflicts between services, ignored
 /// keywords as warnings. Same checks and messages as Phase One.
 fn load_specs(

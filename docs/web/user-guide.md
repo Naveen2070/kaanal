@@ -40,7 +40,7 @@ endpoints:                       # optional: per-endpoint overrides (a file path
 
 - **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
 - **edges** — the dependency graph, limited to the [edge table](nodes.md#edges-who-may-call-whom). No cycles, no self or duplicate edges, no dangling references; all rejected at startup. `calls: N` sets how many times the target is called per request.
-- **endpoints** — an entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
+- **endpoints** — per-endpoint behaviour, fully described in [endpoints.md](endpoints.md). An entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
 
 Check a file without starting:
 
@@ -52,14 +52,15 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 
 ## CLI
 
-| Command                                                                               | What it does                                                              |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `kaanal up [-c f] [--port p] [--host ip]`                                             | Start (foreground). Ctrl+C stops.                                         |
-| `kaanal validate [-c f]`                                                              | Check config, topology and specs.                                         |
-| `kaanal schema`                                                                       | Print the JSON Schema; save it and point your editor's YAML plugin at it. |
-| `kaanal status`                                                                       | Table of nodes with their live chaos settings.                            |
-| `kaanal chaos set <node> [--latency 300ms] [--error-rate 10%] [--error 503] [--down]` | Change chaos live. Fields merge — set only what you name.                 |
-| `kaanal chaos clear [node]`                                                           | Clear one node, or everything with no argument.                           |
+| Command                                                                               | What it does                                                                                    |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `kaanal up [-c f] [--port p] [--host ip]`                                             | Start (foreground). Ctrl+C stops.                                                               |
+| `kaanal validate [-c f]`                                                              | Check config, topology and specs.                                                               |
+| `kaanal schema`                                                                       | Print the JSON Schema; save it and point your editor's YAML plugin at it.                       |
+| `kaanal endpoints [-c f] [--write]`                                                   | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file. |
+| `kaanal status`                                                                       | Table of nodes with their live chaos settings.                                                  |
+| `kaanal chaos set <node> [--latency 300ms] [--error-rate 10%] [--error 503] [--down]` | Change chaos live. Fields merge — set only what you name.                                       |
+| `kaanal chaos clear [node]`                                                           | Clear one node, or everything with no argument.                                                 |
 
 Exit codes: `0` ok, `1` error, `2` no running instance.
 

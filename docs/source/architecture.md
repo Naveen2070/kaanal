@@ -138,6 +138,13 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
 
 **Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through per-node FIFO queues (nodes with `concurrency`) on a virtual clock; live mode instead sleeps the plan's `total()`. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
 
+### Chain Engine
+
+- **Compile at load.** `compile` turns the spec routes and the `endpoints:` entries into one `Endpoint` per route. Default bodies are built callees-first and shared through `Arc`s; every error is placed in `kaanal.yaml` or in the endpoints file.
+- **Execute per request.** `execute` walks the compiled chain as a timeline and returns the flat hop list, a `Plan` (the sampled tree) and the result.
+- **Two drivers.** The server sleeps `total()` once and shapes the response; the simulator replays the plan through its queues with tokens.
+- **Seeding.** Each hop draws from the request's chain seed and a per-hop key, so a hop's numbers do not depend on which siblings ran.
+
 ---
 
 ## 5. Live Chaos Engine & Upstream Propagation
