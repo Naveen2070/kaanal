@@ -3,6 +3,7 @@
 //! Today the simulator copies `execute()`'s hops, so this pins the RNG stream and the
 //! per-hop numbering, not queueing. It keeps its meaning once the simulator's RNG stream diverges from live's (M3).
 
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::{ChainRequest, ChaosState, Config, Op, Topology, execute};
 use kaanal_sim::{SimConfig, Stream, run};
 use std::path::Path;
@@ -58,15 +59,23 @@ fn zero_load_matches_live_distribution() {
             seed: cfg.seed,
         };
         let rep = run(&t, &chaos, &sc).unwrap();
+        let eps = compile(
+            &t,
+            &[RouteSpec {
+                key: key.into(),
+                owner: t.id("app").unwrap(),
+                op: Op::Read,
+            }],
+            EndpointsInput::default(),
+        )
+        .unwrap();
         let live: Vec<_> = (1_000_000..1_005_000u64)
             .map(|n| {
                 execute(
                     &t,
                     &chaos,
                     &ChainRequest {
-                        entry: t.id("app"),
-                        op: Op::Read,
-                        endpoint_key: key,
+                        endpoint: eps.get(key).unwrap(),
                         n,
                         seed: cfg.seed,
                     },

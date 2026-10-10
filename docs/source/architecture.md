@@ -192,7 +192,7 @@ flowchart TD
     ConfigSeed["kaanal.yaml seed"]
     
     subgraph Execution["Execution PRNG (kaanal-core)"]
-        ExecSeed["stable_hash(seed, endpoint_key, n)"]
+        ExecSeed["per hop: stable_hash(path, node, tag); path = H(seed, endpoint_key, n) extended per step"]
         ChaChaExec["ChaCha8Rng (Latency & Chaos)"]
     end
 

@@ -35,6 +35,21 @@
         }
       ]
     },
+    "Determinism": {
+      "description": "How chain draws are seeded (rule R1.34).",
+      "oneOf": [
+        {
+          "const": "controlled",
+          "description": "Draws follow `seed:`: the same requests see the same timings and failures.",
+          "type": "string"
+        },
+        {
+          "const": "realistic",
+          "description": "Draws follow a seed picked at startup and printed; replay a run with `controlled`\nand that seed.",
+          "type": "string"
+        }
+      ]
+    },
     "Distribution": {
       "description": "A latency: `5ms` (fixed), `{ p50, p99 }` (lognormal fitted to both, p50 at most p99) or `{ mean }` (exponential). At most 1h.",
       "oneOf": [
@@ -116,6 +131,96 @@
       ],
       "type": "object"
     },
+    "EndpointConfig": {
+      "additionalProperties": false,
+      "description": "One `endpoints:` entry. Every field is optional; a spec route without an entry gets the\ndefault chain.",
+      "properties": {
+        "chain": {
+          "description": "Steps the route's owner runs after its own `proc`; absent = the default chain.",
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "error_map": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ErrorMapping"
+          },
+          "description": "Failure → response, looked up by failing node, then status (`504`), then class\n(`5xx`, `4xx`); a value is a status or `{ status, body }`.",
+          "type": "object"
+        },
+        "op": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Op"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Database operation for the chain (`read`, `write`, `scan`); default inferred from the\nmethod and path (`GET /x/{id}` read, `GET /x` scan, anything else write)."
+        },
+        "override": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Override"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A fixed response served instead of generated data (`status` default 200, `body`)."
+        }
+      },
+      "type": "object"
+    },
+    "Endpoints": {
+      "description": "A path to an endpoints file, or the endpoints inline.",
+      "oneOf": [
+        {
+          "description": "Path relative to this file, e.g. `kaanal.endpoints.yaml`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/EndpointConfig"
+          },
+          "description": "Endpoints keyed by `\"METHOD /path\"`.",
+          "type": "object"
+        }
+      ]
+    },
+    "ErrorMapping": {
+      "description": "The response for a failure: a status, or a status and a body.",
+      "oneOf": [
+        {
+          "maximum": 599,
+          "minimum": 200,
+          "type": "integer"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "description": "Response body, returned verbatim."
+            },
+            "status": {
+              "description": "HTTP status to answer with.",
+              "maximum": 599,
+              "minimum": 200,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "NodeConfig": {
       "description": "One node in `nodes:`. `type` selects the kind; each kind rejects fields it does not have.",
       "oneOf": [
@@ -164,6 +269,16 @@
           "additionalProperties": false,
           "description": "A backend service with an optional `OpenAPI` spec; never has `ops`.",
           "properties": {
+            "chains": {
+              "additionalProperties": {
+                "items": {
+                  "$ref": "#/$defs/Step"
+                },
+                "type": "array"
+              },
+              "description": "Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.",
+              "type": "object"
+            },
             "concurrency": {
               "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
               "format": "uint32",
@@ -205,6 +320,16 @@
           "additionalProperties": false,
           "description": "A service that may also run its own read/write/scan (`ops`), or call databases.",
           "properties": {
+            "chains": {
+              "additionalProperties": {
+                "items": {
+                  "$ref": "#/$defs/Step"
+                },
+                "type": "array"
+              },
+              "description": "Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.",
+              "type": "object"
+            },
             "concurrency": {
               "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
               "format": "uint32",
@@ -518,6 +643,26 @@
         }
       ]
     },
+    "Op": {
+      "description": "A database operation. Discriminants index `Node::ops` ([read, write, scan]);\nkeep in sync with the topology.",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Read one row (`GET /users/{id}`).",
+          "type": "string"
+        },
+        {
+          "const": "write",
+          "description": "Insert, update or delete.",
+          "type": "string"
+        },
+        {
+          "const": "scan",
+          "description": "List or search (`GET /users`).",
+          "type": "string"
+        }
+      ]
+    },
     "OpsConfig": {
       "additionalProperties": false,
       "description": "Read/write/scan costs. Without a `flavor`, all three are required.",
@@ -554,6 +699,25 @@
             }
           ],
           "description": "Cost of an insert, update or delete."
+        }
+      },
+      "type": "object"
+    },
+    "Override": {
+      "additionalProperties": false,
+      "description": "A fixed response for an endpoint (`override:`), served instead of generated data.",
+      "properties": {
+        "body": {
+          "default": null,
+          "description": "Response body, returned verbatim."
+        },
+        "status": {
+          "default": 200,
+          "description": "HTTP status to return. Defaults to 200.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -612,24 +776,98 @@
       ],
       "type": "object"
     },
-    "RouteOverride": {
-      "additionalProperties": false,
-      "description": "A static response override for a `\"METHOD /path\"` key in `routes:`.",
-      "properties": {
-        "body": {
-          "default": null,
-          "description": "Response body, returned verbatim."
+    "Step": {
+      "description": "One step: a node name (call its default chain), `call`, `cache` or `parallel`.",
+      "oneOf": [
+        {
+          "description": "Shorthand for `call: <node>`.",
+          "type": "string"
         },
-        "status": {
-          "default": 200,
-          "description": "HTTP status to return. Defaults to 200.",
-          "format": "uint16",
-          "maximum": 65535,
-          "minimum": 0,
-          "type": "integer"
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call": {
+              "description": "Node to call; an edge from the running node to it must exist.",
+              "type": "string"
+            },
+            "chain": {
+              "description": "Inline body for a service or monolith callee.",
+              "items": {
+                "$ref": "#/$defs/Step"
+              },
+              "type": "array"
+            },
+            "op": {
+              "description": "Op for this step (database or monolith with inline ops).",
+              "enum": [
+                "read",
+                "write",
+                "scan"
+              ],
+              "type": "string"
+            },
+            "repeat": {
+              "description": "Sequential calls; default is the edge's `calls`.",
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "via": {
+              "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op.",
+              "type": "string"
+            },
+            "with": {
+              "description": "A named chain of the callee (its `chains:`).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cache": {
+              "description": "Cache node to look up; a hit ends the enclosing sequence.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cache"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "parallel": {
+              "description": "Branches (a step or a list of steps) that start together; the first failure fails the block.",
+              "items": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Step"
+                  },
+                  {
+                    "items": {
+                      "$ref": "#/$defs/Step"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "maxItems": 32,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "parallel"
+          ],
+          "type": "object"
         }
-      },
-      "type": "object"
+      ]
     },
     "UserConfig": {
       "additionalProperties": false,
@@ -663,12 +901,27 @@
   "additionalProperties": false,
   "description": "The parsed `kaanal.yaml` file.",
   "properties": {
+    "determinism": {
+      "$ref": "#/$defs/Determinism",
+      "description": "`controlled` (default): timings and failures follow `seed`, so a run can be replayed.\n`realistic`: a seed is picked at startup (and printed), so runs differ like a real system."
+    },
     "edges": {
       "description": "Dependency edges, caller → dependency.",
       "items": {
         "$ref": "#/$defs/EdgeConfig"
       },
       "type": "array"
+    },
+    "endpoints": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Endpoints"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Per-endpoint chains, overrides and error maps: a path to a YAML file (relative to this\nfile, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `\"METHOD /path\"`."
     },
     "nodes": {
       "additionalProperties": {
@@ -684,13 +937,6 @@
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
-    },
-    "routes": {
-      "additionalProperties": {
-        "$ref": "#/$defs/RouteOverride"
-      },
-      "description": "Static route overrides, keyed by `\"METHOD /path\"`.",
-      "type": "object"
     },
     "seed": {
       "default": 0,

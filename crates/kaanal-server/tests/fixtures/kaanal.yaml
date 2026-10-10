@@ -7,6 +7,6 @@ nodes:
 edges:
   - { from: nginx, to: app, net: 1ms }
   - { from: app, to: db, net: 1ms }
-routes:
-  "GET /users": { body: [ { id: 1 } ] }
-  "GET /health": { body: { ok: true } }
+endpoints:
+  "GET /users": { override: { body: [ { id: 1 } ] } }
+  "GET /health": { override: { body: { ok: true } } }

@@ -39,7 +39,7 @@ fn same_route_in_two_services_conflicts() {
 #[test]
 fn malformed_route_key_is_rejected() {
     let err =
-        check_yaml("version: 1\nnodes:\n  gw: { type: gateway }\nroutes:\n  nope: { body: 1 }\n")
+        check_yaml("version: 1\nnodes:\n  gw: { type: gateway }\nendpoints:\n  nope: { override: { body: 1 } }\n")
             .unwrap_err();
     assert!(err.contains("must look like"), "{err}");
 }
@@ -61,16 +61,22 @@ fn gatewayless_topology_validates() {
 
 #[test]
 fn static_route_without_gateway_is_rejected() {
-    let base = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\nroutes:\n";
-    let err = check_yaml(&format!("{base}  \"GET /health\": {{ body: 1 }}\n")).unwrap_err();
+    let base = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\nendpoints:\n";
+    let err = check_yaml(&format!(
+        "{base}  \"GET /health\": {{ override: {{ body: 1 }} }}\n"
+    ))
+    .unwrap_err();
     assert!(
         err.contains(
-            "routes: 'GET /health': static route needs a gateway or a service that owns it"
+            "endpoint 'GET /health': static route needs a gateway or a service that owns it"
         ),
         "{err}"
     );
     // Overriding a route the service owns is fine: it still has an owner.
-    check_yaml(&format!("{base}  \"GET /users/{{id}}\": {{ body: 1 }}\n")).unwrap();
+    check_yaml(&format!(
+        "{base}  \"GET /users/{{id}}\": {{ override: {{ body: 1 }} }}\n"
+    ))
+    .unwrap();
 }
 
 #[test]
@@ -116,7 +122,7 @@ const GW_APP: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type
 #[test]
 fn override_differing_only_in_param_name_is_a_clear_error() {
     let err = check_yaml(&format!(
-        "{GW_APP}routes:\n  \"GET /users/{{x}}\": {{ body: 1 }}\n"
+        "{GW_APP}endpoints:\n  \"GET /users/{{x}}\": {{ override: {{ body: 1 }} }}\n"
     ))
     .unwrap_err();
     assert!(err.contains("differ only in parameter names"), "{err}");
@@ -129,17 +135,20 @@ fn override_differing_only_in_param_name_is_a_clear_error() {
 #[test]
 fn override_with_same_param_name_replaces_the_spec_route() {
     check_yaml(&format!(
-        "{GW_APP}routes:\n  \"GET /users/{{id}}\": {{ body: 1 }}\n"
+        "{GW_APP}endpoints:\n  \"GET /users/{{id}}\": {{ override: {{ body: 1 }} }}\n"
     ))
     .unwrap();
 }
 
 #[test]
 fn override_needs_known_method_and_leading_slash() {
-    let err = check_yaml(&format!("{GW_APP}routes:\n  \"FOO /x\": {{ body: 1 }}\n")).unwrap_err();
+    let err = check_yaml(&format!(
+        "{GW_APP}endpoints:\n  \"FOO /x\": {{ override: {{ body: 1 }} }}\n"
+    ))
+    .unwrap_err();
     assert!(err.contains("unknown method 'FOO'"), "{err}");
     let err = check_yaml(&format!(
-        "{GW_APP}routes:\n  \"GET users\": {{ body: 1 }}\n"
+        "{GW_APP}endpoints:\n  \"GET users\": {{ override: {{ body: 1 }} }}\n"
     ))
     .unwrap_err();
     assert!(err.contains("must start with '/'"), "{err}");
@@ -149,7 +158,7 @@ fn override_needs_known_method_and_leading_slash() {
 fn override_status_must_be_a_real_http_status() {
     for bad in ["99", "100", "199", "1000"] {
         let err = check_yaml(&format!(
-            "{GW_APP}routes:\n  \"GET /x\": {{ status: {bad}, body: 1 }}\n"
+            "{GW_APP}endpoints:\n  \"GET /x\": {{ override: {{ status: {bad}, body: 1 }} }}\n"
         ))
         .unwrap_err();
         assert!(err.contains("between 200 and 599"), "{err}");
@@ -159,8 +168,10 @@ fn override_status_must_be_a_real_http_status() {
 #[test]
 fn control_namespace_is_reserved() {
     for p in ["/__kaanal", "/__kaanal/x"] {
-        let err =
-            check_yaml(&format!("{GW_APP}routes:\n  \"GET {p}\": {{ body: 1 }}\n")).unwrap_err();
+        let err = check_yaml(&format!(
+            "{GW_APP}endpoints:\n  \"GET {p}\": {{ override: {{ body: 1 }} }}\n"
+        ))
+        .unwrap_err();
         assert!(err.contains("reserved"), "{err}");
     }
 }
@@ -189,7 +200,7 @@ fn head_override_keeps_the_owning_service() {
     // R6.8: a HEAD override of an owned path is not a gateway-only static route, so it
     // loads with or without a gateway.
     let nodes = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\n";
-    let routes = "routes:\n  \"HEAD /users/{id}\": { status: 204 }\n";
+    let routes = "endpoints:\n  \"HEAD /users/{id}\": { override: { status: 204 } }\n";
     check_yaml(&format!("{nodes}{routes}")).unwrap();
     check_yaml(&format!(
         "{nodes}  gw: {{ type: gateway }}\nedges:\n  - {{ from: gw, to: app }}\n{routes}"
@@ -197,7 +208,7 @@ fn head_override_keeps_the_owning_service() {
     .unwrap();
     // A different method on an owned path is still a static route: it needs a gateway.
     let err = check_yaml(&format!(
-        "{nodes}routes:\n  \"PATCH /users/{{id}}\": {{ status: 204 }}\n"
+        "{nodes}endpoints:\n  \"PATCH /users/{{id}}\": {{ override: {{ status: 204 }} }}\n"
     ))
     .unwrap_err();
     assert!(err.contains("static route needs a gateway"), "{err}");
@@ -217,8 +228,8 @@ nodes:
     let src = "version: 1
 nodes:
   app: { type: service, spec: openapi.yaml }
-routes:
-  \"GET /health\": { body: 1 }
+endpoints:
+  \"GET /health\": { override: { body: 1 } }
 ";
     let err = kaanal_server::check(&Config::from_yaml(src).unwrap(), &fixtures()).unwrap_err();
     assert!(err.msg.contains("static route needs a gateway"), "{err}");

@@ -4,7 +4,7 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 
 ## What it does
 
-- Declares the modules `chaos`, `config`, `diagnostics`, `dist`, `exec`, `presets`, `schema`, `topology`.
+- Declares the modules `chain`, `chaos`, `config`, `diagnostics`, `dist`, `exec`, `presets`, `schema`, `topology`.
 - Re-exports the public API so users of the crate write `kaanal_core::{Config, Topology, execute, ...}` instead of knowing module paths.
 - Defines the one hash function the whole project uses for seeding.
 
@@ -16,14 +16,15 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 
 ## Re-exports
 
-| From          | Items                                                                            |
-| ------------- | -------------------------------------------------------------------------------- |
-| `chaos`       | `ChaosState`, `NodeChaos`                                                        |
-| `config`      | `Config`, `ConfigError`, `NodeKind`                                              |
-| `diagnostics` | `Located`, `PathSeg`                                                             |
-| `dist`        | `Dist`                                                                           |
-| `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `execute` |
-| `topology`    | `CacheModel`, `Edge`, `Node`, `NodeId`, `Topology`, `TopologyError`              |
+| From          | Items                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| `chain`       | `Endpoint`, `Endpoints`, `EndpointsInput`, `RouteSpec`, `compile`, `resolve_error`                   |
+| `chaos`       | `ChaosState`, `NodeChaos`                                                                            |
+| `config`      | `Config`, `ConfigError`, `Determinism`, `EndpointsConfig`, `NodeKind`, `SeedSource`                  |
+| `diagnostics` | `Located`, `PathSeg`                                                                                 |
+| `dist`        | `Dist`                                                                                               |
+| `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `Plan`, `PlanItem`, `execute` |
+| `topology`    | `CacheModel`, `Edge`, `Node`, `NodeId`, `Topology`, `TopologyError`                                  |
 
 ## Notes
 

@@ -1,10 +1,11 @@
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::{
-    ChainOutcome, ChainRequest, ChainResult, ChaosState, Config, HopKind, NodeChaos, Op, Topology,
-    execute,
+    ChainOutcome, ChainRequest, ChainResult, ChaosState, Config, Endpoints, HopKind, NodeChaos, Op,
+    Topology, execute,
 };
 use std::time::Duration;
 
-const BASE: &str = r"
+const BASE: &str = r#"
 version: 1
 nodes:
   nginx: { type: gateway, proc: { p50: 1ms, p99: 3ms } }
@@ -13,24 +14,36 @@ nodes:
 edges:
   - { from: nginx, to: app, net: 1ms }
   - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }
-";
+endpoints:
+  "GET /health": { override: { body: { ok: true } } }
+"#;
 
-fn topo() -> Topology {
-    Topology::build(&Config::from_yaml(BASE).unwrap()).unwrap()
+fn build(src: &str) -> (Topology, Endpoints) {
+    let cfg = Config::from_yaml(src).unwrap();
+    let t = Topology::build(&cfg).unwrap();
+    let routes = [RouteSpec::inferred("GET /users/{id}", t.id("app").unwrap())];
+    let e = compile(&t, &routes, EndpointsInput::inline(&cfg)).unwrap();
+    (t, e)
 }
 
-fn req(t: &Topology, n: u64) -> ChainRequest<'static> {
-    ChainRequest {
-        entry: t.id("app"),
-        op: Op::Read,
-        endpoint_key: "GET /users/{id}",
-        n,
-        seed: 42,
-    }
+fn topo() -> (Topology, Endpoints) {
+    build(BASE)
 }
 
-fn run(t: &Topology, chaos: &ChaosState, n: u64) -> ChainOutcome {
-    execute(t, chaos, &req(t, n))
+fn run_key(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState, n: u64) -> ChainOutcome {
+    execute(
+        t,
+        chaos,
+        &ChainRequest {
+            endpoint: e.get(key).unwrap(),
+            n,
+            seed: 42,
+        },
+    )
+}
+
+fn run(t: &Topology, e: &Endpoints, chaos: &ChaosState, n: u64) -> ChainOutcome {
+    run_key(t, e, "GET /users/{id}", chaos, n)
 }
 
 fn chaos_on(t: &Topology, node: &str, c: NodeChaos) -> ChaosState {
@@ -41,26 +54,26 @@ fn chaos_on(t: &Topology, node: &str, c: NodeChaos) -> ChaosState {
 
 #[test]
 fn same_inputs_same_outcome() {
-    let t = topo();
+    let (t, e) = topo();
     assert_eq!(
-        run(&t, &ChaosState::default(), 3),
-        run(&t, &ChaosState::default(), 3)
+        run(&t, &e, &ChaosState::default(), 3),
+        run(&t, &e, &ChaosState::default(), 3)
     );
 }
 
 #[test]
 fn different_n_gives_different_timings() {
-    let t = topo();
+    let (t, e) = topo();
     assert_ne!(
-        run(&t, &ChaosState::default(), 0).hops,
-        run(&t, &ChaosState::default(), 1).hops
+        run(&t, &e, &ChaosState::default(), 0).hops,
+        run(&t, &e, &ChaosState::default(), 1).hops
     );
 }
 
 #[test]
 fn happy_path_visits_gateway_service_db_in_order() {
-    let t = topo();
-    let out = run(&t, &ChaosState::default(), 0);
+    let (t, e) = topo();
+    let out = run(&t, &e, &ChaosState::default(), 0);
     let kinds: Vec<(String, HopKind)> = out
         .hops
         .iter()
@@ -76,6 +89,13 @@ fn happy_path_visits_gateway_service_db_in_order() {
             ("db".into(), HopKind::Op(Op::Read)),
         ]
     );
+    for w in out.hops.windows(2) {
+        assert_eq!(
+            w[1].start,
+            w[0].start + w[0].dur,
+            "a sequence: each hop starts when the last ends"
+        );
+    }
     assert_eq!(out.result, ChainResult::Ok);
     assert_eq!(
         out.total(),
@@ -85,7 +105,7 @@ fn happy_path_visits_gateway_service_db_in_order() {
 
 #[test]
 fn error_rate_one_always_fails_at_that_node() {
-    let t = topo();
+    let (t, e) = topo();
     let chaos = chaos_on(
         &t,
         "db",
@@ -96,7 +116,7 @@ fn error_rate_one_always_fails_at_that_node() {
         },
     );
     for n in 0..100 {
-        let out = run(&t, &chaos, n);
+        let out = run(&t, &e, &chaos, n);
         assert_eq!(
             out.result,
             ChainResult::Err {
@@ -114,7 +134,7 @@ fn error_rate_one_always_fails_at_that_node() {
 
 #[test]
 fn down_node_returns_503() {
-    let t = topo();
+    let (t, e) = topo();
     let chaos = chaos_on(
         &t,
         "app",
@@ -123,7 +143,7 @@ fn down_node_returns_503() {
             ..Default::default()
         },
     );
-    let out = run(&t, &chaos, 0);
+    let out = run(&t, &e, &chaos, 0);
     assert_eq!(
         out.result,
         ChainResult::Err {
@@ -136,14 +156,14 @@ fn down_node_returns_503() {
 
 #[test]
 fn error_rate_zero_never_fails() {
-    let t = topo();
+    let (t, e) = topo();
     let chaos = chaos_on(&t, "db", NodeChaos::default());
-    assert!((0..1000).all(|n| run(&t, &chaos, n).result == ChainResult::Ok));
+    assert!((0..1000).all(|n| run(&t, &e, &chaos, n).result == ChainResult::Ok));
 }
 
 #[test]
 fn latency_add_lands_on_that_node() {
-    let t = topo();
+    let (t, e) = topo();
     let chaos = chaos_on(
         &t,
         "db",
@@ -152,7 +172,7 @@ fn latency_add_lands_on_that_node() {
             ..Default::default()
         },
     );
-    let out = run(&t, &chaos, 0);
+    let out = run(&t, &e, &chaos, 0);
     let db_op = out
         .hops
         .iter()
@@ -163,22 +183,18 @@ fn latency_add_lands_on_that_node() {
 
 #[test]
 fn inert_chaos_entry_does_not_change_timings() {
-    let t = topo();
+    let (t, e) = topo();
     let chaos = chaos_on(&t, "db", NodeChaos::default());
-    assert_eq!(run(&t, &chaos, 5), run(&t, &ChaosState::default(), 5));
+    assert_eq!(
+        run(&t, &e, &chaos, 5),
+        run(&t, &e, &ChaosState::default(), 5)
+    );
 }
 
 #[test]
 fn static_route_only_touches_gateway() {
-    let t = topo();
-    let r = ChainRequest {
-        entry: None,
-        op: Op::Read,
-        endpoint_key: "GET /health",
-        n: 0,
-        seed: 42,
-    };
-    let out = execute(&t, &ChaosState::default(), &r);
+    let (t, e) = topo();
+    let out = run_key(&t, &e, "GET /health", &ChaosState::default(), 0);
     assert_eq!(out.hops.len(), 1);
     assert_eq!(out.result, ChainResult::Ok);
 }
@@ -195,7 +211,7 @@ fn op_inference() {
 
 #[test]
 fn gateway_down_fails_static_route_with_no_hops() {
-    let t = topo();
+    let (t, e) = topo();
     let chaos = chaos_on(
         &t,
         "nginx",
@@ -204,14 +220,7 @@ fn gateway_down_fails_static_route_with_no_hops() {
             ..Default::default()
         },
     );
-    let r = ChainRequest {
-        entry: None,
-        op: Op::Read,
-        endpoint_key: "GET /health",
-        n: 0,
-        seed: 42,
-    };
-    let out = execute(&t, &chaos, &r);
+    let out = run_key(&t, &e, "GET /health", &chaos, 0);
     assert_eq!(
         out.result,
         ChainResult::Err {
@@ -267,14 +276,10 @@ fn chaos_validate_enforces_the_shared_limits() {
 
 #[test]
 fn gatewayless_walk_starts_at_the_owner() {
-    let t = Topology::build(
-        &Config::from_yaml(
-            "version: 1\nnodes:\n  app: { type: service, proc: 2ms }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:\n  - { from: app, to: db, net: 1ms }\n",
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let out = execute(&t, &ChaosState::default(), &req(&t, 0));
+    let (t, e) = build(
+        "version: 1\nnodes:\n  app: { type: service, proc: 2ms }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:\n  - { from: app, to: db, net: 1ms }\n",
+    );
+    let out = run(&t, &e, &ChaosState::default(), 0);
     let kinds: Vec<(&str, HopKind)> = out
         .hops
         .iter()
@@ -293,23 +298,47 @@ fn gatewayless_walk_starts_at_the_owner() {
 }
 
 #[test]
-fn monolith_and_other_callees_cost_nothing_until_a2() {
-    // D4: only databases are charged op costs. A monolith with inline ops, a cache and an
-    // external API called by the entry are zero-cost op hops (each still draws its error roll).
-    let t = Topology::build(
-        &Config::from_yaml(
-            "version: 1\nnodes:\n  app: { type: service, proc: 2ms }\n  shop: { type: monolith, flavor: mysql }\n  c: { type: cache, flavor: redis }\n  ext: { type: external-api }\nedges:\n  - { from: app, to: shop }\n  - { from: app, to: c }\n  - { from: app, to: ext }\n",
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let out = execute(&t, &ChaosState::default(), &req(&t, 0));
-    let ops: Vec<Duration> = out
+fn callees_below_the_entry_are_charged() {
+    // Default chain (spec §5.2): callees in edge order (shop, ext), then the cache (a read).
+    let (t, e) = build(
+        "version: 1
+nodes:
+  app: { type: service, proc: 2ms }
+  shop: { type: monolith, flavor: mysql }
+  c: { type: cache, flavor: redis }
+  ext: { type: external-api }
+edges:
+  - { from: app, to: shop }
+  - { from: app, to: c }
+  - { from: app, to: ext }
+",
+    );
+    let out = run(&t, &e, &ChaosState::default(), 0);
+    let seen: Vec<(&str, HopKind)> = out
         .hops
         .iter()
-        .filter(|h| matches!(h.kind, HopKind::Op(_)))
-        .map(|h| h.dur)
+        .map(|h| (t.nodes[h.node].name.as_str(), h.kind))
         .collect();
-    assert_eq!(ops, [Duration::ZERO; 3]);
-    assert_eq!(out.total(), Duration::from_millis(2));
+    assert_eq!(
+        seen[..7],
+        [
+            ("app", HopKind::Proc),
+            ("shop", HopKind::Net),
+            ("shop", HopKind::Proc),
+            ("shop", HopKind::Op(Op::Read)),
+            ("ext", HopKind::Net),
+            ("ext", HopKind::Proc),
+            ("c", HopKind::Net),
+        ]
+    );
+    assert!(
+        matches!(seen[7], ("c", HopKind::CacheHit | HopKind::CacheMiss)),
+        "{seen:?}"
+    );
+    assert_eq!(seen.len(), 8);
+    assert!(
+        out.hops[3].dur > Duration::ZERO && out.hops[7].dur > Duration::ZERO,
+        "preset costs"
+    );
+    assert!(out.total() > Duration::from_millis(2));
 }

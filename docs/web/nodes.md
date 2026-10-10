@@ -10,7 +10,7 @@ Durations are `5ms`, `{ p50: 4ms, p99: 20ms }` or `{ mean: 5ms }`, as described 
 
 ## `gateway`
 
-A reverse proxy, API gateway or load balancer. Optional, at most one. With a gateway, every request pays its `proc` first and it answers static `routes`.
+A reverse proxy, API gateway or load balancer. Optional, at most one. With a gateway, every request pays its `proc` first and it answers static endpoints (an `endpoints:` entry with `override` and no owning service).
 
 ```yaml
 nginx: { type: gateway, flavor: nginx, proc: 1ms }
@@ -131,7 +131,7 @@ An edge that breaks the table is rejected with a message listing what that kind 
 
 ## The gateway is optional
 
-With no gateway, a request enters at the `service` or `monolith` that owns the route in its `spec`. With a gateway, every node that has a `spec` needs an edge from the gateway. Static `routes:` need a gateway.
+With no gateway, a request enters at the `service` or `monolith` that owns the route in its `spec`. With a gateway, every node that has a `spec` needs an edge from the gateway. Static endpoints (an `endpoints:` entry with `override` and no owning service) need a gateway.
 
 See `examples/gatewayless` in the repository for a complete gateway-less file.
 

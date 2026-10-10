@@ -58,18 +58,24 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         .map(|(k, v)| (k.to_string(), percent_decode_str(v).decode_utf8_lossy().into_owned()))
         .collect();
 
+    // A2 shim (Task 3 → removed in Task 4): look the endpoint up by key.
+    let Some(endpoint) = st.endpoints.get(&route.key) else {
+        let body = Json(json!({ "error": "no compiled endpoint", "route": route.key }));
+        return cors((StatusCode::INTERNAL_SERVER_ERROR, body).into_response());
+    };
     let started = Instant::now();
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     let outcome = {
         let chaos = st.chaos.read().expect("chaos lock poisoned");
-        let req = ChainRequest {
-            entry: route.owner,
-            op: route.op,
-            endpoint_key: &route.key,
-            n,
-            seed: st.seed,
-        };
-        execute(&st.topo, &chaos, &req)
+        execute(
+            &st.topo,
+            &chaos,
+            &ChainRequest {
+                endpoint,
+                n,
+                seed: st.seed,
+            },
+        )
     };
     // limitation: on Windows the OS timer ticks about every 15 ms, so a sleep shorter than that
     // rounds up. Measured latency (the `ms` in events) can exceed the simulated sum shown in the trace.
@@ -136,6 +142,8 @@ fn trace_header(outcome: &ChainOutcome, topo: &Topology) -> String {
             HopKind::Net => format!("net={}", fmt_ms(hop.dur)),
             HopKind::Proc => format!("{}.proc={}", name(hop.node), fmt_ms(hop.dur)),
             HopKind::Op(op) => format!("{}.{}={}", name(hop.node), op.name(), fmt_ms(hop.dur)),
+            HopKind::CacheHit => format!("{}.hit={}", name(hop.node), fmt_ms(hop.dur)),
+            HopKind::CacheMiss => format!("{}.miss={}", name(hop.node), fmt_ms(hop.dur)),
         })
         .collect();
     // The walk stops at the first failing node, so say which one and why.

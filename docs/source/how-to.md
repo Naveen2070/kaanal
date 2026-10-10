@@ -38,7 +38,7 @@ A ready-made playground config lives in `crates/kaanal-server/tests/fixtures/` (
 
 Everything lives in `crates/kaanal-core/src/dist.rs` (distributions) and `exec.rs` (the walk). Keep these invariants, they are tested:
 
-- Same `(seed, endpoint_key, n)` → same outcome.
+- Same `(seed, endpoint_key, n)` → same outcome, and editing one step never changes another step's draws (each hop has its own seed).
 - The chaos error roll is always drawn, so chaos settings never shift timing RNG.
 - `execute()` stays pure — no sleeping, no IO. The caller sleeps.
 
@@ -54,7 +54,7 @@ Generator: `crates/kaanal-data/src/generate.rs`. An `allOf` is merged into one s
 
 ## Add a static route override
 
-Users do this in `kaanal.yaml` under `routes:` (`"GET /health": { body: { ok: true } }`). The merge/validation logic is in `AppState::build` (`server/src/state.rs`): shape conflicts (`/users/{id}` vs `/users/{x}`), reserved `/__kaanal` namespace, method and status checks. Tests in `server/tests/state.rs`.
+Users do this in `kaanal.yaml` under `endpoints:` (`"GET /health": { override: { body: { ok: true } } }`). The merge/validation logic is in `AppState::build` (`server/src/state.rs`): shape conflicts (`/users/{id}` vs `/users/{x}`), reserved `/__kaanal` namespace, method and status checks. Tests in `server/tests/state.rs`.
 
 ## Debugging tips
 

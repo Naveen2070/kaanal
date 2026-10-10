@@ -4,7 +4,7 @@ Positions for config errors (rule R1.15), computed only when something is wrong.
 
 ## What it does
 
-`serde_yaml_ng` loses positions inside the `type`-tagged `nodes:` map: an error in any node is reported at the start of `nodes:`. When parsing fails, `explain` re-reads the source with `saphyr` (a tree with line/column spans) and reports the first problem at its real place. `Located` gives errors found after parsing (graph, spec files, routes) the same `line:col`.
+`serde_yaml_ng` loses positions inside the `type`-tagged `nodes:` map: an error in any node is reported at the start of `nodes:`. When parsing fails, `explain` re-reads the source with `saphyr` (a tree with line/column spans) and reports the first problem at its real place. `Located` gives errors found after parsing (graph, spec files, endpoints) the same `line:col`, in `kaanal.yaml` or in the endpoints file.
 
 Diagnostics only improves the message. `Config::from_yaml` stays the sole judge: `explain` runs after serde has already failed and always returns an error. Any trouble inside it (saphyr cannot read the file, serde's position is outside `nodes:`, no node problem found, source over 1 MiB) returns serde's own error unchanged. The module denies `unwrap`, `expect`, indexing and `panic`.
 
@@ -20,21 +20,22 @@ Diagnostics only improves the message. `Config::from_yaml` stays the sole judge:
 
 ## Anchor rule (D7)
 
-Errors point at the **key** of a mapping entry (node key, unknown field, spec, route key) and at the **start** of a list item (edges). Bad values point at the value, including an edge's `from`/`to` name. Missing fields point at the object. `saphyr` lines are 1-based and columns 0-based; `position` makes both 1-based.
+Errors point at the **key** of a mapping entry (node key, unknown field, spec, endpoint key) and at the **start** of a list item (edges). Bad values point at the value: an edge's `from`/`to` name, or any error built with `Located::at_value` (for example a missing endpoints file at the value of `endpoints:`). A `Located` that already has a `pos` skips the lookup. Missing fields point at the object. `saphyr` lines are 1-based and columns 0-based; `position` makes both 1-based.
 
 ## Items
 
-| Item                                                          | Kind   | What it does                                                                                                     |
-| ------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------- |
-| `PathSeg`                                                     | enum   | One step of a path into the file: `Key(String)` or `Index(usize)`.                                               |
-| `keys(parts)`                                                 | fn     | A path of mapping keys.                                                                                          |
-| `Located`                                                     | struct | An error with a `path` and a `msg`, not yet a `line:col`.                                                        |
-| `Located::new`                                                | fn     | An error at `path`.                                                                                              |
-| `Located::in_source`                                          | fn     | Places the error in the source as a `ConfigError`; no position for an empty path or a file `saphyr` cannot read. |
-| `explain(src, err)`                                           | fn     | Crate-private. Turns a serde parse error into one placed at the real node problem, or returns it unchanged.      |
-| `node_error`, `check_node`, `schema_problem`, `serde_problem` | fn     | **Private.** The steps above.                                                                                    |
-| `branch_for`, `allowed_fields`, `resolve`                     | fn     | **Private.** Schema lookups: a standalone branch per `type`, the valid field names, `$ref`/`anyOf` following.    |
-| `tree`, `key_text`, `entry`, `locate`, `position`, `to_json`  | fn     | **Private.** `saphyr` tree helpers; `to_json` is depth-bounded.                                                  |
+| Item                                                          | Kind   | What it does                                                                                                                                                                                                                  |
+| ------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PathSeg`                                                     | enum   | One step of a path into the file: `Key(String)` or `Index(usize)`.                                                                                                                                                            |
+| `keys(parts)`                                                 | fn     | A path of mapping keys.                                                                                                                                                                                                       |
+| `Located`                                                     | struct | An error with a `path`, a `msg` and three optional extras: `file` (the endpoints file the path points into; `None` = `kaanal.yaml`), `pos` (a place already known, used as is) and `value` (point at the value, not the key). |
+| `Located::new`, `Located::at_value`                           | fn     | An error at the key or list item `path` names; `at_value` points at the value of the last entry (a bad value).                                                                                                                |
+| `Located::in_file`, `Located::parsed`                         | fn     | Place an error in the endpoints file; `parsed` wraps a parse error that already has `line:col`.                                                                                                                               |
+| `Located::in_source`                                          | fn     | Places the error in the source as a `ConfigError`; no position for an empty path or a file `saphyr` cannot read.                                                                                                              |
+| `explain(src, err)`                                           | fn     | Crate-private. Turns a serde parse error into one placed at the real node problem, or returns it unchanged.                                                                                                                   |
+| `node_error`, `check_node`, `schema_problem`, `serde_problem` | fn     | **Private.** The steps above.                                                                                                                                                                                                 |
+| `branch_for`, `allowed_fields`, `resolve`                     | fn     | **Private.** Schema lookups: a standalone branch per `type`, the valid field names, `$ref`/`anyOf` following.                                                                                                                 |
+| `tree`, `key_text`, `entry`, `locate`, `position`, `to_json`  | fn     | **Private.** `saphyr` tree helpers; `to_json` is depth-bounded.                                                                                                                                                               |
 
 ## Tests
 

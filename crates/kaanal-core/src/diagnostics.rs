@@ -5,8 +5,8 @@
 //! source with `saphyr` (a tree with line/column spans), checks each node against its own
 //! branch of the generated JSON Schema (unknown and missing fields), then lets serde check
 //! each field alone (bad values), and reports the first problem at its real place.
-//! [`Located`] gives errors found after parsing (graph, spec files, routes) the same
-//! `line:col`. If `saphyr` cannot read the file or finds nothing, serde's own position is
+//! [`Located`] gives errors found after parsing (graph, spec files, endpoints) the same
+//! `line:col`, in `kaanal.yaml` or in the endpoints file. If `saphyr` cannot read the file or finds nothing, serde's own position is
 //! kept: the two parsers may disagree on exotic YAML, and serde is the safety net.
 //!
 //! This module only improves messages: it runs after serde has already rejected the file
@@ -21,6 +21,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
+use std::path::PathBuf;
 
 use jsonschema::error::ValidationErrorKind;
 use jsonschema::paths::LocationSegment;
@@ -68,30 +69,75 @@ pub fn keys(parts: &[&str]) -> Vec<PathSeg> {
         .collect()
 }
 
-/// An error at a place in `kaanal.yaml`, not yet turned into `line:col`.
+/// An error at a place in `kaanal.yaml` or in the endpoints file, not yet turned into `line:col`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Located {
     /// Where in the file; empty when the error has no place (e.g. a port in use).
     pub path: Vec<PathSeg>,
-    /// What is wrong, naming the node, edge or route.
+    /// What is wrong, naming the node, edge, endpoint or field.
     pub msg: String,
+    /// The file `path` points into; `None` means `kaanal.yaml`.
+    pub file: Option<PathBuf>,
+    /// A place already known (a parse error in `file`); used instead of `path`.
+    pub pos: Option<(usize, usize)>,
+    /// Point at the value of the last path entry instead of its key (a bad value).
+    pub value: bool,
 }
 
 impl Located {
-    /// An error at `path`.
+    /// An error at the key (or list item) `path` names.
     pub fn new(path: Vec<PathSeg>, msg: impl Into<String>) -> Located {
         Located {
             path,
             msg: msg.into(),
+            file: None,
+            pos: None,
+            value: false,
         }
     }
 
-    /// Places the error in `src`: at the key of a mapping entry, at the start of a list
-    /// item. Without a match (empty path, or a source `saphyr` cannot read) the error has
-    /// no position and prints as `file: msg`.
+    /// An error at the value of the last entry of `path` (an unknown node name, a bad number).
+    pub fn at_value(path: Vec<PathSeg>, msg: impl Into<String>) -> Located {
+        Located {
+            value: true,
+            ..Located::new(path, msg)
+        }
+    }
+
+    /// The same error, placed in `file` instead of `kaanal.yaml`.
+    #[must_use]
+    pub fn in_file(self, file: PathBuf) -> Located {
+        Located {
+            file: Some(file),
+            ..self
+        }
+    }
+
+    /// A parse error of `file` that already knows its position.
+    pub fn parsed(file: PathBuf, e: ConfigError) -> Located {
+        Located {
+            path: Vec::new(),
+            msg: e.msg,
+            file: Some(file),
+            pos: e.line.zip(e.col),
+            value: false,
+        }
+    }
+
+    /// Places the error in `src` (the text of `file`, or of `kaanal.yaml` when `file` is
+    /// `None`): a known `pos` as is; otherwise at the key of a mapping entry or the start of a
+    /// list item, or at the value when `value` is set or the path ends in an edge's
+    /// `from`/`to`. Without a match the error has no position and prints as `file: msg`.
     pub fn in_source(&self, src: &str) -> ConfigError {
-        // D7: a bad value is placed at the value; an edge's `from`/`to` hold a node name.
+        if let Some((line, col)) = self.pos {
+            return ConfigError {
+                line: Some(line),
+                col: Some(col),
+                msg: self.msg.clone(),
+            };
+        }
         let anchor = match self.path.as_slice() {
+            _ if self.value => Anchor::Value,
             [.., PathSeg::Index(_), PathSeg::Key(k)] if k == "from" || k == "to" => Anchor::Value,
             _ => Anchor::Key,
         };

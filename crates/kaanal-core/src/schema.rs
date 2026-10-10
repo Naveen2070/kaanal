@@ -9,7 +9,9 @@ use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde_json::Value;
 
-use crate::config::{Config, DistConfig};
+use crate::config::{
+    Config, DistConfig, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig,
+};
 
 /// **Private.** Loose shape of a `humantime` duration: numbers with unit words (`5ms`,
 /// `1.5s`, `1m 30s`). serde has the final say; this only helps editors.
@@ -56,6 +58,97 @@ impl JsonSchema for DistConfig {
                     "required": ["mean"],
                     "additionalProperties": false
                 }
+            ]
+        })
+    }
+}
+
+impl JsonSchema for StepConfig {
+    fn schema_name() -> Cow<'static, str> {
+        "Step".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        // A `$ref` to this definition: schemars resolves the recursion by name.
+        let step = generator.subschema_for::<StepConfig>();
+        json_schema!({
+            "description": "One step: a node name (call its default chain), `call`, `cache` or `parallel`.",
+            "oneOf": [
+                { "type": "string", "description": "Shorthand for `call: <node>`." },
+                {
+                    "type": "object",
+                    "properties": {
+                        "call": { "type": "string", "description": "Node to call; an edge from the running node to it must exist." },
+                        "op": { "type": "string", "enum": ["read", "write", "scan"], "description": "Op for this step (database or monolith with inline ops)." },
+                        "repeat": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Sequential calls; default is the edge's `calls`." },
+                        "chain": { "type": "array", "items": step, "description": "Inline body for a service or monolith callee." },
+                        "with": { "type": "string", "description": "A named chain of the callee (its `chains:`)." },
+                        "via": { "type": "string", "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op." }
+                    },
+                    "required": ["call"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": { "cache": { "type": "string", "description": "Cache node to look up; a hit ends the enclosing sequence." } },
+                    "required": ["cache"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "parallel": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 32,
+                            "items": { "oneOf": [step, { "type": "array", "items": step }] },
+                            "description": "Branches (a step or a list of steps) that start together; the first failure fails the block."
+                        }
+                    },
+                    "required": ["parallel"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
+impl JsonSchema for ErrorMapping {
+    fn schema_name() -> Cow<'static, str> {
+        "ErrorMapping".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The response for a failure: a status, or a status and a body.",
+            "oneOf": [
+                { "type": "integer", "minimum": 200, "maximum": 599 },
+                {
+                    "type": "object",
+                    "properties": {
+                        "status": { "type": "integer", "minimum": 200, "maximum": 599, "description": "HTTP status to answer with." },
+                        "body": { "description": "Response body, returned verbatim." }
+                    },
+                    "required": ["status"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
+impl JsonSchema for EndpointsConfig {
+    fn schema_name() -> Cow<'static, str> {
+        "Endpoints".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let entry = generator.subschema_for::<EndpointConfig>();
+        json_schema!({
+            "description": "A path to an endpoints file, or the endpoints inline.",
+            "oneOf": [
+                { "type": "string", "description": "Path relative to this file, e.g. `kaanal.endpoints.yaml`." },
+                { "type": "object", "description": "Endpoints keyed by `\"METHOD /path\"`.", "additionalProperties": entry }
             ]
         })
     }

@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::config::{Config, NodeConfig, NodeKind};
+use indexmap::IndexMap;
+
+use crate::config::{Config, NodeConfig, NodeKind, StepConfig};
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::dist::Dist;
 use crate::presets;
@@ -38,6 +40,8 @@ pub struct Node {
     pub cache: Option<CacheModel>,
     /// Capacity for this node's own hops (see `NodeConfig::concurrency`); `None` = unlimited.
     pub concurrency: Option<NonZeroU32>,
+    /// Named chains of a service or monolith (`chains:`), compiled by [`crate::chain::compile`].
+    pub chains: IndexMap<String, Vec<StepConfig>>,
 }
 
 /// A cache node's behaviour.
@@ -320,6 +324,7 @@ impl Topology {
                 ops,
                 cache,
                 concurrency: n.concurrency(),
+                chains: n.chains().cloned().unwrap_or_default(),
             });
         }
         if gateway.is_none() && !nodes.iter().any(|n| is_entry(n.kind)) {

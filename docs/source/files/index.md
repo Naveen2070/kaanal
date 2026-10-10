@@ -14,6 +14,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/topology.rs`    | [kaanal-core/topology.md](kaanal-core/topology.md)       | Graph build + validation (optional gateway, edge table, DAG, presets) |
 | `src/dist.rs`        | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                               |
 | `src/chaos.rs`       | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | `NodeChaos` / `ChaosState` runtime state                              |
+| `src/chain.rs`       | [kaanal-core/chain.md](kaanal-core/chain.md)             | Endpoint compile: default chains, via/with, limits, error_map lookup  |
 | `src/exec.rs`        | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, determinism                |
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)

@@ -1,3 +1,4 @@
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::{ChainRequest, ChaosState, Config, HopKind, NodeChaos, Op, Topology, execute};
 use kaanal_sim::{SimConfig, Stream, run};
 use std::path::Path;
@@ -81,6 +82,16 @@ fn zero_load_equals_live_exactly() {
                 seed: cfg.seed,
             };
             let rep = run(&t, &chaos, &sc).unwrap();
+            let routes: Vec<RouteSpec> = sc
+                .streams
+                .iter()
+                .map(|s| RouteSpec {
+                    key: s.endpoint_key.clone(),
+                    owner: s.entry,
+                    op: s.op,
+                })
+                .collect();
+            let eps = compile(&t, &routes, EndpointsInput::default()).unwrap();
             assert!(rep.requests.len() > 5_000, "{name}: {}", rep.requests.len());
             for r in &rep.requests {
                 let s = &sc.streams[r.stream];
@@ -88,9 +99,7 @@ fn zero_load_equals_live_exactly() {
                     &t,
                     &chaos,
                     &ChainRequest {
-                        entry: Some(s.entry),
-                        op: s.op,
-                        endpoint_key: &s.endpoint_key,
+                        endpoint: eps.get(&s.endpoint_key).unwrap(),
                         n: r.n,
                         seed: cfg.seed,
                     },

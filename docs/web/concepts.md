@@ -53,7 +53,7 @@ This makes tests reproducible: commit the config, and every CI run gets the same
 
 ## Generated data
 
-Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. Static `routes:` overrides beat generation entirely.
+Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. An `override` on an `endpoints:` entry beats generation entirely.
 
 All data is synthetic; emails use `example.com`.
 

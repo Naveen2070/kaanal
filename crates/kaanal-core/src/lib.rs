@@ -4,7 +4,9 @@
 //! parsing ([`Config`]), topology graph validation ([`Topology`]), flavor presets
 //! ([`presets`]), the editor JSON Schema ([`config_schema`]), latency distributions
 //! ([`Dist`]), live chaos state ([`ChaosState`]) and the call-chain executor
-//! ([`execute`]), with error positions for config problems ([`diagnostics`]).
+//! ([`execute`]: a timeline and a replayable [`Plan`] per request), `endpoints:` parsing
+//! ([`config::parse_endpoints`]) and compilation ([`compile`]),
+//! with error positions for config problems ([`diagnostics`]).
 //!
 //! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
 //! outcomes; it never sleeps. The server sleeps the durations it returns (live mode)
@@ -12,6 +14,7 @@
 
 #![warn(missing_docs)]
 
+pub mod chain;
 pub mod chaos;
 pub mod config;
 pub mod diagnostics;
@@ -21,11 +24,14 @@ pub mod presets;
 pub mod schema;
 pub mod topology;
 
+pub use chain::{Endpoint, Endpoints, EndpointsInput, RouteSpec, compile, resolve_error};
 pub use chaos::{ChaosState, MAX_LATENCY_ADD, NodeChaos};
-pub use config::{Config, ConfigError, NodeKind};
+pub use config::{Config, ConfigError, Determinism, EndpointsConfig, NodeKind, SeedSource};
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
-pub use exec::{ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, execute};
+pub use exec::{
+    ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute,
+};
 pub use schema::config_schema;
 pub use topology::{CacheModel, Edge, Node, NodeId, Topology, TopologyError};
 

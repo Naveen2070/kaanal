@@ -10,9 +10,10 @@ use std::path::Path;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 
-use kaanal_core::config::RouteOverride;
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
+use kaanal_core::config::{EndpointsConfig, Override};
 use kaanal_core::diagnostics::{Located, keys};
-use kaanal_core::{ChaosState, Config, NodeId, Op, Topology};
+use kaanal_core::{ChaosState, Config, Endpoints, NodeId, Op, Topology};
 use kaanal_data::ApiModel;
 use serde::Serialize;
 use serde_json::Value;
@@ -26,7 +27,7 @@ pub enum Body {
         /// The inlined JSON schema, if the spec declares one.
         schema: Option<Value>,
     },
-    /// A static `routes:` override, returned verbatim.
+    /// A static `endpoints:` `override`, returned verbatim.
     Static(Value),
 }
 
@@ -87,9 +88,11 @@ pub struct AppState {
     pub port: u16,
     /// Non-fatal findings from loading (ignored schema keywords, nodes with `concurrency`); shown by `validate` and `up`.
     pub warnings: Vec<String>,
+    /// Compiled endpoint chains, looked up by route key.
+    pub endpoints: Endpoints,
 }
 
-/// **Private.** Uppercase methods accepted in `routes:` override keys.
+/// **Private.** Uppercase methods accepted in `endpoints:` override keys.
 const METHODS: [&str; 7] = ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
 /// **Private.** Rejects two paths that differ only in parameter names
@@ -126,7 +129,7 @@ fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), S
 }
 
 /// **Private.** R6.8: a path with GET but no HEAD gets a `HEAD /p` route that answers like
-/// GET (owner, op, status, body, `routes:` override) under its own key and counter, so
+/// GET (owner, op, status, body, `endpoints:` override) under its own key and counter, so
 /// HEAD probes never shift GET's chain sequence.
 fn add_head_routes(by_path: &mut BTreeMap<String, Vec<Route>>) {
     for (p, routes) in by_path {
@@ -148,32 +151,32 @@ fn add_head_routes(by_path: &mut BTreeMap<String, Vec<Route>>) {
     }
 }
 
-/// **Private.** Applies one `routes:` entry: validates the key and status, then either
+/// **Private.** Applies one `endpoints:` `override`: validates the key and status, then either
 /// overrides the route a service owns or adds a static-only route. Without a gateway
 /// nothing answers a route no service owns, so that is an error (R1.23).
 fn apply_override(
     by_path: &mut BTreeMap<String, Vec<Route>>,
     shapes: &mut HashMap<String, String>,
     spec: &str,
-    ov: &RouteOverride,
+    ov: &Override,
     has_gateway: bool,
 ) -> Result<(), String> {
     let (m, p) = spec
         .split_once(' ')
-        .ok_or_else(|| format!("routes: '{spec}' must look like 'GET /path'"))?;
+        .ok_or_else(|| format!("endpoint '{spec}': key must look like 'GET /path'"))?;
     let (m, p) = (m.to_uppercase(), p.trim().to_string());
     // 1xx is not a final response: hyper would turn it into its own 500 (R6.2).
     if !(200..=599).contains(&ov.status) {
         return Err(format!(
-            "routes: '{spec}': status {} must be between 200 and 599",
+            "endpoint '{spec}': status {} must be between 200 and 599",
             ov.status
         ));
     }
     if !METHODS.contains(&m.as_str()) {
-        return Err(format!("routes: '{spec}': unknown method '{m}'"));
+        return Err(format!("endpoint '{spec}': unknown method '{m}'"));
     }
     if !p.starts_with('/') {
-        return Err(format!("routes: '{spec}': path must start with '/'"));
+        return Err(format!("endpoint '{spec}': path must start with '/'"));
     }
     check_shape(shapes, &p)?;
     let routes = by_path.entry(p.clone()).or_default();
@@ -201,7 +204,7 @@ fn apply_override(
     }
     if !has_gateway {
         return Err(format!(
-            "routes: '{spec}': static route needs a gateway or a service that owns it"
+            "endpoint '{spec}': static route needs a gateway or a service that owns it"
         ));
     }
     routes.push(Route {
@@ -217,7 +220,7 @@ fn apply_override(
 }
 
 impl AppState {
-    /// Runs the full load pipeline: topology → spec files → spec routes → `routes:`
+    /// Runs the full load pipeline: topology → spec files → spec routes → `endpoints:`
     /// overrides → matchit router.
     ///
     /// Spec paths are resolved against `base_dir` (the config file's directory).
@@ -240,6 +243,7 @@ impl AppState {
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
         let mut shapes: HashMap<String, String> = HashMap::new();
         let mut warnings = Vec::new();
+        let mut specs: Vec<RouteSpec> = Vec::new();
         // Live mode has no queues yet; say so instead of silently ignoring the setting.
         for n in topo.nodes.iter().filter(|n| n.concurrency.is_some()) {
             warnings.push(format!(
@@ -274,6 +278,10 @@ impl AppState {
                         ),
                     ));
                 }
+                specs.push(RouteSpec::inferred(
+                    &format!("{} {}", ep.method, ep.path),
+                    id,
+                ));
                 routes.push(Route {
                     key: format!("{} {}", ep.method, ep.path),
                     op: Op::infer(&ep.method, &ep.path),
@@ -286,10 +294,19 @@ impl AppState {
             }
         }
 
-        for (spec, ov) in &cfg.routes {
-            apply_override(&mut by_path, &mut shapes, spec, ov, topo.gateway.is_some())
-                .map_err(|m| Located::new(keys(&["routes", spec.as_str()]), m))?;
+        // A2 shim (Task 1 → removed in Task 4): inline `override`s keep the static-route
+        // behaviour until the chain engine serves endpoints; an endpoints file is ignored here.
+        if let Some(EndpointsConfig::Inline(entries)) = &cfg.endpoints {
+            for (spec, entry) in entries {
+                let Some(ov) = &entry.response else { continue };
+                apply_override(&mut by_path, &mut shapes, spec, ov, topo.gateway.is_some())
+                    .map_err(|m| Located::new(keys(&["endpoints", spec.as_str()]), m))?;
+            }
         }
+
+        // A2 shim (Task 3 → removed in Task 4): compile runs beside the override path.
+        let endpoints = compile(&topo, &specs, EndpointsInput::inline(cfg))?;
+        warnings.extend(endpoints.warnings.iter().cloned());
 
         let mut route_keys: Vec<String> =
             by_path.values().flatten().map(|r| r.key.clone()).collect();
@@ -313,6 +330,7 @@ impl AppState {
             seed: cfg.seed,
             port,
             warnings,
+            endpoints,
         })
     }
 }

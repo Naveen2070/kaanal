@@ -1,5 +1,6 @@
 use kaanal_core::diagnostics::{Located, PathSeg, keys};
 use kaanal_core::{Config, ConfigError, Topology};
+use std::path::{Path, PathBuf};
 
 /// The error of a config that must fail to parse.
 fn fail(src: &str) -> ConfigError {
@@ -311,4 +312,39 @@ fn bad_edge_values_are_placed_at_the_field() {
     ));
     assert_eq!(e.line, Some(7), "{e}");
     assert!(e.msg.starts_with("edge #1: field 'calls'"), "{e}");
+}
+
+#[test]
+fn located_points_at_values_and_keeps_known_positions() {
+    let src = "version: 1\nendpoints: missing.yaml\n";
+    let e = Located::at_value(keys(&["endpoints"]), "missing.yaml: not found").in_source(src);
+    assert_eq!((e.line, e.col), (Some(2), Some(12)), "{e}");
+    let e = Located::new(keys(&["endpoints"]), "x").in_source(src);
+    assert_eq!((e.line, e.col), (Some(2), Some(1)), "{e}");
+    let known = ConfigError {
+        line: Some(3),
+        col: Some(7),
+        msg: "bad".into(),
+    };
+    let parsed = Located::parsed(PathBuf::from("eps.yaml"), known.clone());
+    assert_eq!(parsed.file.as_deref(), Some(Path::new("eps.yaml")));
+    assert_eq!(parsed.in_source("anything at all"), known);
+    let f = Located::new(keys(&["GET /x"]), "y").in_file(PathBuf::from("eps.yaml"));
+    assert_eq!(f.file.as_deref(), Some(Path::new("eps.yaml")));
+    assert_eq!(f.in_source("\"GET /x\": {}\n").line, Some(1));
+}
+
+#[test]
+fn node_chain_errors_are_placed_at_the_chains_field() {
+    // `chains` sits inside a tagged node, so serde loses the place; the A1 serde probe finds it.
+    let e = fail(
+        "version: 1\nnodes:\n  app: { type: service, chains: { r: [ { cache: c, op: read } ] } }\n",
+    );
+    assert_eq!((e.line, e.col), (Some(3), Some(33)), "{e}");
+    assert!(
+        e.msg.starts_with("node 'app': field 'chains': ")
+            && e.msg
+                .contains("a cache step takes no other fields (got 'op')"),
+        "{e}"
+    );
 }

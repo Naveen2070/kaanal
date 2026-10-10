@@ -6,10 +6,11 @@ use std::cell::Cell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Duration;
 
 use kaanal_core::{
-    ChainOutcome, ChainRequest, ChaosState, Dist, HopKind, Topology, execute, stable_hash,
+    ChainOutcome, ChainRequest, ChaosState, Dist, Endpoint, HopKind, Topology, execute, stable_hash,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -87,6 +88,8 @@ struct Arrivals {
 /// **Private.** The whole simulation state.
 struct Sim<'a> {
     topo: &'a Topology,
+    /// The compiled endpoint of each stream (A2 shim: the owner's default chain).
+    endpoints: &'a [Arc<Endpoint>],
     chaos: &'a ChaosState,
     cfg: &'a SimConfig,
     /// Current virtual time (ns).
@@ -127,11 +130,13 @@ impl Sim<'_> {
 /// **Private.** Runs a validated config until the event queue drains.
 pub(crate) fn simulate(
     topo: &Topology,
+    endpoints: &[Arc<Endpoint>],
     chaos: &ChaosState,
     cfg: &SimConfig,
 ) -> Result<SimReport, String> {
     let mut sim = Sim {
         topo,
+        endpoints,
         chaos,
         cfg,
         now: 0,
@@ -207,14 +212,11 @@ impl Sim<'_> {
     fn arrive(&mut self, s: usize) {
         let n = self.arrivals[s].n;
         self.arrivals[s].n += 1;
-        let st = &self.cfg.streams[s];
         let outcome = execute(
             self.topo,
             self.chaos,
             &ChainRequest {
-                entry: Some(st.entry),
-                op: st.op,
-                endpoint_key: &st.endpoint_key,
+                endpoint: &self.endpoints[s],
                 n,
                 seed: self.cfg.seed,
             },

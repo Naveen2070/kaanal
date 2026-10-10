@@ -9,9 +9,11 @@
 
 mod engine;
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use kaanal_core::{ChainResult, ChaosState, Dist, Hop, NodeId, NodeKind, Op, Topology};
+use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
+use kaanal_core::{ChainResult, ChaosState, Dist, Endpoint, Hop, NodeId, NodeKind, Op, Topology};
 
 /// **Private.** Most expected arrivals per run. Every record is kept in memory (a few
 /// hundred bytes plus ~90 bytes per hop), so this bounds a typical run (5 hops) to about
@@ -84,7 +86,7 @@ pub struct RequestRecord {
 /// Per-node statistics over the reported requests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeStats {
-    /// Own hops (proc/op) of reported requests at this node.
+    /// Own hops (proc, op, cache lookup) of reported requests at this node.
     pub completed: u64,
     /// Mean queue wait before those hops.
     pub mean_wait: Duration,
@@ -110,8 +112,8 @@ pub struct NodeStats {
 /// 9 h each through one slot) is also an error, never a silently wrong report.
 /// An overloaded system (ρ ≥ 1) is not an error.
 pub fn run(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<SimReport, String> {
-    validate(topo, chaos, cfg)?;
-    engine::simulate(topo, chaos, cfg)
+    let endpoints = validate(topo, chaos, cfg)?;
+    engine::simulate(topo, &endpoints, chaos, cfg)
 }
 
 /// **Private.** Largest value `d` can sample, in seconds (NaN if its parameters are NaN).
@@ -124,7 +126,11 @@ fn worst_case_secs(d: &Dist) -> f64 {
 }
 
 /// **Private.** Rejects inputs the engine cannot run safely (see [`run`]).
-fn validate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<(), String> {
+fn validate(
+    topo: &Topology,
+    chaos: &ChaosState,
+    cfg: &SimConfig,
+) -> Result<Vec<Arc<Endpoint>>, String> {
     if cfg.streams.is_empty() {
         return Err("no streams".into());
     }
@@ -147,7 +153,12 @@ fn validate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<(), 
         w.is_nan() || w > MAX_SERVICE.as_secs_f64()
     };
     for n in &topo.nodes {
-        if too_long(&n.proc) || n.ops.iter().flatten().any(too_long) {
+        if too_long(&n.proc)
+            || n.ops.iter().flatten().any(too_long)
+            || n.cache
+                .iter()
+                .any(|c| too_long(&c.hit) || too_long(&c.miss))
+        {
             return Err(format!("node '{}': a latency can exceed 10h", n.name));
         }
     }
@@ -203,5 +214,21 @@ fn validate(topo: &Topology, chaos: &ChaosState, cfg: &SimConfig) -> Result<(), 
             "workload too large: about {expected:.0} arrivals (max {MAX_ARRIVALS:.0})"
         ));
     }
-    Ok(())
+    // A2 shim (Task 3 → removed in Task 5): each stream runs its owner's default chain.
+    let routes: Vec<RouteSpec> = cfg
+        .streams
+        .iter()
+        .map(|s| RouteSpec {
+            key: s.endpoint_key.clone(),
+            owner: s.entry,
+            op: s.op,
+        })
+        .collect();
+    let eps = compile(topo, &routes, EndpointsInput::default()).map_err(|e| e.msg)?;
+    // `compile` made one endpoint per stream key, and the keys were checked unique above.
+    Ok(cfg
+        .streams
+        .iter()
+        .map(|s| Arc::clone(eps.get(&s.endpoint_key).expect("compiled above")))
+        .collect())
 }

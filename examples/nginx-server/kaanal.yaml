@@ -11,5 +11,5 @@ nodes:
 edges:
   - { from: nginx, to: app, net: { p50: 1ms, p99: 2ms } }
   - { from: app,   to: db,  net: { p50: 1ms, p99: 2ms } }
-routes:
-  "GET /health": { status: 200, body: { ok: true } }
+endpoints:
+  "GET /health": { override: { status: 200, body: { ok: true } } }

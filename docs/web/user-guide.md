@@ -32,14 +32,14 @@ nodes:
 edges:
   - { from: nginx, to: app, net: 1ms }
   - { from: app, to: db, net: 1ms }
-routes:                          # optional static overrides
-  "GET /health": { body: { ok: true } }
-  "GET /users":  { body: [ { id: 1 } ], status: 200 }
+endpoints:                       # optional: per-endpoint overrides (a file path also works)
+  "GET /health": { override: { body: { ok: true } } }
+  "GET /users":  { override: { status: 200, body: [ { id: 1 } ] } }
 ```
 
 - **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
 - **edges** — the dependency graph, limited to the [edge table](nodes.md#edges-who-may-call-whom). No cycles, no self or duplicate edges, no dangling references; all rejected at startup. `calls: N` sets how many times the target is called per request.
-- **routes** — static responses that replace or extend the spec's routes. Same path + same parameter names = override; otherwise a new route.
+- **endpoints** — an entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
 
 Check a file without starting:
 

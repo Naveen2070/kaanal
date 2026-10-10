@@ -112,3 +112,31 @@ fn inert_fields_say_they_have_no_effect_yet() {
         assert!(d.contains("no effect yet"), "{kind}.{name}: {d:?}");
     }
 }
+
+#[test]
+fn schema_describes_endpoints_and_steps() {
+    let s = config_schema();
+    assert!(s["properties"].get("routes").is_none(), "routes: is gone");
+    for key in ["endpoints", "determinism"] {
+        assert!(s["properties"].get(key).is_some(), "{key}");
+    }
+    assert_eq!(s["$defs"]["Step"]["oneOf"].as_array().unwrap().len(), 4);
+    let service = s["$defs"]["NodeConfig"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["properties"]["type"]["const"] == "service")
+        .unwrap();
+    assert!(service["properties"].get("chains").is_some(), "{service}");
+    let doc: Value = serde_yaml_ng::from_str(
+        "version: 1\nnodes:\n  app: { type: service, chains: { r: [ db ] } }\nendpoints:\n  \"GET /x\":\n    chain: [ { cache: c }, { call: a, repeat: 2 }, { parallel: [ a, [ b, c ] ] } ]\n    error_map: { db: 503, \"5xx\": { status: 502, body: { e: 1 } } }\n",
+    )
+    .unwrap();
+    let v = jsonschema::validator_for(&s).unwrap();
+    let errors: Vec<String> = v.iter_errors(&doc).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let file: Value =
+        serde_yaml_ng::from_str("version: 1\nnodes: {}\nendpoints: kaanal.endpoints.yaml\n")
+            .unwrap();
+    assert!(v.is_valid(&file));
+}

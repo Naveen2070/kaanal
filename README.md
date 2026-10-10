@@ -160,9 +160,9 @@ edges:
   - { from: nginx, to: app, net: 1ms }
   - { from: app, to: db, net: 1ms }
 
-routes:                  # Optional static overrides
-  "GET /health": { body: { ok: true } }
-  "GET /users":  { body: [ { id: 1 } ], status: 200 }
+endpoints:               # Optional per-endpoint overrides
+  "GET /health": { override: { body: { ok: true } } }
+  "GET /users":  { override: { status: 200, body: [ { id: 1 } ] } }
 ```
 
 - **`nodes`**:
@@ -190,7 +190,7 @@ edges:
 
 Every node kind and field is documented in [docs/web/nodes.md](docs/web/nodes.md).
 
-- **`routes`**: Static route overrides that take precedence over generated OpenAPI schemas.
+- **`endpoints`**: An entry with `override` is a fixed response that takes precedence over generated OpenAPI schemas; one with no owning service is a static endpoint and needs a gateway.
 
 Check configs without starting:
 
