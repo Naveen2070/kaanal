@@ -189,6 +189,7 @@ fn trace_header(o: &ChainOutcome, topo: &Topology) -> String {
         }
     }
     pieces.extend(forks.iter().map(|_| Piece::Close));
+    let pieces = without_empty_blocks(pieces);
     let error = match &o.result {
         ChainResult::Err { node, status } => format!("{}.error={status}", name(*node)),
         ChainResult::Ok => String::new(),
@@ -205,6 +206,40 @@ fn trace_header(o: &ChainOutcome, topo: &Topology) -> String {
         out.push_str(&error);
     }
     out
+}
+
+/// **Private.** Drops every `[...]` block with no hop inside (a `parallel` that a sibling's
+/// failure cancelled before it started would otherwise print as `[|]`).
+fn without_empty_blocks(pieces: Vec<Piece>) -> Vec<Piece> {
+    // Open positions with the hops seen inside each; a block's range is dropped when it has none.
+    let mut open: Vec<(usize, usize)> = Vec::new();
+    let mut drop: Vec<std::ops::Range<usize>> = Vec::new();
+    for (i, p) in pieces.iter().enumerate() {
+        match p {
+            Piece::Open => open.push((i, 0)),
+            Piece::Hop(_) => {
+                if let Some(top) = open.last_mut() {
+                    top.1 += 1;
+                }
+            }
+            Piece::Close => {
+                if let Some((start, hops)) = open.pop() {
+                    if hops == 0 {
+                        drop.push(start..i + 1);
+                    } else if let Some(parent) = open.last_mut() {
+                        parent.1 += hops;
+                    }
+                }
+            }
+            Piece::Bar => {}
+        }
+    }
+    pieces
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !drop.iter().any(|r| r.contains(i)))
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// **Private.** Joins `pieces` (commas between elements, none after `[` or `|`). Stops

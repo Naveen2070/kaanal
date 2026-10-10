@@ -51,7 +51,7 @@ Given the same `seed` in `kaanal.yaml`:
 
 This makes tests reproducible: commit the config, and every CI run gets the same backend. (Under _concurrent_ requests, arrival order decides which specific request fails; only the failure _rate_ is guaranteed.)
 
-By default (`determinism: controlled`) this holds on every run. With `determinism: realistic`, timings and failures vary from run to run: `kaanal up` draws a fresh seed at startup and prints it (`Seed:  N (determinism: realistic; replay with determinism: controlled and seed: N)`). To replay that run, set `determinism: controlled` and `seed: N`. Generated bodies always follow `seed:`, so the same URL still returns the same data.
+By default (`determinism: controlled`) this holds on every run. With `determinism: realistic`, timings and failures vary from run to run: `kaanal up` draws a fresh seed at startup and prints it (`Seed:  N (determinism: realistic; replay its timings and failures with determinism: controlled and seed: N; generated data then follows that seed too)`). To replay that run's timings and failures, set `determinism: controlled` and `seed: N`. Generated bodies follow `seed:` in both modes, so replaying with a new `seed:` also changes the generated data, while the chain's timings and failures repeat exactly.
 
 ## Generated data
 

@@ -13,7 +13,7 @@ The event loop. A `BinaryHeap` of `(time, seq, event)` on a virtual clock in int
 
 **Record semantics.** `RequestRecord.hops` are the hops that ran, in plan order, with `start` = the actual offset from arrival (after waits). A hop whose branch a failure cancelled (`Plan::cancelled_by`) is cut at the failure instant, or absent if it had not started.
 
-All clock additions go through `Sim::after` (`checked_add`). If an event time would pass `u64::MAX` ns (about 584 years) it sets a flag and `simulate` returns `Err("simulated clock overflow…")`, never a silently wrong report. `validate` bounds hop records but not arrivals × service time, so this is reachable: 2M requests of 9 h through one slot overflows.
+All clock additions go through `Sim::after` (`checked_add`). If an event time would pass `u64::MAX` ns (about 584 years) it sets a flag and `simulate` returns `Err("simulated clock overflow…")`, never a silently wrong report. `validate` bounds hop records but not arrivals × service time, so this is reachable: 600k requests of 9 h through one slot overflows.
 
 Model: a node's slot is busy only during its own hop (a tandem queueing network); "hold until downstream returns" is planned for M1.
 

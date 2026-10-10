@@ -115,7 +115,7 @@ Notice:
 - `id: 42` was copied from the URL path parameter into the matching schema field.
 - City, state, and pincode describe a consistent, real place; the name and email belong to the same person.
 - The `X-Kaanal-Trace` header reports the exact latency breakdown across simulated nodes (parallel branches appear as `[a|b]`, cache lookups as `hit`/`miss`, and very long chains end `,...+N hops`).
-- Your client actually waited the sum of the trace, ~8.3 ms.
+- Your client actually waited the trace's total, ~8.3 ms (a plain sequence here; a `parallel` block counts only its slowest branch).
 
 ### 2. Inject live chaos
 

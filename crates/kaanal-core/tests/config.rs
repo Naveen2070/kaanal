@@ -633,3 +633,18 @@ fn endpoints_file_parses_and_places_shape_errors() {
     let top = parse_endpoints("- a\n").unwrap_err();
     assert!(top.msg.contains("map of endpoints"), "{top}");
 }
+
+#[test]
+fn serde_errors_do_not_repeat_their_position_or_offer_routes() {
+    // The position is in the error's own line/col; the message must not say it again.
+    let e = Config::from_yaml("version: 1\nfoo: 2\n").unwrap_err();
+    assert!(!e.msg.contains("at line"), "{}", e.msg);
+    assert!(
+        e.msg.contains("`endpoints`") && !e.msg.contains("routes"),
+        "routes: is removed, so it is not a valid key to suggest: {}",
+        e.msg
+    );
+    let e = parse_endpoints("\"GET /a\":\n  chain:\n    - { cache: c, op: read }\n").unwrap_err();
+    assert_eq!((e.line, e.col), (Some(3), Some(7)), "{e}");
+    assert!(!e.msg.contains("at line"), "{}", e.msg);
+}

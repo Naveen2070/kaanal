@@ -898,10 +898,18 @@ pub fn parse_endpoints(src: &str) -> Result<IndexMap<String, EndpointConfig>, Co
 /// **Private.** A `serde_yaml_ng` error as a [`ConfigError`] with serde's own position.
 fn serde_error(e: &serde_yaml_ng::Error) -> ConfigError {
     let loc = e.location();
+    let mut msg = e.to_string();
+    // serde appends " at line L column C"; the error already carries (and prints) that position.
+    if let Some(l) = &loc {
+        let at = format!(" at line {} column {}", l.line(), l.column());
+        if let Some(m) = msg.strip_suffix(&at) {
+            msg = m.to_string();
+        }
+    }
     ConfigError {
         line: loc.as_ref().map(serde_yaml_ng::Location::line),
         col: loc.as_ref().map(serde_yaml_ng::Location::column),
-        msg: e.to_string(),
+        msg,
     }
 }
 
@@ -1057,7 +1065,10 @@ impl Config {
         let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         let cfg: Config = serde_yaml_ng::from_str(src).map_err(|e| {
             // R1.15: serde loses positions inside tagged nodes; recover them (error path only).
-            crate::diagnostics::explain(src, serde_error(&e))
+            let mut err = crate::diagnostics::explain(src, serde_error(&e));
+            // The private `routes` field (kept to explain its removal) must not be offered as valid.
+            err.msg = err.msg.replace(", `routes`", "");
+            err
         })?;
         if cfg.version != 1 {
             return Err(Located::new(

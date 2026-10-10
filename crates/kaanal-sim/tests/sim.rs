@@ -495,6 +495,7 @@ fn hop_budget_counts_chain_length() {
 
 #[test]
 fn hop_budget_sums_streams_and_skips_warmup() {
+    // The record budget counts reported arrivals; a second cap counts all simulated hops.
     // Two 20 201-hop endpoints. Each stream alone is under 20 M records at 0.6 req/s, the sum
     // is not; and a warmup shrinks the count to the reported arrivals only.
     let chain = "chain: [ { call: svc, repeat: 100, chain: [ { call: db, repeat: 100 } ] } ]";
@@ -530,6 +531,13 @@ fn hop_budget_sums_streams_and_skips_warmup() {
     assert!(
         err.contains("about 1080 arrivals with up to 21817080 hops"),
         "only post-warmup arrivals count: {err}"
+    );
+    // A long warmup keeps the records small but not the CPU time: warmup arrivals count
+    // against the total-work cap (30 reported arrivals, 3 000 simulated).
+    let err = run(&t, &e, &none, &cfg(vec![stream("GET /x", 3.0)], 990)).unwrap_err();
+    assert!(
+        err.starts_with("simulated work too large: about 60603000 hops in total"),
+        "{err}"
     );
 }
 

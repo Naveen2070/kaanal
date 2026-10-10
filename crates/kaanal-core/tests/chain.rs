@@ -491,6 +491,13 @@ fn limits_are_named_errors() {
         e.msg,
         "endpoint 'GET /x': resolves to calls nested 69 deep (max 64)"
     );
+    // No entry to point at: the error lands on the owning node (line 3 is `s0`).
+    assert_eq!((e.line, e.col), (Some(3), Some(3)), "{e}");
+    // The same for a default chain that is too big through edge `calls`.
+    let y = "version: 1\nnodes:\n  app: { type: service }\n  x: { type: service }\n  y: { type: service }\nedges:\n  - { from: app, to: x, calls: 1000 }\n  - { from: x, to: y, calls: 1000 }\n";
+    let e = build(y, &[("GET /x", "app")]).1.unwrap_err();
+    assert!(e.msg.contains("hops (max 100000)"), "{e}");
+    assert_eq!((e.line, e.col), (Some(3), Some(3)), "{e}");
 }
 
 #[test]

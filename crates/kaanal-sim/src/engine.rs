@@ -159,7 +159,7 @@ fn nanos(d: Duration) -> u64 {
 impl Sim<'_> {
     /// **Private.** `now + d`. On overflow it flags the run as failed (and returns `u64::MAX`)
     /// instead of letting the clock pin, which would silently collapse `(time, seq)` ordering.
-    /// Validation bounds hop records but not arrivals × service time: 2M requests of 9 h
+    /// Validation bounds hop records but not arrivals × service time: 600k requests of 9 h
     /// through one slot passes `validate` and overflows here.
     fn after(&self, d: u64) -> u64 {
         self.now.checked_add(d).unwrap_or_else(|| {

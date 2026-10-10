@@ -650,9 +650,14 @@ impl Compiler<'_> {
                     op: r.op,
                     cfg: None,
                     error_map: IndexMap::new(),
+                    // No entry to point at: a limit hit by the default chain is placed at the
+                    // owning node, whose edges (`calls`) decide its size.
                     place: Place {
                         ctx: format!("endpoint '{}'", r.key),
-                        path: Vec::new(),
+                        path: vec![
+                            PathSeg::Key("nodes".into()),
+                            PathSeg::Key(topo.nodes[r.owner].name.clone()),
+                        ],
                         file: None,
                     },
                 },

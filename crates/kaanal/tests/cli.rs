@@ -483,7 +483,7 @@ fn up_prints_the_realistic_seed() {
     assert_eq!(
         line,
         format!(
-            "Seed:  {n} (determinism: realistic; replay with determinism: controlled and seed: {n})"
+            "Seed:  {n} (determinism: realistic; replay its timings and failures with determinism: controlled and seed: {n}; generated data then follows that seed too)"
         )
     );
 }
@@ -571,7 +571,9 @@ fn endpoints_write_refuses_inline_and_existing_files() {
     let before = std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap();
     let out = kaanal(&dir, &["endpoints", "--write"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
-    assert_eq!(stdout(&out), SKELETON);
+    // Indented for pasting below `endpoints:`.
+    let indented: String = SKELETON.lines().map(|l| ["  ", l, "\n"].concat()).collect();
+    assert_eq!(stdout(&out), indented);
     assert!(
         stderr(&out).contains("endpoints: is inline"),
         "{}",
@@ -581,6 +583,12 @@ fn endpoints_write_refuses_inline_and_existing_files() {
         std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap(),
         before
     );
+    // ...and pasting it as printed gives a config that validates with nothing stale.
+    std::fs::write(dir.join("kaanal.yaml"), format!("{before}{}", stdout(&out))).unwrap();
+    let out = kaanal(&dir, &["validate"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(stderr(&out).is_empty(), "{}", stderr(&out));
+    std::fs::write(dir.join("kaanal.yaml"), &before).unwrap();
     // No `endpoints:` key: --write creates kaanal.endpoints.yaml and says how to wire it.
     let dir = project("eps-new", "");
     let out = kaanal(&dir, &["endpoints", "--write"]);

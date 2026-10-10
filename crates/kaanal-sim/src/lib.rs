@@ -20,6 +20,10 @@ use kaanal_core::{ChainResult, ChaosState, Dist, Endpoint, Endpoints, Hop, Topol
 /// 100 bytes per hop plus a few hundred per request, so the cap bounds a run near 2–3 GB.
 /// Start value; tune once measured.
 const MAX_HOP_RECORDS: f64 = 20_000_000.0;
+/// **Private.** Most hop events one run may simulate, warmup included (a CPU bound; R6.13 bounds
+/// memory only). About 0.35 µs per hop in release, so the cap is roughly 20 s. Start value;
+/// tune once measured.
+const MAX_SIM_HOPS: f64 = 50_000_000.0;
 /// **Private.** Largest single service/net time a topology may sample (the config's 1 h
 /// cap times the 10× exponential/lognormal tail cap).
 const MAX_SERVICE: Duration = Duration::from_hours(10);
@@ -112,7 +116,7 @@ pub struct NodeStats {
 /// (e.g. `latency_add` over 5 min); or a node or edge
 /// latency that can sample over 10 h (e.g. a config with `p50` above `p99`, which core
 /// turns into a fixed `p50` without the 1 h cap, or a hand-edited `Topology`).
-/// A run whose virtual clock would pass `u64::MAX` ns (about 584 years, e.g. 2M requests of
+/// A run whose virtual clock would pass `u64::MAX` ns (about 584 years, e.g. 600k requests of
 /// 9 h each through one slot) is also an error, never a silently wrong report.
 /// An overloaded system (ρ ≥ 1) is not an error.
 pub fn run(
@@ -180,7 +184,7 @@ fn validate(
             ));
         }
     }
-    // The same limits live mode enforces (R6.9); the 5 min latency cap, with the 2 M arrival
+    // The same limits live mode enforces (R6.9); the 5 min latency cap, with the hop
     // cap, keeps the virtual clock far inside `u64` nanoseconds.
     // min(): a HashMap has no order, and the error must name the same node every run.
     if let Some((id, e)) = chaos
@@ -190,7 +194,7 @@ fn validate(
     {
         return Err(format!("chaos on node {id}: {e}"));
     }
-    let (mut arrivals, mut records) = (0.0, 0.0);
+    let (mut arrivals, mut records, mut work) = (0.0, 0.0, 0.0);
     let mut out = Vec::with_capacity(cfg.streams.len());
     for (i, s) in cfg.streams.iter().enumerate() {
         if !(MIN_RATE_PER_S..=MAX_RATE_PER_S).contains(&s.rate_per_s) {
@@ -220,11 +224,17 @@ fn validate(
         )]
         let hops = ep.chain.hops as f64;
         records += a * hops;
+        work += s.rate_per_s * cfg.duration.as_secs_f64() * hops;
         out.push(Arc::clone(ep));
     }
     if records > MAX_HOP_RECORDS {
         return Err(format!(
             "workload too large: about {arrivals:.0} arrivals with up to {records:.0} hops in total (max {MAX_HOP_RECORDS:.0}); lower the rate, the duration or the chain length"
+        ));
+    }
+    if work > MAX_SIM_HOPS {
+        return Err(format!(
+            "simulated work too large: about {work:.0} hops in total, warmup included (max {MAX_SIM_HOPS:.0}); lower the rate, the duration, the warmup or the chain length"
         ));
     }
     Ok(out)

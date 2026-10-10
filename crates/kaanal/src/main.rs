@@ -265,7 +265,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
         if let Some(seed) = server.drawn_seed {
             println!(
-                "Seed:  {seed} (determinism: realistic; replay with determinism: controlled and seed: {seed})"
+                "Seed:  {seed} (determinism: realistic; replay its timings and failures with determinism: controlled and seed: {seed}; generated data then follows that seed too)"
             );
         }
         // limitation: only Ctrl+C removes run.json. Closing the window, SIGTERM (docker stop) or a
@@ -328,7 +328,17 @@ fn endpoints(config: &Path, write: bool) -> Result<(), Fail> {
             })
     };
     // Spec paths and node names are user text: never let them drive the terminal.
-    let show = || println!("{}", clean_lines(&block("\n")));
+    // Under an inline map the lines are pasted below `endpoints:`, so they need its indent.
+    let indent = if matches!(cfg.endpoints, Some(EndpointsConfig::Inline(_))) {
+        "  "
+    } else {
+        ""
+    };
+    let show = || {
+        for l in clean_lines(&block("\n")).lines() {
+            println!("{indent}{l}");
+        }
+    };
     match (write, &cfg.endpoints, file) {
         (false, ..) => show(),
         (true, Some(EndpointsConfig::Inline(_)), _) => {
@@ -348,7 +358,7 @@ fn endpoints(config: &Path, write: bool) -> Result<(), Fail> {
             // Safety net (D22): the appended file must parse and keep every old entry.
             let back = parse_endpoints(&text).map_err(|e| {
                 err(format!(
-                    "{}: refusing to append, the result would not parse: {e}",
+                    "{}: refusing to append, the result would not parse: {e} (a file that is one flow-style `{{ ... }}` map cannot be appended to: rewrite it in block style, or paste the lines in yourself)",
                     f.display()
                 ))
             })?;

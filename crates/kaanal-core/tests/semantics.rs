@@ -283,6 +283,31 @@ fn cache_hit_ends_only_the_enclosing_sequence() {
 }
 
 #[test]
+fn cache_hit_in_a_parallel_branch_ends_only_that_branch() {
+    // Branch 0 hits the cache and stops; branch 1 still runs db; the block ends with the slower one.
+    let (t, e) =
+        hot("  \"GET /users/{id}\": { chain: [ { parallel: [ [ { cache: c }, db ], db ] } ] }\n");
+    let o = run(&t, &e, "GET /users/{id}", &ChaosState::default());
+    let tl = timeline(&t, &o);
+    let hops: Vec<&str> = tl.iter().map(String::as_str).collect();
+    // Exactly one db read (branch 1's); branch 0 ends at its hit.
+    assert_eq!(
+        hops.iter().filter(|h| h.starts_with("db.read")).count(),
+        1,
+        "{hops:?}"
+    );
+    assert!(hops.iter().any(|h| h.starts_with("c.hit")), "{hops:?}");
+    let hit_end = o
+        .hops
+        .iter()
+        .filter(|h| h.kind == HopKind::CacheHit)
+        .map(|h| h.start + h.dur)
+        .max()
+        .unwrap();
+    assert!(o.total() > hit_end, "the block waits for the db branch");
+}
+
+#[test]
 fn cache_hit_in_a_repeated_call_ends_only_that_repetition() {
     let (t, e) = hot("  \"GET /users/{id}\": { chain: [ { call: orders, repeat: 2 } ] }\n");
     let o = run(&t, &e, "GET /users/{id}", &ChaosState::default());

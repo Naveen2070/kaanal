@@ -682,6 +682,21 @@ async fn trace_brackets_parallel_branches_and_marks_cache_hits() {
 }
 
 #[tokio::test]
+async fn trace_drops_blocks_a_failure_cancelled_before_they_started() {
+    // Branch 0 would open a nested `parallel` at 2 ms, the instant branch 1 fails: none of the
+    // nested hops start, so the block must not print as `[|]`.
+    let yaml = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\n  s1: { type: external-api, proc: 2ms }\n  a: { type: external-api, proc: 1ms }\n  b: { type: external-api, proc: 1ms }\n  w: { type: external-api, proc: 2ms }\n  f: { type: external-api }\nedges:\n  - { from: app, to: s1 }\n  - { from: app, to: a }\n  - { from: app, to: b }\n  - { from: app, to: w }\n  - { from: app, to: f }\nendpoints:\n  \"GET /users/{id}\": { chain: [ { parallel: [ [ s1, { parallel: [ a, b ] } ], [ w, f ] ] } ] }\n";
+    let s = start_yaml(yaml).await;
+    s.put_chaos("f", json!({ "down": true })).await;
+    let r = s.get("/users/1").await;
+    assert_eq!(r.status(), 503);
+    assert_eq!(
+        trace_of(&r),
+        "app.proc=0.0ms,[net=0.0ms,s1.proc=2.0ms|net=0.0ms,w.proc=2.0ms,net=0.0ms],f.error=503"
+    );
+}
+
+#[tokio::test]
 async fn error_map_shapes_status_and_body() {
     let s = start_yaml(&format!(
         "{GW_APP_DB}  \"GET /users/{{id}}\":\n    error_map: {{ db: {{ status: 502, body: {{ error: upstream }} }}, \"5xx\": 500 }}\n"
@@ -803,6 +818,14 @@ async fn realistic_runs_replay_under_controlled_with_the_printed_seed() {
     replay.seed = drawn;
     let replay = start_in(&replay, &fixtures()).await;
     assert_eq!(replay.drawn_seed, None);
+    // Bodies follow `seed:` in both modes, so a replay under the drawn seed generates other
+    // data (documented: only timings and failures replay). Compared before `statuses` turns
+    // chaos on: with the same chain seed both servers fail the same request, and a chaos
+    // error body is identical on both.
+    assert_ne!(
+        body(real.get("/users/42").await).await,
+        body(replay.get("/users/42").await).await
+    );
     assert_eq!(statuses(&real).await, statuses(&replay).await);
 }
 
