@@ -11,6 +11,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, ConfigError};
 use kaanal_server::ServeOpts;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
@@ -123,8 +124,8 @@ fn run(cli: Cli) -> Result<(), Fail> {
     match cli.cmd {
         Cmd::Validate { config } => {
             let (cfg, dir, src) = load(&config)?;
-            let warnings = kaanal_server::check(&cfg, &dir)
-                .map_err(|e| config_err(&config, &e.in_source(&src)))?;
+            let warnings =
+                kaanal_server::check(&cfg, &dir).map_err(|e| located_err(&config, &src, &e))?;
             for w in warnings {
                 eprintln!("warning: {}", clean(&w));
             }
@@ -192,6 +193,18 @@ fn config_err(path: &Path, e: &ConfigError) -> Fail {
     err(format!("{}{sep}{e}", path.display()))
 }
 
+/// **Private.** A load error as `file:line:col: msg`: placed in the endpoints file when it
+/// came from there (spec §8), else in `kaanal.yaml` (`src`).
+fn located_err(config: &Path, src: &str, e: &Located) -> Fail {
+    match &e.file {
+        Some(f) => {
+            let text = std::fs::read_to_string(f).unwrap_or_default();
+            config_err(f, &e.in_source(&text))
+        }
+        None => config_err(config, &e.in_source(src)),
+    }
+}
+
 /// **Private.** Reads and parses the config; errors print as `file:line:col: msg`
 /// (R6.1). Also returns the config's directory, which spec files resolve against, and
 /// the source, so later errors can be placed in it.
@@ -231,7 +244,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         };
         let server = kaanal_server::serve(&cfg, &dir, opts)
             .await
-            .map_err(|e| config_err(config, &e.in_source(&src)))?;
+            .map_err(|e| located_err(config, &src, &e))?;
         let port = server.addr.port();
         for w in &server.warnings {
             eprintln!("warning: {}", clean(w));
@@ -239,6 +252,11 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         write_run_file(server.addr, &token)?;
         println!("Mocks: http://localhost:{port}");
         println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
+        if let Some(seed) = server.drawn_seed {
+            println!(
+                "Seed:  {seed} (determinism: realistic; replay with determinism: controlled and seed: {seed})"
+            );
+        }
         // limitation: only Ctrl+C removes run.json. Closing the window, SIGTERM (docker stop) or a
         // crash leaves it behind; that is harmless (later commands exit 2, the next `up` overwrites it).
         // Add a SIGTERM handler under #[cfg(unix)] if containers become a use case.

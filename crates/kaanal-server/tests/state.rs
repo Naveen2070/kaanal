@@ -235,3 +235,85 @@ endpoints:
     assert!(err.msg.contains("static route needs a gateway"), "{err}");
     assert_eq!(err.in_source(src).line, Some(5));
 }
+
+/// A temp dir holding a copy of the fixture spec.
+fn scratch(name: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("kaanal-state-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::copy(fixtures().join("openapi.yaml"), d.join("openapi.yaml")).unwrap();
+    d
+}
+
+#[test]
+fn endpoints_file_errors_name_the_file_and_place() {
+    let dir = scratch("eps-file");
+    let src = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, spec: openapi.yaml }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: db }\nendpoints: kaanal.endpoints.yaml\n";
+    let cfg = Config::from_yaml(src).unwrap();
+    // A missing file is placed at the `endpoints:` value in kaanal.yaml.
+    let e = kaanal_server::check(&cfg, &dir).unwrap_err();
+    assert_eq!(e.file, None);
+    let at = e.in_source(src);
+    assert_eq!((at.line, at.col), (Some(9), Some(12)), "{at}");
+    assert!(at.msg.contains("kaanal.endpoints.yaml"), "{at}");
+    // A compile error inside the file is placed in the file; BOM and CRLF change nothing.
+    let file = dir.join("kaanal.endpoints.yaml");
+    let eps = "\"GET /users/{id}\":\n  chain:\n    - call: pay\n";
+    for text in [
+        eps.to_string(),
+        format!("\u{feff}{}", eps.replace('\n', "\r\n")),
+    ] {
+        std::fs::write(&file, &text).unwrap();
+        let e = kaanal_server::check(&cfg, &dir).unwrap_err();
+        assert_eq!(e.file.as_deref(), Some(file.as_path()));
+        let at = e.in_source(&text);
+        assert_eq!(
+            (at.line, at.col, at.msg.as_str()),
+            (
+                Some(3),
+                Some(13),
+                "endpoint 'GET /users/{id}': unknown node 'pay'"
+            )
+        );
+    }
+    // A shape error keeps serde's position in the file (Located::parsed).
+    std::fs::write(
+        &file,
+        "\"GET /users/{id}\":\n  chain:\n    - { cache: c, op: read }\n",
+    )
+    .unwrap();
+    let e = kaanal_server::check(&cfg, &dir).unwrap_err();
+    assert_eq!(
+        (e.file.as_deref(), e.pos),
+        (Some(file.as_path()), Some((3, 7)))
+    );
+}
+
+#[test]
+fn stale_entries_and_ignored_error_maps_are_warnings() {
+    let src = format!(
+        "{GW_APP}endpoints:\n  \"GET /old\": {{}}\n  \"GET /health\": {{ override: {{ body: 1 }}, chain: [ {{ call: app, via: \"POST /orders\" }} ] }}\n  \"POST /orders\": {{ error_map: {{ \"5xx\": 502 }} }}\n"
+    );
+    let warnings = kaanal_server::check(&Config::from_yaml(&src).unwrap(), &fixtures()).unwrap();
+    assert_eq!(
+        warnings,
+        [
+            "endpoint 'GET /old': no spec defines this route and it has no override (stale entry: remove it, or add an override to serve it)",
+            "endpoint 'GET /health': via 'POST /orders': that endpoint's error_map is ignored here (each endpoint maps its own errors)",
+        ]
+    );
+}
+
+#[test]
+fn spec_node_without_a_gateway_edge_is_rejected_before_compile() {
+    // P4: compile would fail on such a route with no place; the topology check catches it first
+    // and names the node.
+    let err = check_yaml(
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, spec: openapi.yaml }\n",
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("node 'app' has an OpenAPI spec but no edge from the gateway"),
+        "{err}"
+    );
+}

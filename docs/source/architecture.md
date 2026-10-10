@@ -102,12 +102,13 @@ sequenceDiagram
     participant Bus as SSE Broadcast Bus
 
     Client->>Router: GET /users/42
-    Router->>Mock: Dispatched Route
+    Router->>Mock: Dispatched Route (its compiled endpoint: chain, op, override, error_map)
     Mock->>Chaos: Acquire Read Lock (brief)
-    Mock->>Core: execute(topology, chaos, request)
+    Mock->>Core: execute(topology, chaos, endpoint, n, chain_seed)
     Note over Core: Pure Synchronous Evaluation:<br/>1. Gateway proc (1.0ms)<br/>2. Net hop (1.0ms)<br/>3. Service proc (5.0ms)<br/>4. Net hop (1.0ms)<br/>5. DB read op (4.2ms)
     Core-->>Mock: ChainOutcome { hops, total: 12.2ms, status: Ok }
-    Mock->>Mock: tokio::time::sleep(12.2ms)
+    Mock->>Mock: one tokio::time::sleep(12.2ms) for the whole chain
+    Note over Mock: Shaping: failure → error_map; success → override, else generated body
     Mock->>Data: generate(schema, "response", seed=hash(seed, node, path))
     Data-->>Mock: Synthetic JSON Payload
     Mock->>Mock: apply_params(body, {"id": 42})

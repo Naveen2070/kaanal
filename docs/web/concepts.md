@@ -51,6 +51,8 @@ Given the same `seed` in `kaanal.yaml`:
 
 This makes tests reproducible: commit the config, and every CI run gets the same backend. (Under _concurrent_ requests, arrival order decides which specific request fails; only the failure _rate_ is guaranteed.)
 
+By default (`determinism: controlled`) this holds on every run. With `determinism: realistic`, timings and failures vary from run to run: `kaanal up` draws a fresh seed at startup and prints it (`Seed:  N (determinism: realistic; replay with determinism: controlled and seed: N)`). To replay that run, set `determinism: controlled` and `seed: N`. Generated bodies always follow `seed:`, so the same URL still returns the same data.
+
 ## Generated data
 
 Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. An `override` on an `endpoints:` entry beats generation entirely.

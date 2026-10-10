@@ -75,7 +75,7 @@ event: lagged
 data: 37
 ```
 
-- `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header.
+- `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header (parallel branches in `[a|b]`, cache lookups as `hit`/`miss`, long chains ending `,...+N hops`).
 - `lagged` means the stream fell behind and skipped that many events.
 
 ### `GET /__kaanal/ui`

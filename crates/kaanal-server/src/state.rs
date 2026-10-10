@@ -1,50 +1,37 @@
 //! [`AppState`]: everything the running server knows, built once at startup.
 //!
 //! [`AppState::build`] is the full load pipeline shared by `serve` and `check`
-//! (`kaanal validate`): topology → `OpenAPI` specs → route table → overrides. Every
-//! problem is a fatal error with a precise message, or — for ignorable schema
-//! keywords — a collected warning.
+//! (`kaanal validate`): topology → `OpenAPI` specs → endpoints (inline or the endpoints
+//! file) compiled by `kaanal_core::chain::compile` → route table. Every problem is a
+//! fatal error with a precise message, or — for ignorable schema keywords — a collected
+//! warning.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, RwLock};
 
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::config::{EndpointsConfig, Override};
+use kaanal_core::config::{EndpointsConfig, SeedSource, parse_endpoints};
 use kaanal_core::diagnostics::{Located, keys};
-use kaanal_core::{ChaosState, Config, Endpoints, NodeId, Op, Topology};
+use kaanal_core::{ChaosState, Config, Endpoint, Endpoints, NodeId, Topology};
 use kaanal_data::ApiModel;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-/// Where a route's response body comes from.
-#[derive(Clone)]
-pub enum Body {
-    /// Generated from an `OpenAPI` response schema (`None` = empty body).
-    Generated {
-        /// The inlined JSON schema, if the spec declares one.
-        schema: Option<Value>,
-    },
-    /// A static `endpoints:` `override`, returned verbatim.
-    Static(Value),
-}
-
-/// One route: a `method + path` pair and how to answer it.
+/// One route: a `method + path` pair and the compiled endpoint that answers it.
 pub struct Route {
     /// Uppercase HTTP method.
     pub method: String,
-    /// "GET /users/{id}" — chain RNG key and display name.
+    /// `"GET /users/{id}"`: chain seed material and display name.
     pub key: String,
-    /// Service or monolith owning the route; `None` = static-only route answered by the gateway.
-    pub owner: Option<NodeId>,
-    /// The database operation this endpoint performs (inferred from method + path).
-    pub op: Op,
-    /// HTTP status of a successful response.
+    /// The compiled chain, op, `override` and `error_map` (HEAD copies included, R6.8).
+    pub endpoint: Arc<Endpoint>,
+    /// Success status from the spec (200 for a static route); an `override` status wins.
     pub status: u16,
-    /// Generated schema or static body.
-    pub body: Body,
+    /// Response schema for generated bodies (`None`: empty body, or a static route).
+    pub schema: Option<Value>,
     /// Requests seen so far; becomes `ChainRequest.n`.
     pub counter: AtomicU64,
 }
@@ -74,7 +61,7 @@ pub struct AppState {
     pub topo: Topology,
     /// Path router: each path maps to its method routes.
     pub paths: matchit::Router<Vec<Route>>,
-    /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status` (synthesised HEAD routes excluded).
+    /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status` (synthesized HEAD routes excluded, R6.8).
     pub route_keys: Vec<String>,
     /// Live chaos settings; written by the control API, read (briefly) per request.
     pub chaos: RwLock<ChaosState>,
@@ -82,18 +69,17 @@ pub struct AppState {
     pub events: broadcast::Sender<Event>,
     /// Bearer token the control API requires.
     pub token: String,
-    /// Master RNG seed from the config.
+    /// The config's `seed:`: generated bodies use it in both determinism modes (D14).
     pub seed: u64,
+    /// Seed of the chain draws: `seed:` under `controlled`, the startup draw under `realistic`.
+    pub chain_seed: u64,
+    /// The startup draw under `determinism: realistic`, printed by `up` for replay.
+    pub drawn_seed: Option<u64>,
     /// The bound port (after the +20 search), used by the Host guard.
     pub port: u16,
     /// Non-fatal findings from loading (ignored schema keywords, nodes with `concurrency`); shown by `validate` and `up`.
     pub warnings: Vec<String>,
-    /// Compiled endpoint chains, looked up by route key.
-    pub endpoints: Endpoints,
 }
-
-/// **Private.** Uppercase methods accepted in `endpoints:` override keys.
-const METHODS: [&str; 7] = ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
 /// **Private.** Rejects two paths that differ only in parameter names
 /// (`/users/{id}` vs `/users/{uid}`): the router would refuse the second with an
@@ -128,100 +114,91 @@ fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), S
     }
 }
 
-/// **Private.** R6.8: a path with GET but no HEAD gets a `HEAD /p` route that answers like
-/// GET (owner, op, status, body, `endpoints:` override) under its own key and counter, so
-/// HEAD probes never shift GET's chain sequence.
-fn add_head_routes(by_path: &mut BTreeMap<String, Vec<Route>>) {
-    for (p, routes) in by_path {
-        if routes.iter().any(|r| r.method == "HEAD") {
-            continue;
-        }
-        if let Some(get) = routes.iter().find(|r| r.method == "GET") {
-            let head = Route {
-                method: "HEAD".into(),
-                key: format!("HEAD {p}"),
-                owner: get.owner,
-                op: get.op,
-                status: get.status,
-                body: get.body.clone(),
-                counter: AtomicU64::new(0),
-            };
-            routes.push(head);
-        }
-    }
+/// **Private.** What the spec files define: one [`RouteSpec`] per route, plus its success
+/// status and response schema by key.
+struct Specs {
+    routes: Vec<RouteSpec>,
+    info: BTreeMap<String, (u16, Option<Value>)>,
 }
 
-/// **Private.** Applies one `endpoints:` `override`: validates the key and status, then either
-/// overrides the route a service owns or adds a static-only route. Without a gateway
-/// nothing answers a route no service owns, so that is an error (R1.23).
-fn apply_override(
-    by_path: &mut BTreeMap<String, Vec<Route>>,
+/// **Private.** Reads every node's spec: path shapes, conflicts between services, ignored
+/// keywords as warnings. Same checks and messages as Phase One.
+fn load_specs(
+    topo: &Topology,
+    base_dir: &Path,
     shapes: &mut HashMap<String, String>,
-    spec: &str,
-    ov: &Override,
-    has_gateway: bool,
-) -> Result<(), String> {
-    let (m, p) = spec
-        .split_once(' ')
-        .ok_or_else(|| format!("endpoint '{spec}': key must look like 'GET /path'"))?;
-    let (m, p) = (m.to_uppercase(), p.trim().to_string());
-    // 1xx is not a final response: hyper would turn it into its own 500 (R6.2).
-    if !(200..=599).contains(&ov.status) {
-        return Err(format!(
-            "endpoint '{spec}': status {} must be between 200 and 599",
-            ov.status
-        ));
+    warnings: &mut Vec<String>,
+) -> Result<Specs, Located> {
+    let mut specs = Specs {
+        routes: Vec::new(),
+        info: BTreeMap::new(),
+    };
+    let mut owners: BTreeMap<String, NodeId> = BTreeMap::new();
+    for (id, node) in topo.nodes.iter().enumerate() {
+        let Some(spec) = &node.spec else { continue };
+        let at = keys(&["nodes", node.name.as_str(), "spec"]);
+        let file = base_dir.join(spec);
+        let src = std::fs::read_to_string(&file)
+            .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
+        let api = ApiModel::from_openapi(&src)
+            .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
+        warnings.extend(
+            api.warnings()
+                .into_iter()
+                .map(|w| format!("{}: {w}", file.display())),
+        );
+        for ep in api.endpoints {
+            check_shape(shapes, &ep.path).map_err(|m| Located::new(at.clone(), m))?;
+            let key = format!("{} {}", ep.method, ep.path);
+            // `compile` takes unique keys; a duplicate is rejected here (P2).
+            if let Some(&other) = owners.get(&key) {
+                return Err(Located::new(
+                    at.clone(),
+                    format!(
+                        "route {} {} defined by both '{}' and '{}'",
+                        ep.method, ep.path, topo.nodes[other].name, node.name
+                    ),
+                ));
+            }
+            owners.insert(key.clone(), id);
+            specs.routes.push(RouteSpec::inferred(&key, id));
+            specs.info.insert(key, (ep.status, ep.schema));
+        }
     }
-    if !METHODS.contains(&m.as_str()) {
-        return Err(format!("endpoint '{spec}': unknown method '{m}'"));
-    }
-    if !p.starts_with('/') {
-        return Err(format!("endpoint '{spec}': path must start with '/'"));
-    }
-    check_shape(shapes, &p)?;
-    let routes = by_path.entry(p.clone()).or_default();
-    if let Some(r) = routes.iter_mut().find(|r| r.method == m) {
-        r.status = ov.status;
-        r.body = Body::Static(ov.body.clone());
-        return Ok(());
-    }
-    // R6.8: a HEAD override of a path the service owns keeps GET's owner and op, so the
-    // service hop is not lost (and it is not a gateway-only static route).
-    if m == "HEAD"
-        && let Some(get) = routes.iter().find(|r| r.method == "GET")
-    {
-        let head = Route {
-            key: format!("HEAD {p}"),
-            op: get.op,
-            method: m,
-            owner: get.owner,
-            status: ov.status,
-            body: Body::Static(ov.body.clone()),
-            counter: AtomicU64::new(0),
-        };
-        routes.push(head);
-        return Ok(());
-    }
-    if !has_gateway {
-        return Err(format!(
-            "endpoint '{spec}': static route needs a gateway or a service that owns it"
-        ));
-    }
-    routes.push(Route {
-        key: format!("{m} {p}"),
-        op: Op::infer(&m, &p),
-        method: m,
-        owner: None,
-        status: ov.status,
-        body: Body::Static(ov.body.clone()),
-        counter: AtomicU64::new(0),
-    });
-    Ok(())
+    Ok(specs)
+}
+
+/// **Private.** Compiles the spec routes with `endpoints:`: the inline map, or the file it
+/// names (relative to `base_dir`). A missing file is placed at the `endpoints:` value;
+/// errors inside the file carry that file (spec §8).
+fn compile_endpoints(
+    cfg: &Config,
+    base_dir: &Path,
+    topo: &Topology,
+    routes: &[RouteSpec],
+) -> Result<Endpoints, Located> {
+    // P4: a spec route with no entry and no gateway edge would fail in `compile` with no place,
+    // but `Topology::build` already rejects a spec node without an edge from the gateway.
+    let Some(EndpointsConfig::File(p)) = &cfg.endpoints else {
+        return compile(topo, routes, EndpointsInput::inline(cfg));
+    };
+    let path = base_dir.join(p);
+    let src = std::fs::read_to_string(&path)
+        .map_err(|e| Located::at_value(keys(&["endpoints"]), format!("{}: {e}", path.display())))?;
+    let entries = parse_endpoints(&src).map_err(|e| Located::parsed(path.clone(), e))?;
+    compile(
+        topo,
+        routes,
+        EndpointsInput {
+            entries: Some(&entries),
+            file: Some(&path),
+        },
+    )
 }
 
 impl AppState {
-    /// Runs the full load pipeline: topology → spec files → spec routes → `endpoints:`
-    /// overrides → matchit router.
+    /// Runs the full load pipeline: topology → spec files → endpoints (inline or file) →
+    /// compiled routes → matchit router.
     ///
     /// Spec paths are resolved against `base_dir` (the config file's directory).
     /// Routes are inserted in deterministic (`BTreeMap`) order so a conflict always
@@ -229,8 +206,9 @@ impl AppState {
     ///
     /// # Errors
     /// Returns a [`Located`] error (path into `kaanal.yaml` + message, with file paths
-    /// where relevant) for unreadable or invalid specs, route conflicts between services, malformed override keys, or any
-    /// topology error. Nothing is served half-configured (rule R6.1).
+    /// where relevant) for unreadable or invalid specs or endpoints file, route conflicts,
+    /// any `endpoints:` error from `compile` (placed in the endpoints file when it comes
+    /// from there), or any topology error. Nothing is served half-configured (rule R6.1).
     pub fn build(
         cfg: &Config,
         base_dir: &Path,
@@ -238,12 +216,9 @@ impl AppState {
         port: u16,
     ) -> Result<AppState, Located> {
         let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
-        // BTreeMap: deterministic order, so a router conflict always names the same path.
-        let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
         let mut shapes: HashMap<String, String> = HashMap::new();
         let mut warnings = Vec::new();
-        let mut specs: Vec<RouteSpec> = Vec::new();
         // Live mode has no queues yet; say so instead of silently ignoring the setting.
         for n in topo.nodes.iter().filter(|n| n.concurrency.is_some()) {
             warnings.push(format!(
@@ -252,73 +227,51 @@ impl AppState {
             ));
         }
 
-        for (id, node) in topo.nodes.iter().enumerate() {
-            let Some(spec) = &node.spec else { continue };
-            let at = keys(&["nodes", node.name.as_str(), "spec"]);
-            let file = base_dir.join(spec);
-            let src = std::fs::read_to_string(&file)
-                .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
-            let api = ApiModel::from_openapi(&src)
-                .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
-            warnings.extend(
-                api.warnings()
-                    .into_iter()
-                    .map(|w| format!("{}: {w}", file.display())),
-            );
-            for ep in api.endpoints {
-                check_shape(&mut shapes, &ep.path).map_err(|m| Located::new(at.clone(), m))?;
-                let routes = by_path.entry(ep.path.clone()).or_default();
-                if let Some(other) = routes.iter().find(|r| r.method == ep.method) {
-                    let owner = other.owner.map_or("?", |o| topo.nodes[o].name.as_str());
-                    return Err(Located::new(
-                        at.clone(),
-                        format!(
-                            "route {} {} defined by both '{owner}' and '{}'",
-                            ep.method, ep.path, node.name
-                        ),
-                    ));
-                }
-                specs.push(RouteSpec::inferred(
-                    &format!("{} {}", ep.method, ep.path),
-                    id,
-                ));
-                routes.push(Route {
-                    key: format!("{} {}", ep.method, ep.path),
-                    op: Op::infer(&ep.method, &ep.path),
-                    method: ep.method,
-                    owner: Some(id),
-                    status: ep.status,
-                    body: Body::Generated { schema: ep.schema },
-                    counter: AtomicU64::new(0),
-                });
-            }
-        }
-
-        // A2 shim (Task 1 → removed in Task 4): inline `override`s keep the static-route
-        // behaviour until the chain engine serves endpoints; an endpoints file is ignored here.
-        if let Some(EndpointsConfig::Inline(entries)) = &cfg.endpoints {
-            for (spec, entry) in entries {
-                let Some(ov) = &entry.response else { continue };
-                apply_override(&mut by_path, &mut shapes, spec, ov, topo.gateway.is_some())
-                    .map_err(|m| Located::new(keys(&["endpoints", spec.as_str()]), m))?;
-            }
-        }
-
-        // A2 shim (Task 3 → removed in Task 4): compile runs beside the override path.
-        let endpoints = compile(&topo, &specs, EndpointsInput::inline(cfg))?;
+        let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings)?;
+        let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
         warnings.extend(endpoints.warnings.iter().cloned());
-
-        let mut route_keys: Vec<String> =
-            by_path.values().flatten().map(|r| r.key.clone()).collect();
-        route_keys.sort();
-        // After `route_keys`, so synthesised HEAD routes are not listed (R6.8).
-        add_head_routes(&mut by_path);
+        // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
+        let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
+        for ep in endpoints.iter() {
+            let (method, path) = ep.key.split_once(' ').unwrap_or((ep.key.as_str(), ""));
+            if ep.owner.is_none() {
+                // A static route: the spec loop never saw its path.
+                check_shape(&mut shapes, path).map_err(|m| ep.located(m))?;
+            }
+            // HEAD without a spec entry of its own answers like GET (R6.8).
+            let spec = specs.info.get(&ep.key).or_else(|| {
+                if method == "HEAD" {
+                    specs.info.get(&format!("GET {path}"))
+                } else {
+                    None
+                }
+            });
+            let (status, schema) = spec.cloned().unwrap_or((200, None));
+            by_path.entry(path.to_string()).or_default().push(Route {
+                method: method.to_string(),
+                key: ep.key.clone(),
+                endpoint: Arc::clone(ep),
+                status,
+                schema,
+                counter: AtomicU64::new(0),
+            });
+        }
+        let route_keys: Vec<String> = endpoints
+            .iter()
+            .filter(|e| !e.synthesized)
+            .map(|e| e.key.clone())
+            .collect();
         let mut paths = matchit::Router::new();
         for (p, routes) in by_path {
             paths
                 .insert(p.clone(), routes)
                 .map_err(|e| Located::new(Vec::new(), format!("route '{p}': {e}")))?;
         }
+        let drawn_seed = match cfg.seed_source() {
+            SeedSource::Fixed(_) => None,
+            // R2.3: entropy is the server's job, drawn once here; no RNG state is kept.
+            SeedSource::Entropy => Some(rand::random::<u64>()),
+        };
         let (events, _) = broadcast::channel(1024);
         Ok(AppState {
             topo,
@@ -328,9 +281,10 @@ impl AppState {
             events,
             token,
             seed: cfg.seed,
+            chain_seed: drawn_seed.unwrap_or(cfg.seed),
+            drawn_seed,
             port,
             warnings,
-            endpoints,
         })
     }
 }

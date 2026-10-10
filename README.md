@@ -114,7 +114,7 @@ Notice:
 
 - `id: 42` was copied from the URL path parameter into the matching schema field.
 - City, state, and pincode describe a consistent, real place; the name and email belong to the same person.
-- The `X-Kaanal-Trace` header reports the exact latency breakdown across simulated nodes.
+- The `X-Kaanal-Trace` header reports the exact latency breakdown across simulated nodes (parallel branches appear as `[a|b]`, cache lookups as `hit`/`miss`, and very long chains end `,...+N hops`).
 - Your client actually waited the sum of the trace, ~8.3 ms.
 
 ### 2. Inject live chaos
@@ -148,6 +148,7 @@ bash examples/nginx-server/check.sh      # or: pwsh examples/nginx-server/check.
 ```yaml
 version: 1
 seed: 42                 # Master seed: same seed -> identical data and timings
+determinism: controlled  # or realistic: timings vary per run, `up` prints the seed to replay
 port: 8080
 
 nodes:

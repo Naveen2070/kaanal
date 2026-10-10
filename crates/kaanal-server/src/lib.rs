@@ -37,6 +37,9 @@ pub struct BoundServer {
     pub addr: SocketAddr,
     /// Same warnings `check` returns, so `up` can print them.
     pub warnings: Vec<String>,
+    /// The chain seed drawn at startup under `determinism: realistic`; print it so the run can
+    /// be replayed as `controlled`. `None` under `controlled`.
+    pub drawn_seed: Option<u64>,
     /// **Private.** The spawned `axum::serve` task.
     handle: tokio::task::JoinHandle<std::io::Result<()>>,
 }
@@ -51,7 +54,7 @@ impl BoundServer {
     }
 }
 
-/// Validate everything `serve` would load (config, topology, specs, routes) without binding a port.
+/// Validate everything `serve` would load (config, topology, specs, endpoints inline or from a file) without binding a port.
 /// `Ok` carries non-fatal warnings (ignored schema keywords, nodes with `concurrency`).
 ///
 /// # Errors
@@ -92,11 +95,13 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
         addr.port(),
     )?);
     let warnings = st.warnings.clone();
+    let drawn_seed = st.drawn_seed;
     let app = router(st);
     let handle = tokio::spawn(async move { axum::serve(listener, app).await });
     Ok(BoundServer {
         addr,
         warnings,
+        drawn_seed,
         handle,
     })
 }

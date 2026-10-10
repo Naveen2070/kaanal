@@ -1,3 +1,4 @@
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -446,6 +447,61 @@ fn gatewayless_example_validates() {
     assert!(
         stderr(&out).is_empty(),
         "no warnings expected: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn up_prints_the_realistic_seed() {
+    let dir = scratch("realistic");
+    std::fs::copy(fixtures().join("openapi.yaml"), dir.join("openapi.yaml")).unwrap();
+    let src = std::fs::read_to_string(fixture())
+        .unwrap()
+        .replace("seed: 42", "seed: 42\ndeterminism: realistic");
+    std::fs::write(dir.join("kaanal.yaml"), src).unwrap();
+    let mut child = bin()
+        .args(["up", "--port", "0", "-c", "kaanal.yaml"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let out = child.stdout.take().unwrap();
+    let line = BufReader::new(out)
+        .lines()
+        .map(Result::unwrap)
+        .find(|l| l.starts_with("Seed:"));
+    let _ = child.kill();
+    let _ = child.wait();
+    let line = line.expect("up prints a Seed: line under determinism: realistic");
+    let n: u64 = line["Seed:".len()..]
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        line,
+        format!(
+            "Seed:  {n} (determinism: realistic; replay with determinism: controlled and seed: {n})"
+        )
+    );
+}
+
+#[test]
+fn validate_rejects_routes_with_a_pointer() {
+    let dir = scratch("routes");
+    let file = dir.join("kaanal.yaml");
+    std::fs::write(
+        &file,
+        "version: 1\nnodes:\n  app: { type: service }\nroutes:\n  \"GET /health\": { body: 1 }\n",
+    )
+    .unwrap();
+    let out = bin().args(["validate", "-c"]).arg(&file).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("kaanal.yaml:4:1: routes: was replaced by endpoints: (see docs)"),
+        "{}",
         stderr(&out)
     );
 }
