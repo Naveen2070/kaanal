@@ -797,3 +797,36 @@ fn branch_waits_under_load() {
     );
     assert!(rep.nodes[s].mean_wait > Duration::ZERO);
 }
+
+#[test]
+fn login_is_a_stream_key_and_auth_concurrency_queues_logins() {
+    // Spec §6: the built-in route is a compiled endpoint, so it streams with no simulator change.
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway }\n  login: { type: auth, concurrency: 1, proc: { mean: 10ms } }\n  users: { type: database, flavor: postgres }\nedges:\n  - { from: gw, to: login }\n  - { from: login, to: users }\n";
+    let (t, e) = compiled(yaml, &[]);
+    let cfg = SimConfig {
+        streams: vec![Stream {
+            endpoint_key: "POST /login".into(),
+            rate_per_s: 50.0,
+        }],
+        duration: Duration::from_secs(20),
+        warmup: Duration::ZERO,
+        seed: 3,
+    };
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+    let (login, users) = (t.id("login").unwrap(), t.id("users").unwrap());
+    assert!(rep.requests.len() > 500, "{}", rep.requests.len());
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| matches!(r.result, ChainResult::Ok))
+    );
+    // X12: every login reads the user store.
+    assert!(rep.requests.iter().all(|r| {
+        r.hops
+            .iter()
+            .any(|(h, _)| h.node == users && h.kind == HopKind::Op(kaanal_core::Op::Read))
+    }));
+    // One slot at rho = 0.5: logins queue at the auth node.
+    let s = &rep.nodes[login];
+    assert!(s.max_queue >= 1 && s.mean_wait > Duration::ZERO, "{s:?}");
+}

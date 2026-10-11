@@ -173,7 +173,7 @@ endpoints:               # Optional per-endpoint overrides
   - `database`: Data store with configured costs for `read`, `write`, and `scan` operations; `flavor: postgres | mysql | mongodb` fills the ones you leave out (estimates).
   - `cache`: Hit ratio plus hit and miss costs; `flavor: redis | memcached`.
   - `external-api`: A third-party HTTP API with its own response time.
-  - `auth`: An identity provider (login and token issue). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
+  - `auth`: An identity provider: `POST /login` returns a signed RS256 JWT for its test users, `GET /.well-known/jwks.json` serves the key (see [auth.md](docs/web/auth.md)). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
 - Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
 - **`edges`**: Directed dependency graph, limited to an edge table (see [nodes.md](docs/web/nodes.md)). No cycles; `calls: N` sets calls per request. Each request follows its endpoint's chain: by default every node reachable from the owner is charged; `endpoints:` customises it (see [endpoints.md](docs/web/endpoints.md)).
 
@@ -224,6 +224,7 @@ Exit codes: `0` (success), `1` (error), `2` (no running instance found).
 - **Local Development Security**: Binds to `127.0.0.1` by default. Control endpoints require a 256-bit Bearer token and check the `Host` header against DNS-rebinding attacks.
 - **Strict File Isolation**: Holds an exclusive OS lock on `.kaanal/lock` using `std::fs::File::try_lock` ensuring exactly one instance per directory. `.kaanal/run.json` is protected with private permissions (Unix `0700`/`0600`, Windows ACLs restricted to the current user SID).
 - **Synthetic Data Safety**: All emails use `@example.com` (RFC 2606); no real user data is ever generated or queried.
+- **Signing Key**: The auth signing key lives outside the project, readable only by you.
 - **Embedded Web UI**: Self-contained vanilla HTML/JS served at `/__kaanal/ui` with strict Content Security Policy (`frame-ancestors 'none'`, `no-referrer`, DOM manipulation via `textContent` only).
 
 ---

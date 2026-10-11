@@ -9,14 +9,17 @@ cargo install kaanal        # or grab a release binary
 kaanal up                   # reads ./kaanal.yaml, serves on http://localhost:8080
 ```
 
-`kaanal up` prints two URLs:
+`kaanal up` prints two URLs (and an `Auth:` line when the file has an `auth` node):
 
 ```
 Mocks: http://localhost:8080
 UI:    http://localhost:8080/__kaanal/ui#token=<64 hex chars>
+Auth:  POST http://localhost:8080/login, JWKS http://localhost:8080/.well-known/jwks.json, 1 user
 ```
 
 Point your frontend's `API_BASE_URL` at the mocks URL. Open the UI URL to watch requests and flip chaos. Only one instance per project directory; a second `kaanal up` tells you it's already running.
+
+**Log in from your frontend.** With an `auth` node, `POST /login` returns a signed JWT. Send `Content-Type: application/json` (a `fetch` with `JSON.stringify` and no header sends `text/plain` and gets 415). See [auth.md](auth.md).
 
 ## `kaanal.yaml`
 
@@ -38,7 +41,7 @@ endpoints:                       # optional: per-endpoint overrides (a file path
   "GET /users":  { override: { status: 200, body: [ { id: 1 } ] } }
 ```
 
-- **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
+- **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field; `auth` serves login and JWKS, see [auth.md](auth.md)). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
 - **edges** — the dependency graph, limited to the [edge table](nodes.md#edges-who-may-call-whom). No cycles, no self or duplicate edges, no dangling references; all rejected at startup. `calls: N` sets how many times the target is called per request.
 - **endpoints** — per-endpoint behaviour, fully described in [endpoints.md](endpoints.md). An entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
 
@@ -103,4 +106,5 @@ Open the UI URL printed by `kaanal up`. It shows a node table with live rps/erro
 
 - Kaanal binds `127.0.0.1`. `--host 0.0.0.0` works but warns; the control API still requires the token and a loopback `Host` header.
 - The token is per-run and lives in `.kaanal/run.json`, readable only by you.
+- `KAANAL_CONFIG_DIR` sets the base folder for the auth signing key (default: your per-user local config folder). See [auth.md](auth.md).
 - All generated data is synthetic. Emails always use `example.com`.

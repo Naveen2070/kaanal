@@ -103,18 +103,24 @@ pay: { type: external-api, proc: 50ms, error_rate: 0.01 }
 
 ## `auth`
 
-An identity provider: login and token issue.
+An identity provider: serves `POST /login` and `GET /.well-known/jwks.json` (see [auth.md](auth.md)). At most one.
 
 ```yaml
-login: { type: auth, proc: 5ms, token_ttl: 2h, users: [{ username: alice, password: secret, roles: [admin] }] }
+login:
+  type: auth
+  proc: 5ms
+  token_ttl: 2h
+  claims: { aud: my-app }
+  users: [{ username: alice, password: secret, roles: [admin], scopes: [read] }]
 ```
 
-| Field         | Meaning                                                                        | Default   | Status                  |
-| ------------- | ------------------------------------------------------------------------------ | --------- | ----------------------- |
-| `proc`        | Cost of one login or token check (an auth node's own calls are not walked yet) | zero      | active now              |
-| `users`       | Accounts that can log in (`username` unique, `password`, `roles`)              | none      | used from sub-project E |
-| `token_ttl`   | Lifetime of issued tokens, at most 1 day                                       | 1h        | used from sub-project E |
-| `concurrency` | Most requests served at once                                                   | unlimited | active now              |
+| Field         | Meaning                                                                               | Default   | Status     |
+| ------------- | ------------------------------------------------------------------------------------- | --------- | ---------- |
+| `proc`        | Cost of one login, one JWKS request or one gateway token check                        | zero      | active now |
+| `users`       | Accounts that can log in (`username` unique, `password`, `roles`, `scopes`, `claims`) | none      | active now |
+| `token_ttl`   | Lifetime of issued tokens, whole seconds, 1s to 1 day                                 | 1h        | active now |
+| `claims`      | Extra claims in every token (a user's own `claims` win)                               | none      | active now |
+| `concurrency` | Most requests served at once                                                          | unlimited | active now |
 
 ## Edges: who may call whom
 
@@ -128,6 +134,8 @@ An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net`
 | `database`, `cache`, `external-api` | nothing                                                            |
 
 An edge that breaks the table is rejected with a message listing what that kind may call.
+
+An edge `gateway -> auth` makes every request pay an auth check; logins run inside it.
 
 ## The gateway is optional
 

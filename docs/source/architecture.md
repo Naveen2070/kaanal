@@ -145,6 +145,14 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
 - **Two drivers.** The server sleeps `total()` once and shapes the response; the simulator replays the plan through its queues with tokens.
 - **Seeding.** Each hop draws from the request's chain seed and a per-hop key, so a hop's numbers do not depend on which siblings ran.
 
+### Auth
+
+- **Config rules in core.** `check_auth` runs after parsing, so every error is a `Located` with a `line:col` (claims, scopes, limits, empty username); `Topology::build` allows one auth node and accepts an auth-only topology.
+- **Built-in routes are ordinary endpoints.** `compile` adds `POST /login` and `GET /.well-known/jwks.json` as jobs owned by the auth node, tagged with a `Responder` (plain data). Chaos, trace, `error_map`, `endpoints:` customisation and simulator streams therefore need no special case. Core never builds tokens.
+- **Server.** `auth.rs` holds the signing key (RS256, RFC 7638 `kid`, JWKS), the `Issuer` (users, claims, ttl, `iss`), the login body reader and the responder. In `mock::handle` a login body is read first (no sleep), then `execute`, one sleep, and the answer: chain failure through `error_map` first, then an `override`, then the responder.
+- **Binary.** `keys.rs` owns key IO: location (`KAANAL_CONFIG_DIR` or the per-user local config folder), identity (hash of the config directory), race-safe store (temp file, hard link, adopt the winner), permissions, and the eager load at `up`; `validate` never touches keys.
+- **Why this split.** Core stays free of IO and crypto (R2.3); the server owns crypto and HTTP; the binary owns the filesystem (X5). A config with an auth node and no key makes `serve` fail closed.
+
 ---
 
 ## 5. Live Chaos Engine & Upstream Propagation
