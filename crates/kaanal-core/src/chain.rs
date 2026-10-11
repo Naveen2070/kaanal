@@ -7,6 +7,11 @@
 //! with no lookups. Default bodies are built once per node, callees first, and shared
 //! through `Arc`. They fix no op: a database step runs the op of whoever called it (E10),
 //! so one body serves reads and writes.
+//!
+//! When the topology has an auth node, `compile` also creates its two built-in routes,
+//! `POST /login` and `GET /.well-known/jwks.json` (spec X7): ordinary compiled endpoints
+//! owned by the auth node, tagged with a [`Responder`] the server uses to build the body.
+//! Core never builds tokens.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -35,6 +40,21 @@ pub const MAX_REPEAT: u32 = 1000;
 pub const MAX_HOPS: u64 = 100_000;
 /// Deepest resolved call tree (D9).
 pub const MAX_DEPTH: u32 = 64;
+
+/// The built-in login route of an auth node (spec X7).
+pub const LOGIN_KEY: &str = "POST /login";
+/// The built-in JWKS route of an auth node (spec X7).
+pub const JWKS_KEY: &str = "GET /.well-known/jwks.json";
+
+/// What answers a built-in route once its chain succeeds. Plain data: the server builds the
+/// body (a token or the JWKS); an `override` on the route still wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Responder {
+    /// `POST /login`: checks the credentials and issues a signed token.
+    Login,
+    /// `GET /.well-known/jwks.json`: the public signing key.
+    Jwks,
+}
 
 /// **Private.** Methods an endpoint key may use.
 const METHODS: [&str; 7] = ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS"];
@@ -177,7 +197,7 @@ impl Drop for Seq {
 pub struct Endpoint {
     /// Normalized `"METHOD /path"`.
     pub key: String,
-    /// The service or monolith that owns the route; `None` for a static endpoint.
+    /// The service, monolith or auth node that owns the route; `None` for a static endpoint.
     pub owner: Option<NodeId>,
     /// The op database steps inherit.
     pub op: Op,
@@ -191,6 +211,8 @@ pub struct Endpoint {
     pub response: Option<Override>,
     /// A `HEAD` copy made from a `GET` (not listed, R6.8).
     pub synthesized: bool,
+    /// The built-in body producer of an auth node's routes; `None` for spec and static routes.
+    pub responder: Option<Responder>,
     /// **Private.** Where the `endpoints:` entry sits (path and file), if there is one.
     entry: Option<(Vec<PathSeg>, Option<PathBuf>)>,
 }
@@ -510,6 +532,7 @@ struct Job<'e> {
     cfg: Option<&'e EndpointConfig>,
     error_map: IndexMap<String, ErrorMapping>,
     place: Place,
+    responder: Option<Responder>,
 }
 
 /// **Private.** A valid `error_map` key, normalized: a node name, `400..=599`, `4xx`/`5xx`.
@@ -624,8 +647,8 @@ impl Compiler<'_> {
     }
 
     /// **Private.** Lists the endpoints to compile: spec routes in order (with their entry,
-    /// if any), then `HEAD` entries of a `GET` route, then static entries. Stale entries
-    /// become warnings.
+    /// if any), then the auth node's built-in routes, then `HEAD` entries of a `GET` route,
+    /// then static entries. Stale entries become warnings.
     fn jobs<'e>(
         &mut self,
         routes: &[RouteSpec],
@@ -643,6 +666,7 @@ impl Compiler<'_> {
                     cfg: Some(e.cfg),
                     error_map: e.error_map,
                     place: e.place,
+                    responder: None,
                 },
                 None => Job {
                     key: r.key.clone(),
@@ -660,10 +684,12 @@ impl Compiler<'_> {
                         ],
                         file: None,
                     },
+                    responder: None,
                 },
             };
             jobs.push(job);
         }
+        self.builtin_jobs(routes, &mut entries, &mut jobs);
         // GET entries with an override: a HEAD entry for one is served as a copy of it.
         let static_gets: Vec<String> = entries
             .iter()
@@ -674,8 +700,16 @@ impl Compiler<'_> {
             let get = (e.method == "HEAD")
                 .then(|| routes.iter().find(|r| r.key == format!("GET {}", e.path)))
                 .flatten();
+            // A HEAD entry for the built-in JWKS route is a copy of it, like one for a spec GET.
+            let builtin = (e.method == "HEAD" && format!("GET {}", e.path) == JWKS_KEY)
+                .then_some(topo.auth)
+                .flatten();
+            let mut responder = None;
             let (owner, op) = if let Some(r) = get {
                 (Some(r.owner), r.op)
+            } else if let Some(auth) = builtin {
+                responder = Some(Responder::Jwks);
+                (Some(auth), Op::Read)
             } else if e.cfg.response.is_none()
                 && static_gets.contains(&format!("GET {}", e.path))
                 && e.method == "HEAD"
@@ -705,9 +739,56 @@ impl Compiler<'_> {
                 cfg: Some(e.cfg),
                 error_map: e.error_map,
                 place: e.place,
+                responder,
             });
         }
         Ok(jobs)
+    }
+
+    /// **Private.** X7, X9: the auth node's built-in routes, listed before stale detection so
+    /// an `endpoints:` entry customises them; a spec route with the same key replaces one (P8).
+    fn builtin_jobs<'e>(
+        &mut self,
+        routes: &[RouteSpec],
+        entries: &mut IndexMap<String, Entry<'e>>,
+        jobs: &mut Vec<Job<'e>>,
+    ) {
+        let topo = self.topo;
+        let Some(auth) = topo.auth else { return };
+        for (key, responder) in [(LOGIN_KEY, Responder::Login), (JWKS_KEY, Responder::Jwks)] {
+            if let Some(r) = routes.iter().find(|r| r.key == key) {
+                self.warnings.push(format!(
+                    "endpoint '{key}': the spec of '{}' defines it, so it replaces the built-in route of auth node '{}'",
+                    topo.nodes[r.owner].name, topo.nodes[auth].name
+                ));
+                continue;
+            }
+            let (cfg, error_map, place) = match entries.shift_remove(key) {
+                Some(e) => (Some(e.cfg), e.error_map, e.place),
+                None => (
+                    None,
+                    IndexMap::new(),
+                    Place {
+                        ctx: format!("endpoint '{key}'"),
+                        path: vec![
+                            PathSeg::Key("nodes".into()),
+                            PathSeg::Key(topo.nodes[auth].name.clone()),
+                        ],
+                        file: None,
+                    },
+                ),
+            };
+            jobs.push(Job {
+                key: key.to_string(),
+                owner: Some(auth),
+                // X12: both built-in routes read.
+                op: Op::Read,
+                cfg,
+                error_map,
+                place,
+                responder: Some(responder),
+            });
+        }
     }
 
     /// **Private.** `"chains: a, b"` or `"it has no chains"`.
@@ -967,6 +1048,13 @@ impl Compiler<'_> {
                 s.extend(self.steps(steps, o, &j.place.key("chain"), 1, &mut Keys::new(n))?);
                 Arc::new(Seq::new(s))
             }
+            // X12: login walks the auth node's out-edges like a service's default body. JWKS,
+            // and the gateway's auth calls on ordinary routes, stay `proc` only (A2 D5).
+            (Some(o), None) if j.responder == Some(Responder::Login) => {
+                let mut s = self.prefix(o);
+                s.extend(self.walk(o, &mut Keys::new(n)));
+                Arc::new(Seq::new(s))
+            }
             (Some(o), None) => Arc::clone(&self.default[o]),
             (None, custom) => {
                 let Some(gw) = self.topo.gateway else {
@@ -983,6 +1071,27 @@ impl Compiler<'_> {
             }
         };
         let chain = match (self.topo.gateway, j.owner) {
+            // X7: the auth node owns its built-in routes; the gateway's own work runs first.
+            (Some(gw), Some(o)) if j.responder.is_some() => {
+                let mut steps = self.default[gw].steps.clone();
+                match steps
+                    .iter()
+                    .position(|s| matches!(s, Step::Call(c) if c.node == o))
+                {
+                    // `auth_request` edge: that call runs the route's body, once (P6).
+                    Some(i) => {
+                        if let Step::Call(c) = &mut steps[i] {
+                            c.body = Arc::clone(&body);
+                            c.repeat = 1;
+                        }
+                    }
+                    // Local validation: no edge, so no network hop; the body runs inline and
+                    // already starts with auth's own `proc` (P7). No call keys can repeat: the
+                    // gateway part has no calls without an auth edge (one auth node, X2).
+                    None => steps.extend(body.steps.iter().cloned()),
+                }
+                Arc::new(Seq::new(steps))
+            }
             (Some(gw), Some(o)) => {
                 let net = self.edge(gw, o, &j.place)?.net.clone();
                 let mut steps = self.default[gw].steps.clone();
@@ -1009,6 +1118,7 @@ impl Compiler<'_> {
             error_map: j.error_map.clone(),
             response: j.cfg.and_then(|c| c.response.clone()),
             synthesized: false,
+            responder: j.responder,
             entry: j.cfg.map(|_| (j.place.path.clone(), j.place.file.clone())),
         };
         self.done.insert(j.key.clone(), Arc::new(ep));

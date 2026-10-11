@@ -8,18 +8,20 @@ Compiles `endpoints:`, node `chains:` and the topology into resolved call trees,
 
 ## Types
 
-| Item             | Kind   | What it does                                                                                                                                                          |
-| ---------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Step`           | enum   | `Proc`, `Op`, `Call`, `Cache`, `Parallel`: one resolved step.                                                                                                         |
-| `Call`           | struct | Callee, `repeat`, edge `net`, shared `body`, optional fixed `op`, `key`.                                                                                              |
-| `CacheStep`      | struct | Cache node, edge `net`, `reads_only` (default-chain lookups skip writes), `repeat` (lookups in sequence: a stored count, so a large edge `calls` stays cheap), `key`. |
-| `Seq`            | struct | Steps plus `hops` and `depth`, computed bottom-up (saturating) by `Seq::new`.                                                                                         |
-| `StepKey`        | struct | `(target, occ)`: the n-th call of a target in an endpoint; the seed of its draws.                                                                                     |
-| `Endpoint`       | struct | `key`, `owner`, `op`, `chain` (gateway work + owner body), `body`, `error_map`, `response`, `synthesized`; `located(msg)` places an error.                            |
-| `Endpoints`      | struct | Endpoints sorted by key (`get`, `iter`) and `warnings`.                                                                                                               |
-| `RouteSpec`      | struct | A spec route: `key`, `owner`, `op`; `RouteSpec::inferred(key, owner)` infers the op.                                                                                  |
-| `EndpointsInput` | struct | The entries and the file they came from; `EndpointsInput::inline(cfg)` for an inline map.                                                                             |
-| `resolve_error`  | fn     | `error_map` lookup: failing node, then exact status, then class (`5xx`); no match keeps the failure's own status and no body.                                         |
+| Item                    | Kind   | What it does                                                                                                                                                          |
+| ----------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Step`                  | enum   | `Proc`, `Op`, `Call`, `Cache`, `Parallel`: one resolved step.                                                                                                         |
+| `Call`                  | struct | Callee, `repeat`, edge `net`, shared `body`, optional fixed `op`, `key`.                                                                                              |
+| `CacheStep`             | struct | Cache node, edge `net`, `reads_only` (default-chain lookups skip writes), `repeat` (lookups in sequence: a stored count, so a large edge `calls` stays cheap), `key`. |
+| `Seq`                   | struct | Steps plus `hops` and `depth`, computed bottom-up (saturating) by `Seq::new`.                                                                                         |
+| `StepKey`               | struct | `(target, occ)`: the n-th call of a target in an endpoint; the seed of its draws.                                                                                     |
+| `Endpoint`              | struct | `key`, `owner`, `op`, `chain` (gateway work + owner body), `body`, `error_map`, `response`, `synthesized`, `responder`; `located(msg)` places an error.               |
+| `Responder`             | enum   | `Login` or `Jwks`: which built-in body the server builds once the route's chain succeeds. Plain data; core never builds tokens.                                       |
+| `LOGIN_KEY`, `JWKS_KEY` | const  | `"POST /login"` and `"GET /.well-known/jwks.json"`, the keys of an auth node's built-in routes.                                                                       |
+| `Endpoints`             | struct | Endpoints sorted by key (`get`, `iter`) and `warnings`.                                                                                                               |
+| `RouteSpec`             | struct | A spec route: `key`, `owner`, `op`; `RouteSpec::inferred(key, owner)` infers the op.                                                                                  |
+| `EndpointsInput`        | struct | The entries and the file they came from; `EndpointsInput::inline(cfg)` for an inline map.                                                                             |
+| `resolve_error`         | fn     | `error_map` lookup: failing node, then exact status, then class (`5xx`); no match keeps the failure's own status and no body.                                         |
 
 ## Default chain
 
@@ -57,6 +59,18 @@ Warnings (not errors): a stale entry (no spec route, no `override`), a `HEAD` en
 
 A stale entry is skipped, so a broken `chain:` in it only warns, but its `error_map` keys and statuses are still checked at load. Routes passed to `compile` must have unique keys (the server rejects duplicates first; a duplicate trips a debug assertion).
 Two limits to know: the default body of every node is built, used or not, so an edge with `calls: 1000` to a cache stores 1 000 cache steps (A2 Task 3 revisits this), and `compile` does not check that two routes differ only in parameter names (`/users/{id}` vs `/users/{uid}`) or use the reserved `/__kaanal` prefix; the server keeps that check (A2 Task 4).
+
+## Built-in routes
+
+With an auth node, `compile` always adds `POST /login` and `GET /.well-known/jwks.json` (and the synthesized `HEAD` of the JWKS), owned by the auth node, op `read`, each with its `Responder`. They are listed after the spec routes and before stale detection, so an `endpoints:` entry for them (`error_map`, `override`, `chain`) customises them instead of being stale.
+
+| Topology                              | Chain                                                                                                                                          |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway with a `gateway -> auth` edge | The gateway's default steps; its auth call runs the route's body, **once** even when the edge has `calls: N` (N checks model ordinary routes). |
+| Gateway without the edge              | The gateway's steps, then the body inline: no network hop, auth's own `proc` once.                                                             |
+| No gateway (or an auth node alone)    | The body alone.                                                                                                                                |
+
+The login body is auth's `proc`, then its callees, caches (reads) and databases, like a service. JWKS is auth's `proc` only. A custom `chain:` on either route runs with the auth node as runner. A spec route with the same key replaces the built-in route and adds a warning. The HEAD copy of the JWKS keeps its `responder`, and an explicit `HEAD /.well-known/jwks.json` entry is treated like one for a spec `GET`: the auth node owns it and it keeps the `Jwks` responder. `skeleton` never lists them: they are not spec routes. Ordinary routes keep the gateway's `auth_request` call with auth's `proc` only.
 
 ## Skeletons
 

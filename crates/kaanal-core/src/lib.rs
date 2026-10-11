@@ -5,7 +5,7 @@
 //! ([`presets`]), the editor JSON Schema ([`config_schema`]), latency distributions
 //! ([`Dist`]), live chaos state ([`ChaosState`]) and the call-chain executor
 //! ([`execute`]: a timeline and a replayable [`Plan`] per request), `endpoints:` parsing
-//! ([`config::parse_endpoints`]) and compilation ([`compile`]),
+//! ([`config::parse_endpoints`]) and compilation ([`compile`], including an auth node's built-in login and JWKS routes),
 //! with error positions for config problems ([`diagnostics`]).
 //!
 //! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
@@ -24,7 +24,10 @@ pub mod presets;
 pub mod schema;
 pub mod topology;
 
-pub use chain::{Endpoint, Endpoints, EndpointsInput, RouteSpec, compile, resolve_error, skeleton};
+pub use chain::{
+    Endpoint, Endpoints, EndpointsInput, JWKS_KEY, LOGIN_KEY, Responder, RouteSpec, compile,
+    resolve_error, skeleton,
+};
 pub use chaos::{ChaosState, MAX_LATENCY_ADD, NodeChaos};
 pub use config::{Config, ConfigError, Determinism, EndpointsConfig, NodeKind, SeedSource};
 pub use diagnostics::{Located, PathSeg};
