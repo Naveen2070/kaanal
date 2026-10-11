@@ -5,21 +5,27 @@
 //! no padding. Key IO lives in the `kaanal` binary (X5); this module only parses, generates
 //! and signs. RUSTSEC-2023-0071 (an RSA timing side channel) does not matter for a local mock
 //! that signs synthetic tokens (R1.16). Nothing here ever prints a password or the key.
+//!
+//! `POST /login` bodies are read by [`read_login`] before the chain runs; [`respond`] builds
+//! the answer after it succeeded.
 
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use axum::extract::Request;
+use axum::http::header;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use indexmap::IndexMap;
-use kaanal_core::Config;
 use kaanal_core::config::{NodeConfig, UserConfig};
 use kaanal_core::diagnostics::Located;
+use kaanal_core::{Config, Responder};
 use rsa::pkcs1v15::SigningKey;
 use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
 use rsa::signature::{SignatureEncoding, Signer};
 use rsa::traits::PublicKeyParts;
 use rsa::{BigUint, RsaPrivateKey};
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -164,11 +170,6 @@ impl Issuer {
 
     /// The `200` body for good credentials, `None` (a 401) for an unknown user or a wrong
     /// password alike (X8). Plain comparison: synthetic accounts on a local mock.
-    // Task 3 shim (removed in Task 4, when the login responder calls it).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the login responder calls it from Task 4")
-    )]
     pub(crate) fn login(&self, username: &str, password: &str) -> Option<Value> {
         let user = self
             .users
@@ -208,6 +209,90 @@ impl Issuer {
             c.insert("scope".into(), user.scopes.join(" ").into());
         }
         self.key.sign(&Value::Object(c))
+    }
+}
+
+/// **Private.** Largest login body Kaanal reads (spec §5).
+const MAX_LOGIN_BODY: usize = 16 * 1024;
+
+/// The two fields `POST /login` reads. Extra fields (`grant_type`, …) are ignored; serde's
+/// derive rejects duplicate, missing and non-string ones (P12). `Debug` hides the password.
+// ponytail: serde also reads a struct from a JSON array, so `["alice","pw"]` logs in too;
+// harmless for a local mock, add a map-only visitor if that ever matters.
+#[derive(Deserialize)]
+pub(crate) struct Credentials {
+    /// **Private.** The account name.
+    username: String,
+    /// **Private.** The password as sent.
+    password: String,
+}
+
+impl fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Credentials")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+/// A login request rejected before the credentials are checked: the status and the `error`
+/// code of the body (P10). Never a parser message: those can quote the password.
+pub(crate) type Reject = (u16, &'static str);
+
+/// Reads a `POST /login` body before the chain runs (spec §5). `Content-Type` (case-insensitive,
+/// parameters ignored) must be `application/json` or `application/x-www-form-urlencoded`, else
+/// 415 (decided from the header alone); a body over 16 KiB is 413; anything serde rejects is 400.
+pub(crate) async fn read_login(req: Request) -> Result<Credentials, Reject> {
+    let kind = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+        });
+    let json = match kind.as_deref() {
+        Some("application/json") => true,
+        Some("application/x-www-form-urlencoded") => false,
+        // `fetch` with `JSON.stringify` and no header sends text/plain (documented in auth.md).
+        _ => return Err((415, "unsupported_media_type")),
+    };
+    // ponytail: any body read error counts as too large; a client whose body stream breaks never reads the answer.
+    let body = axum::body::to_bytes(req.into_body(), MAX_LOGIN_BODY)
+        .await
+        .map_err(|_| (413, "request_too_large"))?;
+    let creds = if json {
+        serde_json::from_slice::<Credentials>(&body).ok()
+    } else {
+        serde_urlencoded::from_bytes::<Credentials>(&body).ok()
+    };
+    creds.ok_or((400, "invalid_request"))
+}
+
+/// The status and body of a built-in route whose chain succeeded. `login` is what
+/// [`read_login`] returned; it is `Some` whenever `r` is [`Responder::Login`].
+pub(crate) fn respond(
+    r: Responder,
+    issuer: Option<&Issuer>,
+    login: Option<Result<Credentials, Reject>>,
+) -> (u16, Value) {
+    // `serve` refuses to start an auth config without a key, so this is only defensive.
+    let Some(issuer) = issuer else {
+        return (500, json!({ "error": "no signing key" }));
+    };
+    match (r, login) {
+        (Responder::Jwks, _) => (200, issuer.key.jwks()),
+        (Responder::Login, Some(Ok(c))) => match issuer.login(&c.username, &c.password) {
+            Some(body) => (200, body),
+            // X8: wrong password and unknown user alike, after the full chain latency.
+            None => (401, json!({ "error": "invalid_credentials" })),
+        },
+        (Responder::Login, Some(Err((status, code)))) => (status, json!({ "error": code })),
+        (Responder::Login, None) => (500, json!({ "error": "login body not read" })),
     }
 }
 

@@ -1,8 +1,10 @@
 //! The mock request handler — the axum fallback that serves every non-control route.
 //!
 //! One request, end to end: CORS → matchit routing → the endpoint's compiled chain
-//! (`kaanal_core::execute`) → one sleep for the total → `override`, generated body, or the
-//! `error_map` response → `X-Kaanal-Trace` + an event on the broadcast bus.
+//! (`kaanal_core::execute`) → one sleep for the total → `override`, a built-in responder
+//! (login, JWKS), a generated body, or the `error_map` response → `X-Kaanal-Trace` + an
+//! event on the broadcast bus. A built-in login reads its body before the chain runs, so a
+//! bad body still costs the full chain latency and a chain failure still wins (spec §5).
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -14,12 +16,13 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
-    ChainOutcome, ChainRequest, ChainResult, HopKind, PlanItem, Topology, execute, resolve_error,
-    stable_hash,
+    ChainOutcome, ChainRequest, ChainResult, HopKind, PlanItem, Responder, Topology, execute,
+    resolve_error, stable_hash,
 };
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
+use crate::auth;
 use crate::state::{AppState, Event};
 
 /// Serves one mock request.
@@ -63,6 +66,13 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let started = Instant::now();
     let ep = &route.endpoint;
     debug_assert_eq!(route.key, ep.key, "a route answers with its own endpoint");
+    // Spec §5: a built-in login reads (and checks) its body before the chain, with no sleep
+    // yet; an `override` replaces the responder, so its body is never read.
+    let login = if ep.responder == Some(Responder::Login) && ep.response.is_none() {
+        Some(auth::read_login(req).await)
+    } else {
+        None
+    };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     let outcome = {
         let chaos = st.chaos.read().expect("chaos lock poisoned");
@@ -94,6 +104,10 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         ChainResult::Ok => {
             if let Some(ov) = &ep.response {
                 (ov.status, ov.body.clone(), None)
+            } else if let Some(r) = ep.responder {
+                // The responder owns its status codes; the route's 200 and schema do not apply.
+                let (status, body) = auth::respond(r, st.auth.as_ref(), login);
+                (status, body, None)
             } else {
                 let body = match &route.schema {
                     Some(schema) => {
@@ -124,6 +138,9 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     } else {
         (code, Json(body)).into_response()
     };
+    if ep.responder == Some(Responder::Login) {
+        no_store(&mut resp);
+    }
     if let Ok(v) = HeaderValue::from_str(&trace) {
         resp.headers_mut().insert("x-kaanal-trace", v);
     }
@@ -132,6 +149,13 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     send_event(&st, method, path, status, started, nodes, failed);
 
     cors(resp)
+}
+
+/// **Private.** P11: tokens and credential errors are never cached, whatever answered.
+fn no_store(r: &mut Response) {
+    let h = r.headers_mut();
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    h.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
 }
 
 /// **Private.** Longest `X-Kaanal-Trace` value in bytes (Node's undici rejects headers over
