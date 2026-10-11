@@ -414,7 +414,9 @@ pub struct RateLimitConfig {
 pub struct UserConfig {
     /// Login name and the token's `sub`: unique per node, 1 to 256 bytes.
     pub username: String,
-    /// Plain-text password, at most 256 bytes. Never logged or printed.
+    /// Plain-text password, at most 256 bytes. Never logged or printed. Must be text: put a
+    /// number or `true` in quotes.
+    #[serde(deserialize_with = "password_text")]
     pub password: String,
     /// Roles put into the token's `roles` claim (at most 32).
     #[serde(default)]
@@ -1043,6 +1045,55 @@ fn unique_nodes<'de, D: Deserializer<'de>>(d: D) -> Result<IndexMap<String, Node
     d.deserialize_map(Nodes)
 }
 
+/// **Private.** Marks a `password` that was not text (`password: 4711`). serde would reject it
+/// with a message that quotes the value, at the node's key, so the field takes any scalar and
+/// [`check_auth`] reports it, placed at the value and without it. NUL cannot start a password
+/// from a plain scalar; one written as `"\0not-text:…"` is rejected the same way.
+const NOT_TEXT: &str = "\u{0}not-text:";
+
+/// **Private.** A password as text; a number, boolean or null becomes `NOT_TEXT` plus its kind
+/// for [`check_auth`] to reject. Lists and maps fail with a fixed message (never the value).
+fn password_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    struct Text;
+    impl serde::de::Visitor<'_> for Text {
+        type Value = String;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a string")
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<String, E> {
+            Ok(v)
+        }
+        fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}a boolean"))
+        }
+        fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}a number"))
+        }
+        fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}a number"))
+        }
+        fn visit_i128<E: serde::de::Error>(self, _: i128) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}a number"))
+        }
+        fn visit_u128<E: serde::de::Error>(self, _: u128) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}a number"))
+        }
+        fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}a number"))
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}null"))
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<String, E> {
+            Ok(format!("{NOT_TEXT}null"))
+        }
+    }
+    d.deserialize_any(Text)
+}
+
 /// **Private.** `users`: no two accounts share a username.
 fn unique_users<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<UserConfig>, D::Error> {
     let users = Vec::<UserConfig>::deserialize(d)?;
@@ -1103,6 +1154,12 @@ fn check_auth(cfg: &Config) -> Result<(), Located> {
                 return Err(Located::at_value(
                     field("username"),
                     format!("{here}.username: must be 1 to {MAX_AUTH_TEXT} bytes"),
+                ));
+            }
+            if let Some(kind) = u.password.strip_prefix(NOT_TEXT) {
+                return Err(Located::at_value(
+                    field("password"),
+                    format!("{here}.password: must be text, not {kind} (put it in quotes)"),
                 ));
             }
             if u.password.len() > MAX_AUTH_TEXT {

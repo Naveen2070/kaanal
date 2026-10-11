@@ -34,7 +34,7 @@ Rules, all checked when the file loads (errors carry `line:col`):
 - At most 32 claims (per node and per user), 32 roles and 32 scopes per user, and 1000 users. Names, roles, scopes, usernames and passwords are at most 256 bytes. A username cannot be empty.
 - Scopes are OAuth scope tokens: printable ASCII without spaces, `"` or `\`.
 - `token_ttl` is whole seconds from 1s to 1 day.
-- YAML reads `007` as the number 7. Quote it (`"007"`) to keep the zeros.
+- A password must be text. A number such as `4711`, or `true` or `null`, is rejected with `must be text` at that line and column (the value is never printed): put it in quotes (`"4711"`). Text with leading zeros such as `007` is kept as it is.
 
 An auth node with no users loads with a warning: every login would answer 401.
 
@@ -42,13 +42,13 @@ An auth node with no users loads with a warning: every login would answer 401.
 
 Send `application/json` or `application/x-www-form-urlencoded` with the fields `username` and `password`. Other fields (such as `grant_type`) are ignored. The body can be at most 16 KiB.
 
-| Status | Body                                                                      | When                                                                        |
-| ------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 200    | `{ "access_token", "token_type": "Bearer", "expires_in" }` (plus `scope`) | Good credentials. `scope` appears only when the user has scopes.            |
-| 400    | `{ "error": "invalid_request" }`                                          | A duplicate, missing or non-string `username` or `password`, or unparsable. |
-| 401    | `{ "error": "invalid_credentials" }`                                      | Wrong password or unknown user, alike, **after the full chain latency**.    |
-| 413    | `{ "error": "request_too_large" }`                                        | Body over 16 KiB.                                                           |
-| 415    | `{ "error": "unsupported_media_type" }`                                   | Any other `Content-Type`, or none.                                          |
+| Status | Body                                                                      | When                                                                                                                                                             |
+| ------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    | `{ "access_token", "token_type": "Bearer", "expires_in" }` (plus `scope`) | Good credentials. `scope` appears only when the user has scopes.                                                                                                 |
+| 400    | `{ "error": "invalid_request" }`                                          | A duplicate, missing or non-string `username` or `password`, or unparsable. (A JSON array body such as `["alice", "pw"]` is read as the two fields and logs in.) |
+| 401    | `{ "error": "invalid_credentials" }`                                      | Wrong password or unknown user, alike, **after the full chain latency**.                                                                                         |
+| 413    | `{ "error": "request_too_large" }`                                        | Body over 16 KiB.                                                                                                                                                |
+| 415    | `{ "error": "unsupported_media_type" }`                                   | Any other `Content-Type`, or none.                                                                                                                               |
 
 - It is 401, not OAuth's 400 `invalid_grant`: the mock follows the product's login contract.
 - Every response of this route has `Cache-Control: no-store` and `Pragma: no-cache`.
@@ -86,7 +86,7 @@ const { payload } = await jwtVerify(token, jwks, { issuer: "http://localhost:808
 
 A login also calls the auth node's own dependencies (a user store database, a session cache, an email API) in the default order. The JWKS costs the auth node's `proc` only.
 
-An `endpoints:` entry for `"POST /login"` (or the JWKS key) can set `chain`, `error_map` or `override`; an `override` replaces the token response. A `HEAD /.well-known/jwks.json` entry with an `override` is a copy of the JWKS route and works with or without a gateway. If your OpenAPI spec defines its own `POST /login`, the spec route wins with a warning; the JWKS route stays.
+An `endpoints:` entry for `"POST /login"` (or the JWKS key) can set `chain`, `error_map` or `override`; an `override` replaces the token response. A `HEAD /.well-known/jwks.json` entry is served by the auth node like the JWKS route itself, with or without a gateway, but it does not inherit a custom `chain:` of the `GET` entry: give it its own. If your OpenAPI spec defines its own `POST /login`, the spec route wins with a warning; the JWKS route stays.
 
 ## Chaos
 

@@ -13,10 +13,10 @@ IO only: generating, parsing and signing live in `kaanal_server::AuthKey`. `up` 
 - `<base>` is `KAANAL_CONFIG_DIR` (an empty value counts as unset), else the per-user local config directory (`dirs::config_local_dir()`: `LocalAppData` on Windows, so the key never roams with the profile). With neither, `up` stops and says to set `KAANAL_CONFIG_DIR`.
 - `<id>` is the first 16 hex digits of the SHA-256 of the **canonical directory of `kaanal.yaml`** (`\\?\` stripped on Windows). A project keeps one key whatever the config file is called; moving the project starts a new key and orphans the old file.
 
-## Flow
+Before any of this, `up` runs the server's `check` on the config, so a config that cannot load creates no key (the key directory is not even made).
 
 1. `private_dir` on the keys directory, **on every run** (Unix mode 0700 or an error; Windows ACL replaced by one grant for the current user, a warning if that fails). It also repairs a directory the user widened.
-2. Read the file. Found: `parse`. Not found: print `Generating signing key...`, generate, `store`, and use whichever key the file ends up holding.
+2. Read the file. Found: `parse`. Not found: print `Generating signing key...`, generate, `store`, and use whichever key the file ends up holding (a loser of the race prints `Another kaanal start created the signing key first; using it.`).
 3. Any other read error stops startup naming the file.
 
 ## Items

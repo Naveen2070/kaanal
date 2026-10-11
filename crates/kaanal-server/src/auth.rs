@@ -69,7 +69,13 @@ impl AuthKey {
     pub fn from_pem(pem: &str) -> Result<AuthKey, String> {
         RsaPrivateKey::from_pkcs8_pem(pem)
             .map(AuthKey::from_private)
-            .map_err(|e| format!("not a PKCS#8 RSA private key ({e})"))
+            // The crate's own text is dropped: it can name the wrong thing (an EC key reports
+            // RSA's OID) and may quote parts of the file.
+            .map_err(|_| {
+                "not a PKCS#8 RSA private key (expected an unencrypted RSA key in PEM form, \
+                 starting with -----BEGIN PRIVATE KEY-----)"
+                    .to_string()
+            })
     }
 
     /// The key as PKCS#8 PEM with LF line endings, for the key file.

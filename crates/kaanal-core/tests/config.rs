@@ -785,6 +785,55 @@ fn auth_rules_are_checked_after_parsing_and_placed() {
 }
 
 #[test]
+fn a_non_text_password_is_rejected_at_its_value_without_echo() {
+    // serde alone would say `invalid type: integer `4711`` at the node's key.
+    let cases = [
+        ("4711", "a number"),
+        ("1.5", "a number"),
+        ("true", "a boolean"),
+        ("null", "null"),
+    ];
+    for (pw, kind) in cases {
+        for body in [
+            format!("      - {{ username: a, password: {pw} }}\n"),
+            format!("      - username: a\n        password: {pw}\n"),
+        ] {
+            let yaml = format!("version: 1\nnodes:\n  login:\n    type: auth\n    users:\n{body}");
+            let err = Config::from_yaml(&yaml).unwrap_err();
+            let (line, col) = if body.starts_with("      - {") {
+                (6, 34)
+            } else {
+                (7, 19)
+            };
+            assert_eq!((err.line, err.col), (Some(line), Some(col)), "{pw}: {err}");
+            assert!(
+                err.msg.contains(&format!(
+                    "users[0].password: must be text, not {kind} (put it in quotes)"
+                )),
+                "{pw}: {err}"
+            );
+            // (`null` names its own kind in the message; the others must not appear at all.)
+            assert!(
+                pw == "null" || !err.msg.contains(pw),
+                "{pw}: value echoed: {err}"
+            );
+        }
+    }
+    // A quoted number is text and loads; so does a number with a leading zero (this YAML
+    // reader keeps `0123` and `007` as text), zeros intact.
+    for (written, want) in [("\"4711\"", "4711"), ("0123", "0123"), ("007", "007")] {
+        let cfg = Config::from_yaml(&format!(
+            "version: 1\nnodes:\n  login: {{ type: auth, users: [ {{ username: a, password: {written} }} ] }}\n"
+        ))
+        .unwrap();
+        let Some(NodeConfig::Auth(a)) = cfg.nodes.get("login") else {
+            panic!("login is an auth node")
+        };
+        assert_eq!(a.users[0].password, want, "{written}");
+    }
+}
+
+#[test]
 fn token_ttl_must_be_whole_seconds_of_at_least_one() {
     // P1: placed at the value (5:16) by the per-field probe, like the 1-day cap.
     for bad in ["1500ms", "0s", "500ms"] {

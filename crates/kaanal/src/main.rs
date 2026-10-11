@@ -254,7 +254,12 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
     // key file stops startup with its name; `validate` and `endpoints` never get here.
     let users = auth_users(&cfg);
     let auth_key = match users {
-        Some(_) => Some(keys::signing_key(config)?),
+        Some(_) => {
+            // A config that cannot load must not leave a key behind: check it first (the
+            // same load `serve` does, so a topology or spec error shows before any keygen).
+            kaanal_server::check(&cfg, &dir).map_err(|e| located_err(config, &src, &e))?;
+            Some(keys::signing_key(config)?)
+        }
         None => None,
     };
     if !host.is_loopback() {

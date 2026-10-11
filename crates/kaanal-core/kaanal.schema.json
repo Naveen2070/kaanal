@@ -900,7 +900,7 @@
           "type": "object"
         },
         "password": {
-          "description": "Plain-text password, at most 256 bytes. Never logged or printed.",
+          "description": "Plain-text password, at most 256 bytes. Never logged or printed. Must be text: put a\nnumber or `true` in quotes.",
           "type": "string"
         },
         "roles": {

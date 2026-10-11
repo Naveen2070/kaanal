@@ -37,6 +37,8 @@ pub(crate) fn signing_key(config: &Path) -> Result<AuthKey, Fail> {
             if stored == pem {
                 Ok(key)
             } else {
+                // Lost the race: a simultaneous `up` of this project stored its key first.
+                println!("Another kaanal start created the signing key first; using it.");
                 parse(&file, &stored)
             }
         }

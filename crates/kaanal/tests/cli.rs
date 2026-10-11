@@ -853,6 +853,77 @@ fn corrupt_key_file_stops_startup_naming_it() {
 }
 
 #[test]
+fn two_simultaneous_ups_share_one_key() {
+    // Different working directories, so both pass the per-directory instance lock; the same
+    // config file, so both want the same key. Whoever links second adopts the first's key.
+    let (dir, cfg) = auth_project("key-race", false);
+    let config = dir.join("kaanal.yaml");
+    let other = scratch("key-race-cwd");
+    let start = |cwd: &Path| {
+        bin()
+            .args(["up", "--port", "0", "-c"])
+            .arg(&config)
+            .current_dir(cwd)
+            .env("KAANAL_CONFIG_DIR", &cfg)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    let read = |mut child: Child| {
+        let mut lines = Vec::new();
+        for l in BufReader::new(child.stdout.take().unwrap()).lines() {
+            let l = l.unwrap();
+            let last = l.starts_with("Auth:");
+            lines.push(l);
+            if last {
+                break;
+            }
+        }
+        (child, lines)
+    };
+    let (a, b) = (start(&dir), start(&other));
+    let ((a, la), (b, lb)) = (read(a), read(b));
+    let (ka, kb) = (served_kid(port_of(&la)), served_kid(port_of(&lb)));
+    stop(a);
+    stop(b);
+    assert_eq!(ka, kb, "one key for one project: {la:?} {lb:?}");
+    let names: Vec<String> = std::fs::read_dir(cfg.join("kaanal").join("keys"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 1, "one key file and no temp file: {names:?}");
+    assert_eq!(
+        Path::new(&names[0]).extension().and_then(|e| e.to_str()),
+        Some("pem"),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn up_with_a_broken_config_generates_no_key() {
+    let (dir, cfg) = auth_project("broken-no-key", false);
+    // A cache without a flavor is a topology error; `validate` reports it too.
+    std::fs::write(
+        dir.join("kaanal.yaml"),
+        "version: 1\nnodes:\n  login: { type: auth, users: [ { username: a, password: b } ] }\n  sess: { type: cache }\nedges:\n  - { from: login, to: sess }\n",
+    )
+    .unwrap();
+    let out = up_fails(&dir, &cfg);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("cache node 'sess' needs"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!stdout(&out).contains("Generating"), "{}", stdout(&out));
+    assert!(
+        !cfg.exists(),
+        "no key directory for a config that cannot run"
+    );
+}
+
+#[test]
 fn validate_never_touches_keys_and_warns_without_users() {
     let dir = scratch("auth-validate");
     std::fs::write(
