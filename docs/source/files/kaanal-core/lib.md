@@ -16,15 +16,15 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 
 ## Re-exports
 
-| From          | Items                                                                                                |
-| ------------- | ---------------------------------------------------------------------------------------------------- |
-| `chain`       | `Endpoint`, `Endpoints`, `EndpointsInput`, `RouteSpec`, `compile`, `resolve_error`                   |
-| `chaos`       | `ChaosState`, `NodeChaos`                                                                            |
-| `config`      | `Config`, `ConfigError`, `Determinism`, `EndpointsConfig`, `NodeKind`, `SeedSource`                  |
-| `diagnostics` | `Located`, `PathSeg`                                                                                 |
-| `dist`        | `Dist`                                                                                               |
-| `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `Plan`, `PlanItem`, `execute` |
-| `topology`    | `CacheModel`, `Edge`, `Node`, `NodeId`, `Topology`, `TopologyError`                                  |
+| From          | Items                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `chain`       | `Endpoint`, `Endpoints`, `EndpointsInput`, `RouteSpec`, `compile`, `resolve_error`                                  |
+| `chaos`       | `ChaosState`, `NodeChaos`                                                                                           |
+| `config`      | `Config`, `ConfigError`, `Determinism`, `EndpointsConfig`, `NodeKind`, `SeedSource`                                 |
+| `diagnostics` | `Located`, `PathSeg`                                                                                                |
+| `dist`        | `Dist`                                                                                                              |
+| `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `Plan`, `PlanItem`, `execute`, `sample_plan` |
+| `topology`    | `CacheModel`, `Edge`, `Node`, `NodeId`, `Topology`, `TopologyError`                                                 |
 
 ## Notes
 

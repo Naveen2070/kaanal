@@ -235,6 +235,29 @@ impl Plan {
 /// extends it with `(target name, occurrence, repetition)` (R1.34, D8). Own hops draw the
 /// chaos roll first and caches also their hit roll, always, so chaos never shifts a timing.
 pub fn execute(topo: &Topology, chaos: &ChaosState, req: &ChainRequest) -> ChainOutcome {
+    let (plan, fail) = sample_plan(topo, chaos, req);
+    let result = match fail.map(|(i, _)| &plan.items[i]) {
+        Some(&PlanItem::Fail { node, status, .. }) => ChainResult::Err { node, status },
+        _ => ChainResult::Ok,
+    };
+    let (hops, kept) = plan.visible(fail);
+    ChainOutcome {
+        hops,
+        kept,
+        plan,
+        result,
+        fail: fail.map(|(i, _)| i),
+    }
+}
+
+/// The sampling half of [`execute`]: the [`Plan`] and the deciding failure (plan index,
+/// instant), without building the client-visible hops. The simulator replays the plan
+/// itself, so it skips that work; [`execute`] returns this same plan.
+pub fn sample_plan(
+    topo: &Topology,
+    chaos: &ChaosState,
+    req: &ChainRequest,
+) -> (Plan, Option<(usize, Duration)>) {
     let ep = req.endpoint;
     let root = stable_hash(&[
         &req.seed.to_le_bytes(),
@@ -246,25 +269,11 @@ pub fn execute(topo: &Topology, chaos: &ChaosState, req: &ChainRequest) -> Chain
         chaos,
         items: Vec::new(),
     };
-    let flow = w.seq(&ep.chain, root, ep.op, Duration::ZERO);
-    let plan = Plan { items: w.items };
-    let (result, fail) = match flow {
-        Flow::Fail {
-            node,
-            status,
-            at,
-            idx,
-        } => (ChainResult::Err { node, status }, Some((idx, at))),
-        Flow::Done(_) | Flow::Hit(_) => (ChainResult::Ok, None),
+    let fail = match w.seq(&ep.chain, root, ep.op, Duration::ZERO) {
+        Flow::Fail { at, idx, .. } => Some((idx, at)),
+        Flow::Done(_) | Flow::Hit(_) => None,
     };
-    let (hops, kept) = plan.visible(fail);
-    ChainOutcome {
-        hops,
-        kept,
-        plan,
-        result,
-        fail: fail.map(|(i, _)| i),
-    }
+    (Plan { items: w.items }, fail)
 }
 
 /// **Private.** The RNG of one hop's draws (R1.34, D8).
@@ -288,13 +297,8 @@ enum Flow {
     Done(Duration),
     /// A cache hit ended it at this offset (only this sequence, §5.3).
     Hit(Duration),
-    /// A step failed: its node, status, instant and plan index.
-    Fail {
-        node: NodeId,
-        status: u16,
-        at: Duration,
-        idx: usize,
-    },
+    /// A step failed: its instant and the plan index of its `Fail` item.
+    Fail { at: Duration, idx: usize },
 }
 
 /// **Private.** One walk in progress: borrowed inputs plus the plan so far.
@@ -401,12 +405,7 @@ impl Walk<'_> {
                 status,
                 at: start,
             });
-            return Err(Flow::Fail {
-                node,
-                status,
-                at: start,
-                idx,
-            });
+            return Err(Flow::Fail { at: start, idx });
         }
         let dist = match kind {
             HopKind::Op(op) => n.ops.as_ref().map_or(&Dist::ZERO, |o| &o[op as usize]),

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kaanal_core::{
-    ChainOutcome, ChainRequest, ChainResult, ChaosState, Dist, Endpoint, Hop, HopKind, NodeId,
-    PlanItem, Topology, execute, stable_hash,
+    ChainRequest, ChainResult, ChaosState, Dist, Endpoint, Hop, HopKind, NodeId, Plan, PlanItem,
+    Topology, sample_plan, stable_hash,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -62,8 +62,8 @@ struct Req {
     order: u64,
     /// Arrival time (ns).
     arrival: u64,
-    /// `execute()`'s result: the plan to replay and how the chain ended.
-    outcome: ChainOutcome,
+    /// The sampled plan to replay.
+    plan: Plan,
     /// Actual start (ns) per plan index, `NOT_STARTED` otherwise.
     starts: Vec<u64>,
     /// Queue wait (ns) per plan index.
@@ -76,6 +76,15 @@ struct Req {
     fail: Option<(u64, usize)>,
     /// When the client got its answer (ns).
     done: Option<u64>,
+}
+
+/// **Private.** The per-request buffers of a `Req`, recycled between requests.
+#[derive(Default)]
+struct Scratch {
+    starts: Vec<u64>,
+    waits: Vec<u64>,
+    tokens: Vec<Token>,
+    joins: Vec<Join>,
 }
 
 /// **Private.** Queueing state of one node. `slots == None`: unlimited, never queues.
@@ -132,6 +141,8 @@ struct Sim<'a> {
     reqs: Vec<Option<Req>>,
     /// Free slots of `reqs`.
     free: Vec<usize>,
+    /// Buffers of finished requests, reused by later arrivals instead of reallocated.
+    spare: Vec<Scratch>,
     /// Next arrival order number.
     order: u64,
     nodes: Vec<NodeQ>,
@@ -188,6 +199,7 @@ pub(crate) fn simulate(
         heap: BinaryHeap::new(),
         reqs: Vec::new(),
         free: Vec::new(),
+        spare: Vec::new(),
         order: 0,
         nodes: topo
             .nodes
@@ -264,12 +276,12 @@ impl Sim<'_> {
             .expect("events only name live requests")
     }
 
-    /// **Private.** A request of stream `s` arrives: sample its plan with `execute()` (the
-    /// same call live mode makes) and start its root token.
+    /// **Private.** A request of stream `s` arrives: sample its plan with `sample_plan()`
+    /// (the sampling half of the call live mode makes) and start its root token.
     fn arrive(&mut self, s: usize) {
         let n = self.arrivals[s].n;
         self.arrivals[s].n += 1;
-        let outcome = execute(
+        let (plan, _) = sample_plan(
             self.topo,
             self.chaos,
             &ChainRequest {
@@ -278,25 +290,33 @@ impl Sim<'_> {
                 seed: self.cfg.seed,
             },
         );
-        let len = outcome.plan.items.len();
+        let len = plan.items.len();
+        let mut sc = self.spare.pop().unwrap_or_default();
+        sc.starts.clear();
+        sc.starts.resize(len, NOT_STARTED);
+        sc.waits.clear();
+        sc.waits.resize(len, 0);
+        sc.tokens.clear();
+        sc.tokens.push(Token {
+            at: 0,
+            end: len,
+            join: None,
+            queued_at: None,
+        });
+        sc.joins.clear();
         let req = Req {
             stream: s,
             n,
             order: self.order,
             arrival: self.now,
-            starts: vec![NOT_STARTED; len],
-            waits: vec![0; len],
-            tokens: vec![Token {
-                at: 0,
-                end: len,
-                join: None,
-                queued_at: None,
-            }],
-            joins: Vec::new(),
+            starts: sc.starts,
+            waits: sc.waits,
+            tokens: sc.tokens,
+            joins: sc.joins,
             busy: 0,
             fail: None,
             done: None,
-            outcome,
+            plan,
         };
         self.order += 1;
         let r = if let Some(r) = self.free.pop() {
@@ -333,7 +353,7 @@ impl Sim<'_> {
                 k = req.joins[j].parent; // the last branch resumes the block's parent
                 continue;
             }
-            let item = req.outcome.plan.items[at].clone();
+            let item = req.plan.items[at].clone();
             if let Some((t, i)) = req.fail
                 && !(matches!(item, PlanItem::Fail { .. }) && t == now && at < i)
             {
@@ -358,7 +378,7 @@ impl Sim<'_> {
                     let first = req.tokens.len();
                     let mut b = at + 1;
                     while b < at + 1 + size {
-                        let PlanItem::Branch { size: bs } = req.outcome.plan.items[b] else {
+                        let PlanItem::Branch { size: bs } = req.plan.items[b] else {
                             break;
                         };
                         req.tokens.push(Token {
@@ -411,7 +431,7 @@ impl Sim<'_> {
     fn hop_done(&mut self, r: usize, k: usize) {
         let now = self.now;
         let at = self.req(r).tokens[k].at;
-        let PlanItem::Hop(hop) = &self.req(r).outcome.plan.items[at] else {
+        let PlanItem::Hop(hop) = &self.req(r).plan.items[at] else {
             unreachable!("HopDone names a hop")
         };
         let (node, kind) = (hop.node, hop.kind);
@@ -426,7 +446,7 @@ impl Sim<'_> {
                     .expect("a token in a node queue has queued_at set");
                 waiter.waits[i] = now - since;
                 waiter.starts[i] = now;
-                let PlanItem::Hop(qh) = &waiter.outcome.plan.items[i] else {
+                let PlanItem::Hop(qh) = &waiter.plan.items[i] else {
                     unreachable!("queued at a hop")
                 };
                 let dur = nanos(qh.dur);
@@ -482,12 +502,18 @@ impl Sim<'_> {
         if req.arrival >= self.warmup {
             self.record(&req);
         }
+        self.spare.push(Scratch {
+            starts: req.starts,
+            waits: req.waits,
+            tokens: req.tokens,
+            joins: req.joins,
+        });
     }
 
     /// **Private.** The client's view of a finished request (see [`RequestRecord::hops`]):
     /// hops that started, cut at the failure when their branch was cancelled.
     fn record(&mut self, req: &Req) {
-        let plan = &req.outcome.plan;
+        let plan = &req.plan;
         let (cut, fail_at) = match req.fail {
             Some((t, i)) => (plan.cancelled_by(i), t),
             None => (Vec::new(), u64::MAX),

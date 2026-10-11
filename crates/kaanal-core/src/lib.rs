@@ -30,7 +30,7 @@ pub use config::{Config, ConfigError, Determinism, EndpointsConfig, NodeKind, Se
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
 pub use exec::{
-    ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute,
+    ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute, sample_plan,
 };
 pub use schema::config_schema;
 pub use topology::{CacheModel, Edge, Node, NodeId, Topology, TopologyError};
