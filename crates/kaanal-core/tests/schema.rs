@@ -105,8 +105,6 @@ fn inert_fields_say_they_have_no_effect_yet() {
         ("external-api", "proxy"),
         ("external-api", "pool"),
         ("cache", "ttl"),
-        ("auth", "users"),
-        ("auth", "token_ttl"),
     ] {
         let d = field(kind, name);
         assert!(d.contains("no effect yet"), "{kind}.{name}: {d:?}");
@@ -139,4 +137,30 @@ fn schema_describes_endpoints_and_steps() {
         serde_yaml_ng::from_str("version: 1\nnodes: {}\nendpoints: kaanal.endpoints.yaml\n")
             .unwrap();
     assert!(v.is_valid(&file));
+}
+
+#[test]
+fn schema_describes_auth_claims_and_scopes() {
+    let s = config_schema();
+    let auth = s["$defs"]["NodeConfig"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["properties"]["type"]["const"] == "auth")
+        .unwrap();
+    assert_eq!(
+        auth["properties"]["claims"]["additionalProperties"]["type"],
+        serde_json::json!(["string", "number", "boolean"]),
+        "{auth}"
+    );
+    let user = &s["$defs"]["UserConfig"]["properties"];
+    assert!(
+        user.get("scopes").is_some() && user.get("claims").is_some(),
+        "{user}"
+    );
+    let doc: Value = serde_yaml_ng::from_str(
+        "version: 1\nnodes:\n  login: { type: auth, claims: { aud: a, n: 1 }, users: [ { username: a, password: b, scopes: [read], claims: { ok: true } } ] }\n",
+    )
+    .unwrap();
+    assert!(jsonschema::validator_for(&s).unwrap().is_valid(&doc));
 }

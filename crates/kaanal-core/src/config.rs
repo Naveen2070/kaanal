@@ -18,7 +18,7 @@ use serde::de::value::MapAccessDeserializer;
 use serde::de::{self, Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use crate::diagnostics::{Located, keys};
+use crate::diagnostics::{Located, PathSeg, keys};
 use crate::exec::Op;
 
 /// The parsed `kaanal.yaml` file.
@@ -302,20 +302,25 @@ pub struct ExternalApiConfig {
     pub concurrency: Option<NonZeroU32>,
 }
 
-/// An identity provider. Its login endpoint and token keys come in a later release.
+/// An identity provider: serves `POST /login` (a signed RS256 token for one of its `users`)
+/// and `GET /.well-known/jwks.json` (the public key). At most one per topology.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuthConfig {
-    /// Cost of one login or token check.
+    /// Cost of one login, one JWKS request or one gateway token check.
     pub proc: Option<DistConfig>,
-    /// Accounts that can log in; usernames are unique. Accepted and validated; no effect yet.
+    /// Accounts that can log in (synthetic only); usernames are unique, at most 1000 users.
     #[serde(default, deserialize_with = "unique_users")]
     pub users: Vec<UserConfig>,
-    /// Lifetime of issued tokens, at most 1 day (default 1h). Accepted and validated;
-    /// no effect yet.
+    /// Lifetime of issued tokens: whole seconds, 1s to 1 day (default 1h).
     #[serde(default, deserialize_with = "token_ttl")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub token_ttl: Option<Duration>,
+    /// Extra claims in every token this node issues (string, number or boolean; at most 32).
+    /// A user's own `claims` win. Reserved: sub, iss, exp, iat, jti, roles, scope.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::claims")]
+    pub claims: IndexMap<String, serde_json::Value>,
     /// Most requests this node serves at once; absent = unlimited. The simulator honours
     /// it; live mode warns and ignores it for now.
     pub concurrency: Option<NonZeroU32>,
@@ -403,17 +408,39 @@ pub struct RateLimitConfig {
     pub burst: NonZeroU32,
 }
 
-/// One account on an `auth` node (synthetic accounts only).
-#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+/// One account on an `auth` node (synthetic accounts only). `Debug` never shows the password.
+#[derive(Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserConfig {
-    /// Login name, unique per node.
+    /// Login name and the token's `sub`: unique per node, 1 to 256 bytes.
     pub username: String,
-    /// Plain-text password.
+    /// Plain-text password, at most 256 bytes. Never logged or printed.
     pub password: String,
-    /// Roles put into issued tokens.
+    /// Roles put into the token's `roles` claim (at most 32).
     #[serde(default)]
     pub roles: Vec<String>,
+    /// OAuth scopes, joined with spaces into the token's `scope` claim (at most 32; each
+    /// printable ASCII without space, `"` or `\`).
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Extra claims in this user's token (string, number or boolean; at most 32); they win
+    /// over the node's `claims`. Same reserved names.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::claims")]
+    pub claims: IndexMap<String, serde_json::Value>,
+}
+
+impl fmt::Debug for UserConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Passwords never reach logs, panic messages or test output (spec §5).
+        f.debug_struct("UserConfig")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("roles", &self.roles)
+            .field("scopes", &self.scopes)
+            .field("claims", &self.claims)
+            .finish()
+    }
 }
 
 /// One entry in `edges:` (caller → dependency).
@@ -972,9 +999,15 @@ fn http_url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error>
     }
 }
 
-/// **Private.** `token_ttl`: a duration of at most 1 day.
+/// **Private.** `token_ttl`: whole seconds from 1 s to 1 day. A node-level field, so
+/// `diagnostics` places this error at the value (plan P1); per-user rules live in [`check_auth`].
 fn token_ttl<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
     let v: Duration = humantime_serde::deserialize(d)?;
+    if v < Duration::from_secs(1) || v.subsec_nanos() != 0 {
+        return Err(D::Error::custom(
+            "token_ttl must be whole seconds, at least 1s",
+        ));
+    }
     if v <= MAX_TOKEN_TTL {
         Ok(Some(v))
     } else {
@@ -1024,6 +1057,161 @@ fn unique_users<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<UserConfig>, D::E
     Ok(users)
 }
 
+/// **Private.** Claim names Kaanal sets in every token (X3).
+const RESERVED_CLAIMS: [&str; 7] = ["sub", "iss", "exp", "iat", "jti", "roles", "scope"];
+/// **Private.** Most claims, roles or scopes in one list (per user; node `claims` too).
+const MAX_AUTH_ITEMS: usize = 32;
+/// **Private.** Longest claim name, string claim value, role, scope, username or password, in bytes.
+const MAX_AUTH_TEXT: usize = 256;
+/// **Private.** Most users on one auth node.
+const MAX_USERS: usize = 1000;
+
+/// **Private.** RFC 6749 `scope-token`: `1*( %x21 / %x23-5B / %x5D-7E )`.
+fn is_scope_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| matches!(b, 0x21 | 0x23..=0x5B | 0x5D..=0x7E))
+}
+
+/// **Private.** `base` followed by `rest`.
+fn under(base: &[PathSeg], rest: &[PathSeg]) -> Vec<PathSeg> {
+    [base, rest].concat()
+}
+
+/// **Private.** The auth rules serde would place at the start of `users:` (spec §3): checked
+/// after parsing, each error at its own key or value. Messages never quote a password.
+fn check_auth(cfg: &Config) -> Result<(), Located> {
+    for (name, node) in &cfg.nodes {
+        let NodeConfig::Auth(a) = node else { continue };
+        let node_path = keys(&["nodes", name.as_str()]);
+        let ctx = format!("node '{name}'");
+        check_claims(&a.claims, &node_path, &format!("{ctx}: claims"))?;
+        if a.users.len() > MAX_USERS {
+            return Err(Located::new(
+                under(&node_path, &[PathSeg::Key("users".into())]),
+                format!("{ctx}: at most {MAX_USERS} users (got {})", a.users.len()),
+            ));
+        }
+        for (i, u) in a.users.iter().enumerate() {
+            let user = under(
+                &node_path,
+                &[PathSeg::Key("users".into()), PathSeg::Index(i)],
+            );
+            let here = format!("{ctx}: users[{i}]");
+            let field = |f: &str| under(&user, &[PathSeg::Key(f.into())]);
+            if u.username.is_empty() || u.username.len() > MAX_AUTH_TEXT {
+                return Err(Located::at_value(
+                    field("username"),
+                    format!("{here}.username: must be 1 to {MAX_AUTH_TEXT} bytes"),
+                ));
+            }
+            if u.password.len() > MAX_AUTH_TEXT {
+                return Err(Located::at_value(
+                    field("password"),
+                    format!("{here}.password: must be at most {MAX_AUTH_TEXT} bytes"),
+                ));
+            }
+            check_list(
+                &u.roles,
+                &field("roles"),
+                &format!("{here}.roles"),
+                "must be at most 256 bytes",
+                |_| true,
+            )?;
+            check_list(
+                &u.scopes,
+                &field("scopes"),
+                &format!("{here}.scopes"),
+                "must be 1 to 256 printable ASCII characters other than space, '\"' and '\\' (an OAuth scope)",
+                is_scope_token,
+            )?;
+            check_claims(&u.claims, &user, &format!("{here}.claims"))?;
+        }
+    }
+    Ok(())
+}
+
+/// **Private.** A `roles` or `scopes` list at `path`: at most 32 entries, each at most 256
+/// bytes and accepted by `ok` (`rule` says what that means).
+fn check_list(
+    items: &[String],
+    path: &[PathSeg],
+    ctx: &str,
+    rule: &str,
+    ok: fn(&str) -> bool,
+) -> Result<(), Located> {
+    if items.len() > MAX_AUTH_ITEMS {
+        return Err(Located::new(
+            path.to_vec(),
+            format!(
+                "{ctx}: at most {MAX_AUTH_ITEMS} entries (got {})",
+                items.len()
+            ),
+        ));
+    }
+    for (j, s) in items.iter().enumerate() {
+        if s.len() > MAX_AUTH_TEXT || !ok(s) {
+            return Err(Located::new(
+                under(path, &[PathSeg::Index(j)]),
+                format!("{ctx}[{j}]: {rule}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// **Private.** The `claims` map under `parent`: at most 32 entries; no reserved name; names
+/// and string values at most 256 bytes; values a string, a number or a boolean.
+fn check_claims(
+    claims: &IndexMap<String, serde_json::Value>,
+    parent: &[PathSeg],
+    ctx: &str,
+) -> Result<(), Located> {
+    let at = under(parent, &[PathSeg::Key("claims".into())]);
+    if claims.len() > MAX_AUTH_ITEMS {
+        return Err(Located::new(
+            at,
+            format!(
+                "{ctx}: at most {MAX_AUTH_ITEMS} claims (got {})",
+                claims.len()
+            ),
+        ));
+    }
+    for (k, v) in claims {
+        let here = under(&at, &[PathSeg::Key(k.clone())]);
+        if RESERVED_CLAIMS.contains(&k.as_str()) {
+            return Err(Located::new(
+                here,
+                format!(
+                    "{ctx}: '{k}' is set by Kaanal and cannot be a claim (reserved: {})",
+                    RESERVED_CLAIMS.join(", ")
+                ),
+            ));
+        }
+        if k.is_empty() || k.len() > MAX_AUTH_TEXT {
+            return Err(Located::new(
+                here,
+                format!("{ctx}: a claim name must be 1 to {MAX_AUTH_TEXT} bytes"),
+            ));
+        }
+        // YAML `.inf`/`.nan` arrive as `null` (serde_json has no non-finite numbers), so they fail here.
+        let fits = match v {
+            serde_json::Value::String(s) => s.len() <= MAX_AUTH_TEXT,
+            serde_json::Value::Number(_) | serde_json::Value::Bool(_) => true,
+            _ => false,
+        };
+        if !fits {
+            return Err(Located::at_value(
+                here,
+                format!(
+                    "{ctx}.{k}: must be a string (at most {MAX_AUTH_TEXT} bytes), a number or a boolean"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// A config parse error with an optional YAML position.
 ///
 /// `Display` renders `line:col: msg` when a position is known, so the caller can
@@ -1057,7 +1245,9 @@ impl Config {
     ///
     /// # Errors
     /// Returns [`ConfigError`] (with line/column when the parser knows them) for
-    /// malformed YAML, unknown fields, bad values, or an unsupported `version`.
+    /// malformed YAML, unknown fields, bad values, or an unsupported `version`,
+    /// and for the auth rules serde cannot place (claims, scopes, limits, empty usernames),
+    /// each at its own key or value.
     /// When parsing fails inside `nodes:`, the error is re-placed at the real node and
     /// field (see [`crate::diagnostics`]).
     pub fn from_yaml(src: &str) -> Result<Config, ConfigError> {
@@ -1084,6 +1274,7 @@ impl Config {
             )
             .in_source(src));
         }
+        check_auth(&cfg).map_err(|e| e.in_source(src))?;
         Ok(cfg)
     }
 }

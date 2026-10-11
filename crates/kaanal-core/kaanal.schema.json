@@ -598,6 +598,19 @@
           "additionalProperties": false,
           "description": "An identity provider: login and token issue.",
           "properties": {
+            "claims": {
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "default": {},
+              "description": "Extra claims in every token this node issues (string, number or boolean; at most 32).\nA user's own `claims` win. Reserved: sub, iss, exp, iat, jti, roles, scope.",
+              "maxProperties": 32,
+              "type": "object"
+            },
             "concurrency": {
               "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
               "format": "uint32",
@@ -616,11 +629,11 @@
                   "type": "null"
                 }
               ],
-              "description": "Cost of one login or token check."
+              "description": "Cost of one login, one JWKS request or one gateway token check."
             },
             "token_ttl": {
               "default": null,
-              "description": "Lifetime of issued tokens, at most 1 day (default 1h). Accepted and validated;\nno effect yet.",
+              "description": "Lifetime of issued tokens: whole seconds, 1s to 1 day (default 1h).",
               "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
               "type": "string"
             },
@@ -629,7 +642,7 @@
               "type": "string"
             },
             "users": {
-              "description": "Accounts that can log in; usernames are unique. Accepted and validated; no effect yet.",
+              "description": "Accounts that can log in (synthetic only); usernames are unique, at most 1000 users.",
               "items": {
                 "$ref": "#/$defs/UserConfig"
               },
@@ -871,22 +884,43 @@
     },
     "UserConfig": {
       "additionalProperties": false,
-      "description": "One account on an `auth` node (synthetic accounts only).",
+      "description": "One account on an `auth` node (synthetic accounts only). `Debug` never shows the password.",
       "properties": {
+        "claims": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "default": {},
+          "description": "Extra claims in this user's token (string, number or boolean; at most 32); they win\nover the node's `claims`. Same reserved names.",
+          "maxProperties": 32,
+          "type": "object"
+        },
         "password": {
-          "description": "Plain-text password.",
+          "description": "Plain-text password, at most 256 bytes. Never logged or printed.",
           "type": "string"
         },
         "roles": {
           "default": [],
-          "description": "Roles put into issued tokens.",
+          "description": "Roles put into the token's `roles` claim (at most 32).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scopes": {
+          "default": [],
+          "description": "OAuth scopes, joined with spaces into the token's `scope` claim (at most 32; each\nprintable ASCII without space, `\"` or `\\`).",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "username": {
-          "description": "Login name, unique per node.",
+          "description": "Login name and the token's `sub`: unique per node, 1 to 256 bytes.",
           "type": "string"
         }
       },

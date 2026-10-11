@@ -36,6 +36,11 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `endpoint_entries_are_strict`                                | Unknown entry fields, duplicate endpoint keys, a non-path non-map `endpoints:`, a bad `error_map` value and a bad `determinism` all fail with a position.                                                           |
 | `chains_belong_to_services_and_monoliths`                    | `chains:` loads on a monolith and is an unknown field on a database.                                                                                                                                                |
 | `endpoints_file_parses_and_places_shape_errors`              | `parse_endpoints` reads a map, treats empty/comment-only/BOM-only files as no entries, places step errors in the file and gives the same position for CRLF plus BOM.                                                |
+| `auth_claims_and_scopes_parse`                               | An auth node's `claims`, `token_ttl` and users' `roles`, `scopes` and `claims` land in their typed fields; omitted ones are empty.                                                                                  |
+| `reserved_claim_on_a_later_user_points_at_that_claim`        | A reserved claim (`iss`) on user #57 is reported at that claim's key (63:49), not at `users:`.                                                                                                                      |
+| `auth_rules_are_checked_after_parsing_and_placed`            | Reserved/typed/oversized claims, too many claims/roles/users, empty username, long password, bad or empty scope: each fails at its own key or value with a named path; no message echoes a value; 1000 users load.  |
+| `token_ttl_must_be_whole_seconds_of_at_least_one`            | `1500ms`, `0s`, `500ms` fail at the value (5:16); `1s`, `90s`, `24h` load.                                                                                                                                          |
+| `user_debug_hides_the_password`                              | `Debug` of a config shows the username and `<redacted>`, never the password.                                                                                                                                        |
 
 ## `crates/kaanal-core/tests/diagnostics.rs` — error positions
 
@@ -62,8 +67,9 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `committed_schema_matches_the_types`          | `kaanal.schema.json` equals `config_schema()` as JSON values; `KAANAL_BLESS=1` rewrites it.                                        |
 | `shipped_configs_validate_against_the_schema` | Every `examples/*/kaanal.yaml` and the server fixture validate against the schema.                                                 |
 | `every_schema_field_has_a_description`        | Every property in the schema has a non-empty description (a doc comment).                                                          |
-| `inert_fields_say_they_have_no_effect_yet`    | The accepted-but-unused fields (`pool`, `ttl`, `users`, ...) say "no effect yet".                                                  |
+| `inert_fields_say_they_have_no_effect_yet`    | The accepted-but-unused fields (`pool`, `ttl`, ...) say "no effect yet"; the auth fields (`users`, `token_ttl`) no longer do.      |
 | `schema_describes_endpoints_and_steps`        | `routes` is gone; `endpoints`, `determinism`, `Step` and service `chains` exist; sample endpoints (inline and file path) validate. |
+| `schema_describes_auth_claims_and_scopes`     | Auth `claims` is an object of string/number/boolean values; `UserConfig` has `scopes` and `claims`; a sample with them validates.  |
 
 ## `crates/kaanal-core/tests/presets.rs` — flavor presets
 
@@ -105,7 +111,7 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `a_long_chain_of_services_does_not_overflow_the_stack`    | R6.12: 20 000 services in a line load and closing the chain reports a 20 001-name cycle, on a 256 KiB thread stack (a recursive check would overflow it). |
 | `cycle_path_starts_at_the_loop_not_the_dfs_root`          | `x → y → z → y` reports `y -> z -> y`, not a path from the DFS root.                                                                                      |
 | `a_cycle_only_reachable_from_a_later_start_node_is_found` | A loop in a second component (`c ⇄ d`) is found after a clean chain.                                                                                      |
-| `edge_table_matches_r1_24`                                | Every kind-to-kind pair is allowed or `ForbiddenEdge` exactly per the R1.24 table.                                                                        |
+| `edge_table_matches_r1_24`                                | Every kind-to-kind pair is allowed or `ForbiddenEdge` exactly per the R1.24 table (the gateway and auth twins are skipped: one of each only).             |
 | `forbidden_edge_names_what_is_allowed`                    | The error text lists what the caller may call (`nothing` for leaves).                                                                                     |
 | `a_topology_needs_somewhere_to_enter`                     | No gateway, service or monolith (empty, or only a database) is `NoEntry`; a lone gateway is fine.                                                         |
 | `self_and_duplicate_edges_are_rejected`                   | `SelfLoop` and `DuplicateEdge`, each with its edge number.                                                                                                |
@@ -113,6 +119,8 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `monolith_works_both_ways`                                | Inline ops, database edges and both are accepted; partial `ops` without a flavor is `MissingOps`.                                                         |
 | `cache_costs_come_from_the_flavor_or_the_user`            | Cache hit/miss come from the flavor preset unless the user gives them; a cache with neither is `MissingCache`.                                            |
 | `edge_call_ratio_is_carried`                              | `calls: 3` is carried onto the edge; the default is 1.                                                                                                    |
+| `second_auth_is_rejected_by_name`                         | A second auth node fails with `SecondAuth` naming it, placed at `nodes.<it>` (5:3), with the "at most one auth node" text.                                |
+| `an_auth_only_topology_is_valid`                          | A lone auth node builds (`gateway` None, `auth` Some(0)); `auth` is None without one; `NoEntry` has the new message that names the auth node.             |
 
 ## `crates/kaanal-core/tests/exec.rs` — the chain executor
 

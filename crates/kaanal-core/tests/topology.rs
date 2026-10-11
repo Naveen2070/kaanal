@@ -147,7 +147,6 @@ nodes:
   ext:    { type: external-api }
   ext2:   { type: external-api }
   auth:   { type: auth }
-  auth2:  { type: auth }
 ";
 
 /// `KINDS` plus one edge `from -> to`.
@@ -168,8 +167,8 @@ fn edge_table_matches_r1_24() {
     };
     for from in kinds {
         for to in kinds {
-            if (from, to) == ("gw", "gw") {
-                continue; // one gateway only: covered by the self-loop and second-gateway tests
+            if matches!((from, to), ("gw", "gw") | ("auth", "auth")) {
+                continue; // one gateway and one auth node only: see the self-loop and second-node tests
             }
             // Twins (svc2, …) stand in for "another node of the same kind".
             let target = if from == to {
@@ -366,5 +365,31 @@ fn edge_call_ratio_is_carried() {
     assert_eq!(
         t.edges.iter().map(|e| e.calls.get()).collect::<Vec<_>>(),
         [3, 1]
+    );
+}
+
+#[test]
+fn second_auth_is_rejected_by_name() {
+    let yaml = "version: 1\nnodes:\n  app: { type: service }\n  login: { type: auth }\n  sso: { type: auth }\n";
+    let cfg = Config::from_yaml(yaml).unwrap();
+    let e = Topology::build(&cfg).unwrap_err();
+    assert_eq!(e, TopologyError::SecondAuth("sso".into()));
+    assert_eq!(
+        e.to_string(),
+        "node 'sso': a topology has at most one auth node"
+    );
+    let placed = e.located(&cfg).in_source(yaml);
+    assert_eq!((placed.line, placed.col), (Some(5), Some(3)), "{placed}");
+}
+
+#[test]
+fn an_auth_only_topology_is_valid() {
+    // X11: a frontend plus a login mock needs nothing else.
+    let t = build("version: 1\nnodes:\n  login: { type: auth, proc: 5ms }\n").unwrap();
+    assert_eq!((t.gateway, t.auth), (None, Some(0)));
+    assert_eq!(build(BASE).unwrap().auth, None);
+    assert_eq!(
+        TopologyError::NoEntry.to_string(),
+        "a topology needs a gateway, a service, a monolith or an auth node (requests enter there)"
     );
 }

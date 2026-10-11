@@ -35,6 +35,16 @@ pub(crate) fn duration_text(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
+/// **Private.** Schema of a `claims` map: names to strings, numbers or booleans (at most 32),
+/// for `#[schemars(schema_with = "crate::schema::claims")]`. The load rules are in `config`.
+pub(crate) fn claims(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "maxProperties": 32,
+        "additionalProperties": { "type": ["string", "number", "boolean"] }
+    })
+}
+
 impl JsonSchema for DistConfig {
     fn schema_name() -> Cow<'static, str> {
         "Distribution".into()

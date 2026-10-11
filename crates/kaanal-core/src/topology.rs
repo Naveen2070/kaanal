@@ -1,7 +1,7 @@
 //! The topology graph: nodes, edges, and all semantic validation of the config.
 //!
 //! [`Topology::build`] turns a parsed [`Config`] into a validated graph the executor can
-//! walk: at most one gateway (R1.23), the caller → dependency edge table (R1.24), no
+//! walk: at most one gateway (R1.23) and one auth node (X2), the caller → dependency edge table (R1.24), no
 //! unknown, self or duplicate edges, no cycles (R2.7), and op/cache costs completed from
 //! flavor presets (R1.25). Anything the executor would silently ignore or misinterpret is
 //! rejected at load with a named error (R6.1).
@@ -77,6 +77,9 @@ pub struct Topology {
     pub edges: Vec<Edge>,
     /// The gateway, if the topology has one (at most one, R1.23).
     pub gateway: Option<NodeId>,
+    /// The auth node, if the topology has one (at most one, X2); it owns the built-in
+    /// `POST /login` and `GET /.well-known/jwks.json` routes.
+    pub auth: Option<NodeId>,
     /// **Private.** name → id lookup.
     index: HashMap<String, NodeId>,
 }
@@ -93,7 +96,9 @@ pub enum TopologyError {
     },
     /// A second gateway; carries its name.
     SecondGateway(String),
-    /// No gateway and no service or monolith: requests have nowhere to enter.
+    /// A second auth node; carries its name.
+    SecondAuth(String),
+    /// No gateway, service, monolith or auth node: requests have nowhere to enter.
     NoEntry,
     /// An edge from a node to itself.
     SelfLoop {
@@ -143,8 +148,11 @@ impl fmt::Display for TopologyError {
             TopologyError::SecondGateway(n) => {
                 write!(f, "node '{n}': a topology has at most one gateway")
             }
+            TopologyError::SecondAuth(n) => {
+                write!(f, "node '{n}': a topology has at most one auth node")
+            }
             TopologyError::NoEntry => f.write_str(
-                "a topology needs a gateway, a service or a monolith (requests enter there)",
+                "a topology needs a gateway, a service, a monolith or an auth node (requests enter there)",
             ),
             TopologyError::SelfLoop { edge, name } => {
                 write!(f, "edge #{edge}: '{name}' cannot call itself")
@@ -221,6 +229,7 @@ impl TopologyError {
                 _ => keys(&["edges"]),
             },
             TopologyError::SecondGateway(n)
+            | TopologyError::SecondAuth(n)
             | TopologyError::MissingOps(n)
             | TopologyError::MissingCache(n)
             | TopologyError::MissingGatewayEdge(n) => keys(&["nodes", n]),
@@ -293,17 +302,22 @@ impl Topology {
     /// Builds and validates the graph.
     ///
     /// Checks, in order: per node, op and cache costs complete (presets fill gaps) and at
-    /// most one gateway; without a gateway, at least one service or monolith; per edge,
+    /// most one gateway and one auth node; without a gateway, at least one service, monolith or auth node; per edge,
     /// both ends exist, no self edge, no duplicate; the graph is a DAG; every edge is in
     /// the R1.24 table; with a gateway, every service/monolith with a spec has an edge
     /// from it. The cycle check runs before the table so a cycle is reported as one.
     ///
     /// # Errors
     /// Returns the first [`TopologyError`] found; nothing is half-built.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear validation pass; one line over after the auth-node check"
+    )]
     pub fn build(cfg: &Config) -> Result<Topology, TopologyError> {
         let mut nodes = Vec::new();
         let mut index = HashMap::new();
         let mut gateway = None;
+        let mut auth = None;
         for (name, n) in &cfg.nodes {
             let id = nodes.len();
             if n.kind() == NodeKind::Gateway {
@@ -311,6 +325,12 @@ impl Topology {
                     return Err(TopologyError::SecondGateway(name.clone()));
                 }
                 gateway = Some(id);
+            }
+            if n.kind() == NodeKind::Auth {
+                if auth.is_some() {
+                    return Err(TopologyError::SecondAuth(name.clone()));
+                }
+                auth = Some(id);
             }
             let ops = ops_of(name, n)?;
             let cache = cache_of(name, n)?;
@@ -327,7 +347,12 @@ impl Topology {
                 chains: n.chains().cloned().unwrap_or_default(),
             });
         }
-        if gateway.is_none() && !nodes.iter().any(|n| is_entry(n.kind)) {
+        // X11: an auth node alone is a valid topology (a frontend and its login mock).
+        if gateway.is_none()
+            && !nodes
+                .iter()
+                .any(|n| is_entry(n.kind) || n.kind == NodeKind::Auth)
+        {
             return Err(TopologyError::NoEntry);
         }
 
@@ -369,6 +394,7 @@ impl Topology {
             nodes,
             edges,
             gateway,
+            auth,
             index,
         };
         topo.check_cycles()?;
