@@ -382,6 +382,16 @@ Each test shares one 2048-bit key per test binary (generation is the slow part).
 | `login_rejects_unknown_users_and_wrong_passwords`             | Unknown user, wrong or empty password, wrong case: `None` (401); a good login has 4 fields (3 without scopes) and a random `jti`.             |
 | `from_config_fails_closed_without_a_key`                      | An auth node and no key is a message naming the node; no auth node is `None`; defaults are a 1 h ttl and `iss` from the bound port.           |
 
+## `crates/kaanal/src/keys.rs` (unit) — the signing key file
+
+| Test                                                          | What it proves                                                                                                                                                                         |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `keys_dir_prefers_the_override_and_needs_one_of_them`         | `KAANAL_CONFIG_DIR` wins over the local config dir, an empty value counts as unset, and neither is an exit-1 error that names `KAANAL_CONFIG_DIR`.                                     |
+| `key_id_hashes_the_canonical_config_directory`                | The id is 16 hex digits of the SHA-256 of the canonical directory (same directory by any path gives the same id, another directory another id).                                        |
+| `store_adopts_the_key_that_linked_first`                      | A second `store` for the same name returns the first key and leaves no temp file; mode 0600 on Unix.                                                                                   |
+| `the_no_hard_link_fallback_creates_once_and_never_overwrites` | The direct-create fallback used when hard links are unsupported creates the key once (0600 on Unix), reports `AlreadyExists` for a second attempt, and leaves the winner's key intact. |
+| `a_corrupt_key_file_is_an_error_naming_it`                    | Text that is not a key is an error naming the file, with the delete hint; the file is not replaced.                                                                                    |
+
 ## `crates/kaanal/tests/cli.rs` — binary end-to-end
 
 Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir and kills it on drop.
@@ -412,6 +422,17 @@ Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir 
 | `endpoints_write_refuses_inline_and_existing_files`            | An inline `endpoints:` map is print-only (kaanal.yaml unchanged, a note on stderr); with no `endpoints:` key `--write` creates `kaanal.endpoints.yaml` and names the line to add; it then refuses to touch that file while kaanal.yaml does not name it. Inline output is indented for pasting and validates once pasted; a flow-style file is refused with a hint. |
 | `validate_warns_about_stale_entries_and_ignored_error_maps`    | `validate` warns about an entry no spec defines (and with no override) and about the `error_map` of a `via:` target, and still exits 0.                                                                                                                                                                                                                             |
 | `validate_places_errors_in_the_endpoints_file`                 | A missing endpoints file is placed at the `endpoints:` value in kaanal.yaml; errors inside the file print as `kaanal.endpoints.yaml:line:col`.                                                                                                                                                                                                                      |
+
+| `up_generates_the_key_once_then_reuses_it` | The one key generation by kaanal itself: prints `Generating signing key...` and the `Auth:` line, writes one key file (no temp; 0700/0600 on Unix), and the next run serves the same `kid` without generating. |
+| `up_uses_a_pre_seeded_key` | A key already at the expected path is used as is (the served `kid` is its `kid`). |
+| `corrupt_key_file_stops_startup_naming_it` | `up` exits 1 naming the file and the delete hint; the file is untouched. |
+| `validate_never_touches_keys_and_warns_without_users` | `validate` of an auth config with no users warns and never creates the key directory. |
+| `endpoints_command_skips_built_in_routes` | `kaanal endpoints` lists only spec routes: the built-in login and JWKS are never in the skeleton. |
+| `unix_key_files_readable_by_others_are_refused` | (Unix only) A mode-0644 key stops `up` with a `chmod 600` hint, and the keys directory is made 0700 anyway. |
+| `explicit_wide_grants_in_the_keys_dir_are_removed_on_windows` | (Windows only) A keys directory and key file that were explicitly granted to Everyone before `up` lose that grant. |
+| `keys_dir_is_restricted_to_the_current_user_on_windows` | (Windows only) `icacls` on the keys directory shows the current user and none of Everyone, Users, Authenticated Users. |
+
+Every CLI test with an auth node sets `KAANAL_CONFIG_DIR` to a scratch directory and pre-seeds one shared key, except the one keygen test.
 
 ## Unit tests inside source files
 

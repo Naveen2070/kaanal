@@ -47,6 +47,7 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal](kaanal/) (binary)
 
-| File          | Page                             | Contents                                         |
-| ------------- | -------------------------------- | ------------------------------------------------ |
-| `src/main.rs` | [kaanal/main.md](kaanal/main.md) | CLI, instance lock, run file, control-API client |
+| File          | Page                             | Contents                                                              |
+| ------------- | -------------------------------- | --------------------------------------------------------------------- |
+| `src/main.rs` | [kaanal/main.md](kaanal/main.md) | CLI, instance lock, run file, control-API client                      |
+| `src/keys.rs` | [kaanal/keys.md](kaanal/keys.md) | Signing key file: location, identity, race-safe creation, permissions |

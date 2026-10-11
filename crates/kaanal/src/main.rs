@@ -3,7 +3,8 @@
 //!
 //! `up`, `validate`, `schema` and `endpoints` work locally; `status` and `chaos` find the running
 //! instance via `.kaanal/run.json` and call its control API (rule R2.6: every
-//! interface is a thin client, no per-interface logic).
+//! interface is a thin client, no per-interface logic). `up` loads (or creates) the auth
+//! signing key only when the config has an auth node (`keys`).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -12,12 +13,14 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use kaanal_core::chain::skeleton;
-use kaanal_core::config::parse_endpoints;
+use kaanal_core::config::{NodeConfig, parse_endpoints};
 use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, ConfigError, EndpointsConfig};
 use kaanal_server::ServeOpts;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
+
+mod keys;
 
 /// **Private.** Per-project state directory holding `run.json` and `lock`.
 const STATE_DIR: &str = ".kaanal";
@@ -230,15 +233,30 @@ fn load(path: &Path) -> Result<(Config, PathBuf, String), Fail> {
     Ok((cfg, dir, src))
 }
 
-/// **Private.** The `up` lifecycle: private state dir → instance lock → token →
-/// tokio runtime → serve → run file → wait for Ctrl+C → clean up the run file
-/// (only if it still holds our token).
+/// **Private.** How many users the config's auth node has, or `None` without an auth node.
+fn auth_users(cfg: &Config) -> Option<usize> {
+    cfg.nodes.values().find_map(|n| match n {
+        NodeConfig::Auth(a) => Some(a.users.len()),
+        _ => None,
+    })
+}
+
+/// **Private.** The `up` lifecycle: private state dir → instance lock → signing key (auth
+/// configs only) → token → tokio runtime → serve → run file → wait for Ctrl+C → clean up the
+/// run file (only if it still holds our token).
 fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
     let (cfg, dir, src) = load(config)?;
-    private_dir()?;
+    private_dir(Path::new(STATE_DIR))?;
     // Held until this process exits. The OS releases it even if we crash, so there is no stale lock,
     // and two `up` runs started at the same instant cannot both get past this point.
     let _lock = lock_instance()?;
+    // X4: only an auth node needs a key. It is loaded (or created) before binding, so a bad
+    // key file stops startup with its name; `validate` and `endpoints` never get here.
+    let users = auth_users(&cfg);
+    let auth_key = match users {
+        Some(_) => Some(keys::signing_key(config)?),
+        None => None,
+    };
     if !host.is_loopback() {
         eprintln!(
             "warning: binding {host} makes the mock and control ports reachable from your network; \
@@ -252,7 +270,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
             host,
             port: port.unwrap_or(cfg.port),
             token: token.clone(),
-            auth_key: None,
+            auth_key,
         };
         let server = kaanal_server::serve(&cfg, &dir, opts)
             .await
@@ -264,6 +282,12 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         write_run_file(server.addr, &token)?;
         println!("Mocks: http://localhost:{port}");
         println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
+        if let Some(n) = users {
+            println!(
+                "Auth:  POST http://localhost:{port}/login, JWKS http://localhost:{port}/.well-known/jwks.json, {n} {}",
+                if n == 1 { "user" } else { "users" }
+            );
+        }
         if let Some(seed) = server.drawn_seed {
             println!(
                 "Seed:  {seed} (determinism: realistic; replay its timings and failures with determinism: controlled and seed: {seed}; generated data then follows that seed too)"
@@ -392,37 +416,40 @@ fn endpoints(config: &Path, write: bool) -> Result<(), Fail> {
     }
     Ok(())
 }
-/// **Private.** Creates `.kaanal` readable only by the current user, before any secret is written into it.
-/// Unix: mode 0700. Windows: the folder's ACL is replaced by one grant for the current user
-/// (inheritance removed), so files created inside never exist with a wider ACL.
-/// If that fails we warn and carry on: the token still protects the control API.
-fn private_dir() -> Result<(), Fail> {
+/// **Private.** Creates `dir` (and missing parents) readable only by the current user, before
+/// any secret is written into it (R5.8): `.kaanal`, and the signing-key directory (spec X16,
+/// on every run, P16). Unix: mode 0700, or an error. Windows: the folder's ACL is replaced by
+/// one grant for the current user (inheritance removed), so files created inside never exist
+/// with a wider ACL; if that fails we warn and carry on: the token still protects the control API.
+fn private_dir(dir: &Path) -> Result<(), Fail> {
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
         b.mode(0o700);
-        b.create(STATE_DIR)
-            .and_then(|()| {
-                std::fs::set_permissions(STATE_DIR, std::fs::Permissions::from_mode(0o700))
-            })
-            .map_err(|e| err(format!("{STATE_DIR}: {e}")))?;
+        b.create(dir)
+            .and_then(|()| std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)))
+            .map_err(|e| err(format!("{}: {e}", dir.display())))?;
     }
     #[cfg(not(unix))]
-    b.create(STATE_DIR)
-        .map_err(|e| err(format!("{STATE_DIR}: {e}")))?;
+    b.create(dir)
+        .map_err(|e| err(format!("{}: {e}", dir.display())))?;
     #[cfg(windows)]
-    if let Err(e) = restrict_to_current_user(STATE_DIR) {
-        eprintln!("warning: could not restrict {STATE_DIR} to the current user: {e}");
+    if let Err(e) = restrict_to_current_user(dir) {
+        eprintln!(
+            "warning: could not restrict {} to the current user: {e}",
+            dir.display()
+        );
     }
     Ok(())
 }
 
-/// **Private.** Replaces the directory's ACL with one grant for the current user,
-/// using System32 binaries by full path (a planted earlier-PATH exe is never run).
+/// **Private.** Replaces the directory's ACL with one grant for the current user and removes
+/// explicit grants to Everyone, Users and Authenticated Users, using System32 binaries by
+/// full path (a planted earlier-PATH exe is never run).
 #[cfg(windows)]
-fn restrict_to_current_user(dir: &str) -> Result<(), String> {
+fn restrict_to_current_user(dir: &Path) -> Result<(), String> {
     use std::process::Command;
     let root = std::env::var("SystemRoot").map_err(|_| "SystemRoot is not set")?;
     // Full paths, so an icacls.exe or whoami.exe planted earlier on PATH is never run.
@@ -439,12 +466,28 @@ fn restrict_to_current_user(dir: &str) -> Result<(), String> {
         .map(|s| s.trim_matches('"'))
         .filter(|s| s.starts_with("S-1-"))
         .ok_or("could not read the current user's SID")?;
-    let out = Command::new(format!(r"{root}\System32\icacls.exe"))
+    let icacls = format!(r"{root}\System32\icacls.exe");
+    let out = Command::new(&icacls)
+        .arg(dir)
+        .args(["/inheritance:r", "/grant:r", &format!("*{sid}:(OI)(CI)F")])
+        .output()
+        .map_err(|e| format!("icacls: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
+    // `/inheritance:r` drops inherited entries only. Remove explicit grants to the wide
+    // well-known groups (Everyone, Users, Authenticated Users) too, on the folder and the
+    // files already in it. Not `/reset`: it would briefly widen a running instance's files.
+    let out = Command::new(&icacls)
+        .arg(dir)
         .args([
-            dir,
-            "/inheritance:r",
-            "/grant:r",
-            &format!("*{sid}:(OI)(CI)F"),
+            "/remove:g",
+            "*S-1-1-0",
+            "*S-1-5-32-545",
+            "*S-1-5-11",
+            "/T",
+            "/C",
+            "/Q",
         ])
         .output()
         .map_err(|e| format!("icacls: {e}"))?;
