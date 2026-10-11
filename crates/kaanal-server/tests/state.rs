@@ -317,3 +317,27 @@ fn spec_node_without_a_gateway_edge_is_rejected_before_compile() {
         "{err}"
     );
 }
+
+#[test]
+fn auth_without_users_warns() {
+    let w = kaanal_server::check(
+        &Config::from_yaml("version: 1\nnodes:\n  login: { type: auth }\n").unwrap(),
+        &fixtures(),
+    )
+    .unwrap();
+    assert_eq!(
+        w,
+        [
+            "node 'login': no users, so every POST /login answers 401 (add users: [{ username, password }])"
+        ]
+    );
+    let w = kaanal_server::check(
+        &Config::from_yaml(
+            "version: 1\nnodes:\n  login: { type: auth, users: [ { username: a, password: b } ] }\n",
+        )
+        .unwrap(),
+        &fixtures(),
+    )
+    .unwrap();
+    assert!(w.is_empty(), "{w:?}");
+}

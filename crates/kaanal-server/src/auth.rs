@@ -1,0 +1,424 @@
+//! An auth node's signing key, JWKS and tokens (spec X13).
+//!
+//! RS256 is hand-rolled over the `rsa` crate: the JWS compact form is
+//! `base64url(header) . base64url(claims) . base64url(PKCS#1 v1.5 SHA-256 signature)`,
+//! no padding. Key IO lives in the `kaanal` binary (X5); this module only parses, generates
+//! and signs. RUSTSEC-2023-0071 (an RSA timing side channel) does not matter for a local mock
+//! that signs synthetic tokens (R1.16). Nothing here ever prints a password or the key.
+
+use std::fmt;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use indexmap::IndexMap;
+use kaanal_core::Config;
+use kaanal_core::config::{NodeConfig, UserConfig};
+use kaanal_core::diagnostics::Located;
+use rsa::pkcs1v15::SigningKey;
+use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
+use rsa::signature::{SignatureEncoding, Signer};
+use rsa::traits::PublicKeyParts;
+use rsa::{BigUint, RsaPrivateKey};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
+
+/// **Private.** Token lifetime when `token_ttl` is absent (R1.16).
+const DEFAULT_TTL: Duration = Duration::from_secs(3600);
+
+/// An RS256 signing key with its RFC 7638 `kid` and public JWK. `Debug` shows only the `kid`.
+#[derive(Clone)]
+pub struct AuthKey {
+    /// **Private.** The RSA private key.
+    private: RsaPrivateKey,
+    /// **Private.** RFC 7638 thumbprint of the public key.
+    kid: String,
+    /// **Private.** The public key as a JWK (`kty`, `use`, `alg`, `kid`, `n`, `e`).
+    jwk: Value,
+}
+
+impl fmt::Debug for AuthKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthKey")
+            .field("kid", &self.kid)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AuthKey {
+    /// A new 2048-bit key from OS entropy.
+    ///
+    /// # Errors
+    /// The OS random source failed.
+    pub fn generate() -> Result<AuthKey, String> {
+        RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048)
+            .map(AuthKey::from_private)
+            .map_err(|e| format!("cannot generate a signing key: {e}"))
+    }
+
+    /// Parses a PKCS#8 PEM private key (what [`AuthKey::to_pem`] writes).
+    ///
+    /// # Errors
+    /// The text is not a PKCS#8 RSA private key (the message never contains the key).
+    pub fn from_pem(pem: &str) -> Result<AuthKey, String> {
+        RsaPrivateKey::from_pkcs8_pem(pem)
+            .map(AuthKey::from_private)
+            .map_err(|e| format!("not a PKCS#8 RSA private key ({e})"))
+    }
+
+    /// The key as PKCS#8 PEM with LF line endings, for the key file.
+    ///
+    /// # Errors
+    /// Encoding failed (not expected for a key this type built).
+    pub fn to_pem(&self) -> Result<String, String> {
+        self.private
+            .to_pkcs8_pem(LineEnding::LF)
+            .map(|p| p.to_string())
+            .map_err(|e| format!("cannot encode the signing key: {e}"))
+    }
+
+    /// The key id: the RFC 7638 thumbprint of the public key.
+    pub fn kid(&self) -> &str {
+        &self.kid
+    }
+
+    /// The JWKS document `GET /.well-known/jwks.json` serves: `{"keys":[<this key>]}`.
+    pub fn jwks(&self) -> Value {
+        json!({ "keys": [self.jwk] })
+    }
+
+    /// **Private.** Derives the `kid` and the public JWK once.
+    fn from_private(private: RsaPrivateKey) -> AuthKey {
+        let b64 = |x: &BigUint| URL_SAFE_NO_PAD.encode(x.to_bytes_be());
+        let (n, e) = (b64(private.n()), b64(private.e()));
+        let kid = thumbprint(&n, &e);
+        let jwk = json!({ "kty": "RSA", "use": "sig", "alg": "RS256", "kid": kid, "n": n, "e": e });
+        AuthKey { private, kid, jwk }
+    }
+
+    /// **Private.** The signed compact token for `claims`.
+    fn sign(&self, claims: &Value) -> String {
+        let header = json!({ "alg": "RS256", "typ": "JWT", "kid": self.kid });
+        let input = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(header.to_string()),
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        );
+        let sig = SigningKey::<Sha256>::new(self.private.clone()).sign(input.as_bytes());
+        format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig.to_bytes()))
+    }
+}
+
+/// RFC 7638 JWK thumbprint of an RSA public key given as base64url `n` and `e`: the SHA-256
+/// of `{"e":…,"kty":"RSA","n":…}` (members sorted, no whitespace), base64url.
+pub(crate) fn thumbprint(n: &str, e: &str) -> String {
+    let canonical = format!(r#"{{"e":"{e}","kty":"RSA","n":"{n}"}}"#);
+    URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes()))
+}
+
+/// What `POST /login` needs: the key and the auth node's accounts, claims and token lifetime.
+#[derive(Debug)]
+pub(crate) struct Issuer {
+    /// The signing key (also serves the JWKS).
+    pub(crate) key: AuthKey,
+    /// **Private.** The accounts (`Debug` redacts passwords).
+    users: Vec<UserConfig>,
+    /// **Private.** The node's extra claims; a user's own win.
+    claims: IndexMap<String, Value>,
+    /// **Private.** Token lifetime.
+    ttl: Duration,
+    /// **Private.** `iss`: `http://localhost:<bound port>`, never the `Host` header (X18).
+    iss: String,
+}
+
+impl Issuer {
+    /// The issuer of `cfg`'s auth node, or `None` when it has none.
+    ///
+    /// # Errors
+    /// The config has an auth node and `key` is `None`: the server fails closed (X5).
+    pub(crate) fn from_config(
+        cfg: &Config,
+        key: Option<AuthKey>,
+        port: u16,
+    ) -> Result<Option<Issuer>, Located> {
+        let Some((name, a)) = cfg.nodes.iter().find_map(|(n, c)| match c {
+            NodeConfig::Auth(a) => Some((n, a)),
+            _ => None,
+        }) else {
+            return Ok(None);
+        };
+        let key = key.ok_or_else(|| {
+            Located::new(
+                Vec::new(),
+                format!("auth node '{name}' needs a signing key (kaanal up provides one)"),
+            )
+        })?;
+        Ok(Some(Issuer {
+            key,
+            users: a.users.clone(),
+            claims: a.claims.clone(),
+            ttl: a.token_ttl.unwrap_or(DEFAULT_TTL),
+            iss: format!("http://localhost:{port}"),
+        }))
+    }
+
+    /// The `200` body for good credentials, `None` (a 401) for an unknown user or a wrong
+    /// password alike (X8). Plain comparison: synthetic accounts on a local mock.
+    // Task 3 shim (removed in Task 4, when the login responder calls it).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the login responder calls it from Task 4")
+    )]
+    pub(crate) fn login(&self, username: &str, password: &str) -> Option<Value> {
+        let user = self
+            .users
+            .iter()
+            .find(|u| u.username == username && u.password == password)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let mut body = json!({
+            "access_token": self.token(user, now, rand::random()),
+            "token_type": "Bearer",
+            "expires_in": self.ttl.as_secs(),
+        });
+        if !user.scopes.is_empty() {
+            body["scope"] = Value::String(user.scopes.join(" "));
+        }
+        Some(body)
+    }
+
+    /// **Private.** A signed token for `user` issued at `now` (Unix seconds) with id `jti`.
+    /// Claims: the node's claims, then the user's (which win), then sub, iss, iat, exp, jti,
+    /// roles and scope (only with scopes). The standard claims go last, so they win even
+    /// if a `Config` built without `from_yaml` carries a reserved name (rejected at load, X3).
+    fn token(&self, user: &UserConfig, now: u64, jti: u128) -> String {
+        let mut c = Map::new();
+        for (k, v) in self.claims.iter().chain(&user.claims) {
+            c.insert(k.clone(), v.clone());
+        }
+        c.insert("sub".into(), user.username.clone().into());
+        c.insert("iss".into(), self.iss.clone().into());
+        c.insert("iat".into(), now.into());
+        // ttl is at most 1 day (config), so this never saturates in practice.
+        c.insert("exp".into(), now.saturating_add(self.ttl.as_secs()).into());
+        c.insert("jti".into(), format!("{jti:032x}").into());
+        c.insert("roles".into(), user.roles.clone().into());
+        if !user.scopes.is_empty() {
+            c.insert("scope".into(), user.scopes.join(" ").into());
+        }
+        self.key.sign(&Value::Object(c))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::sync::OnceLock;
+
+    /// One key per test binary: generation is the slow part (spec §7).
+    fn key() -> &'static AuthKey {
+        static KEY: OnceLock<AuthKey> = OnceLock::new();
+        KEY.get_or_init(|| AuthKey::generate().unwrap())
+    }
+
+    const CFG: &str = "version: 1
+nodes:
+  login:
+    type: auth
+    token_ttl: 2h
+    claims: { aud: my-app, tier: free }
+    users:
+      - { username: alice, password: secret, roles: [admin], scopes: [read, write], claims: { tier: pro, email: a@x.dev } }
+      - { username: bob, password: pw }
+";
+
+    fn issuer() -> Issuer {
+        let cfg = Config::from_yaml(CFG).unwrap();
+        Issuer::from_config(&cfg, Some(key().clone()), 8080)
+            .unwrap()
+            .unwrap()
+    }
+
+    /// A token's claims, decoded without checking the signature.
+    fn claims_of(token: &str) -> Value {
+        let payload = token.split('.').nth(1).unwrap();
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap()
+    }
+
+    fn verifier(iss: &str) -> jsonwebtoken::Validation {
+        let mut v = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        v.set_issuer(&[iss]);
+        // Nothing enforces `aud` (X10); node claims may carry one.
+        v.validate_aud = false;
+        v
+    }
+
+    #[test]
+    fn thumbprint_matches_rfc_7638() {
+        // RFC 7638 §3.1: the example RSA key and its thumbprint.
+        let n = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw";
+        assert_eq!(
+            thumbprint(n, "AQAB"),
+            "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        );
+    }
+
+    #[test]
+    fn jwks_has_one_rs256_signing_key_named_by_its_thumbprint() {
+        let jwks = key().jwks();
+        let keys = jwks["keys"].as_array().unwrap();
+        assert_eq!(keys.len(), 1, "{jwks}");
+        let k = &keys[0];
+        assert_eq!(
+            [&k["kty"], &k["use"], &k["alg"], &k["e"]],
+            [
+                &json!("RSA"),
+                &json!("sig"),
+                &json!("RS256"),
+                &json!("AQAB")
+            ]
+        );
+        let n = k["n"].as_str().unwrap();
+        assert_eq!(k["kid"], json!(key().kid()));
+        assert_eq!(key().kid(), thumbprint(n, "AQAB"));
+        assert_eq!(
+            URL_SAFE_NO_PAD.decode(n).unwrap().len(),
+            256,
+            "2048-bit modulus"
+        );
+        assert_eq!(k.as_object().unwrap().len(), 6, "{k}");
+    }
+
+    #[test]
+    fn pem_round_trips_and_debug_hides_the_key() {
+        let pem = key().to_pem().unwrap();
+        assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"), "PKCS#8");
+        assert_eq!(AuthKey::from_pem(&pem).unwrap().kid(), key().kid());
+        let shown = format!("{:?}", key());
+        let n = key().jwks()["keys"][0]["n"].as_str().unwrap().to_string();
+        assert!(shown.contains(key().kid()), "{shown}");
+        assert!(
+            !shown.contains("BEGIN") && !shown.contains(&n[..40]),
+            "{shown}"
+        );
+        let e = AuthKey::from_pem("not a key").unwrap_err();
+        assert!(e.starts_with("not a PKCS#8 RSA private key"), "{e}");
+    }
+
+    #[test]
+    fn token_verifies_with_an_independent_verifier() {
+        let body = issuer().login("alice", "secret").unwrap();
+        let token = body["access_token"].as_str().unwrap();
+        let header = jsonwebtoken::decode_header(token).unwrap();
+        assert_eq!(header.alg, jsonwebtoken::Algorithm::RS256);
+        assert_eq!(header.typ.as_deref(), Some("JWT"));
+        assert_eq!(header.kid.as_deref(), Some(key().kid()));
+        let set: jsonwebtoken::jwk::JwkSet = serde_json::from_value(key().jwks()).unwrap();
+        let dk = jsonwebtoken::DecodingKey::from_jwk(set.find(key().kid()).unwrap()).unwrap();
+        let v = verifier("http://localhost:8080");
+        let data = jsonwebtoken::decode::<Value>(token, &dk, &v).unwrap();
+        assert_eq!(data.claims["sub"], "alice");
+        // A changed payload no longer verifies.
+        let mut parts: Vec<String> = token.split('.').map(str::to_string).collect();
+        parts[1] = URL_SAFE_NO_PAD
+            .encode(br#"{"sub":"mallory","iss":"http://localhost:8080","exp":9999999999}"#);
+        assert!(jsonwebtoken::decode::<Value>(parts.join("."), &dk, &v).is_err());
+    }
+
+    #[test]
+    fn claims_follow_the_precedence() {
+        let i = issuer();
+        let c = claims_of(&i.token(&i.users[0], 1_000_000, 0xabc));
+        assert_eq!(c["sub"], "alice");
+        assert_eq!(c["iss"], "http://localhost:8080");
+        assert_eq!(
+            (c["iat"].as_u64(), c["exp"].as_u64()),
+            (Some(1_000_000), Some(1_007_200))
+        );
+        assert_eq!(c["jti"], "00000000000000000000000000000abc");
+        assert_eq!(c["roles"], json!(["admin"]));
+        assert_eq!(c["scope"], "read write");
+        assert_eq!(c["aud"], "my-app", "node claim");
+        assert_eq!(c["tier"], "pro", "the user's claim wins over the node's");
+        assert_eq!(c["email"], "a@x.dev");
+        let b = claims_of(&i.token(&i.users[1], 5, 1));
+        let names: BTreeSet<&str> = b.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            names,
+            BTreeSet::from(["aud", "exp", "iat", "iss", "jti", "roles", "sub", "tier"]),
+            "no scope claim without scopes"
+        );
+        assert_eq!(
+            (b["roles"].clone(), b["tier"].clone()),
+            (json!([]), json!("free"))
+        );
+    }
+
+    #[test]
+    fn standard_claims_win_even_if_a_config_skipped_the_load_check() {
+        // `from_yaml` rejects reserved claim names; a hand-built `Config` does not.
+        let mut cfg = Config::from_yaml(CFG).unwrap();
+        let NodeConfig::Auth(a) = cfg.nodes.get_mut("login").unwrap() else {
+            unreachable!("CFG's node is an auth node")
+        };
+        a.claims.insert("iss".into(), json!("evil"));
+        a.users[0].claims.insert("sub".into(), json!("root"));
+        a.users[0].claims.insert("exp".into(), json!(1));
+        let i = Issuer::from_config(&cfg, Some(key().clone()), 8080)
+            .unwrap()
+            .unwrap();
+        let c = claims_of(&i.token(&i.users[0], 1_000_000, 1));
+        assert_eq!(c["sub"], "alice");
+        assert_eq!(c["iss"], "http://localhost:8080");
+        assert_eq!(c["exp"], 1_007_200);
+    }
+
+    #[test]
+    fn login_rejects_unknown_users_and_wrong_passwords() {
+        let i = issuer();
+        assert!(i.login("alice", "wrong").is_none());
+        assert!(i.login("mallory", "secret").is_none());
+        assert!(
+            i.login("Alice", "secret").is_none(),
+            "usernames are case-sensitive"
+        );
+        assert!(i.login("alice", "").is_none());
+        let ok = i.login("alice", "secret").unwrap();
+        assert_eq!(ok["token_type"], "Bearer");
+        assert_eq!(ok["expires_in"], 7200);
+        assert_eq!(ok["scope"], "read write");
+        assert_eq!(ok.as_object().unwrap().len(), 4, "{ok}");
+        let bob = i.login("bob", "pw").unwrap();
+        assert!(bob.get("scope").is_none(), "{bob}");
+        // jti is random per token.
+        let again = i.login("alice", "secret").unwrap();
+        assert_ne!(
+            claims_of(ok["access_token"].as_str().unwrap())["jti"],
+            claims_of(again["access_token"].as_str().unwrap())["jti"]
+        );
+    }
+
+    #[test]
+    fn from_config_fails_closed_without_a_key() {
+        let cfg = Config::from_yaml(CFG).unwrap();
+        let e = Issuer::from_config(&cfg, None, 8080).unwrap_err();
+        assert_eq!(
+            e.msg,
+            "auth node 'login' needs a signing key (kaanal up provides one)"
+        );
+        let none = Config::from_yaml("version: 1\nnodes:\n  app: { type: service }\n").unwrap();
+        assert!(Issuer::from_config(&none, None, 8080).unwrap().is_none());
+        let bare = Config::from_yaml("version: 1\nnodes:\n  login: { type: auth }\n").unwrap();
+        let i = Issuer::from_config(&bare, Some(key().clone()), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            i.ttl,
+            Duration::from_secs(3600),
+            "default token_ttl (R1.16)"
+        );
+        assert_eq!(i.iss, "http://localhost:1", "X18: the bound port");
+    }
+}

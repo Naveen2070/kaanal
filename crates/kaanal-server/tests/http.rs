@@ -19,6 +19,13 @@ fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+/// One signing key per test binary (spec §7); every server gets a clone.
+fn test_key() -> kaanal_server::AuthKey {
+    static KEY: std::sync::OnceLock<kaanal_server::AuthKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| kaanal_server::AuthKey::generate().unwrap())
+        .clone()
+}
+
 /// Serves `cfg` with spec paths resolved against `dir`.
 pub async fn start_in(cfg: &Config, dir: &Path) -> Srv {
     let token = kaanal_server::new_token();
@@ -26,6 +33,7 @@ pub async fn start_in(cfg: &Config, dir: &Path) -> Srv {
         host: "127.0.0.1".parse().unwrap(),
         port: 0,
         token: token.clone(),
+        auth_key: Some(test_key()),
     };
     let s = kaanal_server::serve(cfg, dir, opts).await.unwrap();
     Srv {
@@ -849,4 +857,23 @@ async fn gatewayless_custom_chain_runs_in_order() {
         "an override still runs the chain"
     );
     assert_eq!(r.json::<Value>().await.unwrap(), json!({ "queued": true }));
+}
+
+#[tokio::test]
+async fn serve_without_a_signing_key_fails_closed() {
+    let cfg = Config::from_yaml("version: 1\nnodes:\n  login: { type: auth }\n").unwrap();
+    let opts = ServeOpts {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        token: "t".into(),
+        auth_key: None,
+    };
+    let e = kaanal_server::serve(&cfg, &fixtures(), opts)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        e.msg,
+        "auth node 'login' needs a signing key (kaanal up provides one)"
+    );
 }

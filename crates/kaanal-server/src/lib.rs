@@ -8,6 +8,7 @@
 
 #![warn(missing_docs)]
 
+mod auth;
 mod control;
 mod mock;
 mod state;
@@ -22,6 +23,8 @@ use kaanal_core::chain::RouteSpec;
 use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, Topology};
 
+pub use auth::AuthKey;
+
 /// Options for [`serve`].
 pub struct ServeOpts {
     /// Address to bind. `127.0.0.1` by default; anything else prints a warning upstream.
@@ -30,6 +33,9 @@ pub struct ServeOpts {
     pub port: u16,
     /// Bearer token the control API requires (see [`new_token`]).
     pub token: String,
+    /// The key that signs an auth node's tokens (`kaanal up` loads or creates it). Required
+    /// when the config has an auth node: [`serve`] fails closed without it. Ignored otherwise.
+    pub auth_key: Option<AuthKey>,
 }
 
 /// A running server returned by [`serve`].
@@ -91,7 +97,8 @@ pub fn new_token() -> String {
 ///
 /// # Errors
 /// Returns a [`Located`] error if no port in `port..=port+20` is free or if
-/// building server state fails (bad config, specs or routes).
+/// building server state fails (bad config, specs or routes), or if the config has an auth
+/// node and `opts.auth_key` is `None`.
 pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, Located> {
     let listener = bind(opts.host, opts.port)
         .await
@@ -99,12 +106,10 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
     let addr = listener
         .local_addr()
         .map_err(|e| Located::new(Vec::new(), e.to_string()))?;
-    let st = Arc::new(state::AppState::build(
-        cfg,
-        base_dir,
-        opts.token,
-        addr.port(),
-    )?);
+    let mut st = state::AppState::build(cfg, base_dir, opts.token, addr.port())?;
+    // X5: fail closed. `check` never builds an issuer, so `validate` never needs a key.
+    st.auth = auth::Issuer::from_config(cfg, opts.auth_key, addr.port())?;
+    let st = Arc::new(st);
     let warnings = st.warnings.clone();
     let drawn_seed = st.drawn_seed;
     let app = router(st);

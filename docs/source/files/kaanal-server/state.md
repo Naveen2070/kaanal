@@ -12,7 +12,9 @@
 | ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Route`    | struct | One `method + path`: `key` (`"GET /users/{id}"`, also the chain seed material), `endpoint` (the compiled `Arc<Endpoint>`: chain, op, `override`, `error_map`, HEAD copies included), `status` (success status from the spec, 200 for a static route; an `override` status wins), `schema` (response schema for generated bodies), `counter` (atomic count → `ChainRequest.n`). |
 | `Event`    | struct | One finished request for the SSE stream: `ts_ms`, `method`, `path`, `status`, measured `ms`, `nodes` visited in order, `failed_node`.                                                                                                                                                                                                                                          |
-| `AppState` | struct | `topo`, `paths` (matchit router of `Vec<Route>` per path), `route_keys` (sorted, for display; synthesized HEAD routes excluded), `chaos` (`RwLock<ChaosState>`), `events` (broadcast sender, capacity 1024), `token`, `seed`, `chain_seed`, `drawn_seed`, `port`, `warnings`.                                                                                                  |
+| `AppState` | struct | `topo`, `paths` (matchit router of `Vec<Route>` per path), `route_keys` (sorted, for display; synthesized HEAD routes excluded), `chaos` (`RwLock<ChaosState>`), `events` (broadcast sender, capacity 1024), `token`, `seed`, `chain_seed`, `drawn_seed`, `port`, `warnings`, `auth` (the token `Issuer`; set by `serve`, never by `check`, so `validate` needs no key).       |
+
+**Auth warning.** An auth node with no `users` adds `node 'login': no users, so every POST /login answers 401 (add users: [{ username, password }])` to `warnings`.
 
 ## Seeds
 

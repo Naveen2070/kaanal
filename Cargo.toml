@@ -43,6 +43,17 @@ jsonschema = { version = "0.58", default-features = false }
 schemars = { version = "1.2", features = ["indexmap2"] }
 saphyr = { version = "0.1", default-features = false }
 saphyr-parser = "0.1"
+# Auth. rsa 0.9 signs with digest 0.10, so sha2 stays on 0.10; the sha2
+# feature turns on sha2/oid, which pkcs1v15::SigningKey<Sha256> needs.
+rsa = { version = "0.9.10", features = ["sha2"] }
+sha2 = "0.10"
+base64 = "0.22"
+dirs = "6"
+serde_urlencoded = "0.7"
+# Dev-only independent verifier for our hand-rolled RS256 (pure Rust backend, same rsa/sha2).
+jsonwebtoken = { version = "11.1", default-features = false, features = [
+    "rust_crypto",
+] }
 kaanal-core = { path = "crates/kaanal-core" }
 kaanal-data = { path = "crates/kaanal-data" }
 kaanal-server = { path = "crates/kaanal-server" }
@@ -63,3 +74,10 @@ missing_panics_doc = "allow"
 must_use_candidate = "allow"
 module_name_repetitions = "allow"
 similar_names = "allow"
+
+# A 2048-bit RSA keygen takes seconds with unoptimised bignum maths; tests generate keys.
+[profile.dev.package.rsa]
+opt-level = 3
+
+[profile.dev.package.num-bigint-dig]
+opt-level = 3

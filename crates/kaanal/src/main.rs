@@ -252,6 +252,7 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
             host,
             port: port.unwrap_or(cfg.port),
             token: token.clone(),
+            auth_key: None,
         };
         let server = kaanal_server::serve(&cfg, &dir, opts)
             .await

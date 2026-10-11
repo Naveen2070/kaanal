@@ -288,10 +288,11 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `endpoints_file_errors_name_the_file_and_place`               | A missing endpoints file is placed at the `endpoints:` value; a compile error inside the file carries that file and its position (BOM and CRLF change nothing); a shape error keeps serde's position (`Located::parsed`). |
 | `stale_entries_and_ignored_error_maps_are_warnings`           | A stale entry and a `via:` target's ignored `error_map` come back from `check` as warnings naming the endpoint.                                                                                                           |
 | `spec_node_without_a_gateway_edge_is_rejected_before_compile` | P4: a spec node with no edge from the gateway fails in the topology check, naming the node, so `compile` never sees a spec route with no place.                                                                           |
+| `auth_without_users_warns`                                    | An auth node with no `users` makes `check` return the "no users, so every POST /login answers 401" warning; one user silences it.                                                                                         |
 
 ## `crates/kaanal-server/tests/http.rs` — end-to-end HTTP
 
-Each test boots a real server on an OS-chosen port (`Srv` helper) against the fixtures.
+Each test boots a real server on an OS-chosen port (`Srv` helper) against the fixtures. Every test server gets a clone of one signing key shared by the test binary.
 
 _Mocks:_
 
@@ -331,24 +332,40 @@ _Control API & security:_
 
 _Embedded UI page:_
 
-| Test                                                                        | What it proves                                                                                                                                                  |
-| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ui_page_cannot_be_framed_and_sends_no_referrer`                            | CSP `frame-ancestors 'none'`; `Referrer-Policy: no-referrer`.                                                                                                   |
-| `ui_page_is_served_without_token`                                           | 200 HTML containing the app name, `EventSource`, and fragment-token reading.                                                                                    |
-| `ui_page_avoids_unsafe_dom_apis_and_external_assets`                        | Static guard: no `innerHTML`/`eval(`/inline handlers/`localStorage`/any `http(s)://` URL in the page.                                                           |
-| `ui_controls_have_accessible_names_and_dark_form_controls`                  | `color-scheme: light dark`, aria labels, `role="alert"`.                                                                                                        |
-| `ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters` | Structural guards on the page's JS: separate status/error elements, fixed-size counter buckets, node names as `Map` keys.                                       |
-| `config_seed_changes_generated_bodies`                                      | Same `seed:` → same `/users/42` body; a different `seed:` → different data (path `id` still 42).                                                                |
-| `gatewayless_requests_enter_at_the_service`                                 | No gateway: `GET /users/42` returns 200 and the trace starts at `app.proc=` and includes `db.read=` (no gateway hop).                                           |
-| `a_lone_monolith_serves_its_spec`                                           | A topology of one `monolith` with a spec and no gateway serves its routes over HTTP and traces its own `proc`, then the inline op (one comma in the trace).     |
-| `trace_is_capped_and_counts_what_it_left_out`                               | A 2 003-hop chain returns a trace of exactly 4 087 bytes ending `,...+1664 hops` (hand-counted cap, N exact, D13).                                              |
-| `trace_brackets_parallel_branches_and_marks_cache_hits`                     | `parallel` prints `[a,b\|c,d]`, a cache hit prints `c.hit=`; with `pay` down the cancelled sibling shows as `[\|net=0.0ms]` and the trace ends `pay.error=503`. |
-| `trace_drops_blocks_a_failure_cancelled_before_they_started`                | A nested `parallel` that a sibling's failure cancelled before any of its hops started is left out of the trace (no `[                                           |
-| `error_map_shapes_status_and_body`                                          | `error_map` by node (status and body), by class (`5xx`), none (status passes through); the trace keeps the real failure.                                        |
-| `head_inherits_the_get_entry`                                               | A HEAD with no entry copies GET's `override`; an explicit `HEAD` entry keeps GET's owner and op (R6.8).                                                         |
-| `endpoints_file_and_inline_serve_the_same_chain`                            | The same entry inline and in `kaanal.endpoints.yaml` gives the same trace.                                                                                      |
-| `realistic_runs_replay_under_controlled_with_the_printed_seed`              | `determinism: realistic` draws a seed per start (`drawn_seed`), bodies keep `seed:`, and `controlled` with the drawn seed repeats the 16 request statuses.      |
-| `gatewayless_custom_chain_runs_in_order`                                    | Without a gateway a custom chain runs in order after the owner's `proc`; an `override` still runs the chain.                                                    |
+| Test                                                                        | What it proves                                                                                                                                                      |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ui_page_cannot_be_framed_and_sends_no_referrer`                            | CSP `frame-ancestors 'none'`; `Referrer-Policy: no-referrer`.                                                                                                       |
+| `ui_page_is_served_without_token`                                           | 200 HTML containing the app name, `EventSource`, and fragment-token reading.                                                                                        |
+| `ui_page_avoids_unsafe_dom_apis_and_external_assets`                        | Static guard: no `innerHTML`/`eval(`/inline handlers/`localStorage`/any `http(s)://` URL in the page.                                                               |
+| `ui_controls_have_accessible_names_and_dark_form_controls`                  | `color-scheme: light dark`, aria labels, `role="alert"`.                                                                                                            |
+| `ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters` | Structural guards on the page's JS: separate status/error elements, fixed-size counter buckets, node names as `Map` keys.                                           |
+| `config_seed_changes_generated_bodies`                                      | Same `seed:` → same `/users/42` body; a different `seed:` → different data (path `id` still 42).                                                                    |
+| `gatewayless_requests_enter_at_the_service`                                 | No gateway: `GET /users/42` returns 200 and the trace starts at `app.proc=` and includes `db.read=` (no gateway hop).                                               |
+| `a_lone_monolith_serves_its_spec`                                           | A topology of one `monolith` with a spec and no gateway serves its routes over HTTP and traces its own `proc`, then the inline op (one comma in the trace).         |
+| `trace_is_capped_and_counts_what_it_left_out`                               | A 2 003-hop chain returns a trace of exactly 4 087 bytes ending `,...+1664 hops` (hand-counted cap, N exact, D13).                                                  |
+| `trace_brackets_parallel_branches_and_marks_cache_hits`                     | `parallel` prints `[a,b\|c,d]`, a cache hit prints `c.hit=`; with `pay` down the cancelled sibling shows as `[\|net=0.0ms]` and the trace ends `pay.error=503`.     |
+| `trace_drops_blocks_a_failure_cancelled_before_they_started`                | A nested `parallel` that a sibling's failure cancelled before any of its hops started is left out of the trace (no `[                                               |
+| `error_map_shapes_status_and_body`                                          | `error_map` by node (status and body), by class (`5xx`), none (status passes through); the trace keeps the real failure.                                            |
+| `head_inherits_the_get_entry`                                               | A HEAD with no entry copies GET's `override`; an explicit `HEAD` entry keeps GET's owner and op (R6.8).                                                             |
+| `endpoints_file_and_inline_serve_the_same_chain`                            | The same entry inline and in `kaanal.endpoints.yaml` gives the same trace.                                                                                          |
+| `realistic_runs_replay_under_controlled_with_the_printed_seed`              | `determinism: realistic` draws a seed per start (`drawn_seed`), bodies keep `seed:`, and `controlled` with the drawn seed repeats the 16 request statuses.          |
+| `gatewayless_custom_chain_runs_in_order`                                    | Without a gateway a custom chain runs in order after the owner's `proc`; an `override` still runs the chain.                                                        |
+| `serve_without_a_signing_key_fails_closed`                                  | `serve` with an auth node and `auth_key: None` fails with "auth node 'login' needs a signing key (kaanal up provides one)" instead of serving unsigned logins (X5). |
+
+## `crates/kaanal-server/src/auth.rs` (unit) — key, JWKS and tokens
+
+Each test shares one 2048-bit key per test binary (generation is the slow part).
+
+| Test                                                          | What it proves                                                                                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `thumbprint_matches_rfc_7638`                                 | The thumbprint of the RFC 7638 §3.1 example key is `NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs`.                                             |
+| `jwks_has_one_rs256_signing_key_named_by_its_thumbprint`      | The JWKS has exactly one key with `kty`, `use`, `alg`, `kid`, `n` (256 bytes), `e` = `AQAB`; the `kid` is the thumbprint of that `n`/`e`.     |
+| `pem_round_trips_and_debug_hides_the_key`                     | PKCS#8 PEM round-trips to the same `kid`; `Debug` shows the `kid` only; garbage is a message that never contains key text.                    |
+| `token_verifies_with_an_independent_verifier`                 | `jsonwebtoken` (dev-only) verifies a token against the served JWKS; header `alg`/`typ`/`kid` are right; a swapped payload no longer verifies. |
+| `claims_follow_the_precedence`                                | `sub`, `iss`, `iat`, `exp`, `jti` (32 hex), `roles`, `scope` (only with scopes), node claims, then user claims, which win.                    |
+| `standard_claims_win_even_if_a_config_skipped_the_load_check` | A hand-built config with `iss` on the node and `sub`/`exp` on a user still gets the real `sub`, `iss` and `exp` in the token.                 |
+| `login_rejects_unknown_users_and_wrong_passwords`             | Unknown user, wrong or empty password, wrong case: `None` (401); a good login has 4 fields (3 without scopes) and a random `jti`.             |
+| `from_config_fails_closed_without_a_key`                      | An auth node and no key is a message naming the node; no auth node is `None`; defaults are a 1 h ttl and `iss` from the bound port.           |
 
 ## `crates/kaanal/tests/cli.rs` — binary end-to-end
 

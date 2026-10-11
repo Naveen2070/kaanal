@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::config::{EndpointsConfig, SeedSource, parse_endpoints};
+use kaanal_core::config::{EndpointsConfig, NodeConfig, SeedSource, parse_endpoints};
 use kaanal_core::diagnostics::{Located, keys};
 use kaanal_core::{ChaosState, Config, Endpoint, Endpoints, NodeId, Topology};
 use kaanal_data::ApiModel;
@@ -79,6 +79,9 @@ pub struct AppState {
     pub port: u16,
     /// Non-fatal findings from loading (ignored schema keywords, nodes with `concurrency`); shown by `validate` and `up`.
     pub warnings: Vec<String>,
+    /// The auth node's token issuer; `None` without an auth node and always in `check`
+    /// (`serve` sets it, X5).
+    pub auth: Option<crate::auth::Issuer>,
 }
 
 /// **Private.** Rejects two paths that differ only in parameter names
@@ -236,6 +239,16 @@ impl AppState {
                 n.name
             ));
         }
+        // P9: a login mock with no accounts answers 401 to everyone; say so up front.
+        for (name, n) in &cfg.nodes {
+            if let NodeConfig::Auth(a) = n
+                && a.users.is_empty()
+            {
+                warnings.push(format!(
+                    "node '{name}': no users, so every POST /login answers 401 (add users: [{{ username, password }}])"
+                ));
+            }
+        }
 
         let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings)?;
         let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
@@ -295,6 +308,7 @@ impl AppState {
             drawn_seed,
             port,
             warnings,
+            auth: None,
         })
     }
 }
