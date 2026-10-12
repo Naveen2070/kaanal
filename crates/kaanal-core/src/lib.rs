@@ -11,6 +11,7 @@
 //! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
 //! outcomes; it never sleeps. The server sleeps the durations it returns (live mode)
 //! or advances virtual time (the simulator), so both drivers share one cost model.
+//! The replay machine they share ([`replay`]: token buckets and slot gates) is pure too.
 
 #![warn(missing_docs)]
 
@@ -21,6 +22,7 @@ pub mod diagnostics;
 pub mod dist;
 pub mod exec;
 pub mod presets;
+pub mod replay;
 pub mod schema;
 pub mod topology;
 

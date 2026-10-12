@@ -87,6 +87,21 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `cache_flavor_fills_the_gaps`                      | A cache flavor fills `hit`/`miss` while the user's `hit_ratio` wins; without a flavor a missing `hit_ratio` resolves to nothing.                      |
 | `presets_are_sane`                                 | Every preset is a `{ p50, p99 }` pair with 0 < p50 ≤ p99 ≤ 1 s, and hit ratios are in 0..=1.                                                          |
 
+## `crates/kaanal-core/tests/replay.rs` — token bucket and slot gate
+
+| Test                                                             | What it proves                                                                                                               |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `bucket_with_burst_one_allows_one_then_asks_for_a_full_interval` | Burst 1, 10 ms: one take passes, the next at once asks for 10 ms, at 4 ms for 6 ms, and at 10 ms passes.                     |
+| `bucket_starts_full_and_refills_one_token_per_interval`          | Burst 3 allows three at once and refuses the fourth with one interval; one interval later one token is back.                 |
+| `bucket_never_banks_more_than_its_burst`                         | After an idle hour a burst-2 bucket still allows exactly two takes, then asks for one interval.                              |
+| `refusing_does_not_spend_a_token`                                | Five refused takes do not push the next token away: it is available at the original time.                                    |
+| `extreme_buckets_do_not_overflow`                                | `interval_ns = u64::MAX` with `burst = u32::MAX` at `now = u64::MAX`, and a 1 ns interval at 1 GHz, never overflow or panic. |
+| `gate_runs_up_to_its_slots_then_queues_then_overflows`           | One slot and a queue of one: `Run`, `Queued`, `Overflow`; `busy`, `queued`, `slots` and `overflow_status` report it.         |
+| `a_queue_of_zero_overflows_as_soon_as_every_slot_is_busy`        | Two slots and a queue of 0: two `Run`, then `Overflow` with nothing queued.                                                  |
+| `release_hands_the_slot_to_the_oldest_waiter_without_freeing_it` | `release` returns waiters in FIFO order, `busy` stays 1 during hand-over, a later arrival queues behind them (no barging).   |
+| `an_unbounded_queue_never_overflows`                             | With no queue cap, 9 999 waiters all queue.                                                                                  |
+| `cancel_removes_one_waiter_and_keeps_the_order_of_the_rest`      | Cancelling the middle waiter leaves the others in order; cancelling a waiter that is not queued has no effect.               |
+
 ## `crates/kaanal-core/tests/dist.rs` — latency distributions
 
 | Test                                            | What it proves                                                                                                                                                                                                                                   |
