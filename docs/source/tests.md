@@ -477,6 +477,13 @@ Every CLI test with an auth node sets `KAANAL_CONFIG_DIR` to a scratch directory
 
 `tests/common/mod.rs` holds the `CHAINS` config, its `CHAIN_ROUTES` and `compiled(yaml, routes)`, shared by `sim.rs` and `distribution.rs`.
 
+## `crates/kaanal-sim/tests/golden.rs` — pre-move characterization
+
+| Test                                                     | What it pins                                                                                                                                                                          |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reports_match_the_pre_move_simulator`                   | Six whole-report fingerprints (queued, tandem, forked with failures, failure ties, the A2 chains, login) recorded from the simulator before the engine moved to core must not change. |
+| `every_case_runs_requests_and_the_fingerprint_is_stable` | Each golden case produces requests and the same fingerprint twice.                                                                                                                    |
+
 ## `crates/kaanal-sim/src/engine.rs` — unit test
 
 | Test                                      | What it pins                                                                                                                        |
