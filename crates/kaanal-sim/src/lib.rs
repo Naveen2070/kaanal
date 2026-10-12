@@ -33,6 +33,8 @@ const MIN_RATE_PER_S: f64 = 1e-6;
 const MAX_RATE_PER_S: f64 = 1e6;
 /// **Private.** Longest simulated time; keeps the virtual clock far inside `u64` nanoseconds.
 const MAX_SIM_DURATION: Duration = Duration::from_hours(365 * 24);
+/// **Private.** Most streams a run may have (a request tag packs the stream index into 16 bits).
+const MAX_STREAMS: usize = 65_535;
 
 /// One open Poisson stream on a compiled endpoint: its key (`"METHOD /path"`, as live mode)
 /// and its rate. Any compiled endpoint can be a stream, static ones included.
@@ -145,6 +147,12 @@ fn validate(
     chaos: &ChaosState,
     cfg: &SimConfig,
 ) -> Result<Vec<Arc<Endpoint>>, String> {
+    if cfg.streams.len() > MAX_STREAMS {
+        return Err(format!(
+            "at most {MAX_STREAMS} streams (got {})",
+            cfg.streams.len()
+        ));
+    }
     if cfg.streams.is_empty() {
         return Err("no streams".into());
     }

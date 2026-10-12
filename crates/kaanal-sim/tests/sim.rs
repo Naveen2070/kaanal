@@ -913,3 +913,17 @@ fn login_and_jwks_equal_live_at_zero_load() {
         }
     }
 }
+
+#[test]
+fn too_many_streams_are_rejected_not_truncated() {
+    let (t, e) = topo(QUEUED);
+    let mut cfg = one_stream(1.0, 10);
+    cfg.streams = (0..65_536)
+        .map(|i| Stream {
+            endpoint_key: format!("GET /s{i}"),
+            rate_per_s: 1.0,
+        })
+        .collect();
+    let err = run(&t, &e, &ChaosState::default(), &cfg).unwrap_err();
+    assert!(err.contains("at most 65535 streams"), "{err}");
+}

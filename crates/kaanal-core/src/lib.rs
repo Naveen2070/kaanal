@@ -11,7 +11,7 @@
 //! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
 //! outcomes; it never sleeps. The server sleeps the durations it returns (live mode)
 //! or advances virtual time (the simulator), so both drivers share one cost model.
-//! The replay machine they share ([`replay`]: token buckets and slot gates) is pure too.
+//! The replay machine they share ([`replay`]: token buckets, slot gates and the step-driven engine) is pure too.
 
 #![warn(missing_docs)]
 
@@ -37,6 +37,7 @@ pub use dist::Dist;
 pub use exec::{
     ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute, sample_plan,
 };
+pub use replay::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
 pub use schema::config_schema;
 pub use topology::{Admission, CacheModel, Edge, Node, NodeId, RateLimit, Topology, TopologyError};
 

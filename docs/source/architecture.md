@@ -134,9 +134,9 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
   $$\sigma = \frac{\ln(p99 / p50)}{Z_{99}} \quad \text{where } Z_{99} \approx 2.3263479$$
 - **`Exp { mean }`**: Exponential (the queueing-theory default): $\text{mean} \times -\ln(1 - U)$ with $U$ uniform in $[0, 1)$, so $\ln(0)$ cannot occur.
 - **Tail Cap Safety**: Lognormal samples are clamped to $\min(\text{sample}, 10 \times p99)$ and exponential samples to $10 \times \text{mean}$. This prevents astronomical tail samples from indefinitely hanging a request.
-- **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.concurrency` carries it to the simulator; live mode has no queues, so `AppState::build` warns and ignores it until M1.
+- **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.admission` carries it to the replay engine in core (the simulator already runs it); live mode is wired to that engine in a later change, so `AppState::build` still warns and ignores it for now.
 
-**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through per-node FIFO queues (nodes with `concurrency`) on a virtual clock; live mode instead sleeps the plan's `total()`. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
+**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through the replay `Engine` in core (per-node FIFO queues for nodes with `concurrency`) on a virtual clock; live mode instead sleeps the plan's `total()`. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
 
 ### Chain Engine
 

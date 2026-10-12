@@ -6,7 +6,9 @@
 //! virtual time, live mode with real time.
 
 mod bucket;
+mod engine;
 mod gate;
 
 pub use bucket::Bucket;
+pub use engine::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
 pub use gate::{Admit, Gate, Waiter};

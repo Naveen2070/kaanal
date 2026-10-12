@@ -1,10 +1,10 @@
-# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`)
+# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine.rs`)
 
-The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: three small files that read better together.
+The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together.
 
 ## What it does
 
-A request's `Plan` is walked against per-node limits: a slot limit ([`Gate`](#gate)) and a rate limit ([`Bucket`](#bucket)). Everything here is pure: time is a `u64` of nanoseconds that the caller supplies, and nothing sleeps, reads a clock or does IO. The simulator drives it with virtual time, live mode with real time. This page covers the two building blocks; the engine that uses them is added later.
+A request's `Plan` is walked against per-node limits: a slot limit ([`Gate`](#gate)) and a rate limit ([`Bucket`](#bucket)). Everything here is pure: time is a `u64` of nanoseconds that the caller supplies, and nothing sleeps, reads a clock or does IO. The simulator drives it with virtual time, live mode with real time. The [`Engine`](#engine) walks plans against gates on that clock; bounded queues, buckets and overflow are wired into it in the next change.
 
 ## Bucket
 
@@ -24,3 +24,24 @@ A request's `Plan` is walked against per-node limits: a slot limit ([`Gate`](#ga
 - `release()` ends a running hop. The oldest waiter, if any, gets the slot at once and the slot is not freed, so a later arrival at the same instant cannot barge past waiters. With no waiter the slot is freed.
 - `cancel(w)` removes one queued waiter (its request failed); the others keep their order. A waiter that is not queued is ignored.
 - `busy()`, `queued()`, `slots()` and `overflow_status()` read the state.
+
+## Engine
+
+The old simulator loop, moved here so live mode can run the same machine. It does not own arrivals: the caller submits requests and steps events.
+
+| Method                            | What it does                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Engine::new(&Topology)`          | Every gate free. Gates come from `Node.admission`; this change gives them unbounded queues (bounded queues arrive with limits).                                                                                                                                                                                                                |
+| `set_window(warmup, end)`         | Counters and `drain_finished` cover requests arriving at or after `warmup`; utilisation integrates busy time inside `[warmup, end]`.                                                                                                                                                                                                           |
+| `submit(now, Arc<Plan>, tag)`     | Starts a request at `now` ns. It first runs every event due strictly before `now` (each at its own time; events exactly at `now` stay queued so ties keep their order); `now` earlier than the engine clock panics. The plan (from `sample_plan` or `execute`) is shared by `Arc` because cancelled siblings keep reading it after the answer. |
+| `step()`                          | Runs exactly one event, the earliest by `(time, seq)`. `Ok(false)` = none scheduled.                                                                                                                                                                                                                                                           |
+| `advance_to(now)`                 | Runs every event due at or before `now`, each **at its own scheduled time**: a caller that wakes late (a coarse OS timer) gets the same hop starts and ends as one that wakes on time.                                                                                                                                                         |
+| `stamp()`, `peek()`, `next_due()` | A caller with its own event queue (the simulator's arrivals) takes sequence numbers from `stamp()` and merges `(time, seq)` with `peek()`, so ties order exactly as they did with one heap.                                                                                                                                                    |
+| `drain_finished()`                | (also `drain_finished_iter()`, which keeps the buffer's capacity so a driver that drains after every event allocates nothing per answer.) The answers decided so far, as `Finished` (tag, submit order, arrival, `done`, result, hops with `start` relative to arrival, cut `dur` and queue `wait`).                                           |
+| `node_counters()`, `table_len()`  | Per-node `area`, `max_queue`, `completed`, `wait`; the request table length (it is reused, R6.13).                                                                                                                                                                                                                                             |
+
+**Answer at the end of the instant (Q3).** A request is answered when it fails or completes, at the end of that instant (no other event is scheduled at the same time, so a same-instant `Fail` with a lower plan index can still replace the winner, D17). It is not delayed until its cancelled siblings' hops end, so live replies at the failure instant. The table slot is freed once the answer was emitted and no token is busy.
+
+**Counters (Q4).** `completed` and `wait` accumulate when a hop starts, for requests arriving at or after `warmup`.
+
+A clock overflow (`u64::MAX` ns, about 584 years) is an `EngineError::ClockOverflow` and the engine stays failed, never a silently wrong result.
