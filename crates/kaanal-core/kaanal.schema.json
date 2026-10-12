@@ -1,5 +1,36 @@
 {
   "$defs": {
+    "BoundedConcurrency": {
+      "additionalProperties": false,
+      "description": "The map form of `concurrency` (same defaults as [`PoolConfig`]).",
+      "properties": {
+        "limit": {
+          "description": "Own hops that run at once, at least 1.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "overflow_status": {
+          "default": 503,
+          "description": "Status returned when the queue is full, 500–504 (default 503).",
+          "format": "uint16",
+          "maximum": 504,
+          "minimum": 500,
+          "type": "integer"
+        },
+        "queue": {
+          "default": 0,
+          "description": "Requests that may wait for a slot (default 0).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "type": "object"
+    },
     "CacheFlavor": {
       "description": "Cache flavors with a preset hit ratio and costs (estimates, see [`crate::presets`]).",
       "oneOf": [
@@ -229,13 +260,16 @@
           "description": "A reverse proxy / API gateway / load balancer.",
           "properties": {
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "flavor": {
               "description": "Cosmetic label shown in status output (`nginx`, `envoy`); not a preset.",
@@ -254,6 +288,17 @@
                 }
               ],
               "description": "Processing time per request."
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
             "type": {
               "const": "gateway",
@@ -280,13 +325,16 @@
               "type": "object"
             },
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "proc": {
               "anyOf": [
@@ -298,6 +346,17 @@
                 }
               ],
               "description": "Processing time per request."
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
             "spec": {
               "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
@@ -331,13 +390,16 @@
               "type": "object"
             },
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "flavor": {
               "anyOf": [
@@ -372,6 +434,17 @@
               ],
               "description": "Processing time per request."
             },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+            },
             "spec": {
               "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
               "type": [
@@ -394,13 +467,16 @@
           "description": "A data store with read/write/scan costs.",
           "properties": {
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "flavor": {
               "anyOf": [
@@ -433,7 +509,18 @@
                   "type": "null"
                 }
               ],
-              "description": "Connection pool. Accepted and validated; no effect yet (capacity limits come later)."
+              "description": "Connection pool: the slot limit `size`, a wait queue of `queue` and the status\n`overflow_status` when it is full; the same as the map form of `concurrency`; set one\nof the two."
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
             "type": {
               "const": "database",
@@ -450,13 +537,16 @@
           "description": "A cache with a hit ratio and hit/miss costs.",
           "properties": {
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "flavor": {
               "anyOf": [
@@ -502,6 +592,17 @@
               ],
               "description": "Cost of finding out it is a miss."
             },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+            },
             "ttl": {
               "default": null,
               "description": "Entry lifetime. Accepted and validated; no effect yet.",
@@ -523,13 +624,16 @@
           "description": "A third-party HTTP API (payments, email, …).",
           "properties": {
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "error_rate": {
               "default": null,
@@ -551,7 +655,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Connection pool. Accepted and validated; no effect yet."
+              "description": "Connection pool: the slot limit `size`, a wait queue of `queue` and the status\n`overflow_status` when it is full; the same as the map form of `concurrency`; set one\nof the two."
             },
             "proc": {
               "anyOf": [
@@ -582,7 +686,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit. Accepted and validated; no effect yet."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
             "type": {
               "const": "external-api",
@@ -612,13 +716,16 @@
               "type": "object"
             },
             "concurrency": {
-              "description": "Most requests this node serves at once; absent = unlimited. The simulator honours\nit; live mode warns and ignores it for now.",
-              "format": "uint32",
-              "minimum": 1,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
             "proc": {
               "anyOf": [
@@ -630,6 +737,17 @@
                 }
               ],
               "description": "Cost of one login, one JWKS request or one gateway token check."
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
             "token_ttl": {
               "default": null,

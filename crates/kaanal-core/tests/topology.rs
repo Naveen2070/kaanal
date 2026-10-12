@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use kaanal_core::config::CacheFlavor;
 use kaanal_core::topology::CacheModel;
-use kaanal_core::{Config, Dist, NodeKind, Topology, TopologyError, presets};
+use kaanal_core::{Admission, Config, Dist, NodeKind, Topology, TopologyError, presets};
 
 const BASE: &str = r"
 version: 1
@@ -392,4 +392,57 @@ fn an_auth_only_topology_is_valid() {
         TopologyError::NoEntry.to_string(),
         "a topology needs a gateway, a service, a monolith or an auth node (requests enter there)"
     );
+}
+
+#[test]
+fn admission_and_rate_limit_are_built_from_the_config() {
+    let yaml = "version: 1\nnodes:\n  a: { type: service, concurrency: 3 }\n  b: { type: service, concurrency: { limit: 2, queue: 4, overflow_status: 502 } }\n  db: { type: database, flavor: postgres, pool: { size: 5, queue: 7 }, rate_limit: { rps: 4, burst: 2 } }\n  c: { type: service }\n";
+    let t = Topology::build(&Config::from_yaml(yaml).unwrap()).unwrap();
+    let adm = |n: &str| t.nodes[t.id(n).unwrap()].admission.clone();
+    assert_eq!(
+        adm("a"),
+        Some(Admission {
+            slots: 3,
+            queue: None,
+            overflow_status: 503
+        })
+    );
+    assert_eq!(
+        adm("b"),
+        Some(Admission {
+            slots: 2,
+            queue: Some(4),
+            overflow_status: 502
+        })
+    );
+    assert_eq!(
+        adm("db"),
+        Some(Admission {
+            slots: 5,
+            queue: Some(7),
+            overflow_status: 503
+        })
+    );
+    assert_eq!(adm("c"), None);
+    let rl = t.nodes[t.id("db").unwrap()].rate_limit.unwrap();
+    assert_eq!(
+        (rl.interval_ns, rl.burst),
+        (250_000_000, 2),
+        "4 rps is one token per 250 ms"
+    );
+    assert!(t.nodes[t.id("a").unwrap()].rate_limit.is_none());
+}
+
+#[test]
+fn fractional_rps_rounds_to_the_nearest_nanosecond() {
+    let t = Topology::build(
+        &Config::from_yaml(
+            "version: 1\nnodes:\n  g: { type: gateway, rate_limit: { rps: 3, burst: 1 } }\n",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(t.nodes[0].rate_limit.unwrap().interval_ns, 333_333_333);
+    let t = Topology::build(&Config::from_yaml("version: 1\nnodes:\n  g: { type: gateway, rate_limit: { rps: 1000000000, burst: 1 } }\n").unwrap()).unwrap();
+    assert_eq!(t.nodes[0].rate_limit.unwrap().interval_ns, 1);
 }

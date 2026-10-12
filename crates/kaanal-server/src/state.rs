@@ -233,7 +233,7 @@ impl AppState {
         let mut shapes: HashMap<String, String> = HashMap::new();
         let mut warnings = Vec::new();
         // Live mode has no queues yet; say so instead of silently ignoring the setting.
-        for n in topo.nodes.iter().filter(|n| n.concurrency.is_some()) {
+        for n in topo.nodes.iter().filter(|n| n.admission.is_some()) {
             warnings.push(format!(
                 "node '{}': concurrency is honoured by the simulator only (live mode enforces it from M1)",
                 n.name

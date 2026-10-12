@@ -162,16 +162,38 @@ impl NodeConfig {
         }
     }
 
-    /// Most own hops that may run at once; `None` = unlimited.
-    pub fn concurrency(&self) -> Option<NonZeroU32> {
+    /// Slot limit and queue; `None` = unlimited.
+    pub fn concurrency(&self) -> Option<&ConcurrencyConfig> {
         match self {
-            NodeConfig::Gateway(n) => n.concurrency,
-            NodeConfig::Service(n) => n.concurrency,
-            NodeConfig::Monolith(n) => n.concurrency,
-            NodeConfig::Database(n) => n.concurrency,
-            NodeConfig::Cache(n) => n.concurrency,
-            NodeConfig::ExternalApi(n) => n.concurrency,
-            NodeConfig::Auth(n) => n.concurrency,
+            NodeConfig::Gateway(n) => n.concurrency.as_ref(),
+            NodeConfig::Service(n) => n.concurrency.as_ref(),
+            NodeConfig::Monolith(n) => n.concurrency.as_ref(),
+            NodeConfig::Database(n) => n.concurrency.as_ref(),
+            NodeConfig::Cache(n) => n.concurrency.as_ref(),
+            NodeConfig::ExternalApi(n) => n.concurrency.as_ref(),
+            NodeConfig::Auth(n) => n.concurrency.as_ref(),
+        }
+    }
+
+    /// The connection pool (database, external API).
+    pub fn pool(&self) -> Option<&PoolConfig> {
+        match self {
+            NodeConfig::Database(n) => n.pool.as_ref(),
+            NodeConfig::ExternalApi(n) => n.pool.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The token-bucket rate limit.
+    pub fn rate_limit(&self) -> Option<&RateLimitConfig> {
+        match self {
+            NodeConfig::Gateway(n) => n.rate_limit.as_ref(),
+            NodeConfig::Service(n) => n.rate_limit.as_ref(),
+            NodeConfig::Monolith(n) => n.rate_limit.as_ref(),
+            NodeConfig::Database(n) => n.rate_limit.as_ref(),
+            NodeConfig::Cache(n) => n.rate_limit.as_ref(),
+            NodeConfig::ExternalApi(n) => n.rate_limit.as_ref(),
+            NodeConfig::Auth(n) => n.rate_limit.as_ref(),
         }
     }
 
@@ -197,9 +219,15 @@ pub struct GatewayConfig {
     pub flavor: Option<String>,
     /// Processing time per request.
     pub proc: Option<DistConfig>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// A backend service. Without a gateway, requests for the routes in its `spec` enter here.
@@ -213,9 +241,15 @@ pub struct ServiceConfig {
     /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.
     #[serde(default)]
     pub chains: IndexMap<String, Vec<StepConfig>>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// A service that can also be its own database: with `ops` (or a `flavor`) it has inline
@@ -236,9 +270,15 @@ pub struct MonolithConfig {
     pub ops: Option<OpsConfig>,
     /// Preset that fills inline ops the user left out (estimates).
     pub flavor: Option<DbFlavor>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// A data store with read/write/scan costs.
@@ -249,11 +289,19 @@ pub struct DatabaseConfig {
     pub ops: Option<OpsConfig>,
     /// Preset that fills ops the user left out (estimates).
     pub flavor: Option<DbFlavor>,
-    /// Connection pool. Accepted and validated; no effect yet (capacity limits come later).
+    /// Connection pool: the slot limit `size`, a wait queue of `queue` and the status
+    /// `overflow_status` when it is full; the same as the map form of `concurrency`; set one
+    /// of the two.
     pub pool: Option<PoolConfig>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// A cache in front of slower nodes. Its costs are used once endpoint chains land.
@@ -274,9 +322,15 @@ pub struct CacheConfig {
     #[serde(default, with = "humantime_serde")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub ttl: Option<Duration>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// A third-party HTTP API (payments, email). Targets come from config only.
@@ -289,17 +343,23 @@ pub struct ExternalApiConfig {
     #[serde(default, deserialize_with = "ratio")]
     #[schemars(extend("minimum" = 0, "maximum" = 1))]
     pub error_rate: Option<f64>,
-    /// Token-bucket limit. Accepted and validated; no effect yet.
-    pub rate_limit: Option<RateLimitConfig>,
     /// Real upstream URL to forward to. Accepted and validated; no effect yet.
     #[serde(default, deserialize_with = "http_url")]
     #[schemars(extend("pattern" = "^https?://.+"))]
     pub proxy: Option<String>,
-    /// Connection pool. Accepted and validated; no effect yet.
+    /// Connection pool: the slot limit `size`, a wait queue of `queue` and the status
+    /// `overflow_status` when it is full; the same as the map form of `concurrency`; set one
+    /// of the two.
     pub pool: Option<PoolConfig>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// An identity provider: serves `POST /login` (a signed RS256 token for one of its `users`)
@@ -321,9 +381,15 @@ pub struct AuthConfig {
     #[serde(default)]
     #[schemars(schema_with = "crate::schema::claims")]
     pub claims: IndexMap<String, serde_json::Value>,
-    /// Most requests this node serves at once; absent = unlimited. The simulator honours
-    /// it; live mode warns and ignores it for now.
-    pub concurrency: Option<NonZeroU32>,
+    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
+    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
+    /// `overflow_status`). Absent = unlimited.
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::concurrency")]
+    pub concurrency: Option<ConcurrencyConfig>,
+    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
+    /// at most `burst` at once; beyond it the request fails with 429.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// Read/write/scan costs. Without a `flavor`, all three are required.
@@ -378,6 +444,73 @@ impl CacheFlavor {
             CacheFlavor::Redis => "redis",
             CacheFlavor::Memcached => "memcached",
         }
+    }
+}
+
+/// How many own hops a node runs at once, and what happens to the rest.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConcurrencyConfig {
+    /// `concurrency: 4`: four slots; requests beyond them wait without limit.
+    Slots(NonZeroU32),
+    /// `concurrency: { limit, queue, overflow_status }`: the same slots with a bounded queue.
+    Bounded(BoundedConcurrency),
+}
+
+impl ConcurrencyConfig {
+    /// The slot count of either form.
+    pub fn slots(&self) -> NonZeroU32 {
+        match self {
+            ConcurrencyConfig::Slots(n) => *n,
+            ConcurrencyConfig::Bounded(b) => b.limit,
+        }
+    }
+}
+
+/// The map form of `concurrency` (same defaults as [`PoolConfig`]).
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoundedConcurrency {
+    /// Own hops that run at once, at least 1.
+    pub limit: NonZeroU32,
+    /// Requests that may wait for a slot (default 0).
+    #[serde(default)]
+    pub queue: u32,
+    /// Status returned when the queue is full, 500–504 (default 503).
+    #[serde(default = "default_overflow", deserialize_with = "status_5xx")]
+    #[schemars(extend("minimum" = 500, "maximum" = 504))]
+    pub overflow_status: u16,
+}
+
+impl<'de> Deserialize<'de> for ConcurrencyConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = ConcurrencyConfig;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a positive number or a map { limit, queue, overflow_status }")
+            }
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                u32::try_from(v)
+                    .ok()
+                    .and_then(NonZeroU32::new)
+                    .map(ConcurrencyConfig::Slots)
+                    .ok_or_else(|| {
+                        E::custom(format!(
+                            "concurrency must be at least 1 and fit 32 bits (got {v})"
+                        ))
+                    })
+            }
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                u64::try_from(v)
+                    .map_err(|_| E::custom(format!("concurrency must be at least 1 (got {v})")))
+                    .and_then(|u| self.visit_u64(u))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, m: A) -> Result<Self::Value, A::Error> {
+                BoundedConcurrency::deserialize(MapAccessDeserializer::new(m))
+                    .map(ConcurrencyConfig::Bounded)
+            }
+        }
+        d.deserialize_any(V)
     }
 }
 
@@ -964,11 +1097,21 @@ fn ratio<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     }
 }
 
-/// **Private.** `rate_limit.rps`: finite and above 0.
+/// **Private.** Largest rps whose token interval is still at least 1 ns.
+const MAX_RPS: f64 = 1e9;
+
+/// **Private.** Longest burst window (burst / rps) a limit may have.
+const MAX_BURST_WINDOW_S: f64 = 365.0 * 86_400.0;
+
+/// **Private.** `rate_limit.rps`: finite, above 0 and at most 1e9.
 fn positive_rps<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     let v = f64::deserialize(d)?;
-    if v > 0.0 && v.is_finite() {
+    if v > 0.0 && v.is_finite() && v <= MAX_RPS {
         Ok(v)
+    } else if v > MAX_RPS && v.is_finite() {
+        Err(D::Error::custom(format!(
+            "rps must be at most 1000000000 (got {v})"
+        )))
     } else {
         Err(D::Error::custom(format!("rps must be above 0 (got {v})")))
     }
@@ -1127,6 +1270,30 @@ fn is_scope_token(s: &str) -> bool {
 /// **Private.** `base` followed by `rest`.
 fn under(base: &[PathSeg], rest: &[PathSeg]) -> Vec<PathSeg> {
     [base, rest].concat()
+}
+
+/// **Private.** Capacity rules serde cannot place: `pool` and `concurrency` together, and a
+/// burst window (`burst / rps`) longer than a year, each at its own key or value.
+fn check_capacity(cfg: &Config) -> Result<(), Located> {
+    for (name, node) in &cfg.nodes {
+        if node.pool().is_some() && node.concurrency().is_some() {
+            return Err(Located::new(
+                keys(&["nodes", name.as_str()]),
+                format!("node '{name}' sets both pool and concurrency; use one"),
+            ));
+        }
+        if let Some(rl) = node.rate_limit()
+            && f64::from(rl.burst.get()) / rl.rps > MAX_BURST_WINDOW_S
+        {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "rate_limit"]),
+                format!(
+                    "node '{name}': rate_limit burst / rps is over 365 days (lower burst or raise rps)"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// **Private.** The auth rules serde would place at the start of `users:` (spec §3): checked
@@ -1304,7 +1471,8 @@ impl Config {
     /// Returns [`ConfigError`] (with line/column when the parser knows them) for
     /// malformed YAML, unknown fields, bad values, or an unsupported `version`,
     /// and for the auth rules serde cannot place (claims, scopes, limits, empty usernames),
-    /// each at its own key or value.
+    /// each at its own key or value; also for `pool` and `concurrency` on one node, and a
+    /// rate limit window over a year.
     /// When parsing fails inside `nodes:`, the error is re-placed at the real node and
     /// field (see [`crate::diagnostics`]).
     pub fn from_yaml(src: &str) -> Result<Config, ConfigError> {
@@ -1332,6 +1500,7 @@ impl Config {
             .in_source(src));
         }
         check_auth(&cfg).map_err(|e| e.in_source(src))?;
+        check_capacity(&cfg).map_err(|e| e.in_source(src))?;
         Ok(cfg)
     }
 }

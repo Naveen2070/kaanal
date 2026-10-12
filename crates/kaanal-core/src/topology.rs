@@ -12,7 +12,7 @@ use std::num::NonZeroU32;
 
 use indexmap::IndexMap;
 
-use crate::config::{Config, NodeConfig, NodeKind, StepConfig};
+use crate::config::{ConcurrencyConfig, Config, NodeConfig, NodeKind, RateLimitConfig, StepConfig};
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::dist::Dist;
 use crate::presets;
@@ -38,10 +38,68 @@ pub struct Node {
     pub ops: Option<[Dist; 3]>,
     /// Hit ratio and hit/miss costs of a cache node, presets applied (walked from A2).
     pub cache: Option<CacheModel>,
-    /// Capacity for this node's own hops (see `NodeConfig::concurrency`); `None` = unlimited.
-    pub concurrency: Option<NonZeroU32>,
+    /// Slots, queue and overflow status of this node's own hops; `None` = unlimited.
+    pub admission: Option<Admission>,
+    /// Token-bucket rate limit, one token per visit (see the replay engine); `None` = none.
+    pub rate_limit: Option<RateLimit>,
     /// Named chains of a service or monolith (`chains:`), compiled by [`crate::chain::compile`].
     pub chains: IndexMap<String, Vec<StepConfig>>,
+}
+
+/// Admission control of a node: how many own hops run at once and what the others do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Admission {
+    /// Own hops that run at once (at least 1).
+    pub slots: u32,
+    /// Waiting places; `None` = unbounded queue.
+    pub queue: Option<u32>,
+    /// Status of the failure when the queue is full (500 to 504).
+    pub overflow_status: u16,
+}
+
+/// A token bucket in integer nanoseconds (see [`crate::replay::Bucket`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimit {
+    /// Time to refill one token, at least 1 ns.
+    pub interval_ns: u64,
+    /// Tokens the bucket holds when full, at least 1.
+    pub burst: u32,
+}
+
+/// **Private.** A node's admission control: a pool, or `concurrency` in either form.
+/// (Both together is a load error in `Config::from_yaml`; a hand-built `Config` gets the pool.)
+fn admission_of(n: &NodeConfig) -> Option<Admission> {
+    match (n.pool(), n.concurrency()) {
+        (Some(p), _) => Some(Admission {
+            slots: p.size.get(),
+            queue: Some(p.queue),
+            overflow_status: p.overflow_status,
+        }),
+        (None, Some(ConcurrencyConfig::Slots(s))) => Some(Admission {
+            slots: s.get(),
+            queue: None,
+            overflow_status: 503,
+        }),
+        (None, Some(ConcurrencyConfig::Bounded(b))) => Some(Admission {
+            slots: b.limit.get(),
+            queue: Some(b.queue),
+            overflow_status: b.overflow_status,
+        }),
+        (None, None) => None,
+    }
+}
+
+/// **Private.** `rps` as a whole-nanosecond token interval, rounded to the nearest ns.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "load checks bound rps to (0, 1e9] and burst / rps to a year, so the interval is 1 ns to 3.2e16 ns"
+)]
+fn rate_limit_of(r: &RateLimitConfig) -> RateLimit {
+    RateLimit {
+        interval_ns: ((1e9 / r.rps).round() as u64).max(1),
+        burst: r.burst.get(),
+    }
 }
 
 /// A cache node's behaviour.
@@ -343,7 +401,8 @@ impl Topology {
                 proc: Dist::from_config(n.proc()),
                 ops,
                 cache,
-                concurrency: n.concurrency(),
+                admission: admission_of(n),
+                rate_limit: n.rate_limit().map(rate_limit_of),
                 chains: n.chains().cloned().unwrap_or_default(),
             });
         }

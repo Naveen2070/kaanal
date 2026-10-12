@@ -6,7 +6,6 @@
 use std::cell::Cell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -205,7 +204,7 @@ pub(crate) fn simulate(
             .nodes
             .iter()
             .map(|n| NodeQ {
-                slots: n.concurrency.map(NonZeroU32::get),
+                slots: n.admission.as_ref().map(|a| a.slots),
                 busy: 0,
                 queue: VecDeque::new(),
                 max_queue: 0,

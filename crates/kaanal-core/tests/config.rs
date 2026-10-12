@@ -1,8 +1,9 @@
+use kaanal_core::config::ConcurrencyConfig;
 use kaanal_core::config::{
     Branch, CacheFlavor, CallStep, DbFlavor, Determinism, DistConfig, EndpointsConfig,
     ErrorMapping, NodeConfig, Override, SeedSource, StepConfig, parse_endpoints,
 };
-use kaanal_core::{Config, NodeKind, Op, Topology};
+use kaanal_core::{Config, ConfigError, NodeKind, Op, Topology};
 use serde_json::json;
 use std::fmt::Write as _;
 use std::num::NonZeroU32;
@@ -151,14 +152,15 @@ fn concurrency_parses_on_every_node_type_and_must_be_positive() {
     let cfg = Config::from_yaml(yaml).unwrap();
     let got: Vec<u32> = ["gw", "app", "db"]
         .iter()
-        .map(|n| cfg.nodes[*n].concurrency().unwrap().get())
+        .map(|n| cfg.nodes[*n].concurrency().unwrap().slots().get())
         .collect();
     assert_eq!(got, [4, 2, 1]);
     let t = Topology::build(&cfg).unwrap();
     assert_eq!(
         t.nodes[t.id("db").unwrap()]
-            .concurrency
-            .map(NonZeroU32::get),
+            .admission
+            .as_ref()
+            .map(|a| a.slots),
         Some(1)
     );
     for bad in ["0", "-1", "1.5"] {
@@ -181,11 +183,11 @@ nodes:
   gw:    { type: gateway, flavor: nginx, proc: 1ms, concurrency: 8 }
   app:   { type: service, spec: openapi.yaml, proc: 2ms, concurrency: 4 }
   mono:  { type: monolith, spec: openapi.yaml, proc: 3ms, flavor: mysql, ops: { read: 1ms }, concurrency: 2 }
-  db:    { type: database, flavor: postgres, ops: { write: 9ms }, concurrency: 16,
+  db:    { type: database, flavor: postgres, ops: { write: 9ms },
            pool: { size: 10, queue: 5, overflow_status: 504 } }
   cache: { type: cache, flavor: redis, hit_ratio: 0.8, hit: 1ms, miss: 2ms, ttl: 30s, concurrency: 32 }
   pay:   { type: external-api, proc: 50ms, error_rate: 0.01, rate_limit: { rps: 100, burst: 20 },
-           proxy: "https://api.example.com", pool: { size: 4 }, concurrency: 4 }
+           proxy: "https://api.example.com", pool: { size: 4 } }
   login: { type: auth, proc: 5ms, token_ttl: 2h, concurrency: 2,
            users: [ { username: alice, password: secret, roles: [admin] }, { username: bob, password: pw } ] }
 "#;
@@ -868,4 +870,99 @@ fn user_debug_hides_the_password() {
         "{text}"
     );
     assert!(!text.contains("hunter2"), "{text}");
+}
+
+/// The text of `src` from the position `e` reports.
+fn at<'a>(src: &'a str, e: &ConfigError) -> &'a str {
+    let line = src.lines().nth(e.line.expect("a line") - 1).unwrap();
+    &line[e.col.expect("a column") - 1..]
+}
+
+#[test]
+fn concurrency_takes_a_number_or_a_map() {
+    let yaml = "version: 1\nnodes:\n  a: { type: service, concurrency: 4 }\n  b: { type: service, concurrency: { limit: 2, queue: 5, overflow_status: 504 } }\n  c: { type: service, concurrency: { limit: 3 } }\n";
+    let cfg = Config::from_yaml(yaml).unwrap();
+    assert_eq!(
+        cfg.nodes["a"].concurrency(),
+        Some(&ConcurrencyConfig::Slots(NonZeroU32::new(4).unwrap()))
+    );
+    let Some(ConcurrencyConfig::Bounded(b)) = cfg.nodes["b"].concurrency() else {
+        panic!("b")
+    };
+    assert_eq!((b.limit.get(), b.queue, b.overflow_status), (2, 5, 504));
+    let Some(ConcurrencyConfig::Bounded(c)) = cfg.nodes["c"].concurrency() else {
+        panic!("c")
+    };
+    assert_eq!(
+        (c.queue, c.overflow_status),
+        (0, 503),
+        "map defaults match pool"
+    );
+    assert_eq!(cfg.nodes["b"].concurrency().unwrap().slots().get(), 2);
+}
+
+#[test]
+fn bad_concurrency_values_are_placed_and_named() {
+    for (value, want) in [
+        ("0", "at least 1"),
+        ("-1", "at least 1"),
+        ("1.5", "positive number or a map"),
+        ("lots", "positive number or a map"),
+        ("{ limit: 0 }", "nonzero"),
+        ("{ queue: 1 }", "limit"),
+        ("{ limit: 1, overflow_status: 418 }", "between 500 and 504"),
+        ("{ limit: 1, bogus: 1 }", "unknown field"),
+    ] {
+        let src = format!("version: 1\nnodes:\n  gw: {{ type: gateway, concurrency: {value} }}\n");
+        let e = Config::from_yaml(&src).unwrap_err();
+        assert_eq!(e.line, Some(3), "{value}: {e}");
+        assert!(e.msg.contains(want), "{value}: {e}");
+    }
+}
+
+#[test]
+fn rate_limit_parses_on_every_node_kind() {
+    let rl = "rate_limit: { rps: 10, burst: 3 }";
+    for node in [
+        format!("{{ type: gateway, {rl} }}"),
+        format!("{{ type: service, {rl} }}"),
+        format!("{{ type: monolith, {rl} }}"),
+        format!("{{ type: database, flavor: postgres, {rl} }}"),
+        format!("{{ type: cache, flavor: redis, {rl} }}"),
+        format!("{{ type: external-api, {rl} }}"),
+        format!("{{ type: auth, {rl} }}"),
+    ] {
+        let cfg = Config::from_yaml(&format!("version: 1\nnodes:\n  n: {node}\n")).unwrap();
+        assert_eq!(
+            cfg.nodes["n"].rate_limit().unwrap().burst.get(),
+            3,
+            "{node}"
+        );
+    }
+}
+
+#[test]
+fn capacity_limits_are_checked_at_load() {
+    let both = "version: 1\nnodes:\n  db:\n    type: database\n    flavor: postgres\n    pool: { size: 2 }\n    concurrency: 4\n";
+    let e = Config::from_yaml(both).unwrap_err();
+    assert!(
+        e.msg
+            .contains("node 'db' sets both pool and concurrency; use one"),
+        "{e}"
+    );
+    assert!(at(both, &e).starts_with("db:"), "{e}");
+
+    let fast =
+        "version: 1\nnodes:\n  gw: { type: gateway, rate_limit: { rps: 2000000000, burst: 1 } }\n";
+    let e = Config::from_yaml(fast).unwrap_err();
+    assert!(e.msg.contains("at most 1000000000"), "{e}");
+    assert_eq!(e.line, Some(3));
+
+    let slow = "version: 1\nnodes:\n  gw:\n    type: gateway\n    rate_limit: { rps: 0.000001, burst: 4294967295 }\n";
+    let e = Config::from_yaml(slow).unwrap_err();
+    assert!(e.msg.contains("burst / rps"), "{e}");
+    assert!(at(slow, &e).starts_with('{'), "points at the value: {e}");
+
+    // The extremes that are allowed still load.
+    Config::from_yaml("version: 1\nnodes:\n  gw: { type: gateway, rate_limit: { rps: 1000000000, burst: 4294967295 }, concurrency: { limit: 4294967295, queue: 4294967295 } }\n").unwrap();
 }

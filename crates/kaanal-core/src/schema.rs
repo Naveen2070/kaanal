@@ -10,7 +10,8 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde_json::Value;
 
 use crate::config::{
-    Config, DistConfig, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig,
+    BoundedConcurrency, Config, DistConfig, EndpointConfig, EndpointsConfig, ErrorMapping,
+    StepConfig,
 };
 
 /// **Private.** Loose shape of a `humantime` duration: numbers with unit words (`5ms`,
@@ -42,6 +43,19 @@ pub(crate) fn claims(_: &mut SchemaGenerator) -> Schema {
         "type": "object",
         "maxProperties": 32,
         "additionalProperties": { "type": ["string", "number", "boolean"] }
+    })
+}
+
+/// **Private.** Schema of `concurrency`: a positive number, or the map form
+/// (`#[schemars(schema_with = "crate::schema::concurrency")]`).
+pub(crate) fn concurrency(generator: &mut SchemaGenerator) -> Schema {
+    let map = generator.subschema_for::<BoundedConcurrency>();
+    json_schema!({
+        "description": "Most requests served at once: a number (the rest wait without limit) or `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get `overflow_status`).",
+        "anyOf": [
+            { "type": "integer", "minimum": 1 },
+            map
+        ]
     })
 }
 

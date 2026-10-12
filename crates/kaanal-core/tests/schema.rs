@@ -99,11 +99,8 @@ fn inert_fields_say_they_have_no_effect_yet() {
             .to_string()
     };
     for (kind, name) in [
-        ("database", "pool"),
         ("external-api", "error_rate"),
-        ("external-api", "rate_limit"),
         ("external-api", "proxy"),
-        ("external-api", "pool"),
         ("cache", "ttl"),
     ] {
         let d = field(kind, name);
@@ -163,4 +160,36 @@ fn schema_describes_auth_claims_and_scopes() {
     )
     .unwrap();
     assert!(jsonschema::validator_for(&s).unwrap().is_valid(&doc));
+}
+
+#[test]
+fn concurrency_schema_is_a_number_or_a_map() {
+    let s = kaanal_core::config_schema();
+    let branches = s["$defs"]["NodeConfig"]["oneOf"].as_array().unwrap();
+    let props = |kind: &str| {
+        let b = branches
+            .iter()
+            .find(|b| b["properties"]["type"]["const"] == kind)
+            .unwrap();
+        b["properties"].clone()
+    };
+    let any = props("gateway")["concurrency"]["anyOf"]
+        .as_array()
+        .expect("anyOf")
+        .clone();
+    assert_eq!(any[0]["type"], "integer");
+    assert_eq!(any[0]["minimum"], 1);
+    assert_eq!(any[1]["$ref"], "#/$defs/BoundedConcurrency");
+    assert_eq!(s["$defs"]["BoundedConcurrency"]["type"], "object");
+    for kind in [
+        "gateway",
+        "service",
+        "monolith",
+        "database",
+        "cache",
+        "external-api",
+        "auth",
+    ] {
+        assert!(props(kind)["rate_limit"].is_object(), "{kind}");
+    }
 }
