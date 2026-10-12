@@ -45,3 +45,18 @@ The old simulator loop, moved here so live mode can run the same machine. It doe
 **Counters (Q4).** `completed` and `wait` accumulate when a hop starts, for requests arriving at or after `warmup`.
 
 A clock overflow (`u64::MAX` ns, about 584 years) is an `EngineError::ClockOverflow` and the engine stays failed, never a silently wrong result.
+
+## Limits in the engine
+
+Every node can carry a slot gate (`Admission`) and a rate limit (`RateLimit`); `Engine::new` builds a `Gate` and a `Bucket` from them.
+
+**A visit takes one token (Y6).** A visit is a run of own hops at one node with no edge hop between them. The first own hop of a visit takes a token from the node's bucket; the node's other own hops in the same visit (a monolith's proc then inline op) take none. Every call of a node is its own visit (an edge hop resets the visit), and each `parallel` branch's visit takes its own token; branch tokens start with the visit state of the token that forked them (Q14).
+
+**Order at a hop start (Y7).** A planned chaos failure comes first (it takes no token), then the rate limit, then the gate:
+
+1. **Rate limit.** An empty bucket fails the request at that instant with status 429 and `retry_after` = the wait until a token exists. The hop never starts and takes neither a slot nor a queue place. Counted in `NodeCounters.limited`.
+2. **Gate.** A free slot runs the hop; busy slots queue it (FIFO); a full queue fails the request at that instant with the gate's `overflow_status` (`ChainResult::Err.retry_after` is `None`). Counted in `NodeCounters.overflowed`.
+
+A failure the engine produces cancels queued siblings exactly like a planned one. The answer carries `retry_after` unrounded; turning it into a `Retry-After` header (whole seconds, at least 1) is the server's job.
+
+**Limit L1 (Q6).** A 429 or an overflow failure that ties with another _engine_ failure at the same instant keeps the one the engine processed first. A planned `Fail` item keeps the D17 rule: a lower plan index reached at the same instant still replaces a 429 or an overflow, and then the refusal is taken back out of `limited`/`overflowed`, so the counters equal the answers. The `parallel` branches need not be zero-cost for this: any exact tie (fixed latencies, equal hop sums) can produce it.

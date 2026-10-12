@@ -2,7 +2,7 @@
 //! seeded, so each test is deterministic; the 5% tolerance checks the model.
 
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::{ChaosState, Config, Endpoints, HopKind, Topology};
+use kaanal_core::{ChainResult, ChaosState, Config, Endpoints, HopKind, Topology};
 use kaanal_sim::{SimConfig, SimReport, Stream, run};
 use std::time::Duration;
 
@@ -173,5 +173,102 @@ fn two_way_fork_join_matches_nelson_tantawi() {
         got,
         (12.0 - rho) / 8.0 / (MU - lam),
         "2-way fork-join sojourn at ρ = 0.5",
+    );
+}
+
+/// `app` with `concurrency: { limit: c, queue: q }` and exponential 10 ms service.
+fn bounded(c: u32, q: u32) -> Topology {
+    topo(&format!(
+        "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, concurrency: {{ limit: {c}, queue: {q} }}, proc: {{ mean: 10ms }} }}\nedges:\n  - {{ from: gw, to: app }}\n"
+    ))
+}
+
+/// Share of reported requests that failed with `status`.
+fn share(rep: &SimReport, status: u16) -> f64 {
+    let n = rep
+        .requests
+        .iter()
+        .filter(|r| matches!(r.result, ChainResult::Err { status: s, .. } if s == status))
+        .count();
+    let count = |n: usize| f64::from(u32::try_from(n).expect("a few million requests"));
+    count(n) / count(rep.requests.len())
+}
+
+/// Erlang B blocking probability for `c` servers and offered load `a` (M/M/c/c).
+fn erlang_b(c: u32, a: f64) -> f64 {
+    let (mut sum, mut term) = (1.0, 1.0);
+    for k in 1..=c {
+        term *= a / f64::from(k);
+        sum += term;
+    }
+    term / sum
+}
+
+/// Blocking probability of M/M/c/K (K places in all, c servers): the share of arrivals that find it full.
+fn mmck_blocking(c: u32, k: u32, a: f64) -> f64 {
+    let mut p = Vec::new(); // unnormalised state probabilities
+    let mut term = 1.0;
+    for n in 0..=k {
+        if n > 0 {
+            term *= a / f64::from(n.min(c));
+        }
+        p.push(term);
+    }
+    p[k as usize] / p.iter().sum::<f64>()
+}
+
+#[test]
+fn a_pool_without_a_queue_matches_erlang_b() {
+    let t = bounded(3, 0);
+    let (lam, a) = (240.0, 2.4);
+    let rep = sim(&t, lam, 400_000.0);
+    assert_close(
+        share(&rep, 503),
+        erlang_b(3, a),
+        "Erlang B blocking, c = 3, a = 2.4",
+    );
+}
+
+#[test]
+fn a_bounded_queue_matches_mmck_blocking() {
+    let t = bounded(2, 3);
+    let rep = sim(&t, 180.0, 600_000.0);
+    assert_close(
+        share(&rep, 503),
+        mmck_blocking(2, 5, 1.8),
+        "M/M/2/5 blocking, a = 1.8",
+    );
+}
+
+#[test]
+fn overflow_status_is_the_configured_one() {
+    let t = topo(
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, concurrency: { limit: 1, queue: 0, overflow_status: 502 }, proc: { mean: 10ms } }\nedges:\n  - { from: gw, to: app }\n",
+    );
+    let rep = sim(&t, 150.0, 20_000.0);
+    assert!(share(&rep, 502) > 0.2 && share(&rep, 503) == 0.0);
+}
+
+#[test]
+fn a_rate_limit_under_overload_passes_exactly_its_rps() {
+    // Poisson 300/s into 100 rps with a burst of 50: the bucket is empty almost always, so the
+    // accepted rate is the refill rate. (A burst of 1 would pass λ/(1+λT) = 75/s instead.)
+    let t = topo(
+        "version: 1\nnodes:\n  gw: { type: gateway, rate_limit: { rps: 100, burst: 50 } }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n",
+    );
+    let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
+    let rep = sim_with(&t, &e, 300.0, 120_000.0);
+    let ok = rep
+        .requests
+        .iter()
+        .filter(|r| matches!(r.result, ChainResult::Ok))
+        .count();
+    let span =
+        rep.requests.last().unwrap().arrival.as_secs_f64() - rep.requests[0].arrival.as_secs_f64();
+    assert_close(
+        f64::from(u32::try_from(ok).unwrap()) / span,
+        100.0,
+        "accepted rate",
     );
 }

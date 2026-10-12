@@ -131,6 +131,8 @@ pub enum ChainResult {
         node: NodeId,
         /// The HTTP status it answered with.
         status: u16,
+        /// For a 429 from a rate limit: how long until a token is available. Always `None` from `execute`.
+        retry_after: Option<Duration>,
     },
 }
 
@@ -237,7 +239,11 @@ impl Plan {
 pub fn execute(topo: &Topology, chaos: &ChaosState, req: &ChainRequest) -> ChainOutcome {
     let (plan, fail) = sample_plan(topo, chaos, req);
     let result = match fail.map(|(i, _)| &plan.items[i]) {
-        Some(&PlanItem::Fail { node, status, .. }) => ChainResult::Err { node, status },
+        Some(&PlanItem::Fail { node, status, .. }) => ChainResult::Err {
+            node,
+            status,
+            retry_after: None,
+        },
         _ => ChainResult::Ok,
     };
     let (hops, kept) = plan.visible(fail);

@@ -121,7 +121,8 @@ fn error_rate_one_always_fails_at_that_node() {
             out.result,
             ChainResult::Err {
                 node: t.id("db").unwrap(),
-                status: 504
+                status: 504,
+                retry_after: None
             }
         );
         assert_eq!(
@@ -148,7 +149,8 @@ fn down_node_returns_503() {
         out.result,
         ChainResult::Err {
             node: t.id("app").unwrap(),
-            status: 503
+            status: 503,
+            retry_after: None
         }
     );
     assert_eq!(out.hops.len(), 2);
@@ -225,7 +227,8 @@ fn gateway_down_fails_static_route_with_no_hops() {
         out.result,
         ChainResult::Err {
             node: t.gateway.unwrap(),
-            status: 503
+            status: 503,
+            retry_after: None
         }
     );
     assert_eq!(out.hops, []);
@@ -341,4 +344,27 @@ edges:
         "preset costs"
     );
     assert!(out.total() > Duration::from_millis(2));
+}
+
+#[test]
+fn execute_never_sets_retry_after() {
+    let (t, e) = topo();
+    let chaos = chaos_on(
+        &t,
+        "app",
+        NodeChaos {
+            error_rate: 1.0,
+            error_status: 502,
+            ..Default::default()
+        },
+    );
+    let out = run(&t, &e, &chaos, 0);
+    assert_eq!(
+        out.result,
+        ChainResult::Err {
+            node: t.id("app").unwrap(),
+            status: 502,
+            retry_after: None
+        }
+    );
 }

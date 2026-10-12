@@ -239,7 +239,8 @@ fn error_map_belongs_to_the_served_endpoint() {
         run(&t, &e, "GET /users/{id}", &c).result,
         ChainResult::Err {
             node: db,
-            status: 504
+            status: 504,
+            retry_after: None
         }
     );
     assert_eq!(
@@ -252,7 +253,8 @@ fn error_map_belongs_to_the_served_endpoint() {
         run(&t, &e, "POST /orders", &c).result,
         ChainResult::Err {
             node: db,
-            status: 504
+            status: 504,
+            retry_after: None
         }
     );
     assert_eq!(resolve_error(&post.error_map, "db", 504), (503, None));
@@ -426,7 +428,8 @@ fn parallel_fails_at_the_earliest_failure_and_cuts_siblings() {
         o.result,
         ChainResult::Err {
             node: t.id("db").unwrap(),
-            status: 504
+            status: 504,
+            retry_after: None
         }
     );
     assert_eq!(o.total(), ms(17));
@@ -449,7 +452,8 @@ fn parallel_fails_at_the_earliest_failure_and_cuts_siblings() {
         o.result,
         ChainResult::Err {
             node: t.id("pay").unwrap(),
-            status: 500
+            status: 500,
+            retry_after: None
         }
     );
     assert_eq!(o.total(), ms(9));
@@ -470,7 +474,8 @@ fn parallel_tie_goes_to_the_lowest_branch() {
             o.result,
             ChainResult::Err {
                 node: t.id(winner).unwrap(),
-                status
+                status,
+                retry_after: None,
             },
             "{branches}"
         );

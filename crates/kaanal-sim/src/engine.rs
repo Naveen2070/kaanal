@@ -164,6 +164,8 @@ fn report(
                 .as_ref()
                 .map_or(0.0, |a| c.area as f64 / (f64::from(a.slots) * window)),
             max_queue: c.max_queue,
+            limited: c.limited,
+            overflowed: c.overflowed,
         })
         .collect();
     SimReport { requests, nodes }

@@ -7,9 +7,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::bucket::Bucket;
 use super::gate::{Admit, Gate};
 use crate::exec::{ChainResult, Hop, HopKind, Plan, PlanItem};
-use crate::topology::{Admission, NodeId, Topology};
+use crate::topology::{NodeId, Topology};
 
 /// **Private.** `starts` value of a hop that never started.
 const NOT_STARTED: u64 = u64::MAX;
@@ -58,7 +59,7 @@ pub struct FinishedHop {
     pub wait: Duration,
 }
 
-/// Per-node totals. `completed` and `wait` count requests
+/// Per-node totals. `completed`, `wait`, `limited` and `overflowed` count requests
 /// arriving at or after the window's `warmup`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NodeCounters {
@@ -70,6 +71,10 @@ pub struct NodeCounters {
     pub completed: u64,
     /// Summed queue waits (ns) before those hops.
     pub wait: u128,
+    /// Hop starts refused by the rate limit (429).
+    pub limited: u64,
+    /// Hop starts refused by a full queue.
+    pub overflowed: u64,
 }
 
 /// **Private.** A walker over one plan range: the whole plan, or one `parallel` branch.
@@ -82,6 +87,8 @@ struct Token {
     join: Option<usize>,
     /// The node queue it waits in, and since when (ns).
     queued_at: Option<(NodeId, u64)>,
+    /// Node of the last own hop with no edge hop since: the current visit (Y6).
+    last_own: Option<NodeId>,
 }
 
 /// **Private.** A `parallel` block waiting for its branches.
@@ -96,6 +103,11 @@ struct Failure {
     idx: usize,
     node: NodeId,
     status: u16,
+    retry_after: Option<Duration>,
+    /// Set when the engine itself refused the hop and counted it: the node, and whether it was the
+    /// rate limit (`true`) or the queue (`false`). A planned `Fail` that replaces this failure (D17)
+    /// takes the count back, so counters match the answers.
+    refused: Option<(NodeId, bool)>,
 }
 
 /// **Private.** One request in flight.
@@ -129,6 +141,7 @@ struct Scratch {
 /// **Private.** Queueing state of one node.
 struct NodeState {
     gate: Option<Gate>,
+    bucket: Option<Bucket>,
     /// Last time `busy` changed (ns); `NodeCounters::area` is integrated up to here.
     since: u64,
 }
@@ -172,13 +185,8 @@ impl Engine {
                 .nodes
                 .iter()
                 .map(|n| NodeState {
-                    // Task 3 has no queue caps yet; Task 4 passes the admission as it is.
-                    gate: n.admission.as_ref().map(|a| {
-                        Gate::new(&Admission {
-                            queue: None,
-                            ..a.clone()
-                        })
-                    }),
+                    gate: n.admission.as_ref().map(Gate::new),
+                    bucket: n.rate_limit.as_ref().map(Bucket::new),
                     since: 0,
                 })
                 .collect(),
@@ -279,6 +287,7 @@ impl Engine {
             end: len,
             join: None,
             queued_at: None,
+            last_own: None,
         });
         sc.joins.clear();
         let req = Req {
@@ -392,7 +401,10 @@ impl Engine {
                 if req.joins[j].left > 0 || req.fail.is_some() {
                     return;
                 }
-                k = req.joins[j].parent; // the last branch resumes the block's parent
+                let parent = req.joins[j].parent;
+                // The branches ran edge hops: the next own hop of the parent starts a new visit (Y6).
+                req.tokens[parent].last_own = None;
+                k = parent; // the last branch resumes the block's parent
                 continue;
             }
             let item = req.plan.items[at].clone();
@@ -414,6 +426,8 @@ impl Engine {
                             idx: at,
                             node,
                             status,
+                            retry_after: None,
+                            refused: None,
                         },
                     );
                     return;
@@ -425,6 +439,7 @@ impl Engine {
                         parent: k,
                     });
                     req.tokens[k].at = at + 1 + size;
+                    let inherited = req.tokens[k].last_own;
                     let first = req.tokens.len();
                     let mut b = at + 1;
                     while b < at + 1 + size {
@@ -436,6 +451,7 @@ impl Engine {
                             end: b + 1 + bs,
                             join: Some(j),
                             queued_at: None,
+                            last_own: inherited,
                         });
                         b += 1 + bs;
                     }
@@ -451,36 +467,85 @@ impl Engine {
         }
     }
 
-    /// **Private.** Starts token `k`'s hop now: a plain delay, a free slot, or the node's queue.
+    /// **Private.** Starts token `k`'s hop now. Order (Y7): a rate-limit token if this hop starts
+    /// a visit (Y6), then the node's gate. A refusal fails the request at this hop's start; the
+    /// refused hop never starts and takes neither a token's slot nor a queue place.
     fn start_hop(&mut self, r: usize, k: usize, h: &Hop) {
         let now = self.now;
         let (idx, counted) = {
             let req = live(&mut self.reqs, r);
-            req.busy += 1;
             (req.tokens[k].at, req.arrival >= self.warmup)
         };
-        let own = h.kind != HopKind::Net;
-        if own && self.nodes[h.node].gate.is_some() {
-            self.mark(h.node, now);
-            let gate = self.nodes[h.node].gate.as_mut().expect("checked");
-            match gate.arrive((r, k)) {
-                Admit::Run => {}
-                Admit::Queued => {
-                    let len = gate.queued();
-                    if now >= self.warmup {
-                        let c = &mut self.counters[h.node];
-                        c.max_queue = c.max_queue.max(len);
-                    }
-                    live(&mut self.reqs, r).tokens[k].queued_at = Some((h.node, now));
-                    return;
+        if h.kind == HopKind::Net {
+            let req = live(&mut self.reqs, r);
+            req.tokens[k].last_own = None;
+            req.busy += 1;
+        } else {
+            let node = h.node;
+            let tok = &mut live(&mut self.reqs, r).tokens[k];
+            let new_visit = tok.last_own != Some(node);
+            tok.last_own = Some(node);
+            if new_visit
+                && let Some(b) = self.nodes[node].bucket.as_mut()
+                && let Err(wait) = b.take(now)
+            {
+                if counted {
+                    self.counters[node].limited += 1;
                 }
-                Admit::Overflow => {
-                    unreachable!("Task 3 gates have no queue cap; Task 4 adds overflow")
+                let retry_after = Some(Duration::from_nanos(wait));
+                self.fail(
+                    r,
+                    Failure {
+                        at: now,
+                        idx,
+                        node,
+                        status: 429,
+                        retry_after,
+                        refused: counted.then_some((node, true)),
+                    },
+                );
+                return;
+            }
+            if self.nodes[node].gate.is_some() {
+                self.mark(node, now);
+                let gate = self.nodes[node].gate.as_mut().expect("checked");
+                match gate.arrive((r, k)) {
+                    Admit::Run => {}
+                    Admit::Queued => {
+                        let len = gate.queued();
+                        if now >= self.warmup {
+                            let c = &mut self.counters[node];
+                            c.max_queue = c.max_queue.max(len);
+                        }
+                        let req = live(&mut self.reqs, r);
+                        req.busy += 1;
+                        req.tokens[k].queued_at = Some((node, now));
+                        return;
+                    }
+                    Admit::Overflow => {
+                        let status = gate.overflow_status();
+                        if counted {
+                            self.counters[node].overflowed += 1;
+                        }
+                        self.fail(
+                            r,
+                            Failure {
+                                at: now,
+                                idx,
+                                node,
+                                status,
+                                retry_after: None,
+                                refused: counted.then_some((node, false)),
+                            },
+                        );
+                        return;
+                    }
                 }
             }
-        }
-        if own && counted {
-            self.counters[h.node].completed += 1;
+            live(&mut self.reqs, r).busy += 1;
+            if counted {
+                self.counters[node].completed += 1;
+            }
         }
         live(&mut self.reqs, r).starts[idx] = now;
         let done = self.after(nanos(h.dur));
@@ -547,8 +612,20 @@ impl Engine {
         let now = self.now;
         let req = live(&mut self.reqs, r);
         let first = req.done.is_none();
-        req.fail = Some(f);
+        let old = req.fail.replace(f);
         req.done = Some(now);
+        if let Some(Failure {
+            refused: Some((node, limited)),
+            ..
+        }) = old
+        {
+            let c = &mut self.counters[node];
+            if limited {
+                c.limited -= 1;
+            } else {
+                c.overflowed -= 1;
+            }
+        }
         let queued: Vec<(usize, NodeId)> = req
             .tokens
             .iter()
@@ -651,6 +728,7 @@ fn record(req: &Req) -> Finished {
         .map_or(ChainResult::Ok, |f| ChainResult::Err {
             node: f.node,
             status: f.status,
+            retry_after: f.retry_after,
         });
     Finished {
         tag: req.tag,

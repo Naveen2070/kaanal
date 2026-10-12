@@ -96,7 +96,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let trace = trace_header(&outcome, &st.topo);
     let (status, body, failed) = match outcome.result {
         // E5: node, then status, then class; else the failure's own status and the chaos body.
-        ChainResult::Err { node, status } => {
+        ChainResult::Err { node, status, .. } => {
             let (status, body) = resolve_error(&ep.error_map, name(node), status);
             let body = body.unwrap_or_else(|| json!({ "error": "chaos", "node": name(node) }));
             (status, body, Some(name(node).to_string()))
@@ -215,7 +215,7 @@ fn trace_header(o: &ChainOutcome, topo: &Topology) -> String {
     pieces.extend(forks.iter().map(|_| Piece::Close));
     let pieces = without_empty_blocks(pieces);
     let error = match &o.result {
-        ChainResult::Err { node, status } => format!("{}.error={status}", name(*node)),
+        ChainResult::Err { node, status, .. } => format!("{}.error={status}", name(*node)),
         ChainResult::Ok => String::new(),
     };
     let tail = if error.is_empty() { 0 } else { error.len() + 1 };

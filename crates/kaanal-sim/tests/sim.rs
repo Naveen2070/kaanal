@@ -587,14 +587,16 @@ fn zero_cost_failure_ties_are_a_documented_limit() {
             live.result,
             ChainResult::Err {
                 node: s,
-                status: 503
+                status: 503,
+                retry_after: None
             }
         );
         assert_eq!(
             r.result,
             ChainResult::Err {
                 node: a,
-                status: 500
+                status: 500,
+                retry_after: None
             }
         );
     }
@@ -640,7 +642,8 @@ fn cancelled_siblings_keep_their_slot_but_queued_ones_leave() {
             r.result,
             ChainResult::Err {
                 node: bad,
-                status: 503
+                status: 503,
+                retry_after: None
             }
         );
         let ran: Vec<_> = r
@@ -753,7 +756,8 @@ fn failure_ties_go_to_the_lowest_branch_like_live() {
             r.result,
             ChainResult::Err {
                 node: s,
-                status: 503
+                status: 503,
+                retry_after: None
             }
         );
         let live = execute(
@@ -926,4 +930,32 @@ fn too_many_streams_are_rejected_not_truncated() {
         .collect();
     let err = run(&t, &e, &ChaosState::default(), &cfg).unwrap_err();
     assert!(err.contains("at most 65535 streams"), "{err}");
+}
+
+#[test]
+fn bounded_queue_and_rate_limit_counts_match_the_failed_requests() {
+    // 120/s offered into 80 rps: the limiter refuses a third (429) and passes smoothed 80/s (load 0.8)
+    // to a one-slot node with a queue of 2, which then overflows (503) on its own.
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway, rate_limit: { rps: 80, burst: 5 } }\n  app: { type: service, concurrency: { limit: 1, queue: 2 }, proc: { mean: 10ms } }\nedges:\n  - { from: gw, to: app }\n";
+    let (t, e) = topo(yaml);
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(120.0, 30)).unwrap();
+    let (gw, app) = (t.id("gw").unwrap(), t.id("app").unwrap());
+    let by = |status: u16| {
+        rep.requests
+            .iter()
+            .filter(|r| matches!(r.result, ChainResult::Err { status: s, .. } if s == status))
+            .count() as u64
+    };
+    assert!(by(429) > 100 && by(503) > 100, "{} {}", by(429), by(503));
+    assert_eq!(rep.nodes[gw].limited, by(429));
+    assert_eq!(rep.nodes[app].overflowed, by(503));
+    assert!(rep.nodes[app].max_queue <= 2, "the queue cap holds");
+    assert!(rep.requests.iter().all(|r| match r.result {
+        ChainResult::Err {
+            status: 429,
+            retry_after,
+            ..
+        } => retry_after.is_some(),
+        _ => true,
+    }));
 }
