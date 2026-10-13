@@ -58,14 +58,17 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Submit>) {
                 None => std::future::pending().await,
             }
         };
+        // Biased: an arrival already queued at the instant an event is due goes first (ties favour the arrival, as in the simulator).
         let ok = tokio::select! {
+            biased;
             cmd = rx.recv() => match cmd {
                 None => return,
                 Some(c) => {
                     let t = now();
                     next_tag += 1;
                     waiting.insert(next_tag, c.reply);
-                    engine.advance_to(t).and_then(|()| engine.submit(t, c.plan, next_tag)).is_ok()
+                    // `submit` runs every event due strictly before `t` itself; an event exactly at `t` stays queued, so an arrival wins a tie as in the simulator.
+                    engine.submit(t, c.plan, next_tag).is_ok()
                 }
             },
             () = wake => engine.advance_to(now()).is_ok(),
@@ -131,7 +134,6 @@ mod tests {
         let mut want = Vec::new();
         for (i, p) in plans.iter().enumerate() {
             let at = i as u64 * 1_000_000;
-            direct.advance_to(at).unwrap();
             direct.submit(at, Arc::clone(p), i as u64).unwrap();
             want.extend(direct.drain_finished());
         }
@@ -160,6 +162,29 @@ mod tests {
         }
     }
 
+    /// An arrival at the exact instant a slot frees is served after the arrival, as in the
+    /// engine and the simulator: with no queue it overflows (the release has not run yet).
+    #[tokio::test(start_paused = true)]
+    async fn an_arrival_at_the_release_instant_overflows_like_the_simulator() {
+        let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: 2ms, concurrency: { limit: 1, queue: 0 } }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n";
+        let (t, plans) = plans_for(yaml, 2);
+        let h = spawn(Engine::new(&t));
+        let first = tokio::spawn({
+            let (h, p) = (h.clone(), Arc::clone(&plans[0]));
+            async move { h.run(p).await.unwrap() }
+        });
+        tokio::time::sleep(Duration::from_millis(2)).await; // exactly when the first hop ends
+        let second = h.run(Arc::clone(&plans[1])).await.unwrap();
+        assert_eq!(first.await.unwrap().result, kaanal_core::ChainResult::Ok);
+        assert!(
+            matches!(
+                second.result,
+                kaanal_core::ChainResult::Err { status: 503, .. }
+            ),
+            "{:?}",
+            second.result
+        );
+    }
     #[tokio::test(start_paused = true)]
     async fn a_dropped_receiver_does_not_stop_the_engine() {
         let (t, plans) = plans(2);

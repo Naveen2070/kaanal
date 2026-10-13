@@ -13,8 +13,8 @@ The thin driver behind `run`. It owns the stream arrivals on a virtual clock in 
 
 Model: a node's slot is busy only during its own hop (a tandem queueing network); "hold until downstream returns" is planned for M1.
 
-**Equal to live.** At zero load every token starts each hop at its zero-load `start`, so the record equals `execute()` exactly: same hops, same cut rule, same failure, `latency == total()`.
+**Equal to live.** At zero load (live mode runs this same engine) every token starts each hop at its zero-load `start`, so the record equals `execute()` exactly: same hops, same cut rule, same failure, `latency == total()`.
 
-**Known limits.** Under heavy queueing the winner between two failing branches may differ from live (spec §6). The D17 tie rule does not see a tie reached through a zero-duration hop that starts at the tie instant. This is reachable with default (zero) costs: `parallel: [ [z, s], [a] ]` with zero nets and no proc on `z`, `s` down and `a` failing, fails at `s` live but at `a` in the simulator. `zero_cost_failure_ties_are_a_documented_limit` pins it.
+**Known limits.** Live mode runs this same engine, so live and the simulator resolve ties the same way for the same arrivals. Under heavy queueing the winner between two failing branches may differ from `execute()`, the zero-load oracle (spec §6). The D17 tie rule does not see a tie reached through a zero-duration hop that starts at the tie instant. This is reachable with default (zero) costs: `parallel: [ [z, s], [a] ]` with zero nets and no proc on `z`, `s` down and `a` failing, fails at `s` in `execute()` but at `a` in the engine (so in the simulator and in live mode). `zero_cost_failure_ties_are_a_documented_limit` pins it.
 
 **Limit L1.** A 429 (rate limit) or an overflow failure that ties with another engine failure at the same instant keeps the one the engine processed first; a planned `Fail` with a lower plan index still replaces it (D17) and the refusal is not counted. `NodeStats.limited` and `overflowed` come from the engine's counters and equal the 429 and overflow answers among reported requests.

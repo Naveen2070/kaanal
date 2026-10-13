@@ -16,12 +16,12 @@ A reverse proxy, API gateway or load balancer. Optional, at most one. With a gat
 nginx: { type: gateway, flavor: nginx, proc: 1ms }
 ```
 
-| Field         | Meaning                                                                                                                  | Default   | Status     |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
-| `flavor`      | Free-text label shown in status output (`nginx`, `envoy`)                                                                | none      | active now |
-| `proc`        | Processing time per request                                                                                              | zero      | active now |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }` (live mode warns and ignores it for now) | unlimited | active now |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429             | none      | active now |
+| Field         | Meaning                                                                                                      | Default   | Status     |
+| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
+| `flavor`      | Free-text label shown in status output (`nginx`, `envoy`)                                                    | none      | active now |
+| `proc`        | Processing time per request                                                                                  | zero      | active now |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now |
 
 ## `service`
 

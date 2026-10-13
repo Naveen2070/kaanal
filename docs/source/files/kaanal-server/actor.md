@@ -6,7 +6,7 @@ The live driver of the replay engine: one task owns the `Engine` and a catch-up 
 
 `spawn(engine)` starts one tokio task and returns an `EngineHandle` (`Clone`; clones share the task). A handler calls `handle.run(plan).await`, which sends the sampled `Plan` and waits for its `Finished` (result, arrival and done times, per-hop waits). `None` means the task has stopped (a clock overflow or runtime shutdown); `mock.rs` answers 500 `engine stopped`.
 
-The task loop waits for the first of: a new plan, or the engine's next due event (`Engine::next_due`, as a `sleep_until` on the task's start instant). On wake it runs `advance_to(now)` and, for a new plan, `submit(now, plan, tag)`, then answers every finished request.
+The task loop waits for the first of: a new plan, or the engine's next due event (`Engine::next_due`, as a `sleep_until` on the task's start instant). On wake it runs `advance_to(now)`; for a new plan it calls `submit(now, plan, tag)` alone (it runs every event due strictly before `now` itself, so an arrival that ties with a release goes first, as in the simulator; the select is biased toward queued plans for the same reason), then answers every finished request.
 
 ## Why a catch-up clock
 

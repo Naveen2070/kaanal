@@ -12,7 +12,7 @@ Kaanal simulates a multi-tier microservice backend using a single binary, a sing
 
 1. **One Binary, One Port**: Mock routes and the `/__kaanal/*` control plane share a single TCP port. No secondary listener or out-of-band proxy is required.
 2. **Behavioral Modeling, Not Protocol Emulation**: Databases and caches are virtual nodes modeled by their operation latencies and failure probabilities. Kaanal does not execute SQL or emulate wire protocols (rule R2.8).
-3. **One Cost Model, Two Drivers**: Latency calculation, distribution sampling, and failure decisions exist solely in `kaanal-core`. The live HTTP server awaits the simulated time via Tokio, while future simulators advance virtual time without changes to the cost model (rule R2.5).
+3. **One Cost Model, Two Drivers**: Latency calculation, distribution sampling, and failure decisions exist solely in `kaanal-core`. One replay engine in `kaanal-core` runs the sampled plans against slots, queues and rate limits; the live server drives it on a real-time clock (one actor task) and `kaanal-sim` on a virtual clock, with no change to the cost model (rules R2.5, R2.10).
 4. **Pure Core Engine**: `kaanal-core` contains zero asynchronous code, zero IO, zero threads, and zero network calls. It computes outcomes deterministically given its inputs (rule R2.3).
 5. **Absolute Determinism**: For a fixed `seed` in `kaanal.yaml`, identical request sequences produce identical timings, failure distributions, and response payloads.
 6. **Thin Interfaces**: Every user interface (CLI, Web UI, automated test scripts) is a thin HTTP client consuming the `/__kaanal/*` control API. No interface contains business logic (rule R2.6).
@@ -136,7 +136,7 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
 - **Tail Cap Safety**: Lognormal samples are clamped to $\min(\text{sample}, 10 \times p99)$ and exponential samples to $10 \times \text{mean}$. This prevents astronomical tail samples from indefinitely hanging a request.
 - **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.admission` carries it to the replay engine in core, which both the simulator and live mode run: live mode queues the same way (one engine actor task), so a full pool makes requests wait (`node.wait=` in the trace) and a full bounded queue overflows.
 
-**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through the replay `Engine` in core (per-node FIFO queues for nodes with `concurrency`) on a virtual clock; live mode hands each sampled plan to the same engine on a real-time actor task. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
+**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through the replay `Engine` in core (per-node FIFO queues, bounded queues with an overflow status, and token-bucket rate limits) on a virtual clock; live mode hands each sampled plan to the same engine on a real-time actor task. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
 
 ### Chain Engine
 

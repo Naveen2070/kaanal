@@ -174,7 +174,8 @@ endpoints:               # Optional per-endpoint overrides
   - `cache`: Hit ratio plus hit and miss costs; `flavor: redis | memcached`.
   - `external-api`: A third-party HTTP API with its own response time.
   - `auth`: An identity provider: `POST /login` returns a signed RS256 JWT for its test users, `GET /.well-known/jwks.json` serves the key (see [auth.md](docs/web/auth.md)). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
-- Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
+- Any node may set `concurrency: N` (how many requests it serves at once). Live mode and the simulator both enforce it: extra requests queue.
+- Rate limits, connection pools and queues that behave under load, live and in the simulator (see [capacity.md](docs/web/capacity.md)).
 - **`edges`**: Directed dependency graph, limited to an edge table (see [nodes.md](docs/web/nodes.md)). No cycles; `calls: N` sets calls per request. Each request follows its endpoint's chain: by default every node reachable from the owner is charged; `endpoints:` customises it (see [endpoints.md](docs/web/endpoints.md)).
 
 A gateway-less example lives in `examples/gatewayless`:

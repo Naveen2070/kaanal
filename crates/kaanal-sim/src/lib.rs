@@ -1,10 +1,10 @@
 //! Discrete-event simulator: the second driver of the core cost model (rule R2.5).
 //!
 //! [`run`] feeds open Poisson arrival streams through a [`Topology`] on a virtual
-//! clock. Every service time comes from [`kaanal_core::execute`]'s plan, exactly as in
-//! live mode; this crate replays it with fork/join and FIFO queueing at nodes that set
-//! `concurrency`. It has no timing model of its own, so live mode and the simulator
-//! cannot drift apart.
+//! clock. Every service time comes from `kaanal_core::sample_plan`, and the replay `Engine` in
+//! `kaanal-core` runs it with fork/join, FIFO queues, bounded queues and rate limits. Live mode
+//! runs the same engine on a real clock and this crate has no timing model of its own, so live
+//! mode and the simulator cannot drift apart.
 
 #![warn(missing_docs)]
 
