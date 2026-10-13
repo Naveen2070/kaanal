@@ -85,9 +85,8 @@ pub struct RequestRecord {
     /// The hops that ran, in plan order, each with the queue wait before it: `start` is the
     /// actual offset from arrival; a hop whose branch a failure cancelled is cut at the
     /// failure instant (one that had not started is absent). Equals `execute()`'s hops at
-    /// zero load, with one documented exception: when two failing branches tie at the same
-    /// instant through zero-duration hops, the simulator may pick a different winner than
-    /// live (see `engine.md`, D17 limit).
+    /// zero load, including when two failing branches tie at the same instant through
+    /// zero-duration hops that need no slot or token (D17; the lower branch wins, as in live mode).
     pub hops: Vec<(Hop, Duration)>,
 }
 

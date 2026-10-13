@@ -138,7 +138,7 @@ Run it again and it says `nothing to add`.
 
 ## The trace
 
-The `X-Kaanal-Trace` header lists each hop in order. A `parallel` block shows its branches in brackets split by `|`, a cache shows `hit` or `miss`, and a failure ends the header with `node.error=STATUS`. A header cut at 4 KiB ends with `,...+N hops` (N is the number of hops left out); when the request failed, the failure follows it (`...,...+N hops,node.error=STATUS`):
+The `X-Kaanal-Trace` header lists each hop in order. A `parallel` block shows its branches in brackets split by `|`, a cache shows `hit` or `miss`, and a failure ends the header with `node.error=STATUS`. A header cut at 4 KiB ends with `,...+N hops` (N counts the trace pieces left out; a `node.wait=` piece counts like a hop); when the request failed, the failure follows it (`...,...+N hops,node.error=STATUS`):
 
 ```
 nginx.proc=1.0ms,net=0.0ms,app.proc=2.0ms,[net=0.0ms,audit.proc=1.0ms|net=0.0ms,pay.proc=4.0ms],net=0.0ms,c.hit=0.2ms
@@ -157,4 +157,4 @@ kaanal.endpoints.yaml:3:13: endpoint 'GET /users/{id}': unknown node 'pay'
 - A cache hit is a dice roll at the node's `hit_ratio`; the cache remembers nothing between requests.
 - No connection reuse and no TLS cost.
 - No retries and no timeouts.
-- In the simulator, a parallel branch cancelled by a sibling's failure still uses the capacity it had already taken.
+- A `parallel` branch cancelled by a sibling's failure still uses the capacity it had already taken (a running hop finishes; a queued one leaves the line), live and in the simulator.

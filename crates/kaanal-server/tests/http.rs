@@ -1576,3 +1576,17 @@ async fn load_pooled_node_keeps_latency_and_trace_accurate() {
         pct(&lag, 99)
     );
 }
+
+#[tokio::test]
+async fn parallel_failure_tie_goes_to_the_first_branch_live() {
+    // Both branches fail at t = 0 (default zero costs); the first branch reaches its failure
+    // through a zero-duration hop. The first branch wins, as the docs promise.
+    let yaml = "version: 1\nnodes:\n  app: { type: service, spec: openapi.yaml }\n  z: { type: external-api }\n  s: { type: external-api }\n  a: { type: external-api }\nedges:\n  - { from: app, to: z }\n  - { from: app, to: s }\n  - { from: app, to: a }\nendpoints:\n  \"GET /users/{id}\": { chain: [ { parallel: [ [ z, s ], [ a ] ] } ] }\n";
+    let s = start_yaml(yaml).await;
+    s.put_chaos("s", json!({ "down": true })).await;
+    s.put_chaos("a", json!({ "error_rate": 1.0, "error_status": 500 }))
+        .await;
+    let r = s.get("/users/1").await;
+    assert_eq!(r.status(), 503, "{}", trace_of(&r));
+    assert!(trace_of(&r).ends_with("s.error=503"), "{}", trace_of(&r));
+}

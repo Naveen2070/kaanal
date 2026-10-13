@@ -193,3 +193,20 @@ fn concurrency_schema_is_a_number_or_a_map() {
         assert!(props(kind)["rate_limit"].is_object(), "{kind}");
     }
 }
+
+#[test]
+fn schema_rejects_rates_the_loader_rejects() {
+    let v = jsonschema::validator_for(&config_schema()).unwrap();
+    let doc = |rps: &str| -> Value {
+        serde_yaml_ng::from_str(&format!(
+            "version: 1\nnodes:\n  gw: {{ type: gateway, rate_limit: {{ rps: {rps}, burst: 1 }} }}\n"
+        ))
+        .unwrap()
+    };
+    assert!(v.is_valid(&doc("1000000000")), "the largest allowed rate");
+    assert!(
+        !v.is_valid(&doc("2000000000")),
+        "above 1e9 the loader fails, so the schema must too"
+    );
+    assert!(!v.is_valid(&doc("0")), "rps must be above 0");
+}

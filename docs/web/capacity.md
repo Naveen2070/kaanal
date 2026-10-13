@@ -40,7 +40,7 @@ nodes:
   nginx: { type: gateway, rate_limit: { rps: 100, burst: 20 } }
 ```
 
-The bucket starts full with `burst` tokens and refills at `rps` per second. Each request takes one token when it reaches the node; with none left it is rejected with `429`. `rps` must be above 0 (at most 1000000000), `burst` at least 1, and `burst / rps` can be at most a year.
+The bucket starts full with `burst` tokens and refills at `rps` per second. Each request takes one token when it reaches the node; with none left it is rejected with `429`. `rps` must be above 0 (at most 1000000000), `burst` at least 1, and `burst / rps` can be at most a year. Internally the time between tokens is rounded to a whole nanosecond, so the real rate is off by at most half a nanosecond per token: negligible up to about 10 000 requests per second, and noticeable (several percent or more) in the tens of millions.
 
 ## What counts as a visit
 
@@ -50,7 +50,7 @@ A rate limit takes one token per **visit**, not per hop. A visit is a run of con
 
 - **A rate limit says `429`** with a `Retry-After` header in whole seconds (rounded up, at least 1). A frontend can read it from JavaScript, because Kaanal exposes the header to browsers.
 - **A full line says the overflow status** (503 unless you changed it).
-- **`error_map` applies to both**, like any other failure. If it turns a 429 into something else, the `Retry-After` header is dropped: it only appears while the final status is 429.
+- **`error_map` applies to both**, like any other failure. If it turns a 429 into something else, the `Retry-After` header is dropped: it only appears while the final status is 429 and a rate limit caused it (a 429 you create with `error_map` from another failure carries no `Retry-After`).
 - **Chaos wins over a limit.** A node you have set `down` fails with its own status and uses no token and no slot, so it never becomes a 429.
 - **A failing request ends the whole chain**, as with any failure. Branches of a `parallel` block that were still waiting in a line leave it; branches already running finish.
 

@@ -466,7 +466,7 @@ impl ConcurrencyConfig {
     }
 }
 
-/// The map form of `concurrency` (same defaults as [`PoolConfig`]).
+/// The map form of `concurrency`: the same queue and overflow defaults as `pool`.
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BoundedConcurrency {
@@ -533,9 +533,9 @@ pub struct PoolConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RateLimitConfig {
-    /// Requests per second, above 0.
+    /// Requests per second, above 0 and at most 1000000000.
     #[serde(deserialize_with = "positive_rps")]
-    #[schemars(extend("exclusiveMinimum" = 0))]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 1_000_000_000))]
     pub rps: f64,
     /// Largest burst, at least 1.
     pub burst: NonZeroU32,

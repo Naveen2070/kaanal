@@ -59,4 +59,6 @@ Every node can carry a slot gate (`Admission`) and a rate limit (`RateLimit`); `
 
 A failure the engine produces cancels queued siblings exactly like a planned one. The answer carries `retry_after` unrounded; turning it into a `Retry-After` header (whole seconds, at least 1) is the server's job.
 
+**D17 through zero-duration hops.** After a failure at instant T, a sibling branch stops at its next hop, except that it steps over zero-duration hops (and zero-duration edge hops) at nodes with no slot limit and no rate limit, without starting them, so a lower-index `Fail` reached at T through them still replaces the winner, as `execute()` decides. A zero-duration hop at a gated or rate-limited node is not stepped over.
+
 **Limit L1 (Q6).** A 429 or an overflow failure that ties with another _engine_ failure at the same instant keeps the one the engine processed first. A planned `Fail` item keeps the D17 rule: a lower plan index reached at the same instant still replaces a 429 or an overflow, and then the refusal is taken back out of `limited`/`overflowed`, so the counters equal the answers. The `parallel` branches need not be zero-cost for this: any exact tie (fixed latencies, equal hop sums) can produce it.

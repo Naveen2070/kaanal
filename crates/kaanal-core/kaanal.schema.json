@@ -2,7 +2,7 @@
   "$defs": {
     "BoundedConcurrency": {
       "additionalProperties": false,
-      "description": "The map form of `concurrency` (same defaults as [`PoolConfig`]).",
+      "description": "The map form of `concurrency`: the same queue and overflow defaults as `pool`.",
       "properties": {
         "limit": {
           "description": "Own hops that run at once, at least 1.",
@@ -895,9 +895,10 @@
           "type": "integer"
         },
         "rps": {
-          "description": "Requests per second, above 0.",
+          "description": "Requests per second, above 0 and at most 1000000000.",
           "exclusiveMinimum": 0,
           "format": "double",
+          "maximum": 1000000000,
           "type": "number"
         }
       },

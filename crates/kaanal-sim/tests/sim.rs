@@ -542,12 +542,9 @@ fn hop_budget_sums_streams_and_skips_warmup() {
 }
 
 #[test]
-fn zero_cost_failure_ties_are_a_documented_limit() {
-    // D17's known gap: both branches fail at t0 = 0. `execute()` breaks the tie toward the lower
-    // branch (`s`). The engine (simulator and live mode) reaches branch 1's `Fail` first, and branch 0's path to `s`
-    // runs through a 0 ns hop, so it only reaches its `Fail` after a winner is set and is not
-    // seen. If this test fails because the engine now agrees with `execute()`, the gap is closed:
-    // update `engine.md`, `lib.rs` and this test.
+fn zero_cost_failure_ties_go_to_the_first_branch() {
+    // D17: both branches fail at t0 = 0, one of them through a zero-duration hop. The lower
+    // branch (`s`) wins, in `execute()` and in the engine (simulator and live mode alike).
     let (t, e) = compiled(
         "version: 1\nnodes:\n  app: { type: service }\n  z: { type: service }\n  s: { type: external-api }\n  a: { type: external-api }\nedges:\n  - { from: app, to: z }\n  - { from: app, to: s }\n  - { from: app, to: a }\nendpoints:\n  \"GET /x\": { chain: [ { parallel: [ [ z, s ], [ a ] ] } ] }\n",
         &[("GET /x", "app")],
@@ -594,8 +591,8 @@ fn zero_cost_failure_ties_are_a_documented_limit() {
         assert_eq!(
             r.result,
             ChainResult::Err {
-                node: a,
-                status: 500,
+                node: s,
+                status: 503,
                 retry_after: None
             }
         );

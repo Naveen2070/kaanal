@@ -408,10 +408,24 @@ impl Engine {
                 continue;
             }
             let item = req.plan.items[at].clone();
-            if let Some(f) = &req.fail
-                && !(matches!(item, PlanItem::Fail { .. }) && f.at == now && at < f.idx)
-            {
-                return;
+            if let Some(f) = &req.fail {
+                let tie = f.at == now && at < f.idx;
+                // A sibling cancelled at this instant still reaches a lower-index `Fail` through
+                // zero-duration hops that need no slot or token, as `execute` does (D17); the
+                // skipped hop never starts, so it is not recorded.
+                if tie
+                    && let PlanItem::Hop(h) = &item
+                    && h.dur.is_zero()
+                    && (h.kind == HopKind::Net
+                        || (self.nodes[h.node].gate.is_none()
+                            && self.nodes[h.node].bucket.is_none()))
+                {
+                    req.tokens[k].at += 1;
+                    continue;
+                }
+                if !(tie && matches!(item, PlanItem::Fail { .. })) {
+                    return;
+                }
             }
             match item {
                 PlanItem::Hop(h) => {
