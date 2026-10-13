@@ -1,9 +1,10 @@
 //! The mock request handler — the axum fallback that serves every non-control route.
 //!
 //! One request, end to end: CORS → matchit routing → the endpoint's compiled chain
-//! (`kaanal_core::execute`) → one sleep for the total → `override`, a built-in responder
-//! (login, JWKS), a generated body, or the `error_map` response → `X-Kaanal-Trace` + an
-//! event on the broadcast bus. A built-in login reads its body before the chain runs, so a
+//! (`kaanal_core::sample_plan`) → the replay engine actor (queues, pools, rate limits, real
+//! time) → `override`, a built-in responder (login, JWKS), a generated body, or the
+//! `error_map` response → `X-Kaanal-Trace` (+ `Retry-After` on a 429) + an event on the
+//! broadcast bus. A built-in login reads its body before the chain runs, so a
 //! bad body still costs the full chain latency and a chain failure still wins (spec §5).
 
 use std::fmt::Write as _;
@@ -16,19 +17,19 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
-    ChainOutcome, ChainRequest, ChainResult, HopKind, PlanItem, Responder, Topology, execute,
-    resolve_error, stable_hash,
+    ChainRequest, ChainResult, FinishedHop, HopKind, Plan, PlanItem, Responder, Topology,
+    resolve_error, sample_plan, stable_hash,
 };
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::auth;
-use crate::state::{AppState, Event};
+use crate::state::{AppState, Event, Route};
 
 /// Serves one mock request.
 ///
-/// The engine runs synchronously in this task (microseconds of pure math); the
-/// simulated latency is then awaited, so slow virtual paths never block a worker.
+/// The plan is sampled in this task (microseconds of pure math); the engine actor then runs
+/// it in real time, so slow virtual paths never block a worker.
 /// The `/__kaanal` namespace never reaches here (control routes win), but even a
 /// hypothetical miss gets no CORS headers (rule R5.4).
 pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
@@ -74,9 +75,9 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         None
     };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
-    let outcome = {
+    let plan = {
         let chaos = st.chaos.read().expect("chaos lock poisoned");
-        execute(
+        let (plan, _) = sample_plan(
             &st.topo,
             &chaos,
             &ChainRequest {
@@ -84,22 +85,39 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
                 n,
                 seed: st.chain_seed,
             },
-        )
+        );
+        Arc::new(plan)
     };
-    // limitation: on Windows the OS timer ticks about every 15 ms, so a sleep shorter than that
-    // rounds up. Measured latency (the `ms` in events) can exceed the simulated sum shown in the trace.
-    // Linux and macOS are exact to about 1 ms. Raise the timer resolution if sub-15 ms accuracy matters.
-    // One sleep for the whole chain (spec §7).
-    tokio::time::sleep(outcome.total()).await;
+    // The read lock is gone before the await: the engine task owns time from here.
+    // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
+    // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
+    let Some(fin) = (match &st.engine {
+        Some(e) => e.run(Arc::clone(&plan)).await,
+        None => None,
+    }) else {
+        return cors(
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "engine stopped" })),
+            )
+                .into_response(),
+        );
+    };
 
     let name = |id: usize| st.topo.nodes[id].name.as_str();
-    let trace = trace_header(&outcome, &st.topo);
-    let (status, body, failed) = match outcome.result {
+    let trace = trace_header(&plan, &fin.hops, &fin.result, &st.topo);
+    let mut retry = None;
+    let (status, body, failed) = match &fin.result {
         // E5: node, then status, then class; else the failure's own status and the chaos body.
-        ChainResult::Err { node, status, .. } => {
-            let (status, body) = resolve_error(&ep.error_map, name(node), status);
-            let body = body.unwrap_or_else(|| json!({ "error": "chaos", "node": name(node) }));
-            (status, body, Some(name(node).to_string()))
+        ChainResult::Err {
+            node,
+            status,
+            retry_after,
+        } => {
+            let (status, body) = resolve_error(&ep.error_map, name(*node), *status);
+            let body = body.unwrap_or_else(|| json!({ "error": "chaos", "node": name(*node) }));
+            retry = (status == 429).then_some(*retry_after).flatten();
+            (status, body, Some(name(*node).to_string()))
         }
         ChainResult::Ok => {
             if let Some(ov) = &ep.response {
@@ -109,46 +127,66 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
                 let (status, body) = auth::respond(r, st.auth.as_ref(), login);
                 (status, body, None)
             } else {
-                let body = match &route.schema {
-                    Some(schema) => {
-                        let owner = ep.owner.map_or("", name);
-                        let mut v = kaanal_data::generate(
-                            schema,
-                            None,
-                            // `seed:` (not the chain seed) keys the data: same seed → same data (NFR-10, D14).
-                            stable_hash(&[
-                                &st.seed.to_le_bytes(),
-                                owner.as_bytes(),
-                                path.as_bytes(),
-                            ]),
-                        );
-                        kaanal_data::apply_params(&mut v, &params);
-                        v
-                    }
-                    None => Value::Null,
-                };
-                (route.status, body, None)
+                let owner = ep.owner.map_or("", name);
+                (
+                    route.status,
+                    generated_body(&st, route, owner, &path, &params),
+                    None,
+                )
             }
         }
     };
 
+    let mut resp = response(status, body, &trace, retry);
+    if ep.responder == Some(Responder::Login) {
+        no_store(&mut resp);
+    }
+
+    let nodes = touched_nodes(&fin.hops, failed.as_deref(), &st.topo);
+    send_event(&st, method, path, status, started, nodes, failed);
+
+    cors(resp)
+}
+
+/// **Private.** The reply: status and JSON body (none for `null`), the trace header and, for a
+/// 429, `Retry-After` in whole seconds rounded up (at least 1).
+fn response(status: u16, body: Value, trace: &str, retry: Option<Duration>) -> Response {
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let mut resp = if body.is_null() {
         code.into_response()
     } else {
         (code, Json(body)).into_response()
     };
-    if ep.responder == Some(Responder::Login) {
-        no_store(&mut resp);
+    if let Some(d) = retry {
+        let secs = d
+            .as_secs()
+            .saturating_add(u64::from(d.subsec_nanos() > 0))
+            .max(1);
+        resp.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from(secs));
     }
-    if let Ok(v) = HeaderValue::from_str(&trace) {
+    if let Ok(v) = HeaderValue::from_str(trace) {
         resp.headers_mut().insert("x-kaanal-trace", v);
     }
+    resp
+}
 
-    let nodes = touched_nodes(&outcome, failed.as_deref(), &st.topo);
-    send_event(&st, method, path, status, started, nodes, failed);
-
-    cors(resp)
+/// **Private.** The spec-schema body of a successful route (`null` when it has no schema).
+fn generated_body(
+    st: &AppState,
+    route: &Route,
+    owner: &str,
+    path: &str,
+    params: &[(String, String)],
+) -> Value {
+    let Some(schema) = &route.schema else {
+        return Value::Null;
+    };
+    // `seed:` (not the chain seed) keys the data: same seed → same data (NFR-10, D14).
+    let seed = stable_hash(&[&st.seed.to_le_bytes(), owner.as_bytes(), path.as_bytes()]);
+    let mut v = kaanal_data::generate(schema, None, seed);
+    kaanal_data::apply_params(&mut v, params);
+    v
 }
 
 /// **Private.** P11: tokens and credential errors are never cached, whatever answered.
@@ -172,17 +210,22 @@ enum Piece {
 
 /// **Private.** The `X-Kaanal-Trace` value: visible hops in plan order with one decimal
 /// (`1.0ms`, never a truncated `0ms`); a `parallel` block is `[a,b|c]` (branches split by
-/// `|`); cache hops are `node.hit` / `node.miss`; a failure appends `node.error=STATUS`.
-/// Over [`TRACE_CAP`] bytes it stops before a hop, closes open brackets and adds
-/// `,...+N hops` (ASCII, D13), N being the hops left out.
-fn trace_header(o: &ChainOutcome, topo: &Topology) -> String {
+/// `|`); cache hops are `node.hit` / `node.miss`; `node.wait=T` comes before a hop that
+/// queued; a failure appends `node.error=STATUS`. Over [`TRACE_CAP`] bytes it stops before a
+/// hop, closes open brackets and adds `,...+N hops` (ASCII, D13), N being the pieces left out.
+fn trace_header(
+    plan: &Plan,
+    hops: &[FinishedHop],
+    result: &ChainResult,
+    topo: &Topology,
+) -> String {
     let name = |id: usize| topo.nodes[id].name.as_str();
     let fmt_ms = |d: Duration| format!("{:.1}ms", d.as_secs_f64() * 1000.0);
     let mut pieces = Vec::new();
     // (end of the fork's items, index of its first branch marker) per open fork.
     let mut forks: Vec<(usize, usize)> = Vec::new();
-    let mut next = 0; // index into `o.kept` / `o.hops`
-    for (i, item) in o.plan.items.iter().enumerate() {
+    let mut next = 0; // index into `hops`
+    for (i, item) in plan.items.iter().enumerate() {
         while forks.last().is_some_and(|&(end, _)| end == i) {
             forks.pop();
             pieces.push(Piece::Close);
@@ -197,9 +240,17 @@ fn trace_header(o: &ChainOutcome, topo: &Topology) -> String {
                     pieces.push(Piece::Bar);
                 }
             }
-            PlanItem::Hop(_) if o.kept.get(next) == Some(&i) => {
-                let h = &o.hops[next];
+            PlanItem::Hop(_) if hops.get(next).is_some_and(|h| h.idx == i) => {
+                let fh = &hops[next];
+                let h = &fh.hop;
                 next += 1;
+                if !fh.wait.is_zero() {
+                    pieces.push(Piece::Hop(format!(
+                        "{}.wait={}",
+                        name(h.node),
+                        fmt_ms(fh.wait)
+                    )));
+                }
                 let d = fmt_ms(h.dur);
                 pieces.push(Piece::Hop(match h.kind {
                     HopKind::Net => format!("net={d}"),
@@ -214,7 +265,7 @@ fn trace_header(o: &ChainOutcome, topo: &Topology) -> String {
     }
     pieces.extend(forks.iter().map(|_| Piece::Close));
     let pieces = without_empty_blocks(pieces);
-    let error = match &o.result {
+    let error = match result {
         ChainResult::Err { node, status, .. } => format!("{}.error={status}", name(*node)),
         ChainResult::Ok => String::new(),
     };
@@ -312,10 +363,10 @@ fn render(pieces: &[Piece], cap: usize, tail: usize) -> String {
 }
 
 /// **Private.** Ordered unique node names the request touched, plus the failing node.
-fn touched_nodes(outcome: &ChainOutcome, failed: Option<&str>, topo: &Topology) -> Vec<String> {
+fn touched_nodes(hops: &[FinishedHop], failed: Option<&str>, topo: &Topology) -> Vec<String> {
     let mut nodes: Vec<String> = Vec::new();
-    for hop in &outcome.hops {
-        let n = topo.nodes[hop.node].name.as_str();
+    for hop in hops {
+        let n = topo.nodes[hop.hop.node].name.as_str();
         if !nodes.iter().any(|x| x == n) {
             nodes.push(n.to_string());
         }
@@ -374,7 +425,7 @@ fn with_cors(mut r: Response) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("x-kaanal-trace"),
+        HeaderValue::from_static("x-kaanal-trace, retry-after"),
     );
     r
 }

@@ -26,7 +26,7 @@ GET /users/42
 Calls inside a `parallel` block run side by side, so the block costs as much as its slowest branch; a cache hit skips the rest of the sequence it is in. The breakdown comes back in the `X-Kaanal-Trace` response header, and the total is what your frontend experiences — so loading states, spinners and timeouts behave like they will in production.
 
 Costs can be fixed (`5ms`), long-tailed (`{ p50: 4ms, p99: 20ms }` — most reads are ~4 ms, one in a hundred is ~20 ms, capped at 10×p99) or exponential (`{ mean: 5ms }`, as in queueing theory, capped at 10×mean).
-A node may also set `concurrency: N` (how many requests it serves at once, the rest queue). The simulator honours it; live mode warns and ignores it until M1.
+A node may also set `concurrency: N` (how many requests it serves at once, the rest queue). Live mode queues requests the same way the simulator does: while a node is full, a request waits and its trace shows `node.wait=`.
 
 ## Operations
 

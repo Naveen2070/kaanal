@@ -41,7 +41,7 @@ endpoints:                       # optional: per-endpoint overrides (a file path
   "GET /users":  { override: { status: 200, body: [ { id: 1 } ] } }
 ```
 
-- **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field; `auth` serves login and JWKS, see [auth.md](auth.md)). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). The simulator honours it; live mode prints a warning and ignores it until M1.
+- **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field; `auth` serves login and JWKS, see [auth.md](auth.md)). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). Live mode and the simulator both enforce it: extra requests queue, and the trace shows how long with `node.wait=`.
 - **edges** — the dependency graph, limited to the [edge table](nodes.md#edges-who-may-call-whom). No cycles, no self or duplicate edges, no dangling references; all rejected at startup. `calls: N` sets how many times the target is called per request.
 - **endpoints** — per-endpoint behaviour, fully described in [endpoints.md](endpoints.md). An entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
 
@@ -84,6 +84,7 @@ access-control-allow-origin: *
 - The **body** is generated from your OpenAPI response schema — real-looking names, emails, pincodes — and is identical on every call to the same URL. Path params flow into matching fields (`id: 42`).
 - The **timing** is what the trace header adds up to: hops in sequence add; a `parallel` block costs its slowest branch. The client actually waits it.
 - A `parallel` step shows its branches in brackets, split by `|`, and a cache lookup shows `hit` or `miss`: `nginx.proc=1.0ms,net=0.0ms,app.proc=2.0ms,[net=0.0ms,audit.proc=1.0ms|net=0.0ms,pay.proc=4.0ms],net=0.0ms,c.hit=0.2ms`. A failure ends the header with `node.error=STATUS`. Very long chains end with `,...+N hops`, where N is the number of hops left out.
+- When a node is full, a request queues and the trace shows it before the hop it waited for: `...,net=1.0ms,db.wait=98.0ms,db.read=100.0ms`. A node with a `rate_limit` answers `429` with a `Retry-After` header (whole seconds) once its tokens run out.
 - **CORS** is wide open on mock routes, so any local frontend just works.
 
 ## Chaos, live

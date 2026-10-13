@@ -134,22 +134,22 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
   $$\sigma = \frac{\ln(p99 / p50)}{Z_{99}} \quad \text{where } Z_{99} \approx 2.3263479$$
 - **`Exp { mean }`**: Exponential (the queueing-theory default): $\text{mean} \times -\ln(1 - U)$ with $U$ uniform in $[0, 1)$, so $\ln(0)$ cannot occur.
 - **Tail Cap Safety**: Lognormal samples are clamped to $\min(\text{sample}, 10 \times p99)$ and exponential samples to $10 \times \text{mean}$. This prevents astronomical tail samples from indefinitely hanging a request.
-- **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.admission` carries it to the replay engine in core (the simulator already runs it); live mode is wired to that engine in a later change, so `AppState::build` still warns and ignores it for now.
+- **`concurrency`** (per node, optional) is not a distribution: it is a capacity for the node's own hops. `Node.admission` carries it to the replay engine in core, which both the simulator and live mode run: live mode queues the same way (one engine actor task), so a full pool makes requests wait (`node.wait=` in the trace) and a full bounded queue overflows.
 
-**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through the replay `Engine` in core (per-node FIFO queues for nodes with `concurrency`) on a virtual clock; live mode instead sleeps the plan's `total()`. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
+**Second driver.** `kaanal-sim` calls the same `execute()` per simulated request and replays the returned `Plan` (the sampled tree of hops, forks and failures, E14) through the replay `Engine` in core (per-node FIFO queues for nodes with `concurrency`) on a virtual clock; live mode hands each sampled plan to the same engine on a real-time actor task. `parallel` blocks fork and join, and the first failure ends a request (running siblings keep their slot, queued ones leave). At zero load its latencies equal live mode's exactly; `kaanal-sim/tests/sim.rs` pins that.
 
 ### Chain Engine
 
 - **Compile at load.** `compile` turns the spec routes and the `endpoints:` entries into one `Endpoint` per route. Default bodies are built callees-first and shared through `Arc`s; every error is placed in `kaanal.yaml` or in the endpoints file.
 - **Execute per request.** `execute` walks the compiled chain as a timeline and returns the flat hop list, a `Plan` (the sampled tree) and the result.
-- **Two drivers.** The server sleeps `total()` once and shapes the response; the simulator replays the plan through its queues with tokens.
+- **Two drivers.** The server hands each plan to the live engine actor and shapes the response; the simulator replays the plan through its queues with tokens.
 - **Seeding.** Each hop draws from the request's chain seed and a per-hop key, so a hop's numbers do not depend on which siblings ran.
 
 ### Auth
 
 - **Config rules in core.** `check_auth` runs after parsing, so every error is a `Located` with a `line:col` (claims, scopes, limits, empty username); `Topology::build` allows one auth node and accepts an auth-only topology.
 - **Built-in routes are ordinary endpoints.** `compile` adds `POST /login` and `GET /.well-known/jwks.json` as jobs owned by the auth node, tagged with a `Responder` (plain data). Chaos, trace, `error_map`, `endpoints:` customisation and simulator streams therefore need no special case. Core never builds tokens.
-- **Server.** `auth.rs` holds the signing key (RS256, RFC 7638 `kid`, JWKS), the `Issuer` (users, claims, ttl, `iss`), the login body reader and the responder. In `mock::handle` a login body is read first (no sleep), then `execute`, one sleep, and the answer: chain failure through `error_map` first, then an `override`, then the responder.
+- **Server.** `auth.rs` holds the signing key (RS256, RFC 7638 `kid`, JWKS), the `Issuer` (users, claims, ttl, `iss`), the login body reader and the responder. In `mock::handle` a login body is read first (no sleep), then `sample_plan`, the engine, and the answer: chain failure through `error_map` first, then an `override`, then the responder.
 - **Binary.** `keys.rs` owns key IO: location (`KAANAL_CONFIG_DIR` or the per-user local config folder), identity (hash of the config directory), race-safe store (temp file, hard link, adopt the winner), permissions, and the eager load at `up`; `validate` never touches keys.
 - **Why this split.** Core stays free of IO and crypto (R2.3); the server owns crypto and HTTP; the binary owns the filesystem (X5). A config with an auth node and no key makes `serve` fail closed.
 

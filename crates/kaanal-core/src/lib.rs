@@ -9,7 +9,7 @@
 //! with error positions for config problems ([`diagnostics`]).
 //!
 //! It is deliberately pure: no tokio, no axum, no IO, no global state. It computes
-//! outcomes; it never sleeps. The server sleeps the durations it returns (live mode)
+//! outcomes; it never sleeps. The server runs the plans it returns through the replay engine in real time (live mode)
 //! or advances virtual time (the simulator), so both drivers share one cost model.
 //! The replay machine they share ([`replay`]: token buckets, slot gates and the step-driven engine) is pure too.
 

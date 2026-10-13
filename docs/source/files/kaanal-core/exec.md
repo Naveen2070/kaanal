@@ -4,7 +4,7 @@ The chain executor — the heart of the engine. Given a request, it computes _wh
 
 ## What it does
 
-`execute()` walks an endpoint's compiled chain (see [chain.md](chain.md)) as a **timeline**, sampling distributions and applying chaos at each node. It is **pure**: no sleeping, no IO. The live server sleeps the returned total (`mock.rs`); the simulator replays the returned `Plan` in virtual time (rule R2.5: one cost model, two drivers).
+`execute()` walks an endpoint's compiled chain (see [chain.md](chain.md)) as a **timeline**, sampling distributions and applying chaos at each node. It is **pure**: no sleeping, no IO. The live server samples a `Plan` and runs it on the engine actor (`mock.rs`, `actor.rs`); the simulator replays the returned `Plan` in virtual time (rule R2.5: one cost model, two drivers).
 
 ## Walking a chain
 

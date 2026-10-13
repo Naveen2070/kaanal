@@ -77,11 +77,13 @@ pub struct AppState {
     pub drawn_seed: Option<u64>,
     /// The bound port (after the +20 search), used by the Host guard.
     pub port: u16,
-    /// Non-fatal findings from loading (ignored schema keywords, nodes with `concurrency`); shown by `validate` and `up`.
+    /// Non-fatal findings from loading (ignored schema keywords); shown by `validate` and `up`.
     pub warnings: Vec<String>,
     /// The auth node's token issuer; `None` without an auth node and always in `check`
     /// (`serve` sets it, X5).
     pub auth: Option<crate::auth::Issuer>,
+    /// The live replay engine; `None` after `build`, set by `serve` (no runtime in `check`).
+    pub engine: Option<crate::actor::EngineHandle>,
 }
 
 /// **Private.** Rejects two paths that differ only in parameter names
@@ -232,13 +234,6 @@ impl AppState {
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
         let mut shapes: HashMap<String, String> = HashMap::new();
         let mut warnings = Vec::new();
-        // Live mode has no queues yet; say so instead of silently ignoring the setting.
-        for n in topo.nodes.iter().filter(|n| n.admission.is_some()) {
-            warnings.push(format!(
-                "node '{}': concurrency is honoured by the simulator only (live mode enforces it from M1)",
-                n.name
-            ));
-        }
         // P9: a login mock with no accounts answers 401 to everyone; say so up front.
         for (name, n) in &cfg.nodes {
             if let NodeConfig::Auth(a) = n
@@ -309,6 +304,7 @@ impl AppState {
             port,
             warnings,
             auth: None,
+            engine: None,
         })
     }
 }

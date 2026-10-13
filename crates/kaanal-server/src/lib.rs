@@ -2,12 +2,13 @@
 //!
 //! One axum router on one port serves both the control API (`/__kaanal/*`, guarded
 //! by token + Host checks) and the mock engine (every other path falls through to
-//! the mock handler). The engine itself — chain execution, data generation — is
-//! called synchronously inside the request handler; it is pure math and takes
-//! microseconds.
+//! the mock handler). A handler samples its request's plan (pure math, microseconds) and
+//! hands it to the replay engine, which runs on one actor task (the `actor` module) so queues, pools
+//! and rate limits are shared by every request.
 
 #![warn(missing_docs)]
 
+mod actor;
 mod auth;
 mod control;
 mod mock;
@@ -62,7 +63,7 @@ impl BoundServer {
 }
 
 /// Validate everything `serve` would load (config, topology, specs, endpoints inline or from a file) without binding a port.
-/// `Ok` carries non-fatal warnings (ignored schema keywords, nodes with `concurrency`).
+/// `Ok` carries non-fatal warnings (ignored schema keywords).
 ///
 /// # Errors
 /// Returns the first load error (bad config, unreadable or invalid spec, route conflict),
@@ -109,6 +110,7 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
     let mut st = state::AppState::build(cfg, base_dir, opts.token, addr.port())?;
     // X5: fail closed. `check` never builds an issuer, so `validate` never needs a key.
     st.auth = auth::Issuer::from_config(cfg, opts.auth_key, addr.port())?;
+    st.engine = Some(actor::spawn(kaanal_core::replay::Engine::new(&st.topo)));
     let st = Arc::new(st);
     let warnings = st.warnings.clone();
     let drawn_seed = st.drawn_seed;

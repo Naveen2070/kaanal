@@ -33,6 +33,7 @@ One page per source file: what the file does and what each function/type in it d
 | File             | Page                                                 | Contents                                            |
 | ---------------- | ---------------------------------------------------- | --------------------------------------------------- |
 | `src/lib.rs`     | [kaanal-server/lib.md](kaanal-server/lib.md)         | `serve`/`check`, router, port binding               |
+| `src/actor.rs`   | [kaanal-server/actor.md](kaanal-server/actor.md)     | Live replay-engine actor task and its handle        |
 | `src/auth.rs`    | [kaanal-server/auth.md](kaanal-server/auth.md)       | Signing key, JWKS, RS256 tokens, login              |
 | `src/control.rs` | [kaanal-server/control.md](kaanal-server/control.md) | Control API handlers + the auth/Host guard          |
 | `src/mock.rs`    | [kaanal-server/mock.md](kaanal-server/mock.md)       | Mock request handler, trace header, CORS            |

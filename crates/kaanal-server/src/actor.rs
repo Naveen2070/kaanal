@@ -1,0 +1,206 @@
+//! The live driver of the replay engine: one task owns the [`Engine`] and a catch-up clock.
+//!
+//! Handlers send a sampled plan and await its [`Finished`]. The task sleeps until the engine's
+//! next event, then runs every event that is due **at its scheduled time** (`advance_to`), so a
+//! late wake-up (the Windows timer ticks about every 15 ms) delays only the answer, never the
+//! hop starts of the requests behind it. A request whose client went away stays in the engine
+//! until it ends, like a call still running on a real server; its answer is dropped.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+use kaanal_core::Plan;
+use kaanal_core::replay::{Engine, Finished};
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::{Instant, sleep_until};
+
+/// **Private.** One request for the engine task.
+struct Submit {
+    plan: Arc<Plan>,
+    reply: oneshot::Sender<Finished>,
+}
+
+/// A handle to the engine task; clones share it.
+#[derive(Clone)]
+pub struct EngineHandle {
+    tx: mpsc::UnboundedSender<Submit>,
+}
+
+impl EngineHandle {
+    /// Runs `plan` on the engine clock and returns what happened. `None` when the engine task
+    /// has stopped (a clock overflow, or the runtime is shutting down).
+    pub async fn run(&self, plan: Arc<Plan>) -> Option<Finished> {
+        let (reply, rx) = oneshot::channel();
+        self.tx.send(Submit { plan, reply }).ok()?;
+        rx.await.ok()
+    }
+}
+
+/// Spawns the engine task on the current runtime.
+pub fn spawn(engine: Engine) -> EngineHandle {
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(drive(engine, rx));
+    EngineHandle { tx }
+}
+
+/// **Private.** The task: wait for a command or the next due event, advance, answer.
+async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Submit>) {
+    let t0 = Instant::now();
+    let now = || u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    let mut waiting: HashMap<u64, oneshot::Sender<Finished>> = HashMap::new();
+    let mut next_tag = 0u64;
+    loop {
+        let due = engine.next_due();
+        let wake = async move {
+            match due {
+                Some(d) => sleep_until(t0 + Duration::from_nanos(d)).await,
+                None => std::future::pending().await,
+            }
+        };
+        let ok = tokio::select! {
+            cmd = rx.recv() => match cmd {
+                None => return,
+                Some(c) => {
+                    let t = now();
+                    next_tag += 1;
+                    waiting.insert(next_tag, c.reply);
+                    engine.advance_to(t).and_then(|()| engine.submit(t, c.plan, next_tag)).is_ok()
+                }
+            },
+            () = wake => engine.advance_to(now()).is_ok(),
+        };
+        for f in engine.drain_finished_iter() {
+            if let Some(reply) = waiting.remove(&f.tag) {
+                let _ = reply.send(f); // the client may be gone
+            }
+        }
+        if !ok {
+            return; // dropping `waiting` makes every pending handler see `None`
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kaanal_core::chain::{EndpointsInput, RouteSpec};
+    use kaanal_core::{ChainRequest, ChaosState, Config, Topology, compile, sample_plan};
+
+    const YAML: &str = "version: 1\nnodes:\n  gw: { type: gateway, proc: 2ms, concurrency: 1 }\n  app: { type: service, proc: 3ms }\nedges:\n  - { from: gw, to: app, net: 1ms }\n";
+
+    fn plans(n: u64) -> (Topology, Vec<Arc<Plan>>) {
+        plans_for(YAML, n)
+    }
+
+    fn plans_for(yaml: &str, n: u64) -> (Topology, Vec<Arc<Plan>>) {
+        let cfg = Config::from_yaml(yaml).unwrap();
+        let t = Topology::build(&cfg).unwrap();
+        let eps = compile(
+            &t,
+            &[RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap())],
+            EndpointsInput::default(),
+        )
+        .unwrap();
+        let ep = eps.get("GET /x/{id}").unwrap();
+        let plans = (0..n)
+            .map(|i| {
+                Arc::new(
+                    sample_plan(
+                        &t,
+                        &ChaosState::default(),
+                        &ChainRequest {
+                            endpoint: ep,
+                            n: i,
+                            seed: 1,
+                        },
+                    )
+                    .0,
+                )
+            })
+            .collect();
+        (t, plans)
+    }
+
+    /// Scripted arrivals every 1 ms through the actor (paused clock) and through the engine
+    /// directly give the same answers: the actor adds no ordering, clock or reply error.
+    #[tokio::test(start_paused = true)]
+    async fn the_actor_gives_the_same_records_as_the_engine_driven_directly() {
+        let (t, plans) = plans(20);
+        let mut direct = Engine::new(&t);
+        let mut want = Vec::new();
+        for (i, p) in plans.iter().enumerate() {
+            let at = i as u64 * 1_000_000;
+            direct.advance_to(at).unwrap();
+            direct.submit(at, Arc::clone(p), i as u64).unwrap();
+            want.extend(direct.drain_finished());
+        }
+        direct.advance_to(u64::MAX / 2).unwrap();
+        want.extend(direct.drain_finished());
+        want.sort_by_key(|f| f.order);
+
+        let h = spawn(Engine::new(&t));
+        let mut tasks = Vec::new();
+        for p in &plans {
+            let (h, p) = (h.clone(), Arc::clone(p));
+            tasks.push(tokio::spawn(async move { h.run(p).await.unwrap() }));
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let mut got = Vec::new();
+        for t in tasks {
+            got.push(t.await.unwrap());
+        }
+        assert_eq!(got.len(), want.len());
+        // Tags differ (the actor numbers its own); everything else must match.
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(
+                (g.arrival, g.done, &g.result, &g.hops),
+                (w.arrival, w.done, &w.result, &w.hops)
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_receiver_does_not_stop_the_engine() {
+        let (t, plans) = plans(2);
+        let h = spawn(Engine::new(&t));
+        let (h2, p) = (h.clone(), Arc::clone(&plans[0]));
+        let gone = tokio::spawn(async move { h2.run(p).await });
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        gone.abort();
+        let f = h
+            .run(Arc::clone(&plans[1]))
+            .await
+            .expect("the engine still runs");
+        assert!(f.done > f.arrival);
+    }
+
+    /// Zero-duration hops, so the benchmark measures the actor and not the sleeps.
+    const YAML0: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n";
+
+    /// `cargo test -p kaanal-server --release --lib -- --ignored --nocapture actor_throughput`
+    #[tokio::test]
+    #[ignore = "benchmark; run with --release"]
+    async fn actor_throughput() {
+        let (t, plans) = plans_for(YAML0, 1);
+        let h = spawn(Engine::new(&t));
+        let n = 200_000u32;
+        let start = std::time::Instant::now();
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let (h, p) = (h.clone(), Arc::clone(&plans[0]));
+            tasks.push(tokio::spawn(async move {
+                for _ in 0..n / 8 {
+                    h.run(Arc::clone(&p)).await.unwrap();
+                }
+            }));
+        }
+        for t in tasks {
+            t.await.unwrap();
+        }
+        eprintln!(
+            "{:.0} requests/s through the actor (limit-free plan, zero-duration hops)",
+            f64::from(n) / start.elapsed().as_secs_f64()
+        );
+    }
+}
