@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 use indexmap::IndexMap;
 
@@ -42,6 +43,8 @@ pub struct Node {
     pub admission: Option<Admission>,
     /// Token-bucket rate limit, one token per visit (see the replay engine); `None` = none.
     pub rate_limit: Option<RateLimit>,
+    /// Per-call deadline (B2a Z2): queue wait, own work and everything downstream; `None` = none.
+    pub timeout: Option<Duration>,
     /// Named chains of a service or monolith (`chains:`), compiled by [`crate::chain::compile`].
     pub chains: IndexMap<String, Vec<StepConfig>>,
 }
@@ -403,6 +406,7 @@ impl Topology {
                 cache,
                 admission: admission_of(n),
                 rate_limit: n.rate_limit().map(rate_limit_of),
+                timeout: n.timeout(),
                 chains: n.chains().cloned().unwrap_or_default(),
             });
         }

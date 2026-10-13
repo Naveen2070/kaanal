@@ -15,7 +15,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
-use kaanal_core::NodeChaos;
+use kaanal_core::{ChaosKey, NodeChaos, merge};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio_stream::wrappers::BroadcastStream;
@@ -168,9 +168,17 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
 /// `GET /__kaanal/chaos` — all active chaos, keyed by node name.
 pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
     let chaos = st.chaos.read().expect("chaos lock poisoned");
+    // Node-only until the control API learns endpoint scopes.
     let map: Map<String, Value> = chaos
-        .iter()
-        .map(|(id, c)| (st.topo.nodes[*id].name.clone(), json!(ChaosView::from(c))))
+        .entries()
+        .into_iter()
+        .filter_map(|(k, l)| match k {
+            ChaosKey::Node(id) => Some((
+                st.topo.nodes[id].name.clone(),
+                json!(ChaosView::from(&merge(&[l]))),
+            )),
+            _ => None,
+        })
         .collect();
     Json(Value::Object(map))
 }
@@ -196,7 +204,7 @@ pub async fn set_chaos(
     let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
     let mut chaos = st.chaos.write().expect("chaos lock poisoned");
     // Merge into a copy and validate it, so a bad patch changes nothing (limits live in core, R6.9).
-    let mut c = chaos.get(&id).cloned().unwrap_or_default();
+    let mut c = chaos.resolve(id, "");
     if let Some(ms) = p.latency_ms {
         c.latency_add = Duration::from_millis(ms);
     }
@@ -228,7 +236,10 @@ pub async fn clear_node(
         .topo
         .id(&node)
         .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))?;
-    st.chaos.write().expect("chaos lock poisoned").remove(&id);
+    st.chaos
+        .write()
+        .expect("chaos lock poisoned")
+        .remove(&ChaosKey::Node(id));
     Ok(StatusCode::NO_CONTENT)
 }
 

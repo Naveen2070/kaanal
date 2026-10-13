@@ -197,6 +197,19 @@ impl NodeConfig {
         }
     }
 
+    /// The per-call deadline (`timeout:`).
+    pub fn timeout(&self) -> Option<Duration> {
+        match self {
+            NodeConfig::Gateway(n) => n.timeout,
+            NodeConfig::Service(n) => n.timeout,
+            NodeConfig::Monolith(n) => n.timeout,
+            NodeConfig::Database(n) => n.timeout,
+            NodeConfig::Cache(n) => n.timeout,
+            NodeConfig::ExternalApi(n) => n.timeout,
+            NodeConfig::Auth(n) => n.timeout,
+        }
+    }
+
     /// The `flavor` label: free text on a gateway, a preset name on databases,
     /// monoliths and caches.
     pub fn flavor(&self) -> Option<&str> {
@@ -228,6 +241,12 @@ pub struct GatewayConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// A backend service. Without a gateway, requests for the routes in its `spec` enter here.
@@ -250,6 +269,12 @@ pub struct ServiceConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// A service that can also be its own database: with `ops` (or a `flavor`) it has inline
@@ -279,6 +304,12 @@ pub struct MonolithConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// A data store with read/write/scan costs.
@@ -302,6 +333,12 @@ pub struct DatabaseConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// A cache in front of slower nodes. Its costs are used once endpoint chains land.
@@ -331,6 +368,12 @@ pub struct CacheConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// A third-party HTTP API (payments, email). Targets come from config only.
@@ -360,6 +403,12 @@ pub struct ExternalApiConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// An identity provider: serves `POST /login` (a signed RS256 token for one of its `users`)
@@ -390,6 +439,12 @@ pub struct AuthConfig {
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
     /// at most `burst` at once; beyond it the request fails with 429.
     pub rate_limit: Option<RateLimitConfig>,
+    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
+    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
+    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
+    #[serde(default, deserialize_with = "call_timeout")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub timeout: Option<Duration>,
 }
 
 /// Read/write/scan costs. Without a `flavor`, all three are required.
@@ -1141,6 +1196,22 @@ fn http_url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error>
         Err(D::Error::custom(format!(
             "proxy must be an http(s) URL like https://api.example.com (got '{s}')"
         )))
+    }
+}
+
+/// **Private.** Longest `timeout:` (the chaos latency cap).
+const MAX_CALL_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// **Private.** `timeout`: above 0 and at most 5 min. A node-level field, so `diagnostics`
+/// places the error at the value.
+fn call_timeout<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+    let v: Duration = humantime_serde::deserialize(d)?;
+    if v.is_zero() {
+        Err(D::Error::custom("timeout must be above 0"))
+    } else if v > MAX_CALL_TIMEOUT {
+        Err(D::Error::custom("timeout must be at most 5 min"))
+    } else {
+        Ok(Some(v))
     }
 }
 

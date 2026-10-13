@@ -20,6 +20,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use serde_json::Value;
 
+use crate::chaos::FailKind;
 use crate::config::{
     CallStep, Config, EndpointConfig, EndpointsConfig, ErrorMapping, NodeKind, Override, StepConfig,
 };
@@ -199,13 +200,15 @@ pub struct Endpoint {
     pub key: String,
     /// The service, monolith or auth node that owns the route; `None` for a static endpoint.
     pub owner: Option<NodeId>,
+    /// Where a request enters: the gateway if there is one, else the owner (B2a Z7).
+    pub entry_node: Option<NodeId>,
     /// The op database steps inherit.
     pub op: Op,
     /// The whole chain: the gateway's work, then the owner's body.
     pub chain: Arc<Seq>,
     /// The owner's body alone (what `via:` reuses).
     pub body: Arc<Seq>,
-    /// Failure → response, keys normalized (node name, status, `4xx`/`5xx`).
+    /// Failure → response, keys normalized (node name, failure kind, status, `4xx`/`5xx`).
     pub error_map: IndexMap<String, ErrorMapping>,
     /// A fixed response served instead of generated data.
     pub response: Option<Override>,
@@ -218,6 +221,10 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
+    /// Whether `node` answers on the wire for this endpoint: the gateway or the owner.
+    pub fn is_wire_node(&self, topo: &Topology, node: NodeId) -> bool {
+        Some(node) == topo.gateway || Some(node) == self.owner
+    }
     /// An error placed at this endpoint's `endpoints:` entry (no place for a plain spec route).
     pub fn located(&self, msg: impl Into<String>) -> Located {
         let Some((path, file)) = &self.entry else {
@@ -297,14 +304,34 @@ impl<'a> EndpointsInput<'a> {
     }
 }
 
-/// The response for a failure (E5, D11): the map entry for the failing node, else for the
-/// exact status, else for its class (`5xx`); without one the failure's own status and no body.
+/// The status a failure answers with when no `error_map` entry matches: the failure's own for
+/// [`FailKind::Status`], 502 for a reset or malformed reply, 504 for a timeout.
+pub fn default_status(kind: FailKind, status: u16) -> u16 {
+    match kind {
+        FailKind::Status => status,
+        FailKind::Reset | FailKind::Malformed => 502,
+        FailKind::Timeout => 504,
+    }
+}
+
+/// The response for a failure (E5, D11, B2a Z8): the map entry for the failing node, else for
+/// the failure kind (`reset`, `malformed`, `timeout`), else for the exact status, else for its
+/// class (`5xx`); without one the kind's default status and no body. A node named like a kind
+/// (`reset`, `malformed`, `timeout`) is found by the node lookup first (Z8), so an entry under
+/// that name targets the node, and the kind tier is never consulted for it.
 pub fn resolve_error(
     map: &IndexMap<String, ErrorMapping>,
     node: &str,
+    kind: FailKind,
     status: u16,
 ) -> (u16, Option<Value>) {
+    let status = default_status(kind, status);
     map.get(node)
+        .or_else(|| {
+            (kind != FailKind::Status)
+                .then(|| map.get(kind.as_str()))
+                .flatten()
+        })
         .or_else(|| map.get(&status.to_string()))
         .or_else(|| map.get(&format!("{}xx", status / 100)))
         .map_or((status, None), |m| (m.status, m.body.clone()))
@@ -535,13 +562,17 @@ struct Job<'e> {
     responder: Option<Responder>,
 }
 
-/// **Private.** A valid `error_map` key, normalized: a node name, `400..=599`, `4xx`/`5xx`.
+/// **Private.** A valid `error_map` key, normalized: a node name, a failure kind (`reset`,
+/// `malformed`, `timeout`), `400..=599`, `4xx`/`5xx`.
 fn error_key(k: &str, topo: &Topology) -> Option<String> {
     if topo.id(k).is_some() {
         return Some(k.to_string());
     }
     let lower = k.to_ascii_lowercase();
-    if lower == "4xx" || lower == "5xx" {
+    if matches!(
+        lower.as_str(),
+        "4xx" | "5xx" | "reset" | "malformed" | "timeout"
+    ) {
         return Some(lower);
     }
     // Three plain digits: `u16::parse` would also take `+503` and `0503`.
@@ -1112,6 +1143,7 @@ impl Compiler<'_> {
         let ep = Endpoint {
             key: j.key.clone(),
             owner: j.owner,
+            entry_node: self.topo.gateway.or(j.owner),
             op,
             chain,
             body,

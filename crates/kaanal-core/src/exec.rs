@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::chain::{Endpoint, Seq, Step};
-use crate::chaos::ChaosState;
+use crate::chaos::{ChaosState, ErrorKind, FailKind, HANG_CAP, merge};
 use crate::dist::Dist;
 use crate::stable_hash;
 use crate::topology::{NodeId, Topology};
@@ -69,6 +69,8 @@ pub enum HopKind {
     CacheHit,
     /// A cache lookup that missed (or a cache that is down or failing, E9).
     CacheMiss,
+    /// A fault-injection delay before the entry node: holds no slot and no rate-limit token.
+    Delay,
 }
 
 /// One timed step of a request.
@@ -76,7 +78,7 @@ pub enum HopKind {
 pub struct Hop {
     /// The node the cost belongs to (for `Net` hops, the edge's target).
     pub node: NodeId,
-    /// Net, proc, op, cache hit or miss.
+    /// Net, proc, op, cache hit or miss, or an endpoint-chaos delay.
     pub kind: HopKind,
     /// Offset from the request's start at zero load.
     pub start: Duration,
@@ -96,6 +98,8 @@ pub enum PlanItem {
         node: NodeId,
         /// The status it answers with.
         status: u16,
+        /// How the failure looked to the caller.
+        kind: FailKind,
         /// Zero-load instant of the failure: the failing hop's start (E14).
         at: Duration,
     },
@@ -109,6 +113,18 @@ pub enum PlanItem {
     /// One branch of the enclosing fork: its `size` items follow.
     Branch {
         /// Items after this one that belong to the branch.
+        size: usize,
+    },
+    /// A deadline scope (pre-order): the `size` items after it are the call (edge hop and body)
+    /// that must end within `timeout` of `at`.
+    Span {
+        /// The node whose `timeout` this is.
+        node: NodeId,
+        /// The deadline, counted from `at`.
+        timeout: Duration,
+        /// Zero-load instant the call started.
+        at: Duration,
+        /// Items after this one that belong to the span.
         size: usize,
     },
 }
@@ -131,6 +147,8 @@ pub enum ChainResult {
         node: NodeId,
         /// The HTTP status it answered with.
         status: u16,
+        /// How the failure looked to the caller.
+        kind: FailKind,
         /// For a 429 from a rate limit: how long until a token is available. Always `None` from `execute`.
         retry_after: Option<Duration>,
     },
@@ -148,13 +166,14 @@ pub struct ChainOutcome {
     pub plan: Plan,
     /// Ok, or where and how it failed.
     pub result: ChainResult,
-    /// Plan index of the `Fail` that decided `result`.
+    /// Plan index of the item that decided `result`: a `Fail`, or a `Span` whose deadline passed.
     pub fail: Option<usize>,
 }
 
 impl ChainOutcome {
     /// What the client waits: the end of the latest hop that counted. On a failure this is
-    /// the failure instant (every failure starts where an earlier hop ended, or at 0).
+    /// the failure instant. A planned failure starts where an earlier hop ended, or at 0; a span
+    /// deadline lands mid-hop, and [`ChainOutcome::hops`] is clipped there.
     pub fn total(&self) -> Duration {
         self.hops
             .iter()
@@ -208,15 +227,21 @@ impl Plan {
     }
 
     /// **Private.** The client-visible hops (see [`ChainOutcome::hops`]) and their plan indices.
-    fn visible(&self, fail: Option<(usize, Duration)>) -> (Vec<Hop>, Vec<usize>) {
-        let cut = fail.map(|(i, _)| self.cancelled_by(i)).unwrap_or_default();
+    ///
+    /// `cut_all`: the deciding failure is a span deadline, so every hop is clipped or dropped
+    /// at that instant (not just sibling branches).
+    fn visible(&self, fail: Option<(usize, Duration)>, cut_all: bool) -> (Vec<Hop>, Vec<usize>) {
+        let cut = match fail {
+            Some((i, _)) if !cut_all => self.cancelled_by(i),
+            _ => Vec::new(),
+        };
         let at = fail.map_or(Duration::MAX, |(_, t)| t);
         let (mut hops, mut kept) = (Vec::new(), Vec::new());
         for (i, item) in self.items.iter().enumerate() {
             let PlanItem::Hop(h) = item else { continue };
             let mut h = h.clone();
             // ponytail: linear scan of the cut ranges per hop; ranges are at most the branch count.
-            if cut.iter().any(|r| r.contains(&i)) {
+            if cut_all || cut.iter().any(|r| r.contains(&i)) {
                 if h.start >= at {
                     continue;
                 }
@@ -232,28 +257,69 @@ impl Plan {
 /// Computes what the request would experience.
 ///
 /// The same inputs always give the same outcome (R4.1). Each hop draws from its own RNG
-/// seeded `stable_hash(path, node name, tag)` (tags `net`, `proc`, `op`, `cache`), where
+/// seeded `stable_hash(path, node name, tag)` (tags `net`, `proc`, `op`, `cache`, and `endpoint` for front-door chaos), where
 /// `path` starts as `stable_hash(seed, endpoint key, n)` and every `call`/`cache` step
 /// extends it with `(target name, occurrence, repetition)` (R1.34, D8). Own hops draw the
 /// chaos roll first and caches also their hit roll, always, so chaos never shifts a timing.
 pub fn execute(topo: &Topology, chaos: &ChaosState, req: &ChainRequest) -> ChainOutcome {
-    let (plan, fail) = sample_plan(topo, chaos, req);
-    let result = match fail.map(|(i, _)| &plan.items[i]) {
-        Some(&PlanItem::Fail { node, status, .. }) => ChainResult::Err {
+    let (plan, planned) = sample_plan(topo, chaos, req);
+    let decided = deadline_failure(&plan, planned).or(planned);
+    let result = match decided.map(|(i, _)| &plan.items[i]) {
+        Some(&PlanItem::Fail {
+            node, status, kind, ..
+        }) => ChainResult::Err {
             node,
             status,
+            kind,
+            retry_after: None,
+        },
+        Some(&PlanItem::Span { node, .. }) => ChainResult::Err {
+            node,
+            status: 504,
+            kind: FailKind::Timeout,
             retry_after: None,
         },
         _ => ChainResult::Ok,
     };
-    let (hops, kept) = plan.visible(fail);
+    // `deadline_failure` only returns a span, so a decision that differs from the planned one is one.
+    let cut_all = decided != planned;
+    let (hops, kept) = plan.visible(decided, cut_all);
     ChainOutcome {
         hops,
         kept,
         plan,
         result,
-        fail: fail.map(|(i, _)| i),
+        fail: decided.map(|(i, _)| i),
     }
+}
+
+/// **Private.** Zero-load deadline check (Z13): the earliest span whose body ends after its
+/// deadline, compared with the planned failure; a tie goes to the planned failure.
+fn deadline_failure(plan: &Plan, planned: Option<(usize, Duration)>) -> Option<(usize, Duration)> {
+    let mut best = planned.map(|(_, t)| t);
+    let mut out = None;
+    for (i, item) in plan.items.iter().enumerate() {
+        let PlanItem::Span {
+            timeout, at, size, ..
+        } = item
+        else {
+            continue;
+        };
+        let end = plan.items[i + 1..=i + size]
+            .iter()
+            .filter_map(|x| match x {
+                PlanItem::Hop(h) => Some(h.start + h.dur),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(*at);
+        let due = *at + *timeout;
+        if end > due && best.is_none_or(|b| due < b) {
+            best = Some(due);
+            out = Some((i, due));
+        }
+    }
+    out
 }
 
 /// The sampling half of [`execute`]: the [`Plan`] and the deciding failure (plan index,
@@ -273,13 +339,75 @@ pub fn sample_plan(
     let mut w = Walk {
         topo,
         chaos,
+        ep_key: ep.key.as_str(),
         items: Vec::new(),
     };
-    let fail = match w.seq(&ep.chain, root, ep.op, Duration::ZERO) {
-        Flow::Fail { at, idx, .. } => Some((idx, at)),
+    let entry = ep.entry_node;
+    let root_span = entry.and_then(|n| w.open_span(n, Duration::ZERO));
+    let mut start = Duration::ZERO;
+    let mut flow = None;
+    if let (Some(entry), Some(layer)) = (entry, chaos.endpoint(&ep.key)) {
+        let c = merge(&[layer]);
+        let name = &topo.nodes[entry].name;
+        let roll: f64 = draw_rng(root, name, b"endpoint").random();
+        if c.down || roll < c.error_rate {
+            let (k, s) = if c.down {
+                (ErrorKind::Status, 503)
+            } else {
+                (c.error_kind, c.error_status)
+            };
+            let (kind, status) = fail_of(k, s);
+            let mut at = Duration::ZERO;
+            if k == ErrorKind::Hang {
+                at = hang_cap(topo.nodes[entry].timeout);
+                w.items.push(PlanItem::Hop(Hop {
+                    node: entry,
+                    kind: HopKind::Delay,
+                    start: Duration::ZERO,
+                    dur: at,
+                }));
+            }
+            let idx = w.items.len();
+            w.items.push(PlanItem::Fail {
+                node: entry,
+                status,
+                kind,
+                at,
+            });
+            flow = Some(Flow::Fail { at, idx });
+        } else if !c.latency_add.is_zero() {
+            w.items.push(PlanItem::Hop(Hop {
+                node: entry,
+                kind: HopKind::Delay,
+                start: Duration::ZERO,
+                dur: c.latency_add,
+            }));
+            start = c.latency_add;
+        }
+    }
+    let flow = flow.unwrap_or_else(|| w.seq(&ep.chain, root, ep.op, start));
+    w.close_span(root_span);
+    let fail = match flow {
+        Flow::Fail { at, idx } => Some((idx, at)),
         Flow::Done(_) | Flow::Hit(_) => None,
     };
     (Plan { items: w.items }, fail)
+}
+
+/// **Private.** How a chaos error kind (with its configured status) looks to the caller;
+/// a hang ends as a 504 timeout (Z5, Z6).
+fn fail_of(kind: ErrorKind, status: u16) -> (FailKind, u16) {
+    match kind {
+        ErrorKind::Status => (FailKind::Status, status),
+        ErrorKind::Reset => (FailKind::Reset, 502),
+        ErrorKind::Malformed => (FailKind::Malformed, 502),
+        ErrorKind::Hang => (FailKind::Timeout, 504),
+    }
+}
+
+/// **Private.** How long a hang lasts: the node's `timeout`, else [`HANG_CAP`].
+fn hang_cap(timeout: Option<Duration>) -> Duration {
+    timeout.unwrap_or(HANG_CAP)
 }
 
 /// **Private.** The RNG of one hop's draws (R1.34, D8).
@@ -311,6 +439,8 @@ enum Flow {
 struct Walk<'a> {
     topo: &'a Topology,
     chaos: &'a ChaosState,
+    /// Key of the endpoint being walked, for endpoint-scoped chaos.
+    ep_key: &'a str,
     items: Vec<PlanItem>,
 }
 
@@ -338,8 +468,11 @@ impl Walk<'_> {
                     let op = call.op.unwrap_or(op);
                     for rep in 0..call.repeat {
                         let rep_path = step_path(path, target, call.key.occ, rep);
+                        let span = self.open_span(call.node, now);
                         now += self.net(call.node, &call.net, rep_path, now);
-                        match self.seq(&call.body, rep_path, op, now) {
+                        let flow = self.seq(&call.body, rep_path, op, now);
+                        self.close_span(span);
+                        match flow {
                             Flow::Done(end) | Flow::Hit(end) => now = end,
                             fail @ Flow::Fail { .. } => return fail,
                         }
@@ -370,6 +503,29 @@ impl Walk<'_> {
         Flow::Done(now)
     }
 
+    /// **Private.** Opens a span for a call to `node` when it has a `timeout`; returns its plan index.
+    fn open_span(&mut self, node: NodeId, at: Duration) -> Option<usize> {
+        let timeout = self.topo.nodes[node].timeout?;
+        self.items.push(PlanItem::Span {
+            node,
+            timeout,
+            at,
+            size: 0,
+        });
+        Some(self.items.len() - 1)
+    }
+
+    /// **Private.** Fixes the size of the span opened at `span` (call after its body is walked,
+    /// also when the body failed).
+    fn close_span(&mut self, span: Option<usize>) {
+        if let Some(i) = span {
+            let size = self.items.len() - i - 1;
+            if let PlanItem::Span { size: s, .. } = &mut self.items[i] {
+                *s = size;
+            }
+        }
+    }
+
     /// **Private.** An edge's latency as a `Net` hop (no chaos on edges, as in A1).
     fn net(&mut self, to: NodeId, d: &Dist, path: u64, start: Duration) -> Duration {
         let dur = d.sample(&mut draw_rng(path, &self.topo.nodes[to].name, b"net"));
@@ -383,7 +539,8 @@ impl Walk<'_> {
     }
 
     /// **Private.** A node's own hop (proc or op): chaos roll, then the duration. A failing
-    /// node fails at its hop start (E14) and records a `Fail` instead of a hop.
+    /// node fails at its hop start (E14) and records a `Fail` instead of a hop; a hang records a
+    /// hop of the node's `timeout` (else [`HANG_CAP`]) and then a 504 `Fail` at its end (Z6).
     fn own(
         &mut self,
         node: NodeId,
@@ -396,22 +553,39 @@ impl Walk<'_> {
         let n = &topo.nodes[node];
         let mut rng = draw_rng(path, &n.name, tag);
         let roll: f64 = rng.random();
-        let c = self.chaos.get(&node);
-        let status = c.and_then(|c| {
+        let c = (!self.chaos.is_empty()).then(|| self.chaos.resolve(node, self.ep_key));
+        let c = c.as_ref();
+        let hit = c.and_then(|c| {
             if c.down {
-                Some(503)
+                Some((ErrorKind::Status, 503))
+            } else if roll < c.error_rate {
+                Some((c.error_kind, c.error_status))
             } else {
-                (roll < c.error_rate).then_some(c.error_status)
+                None
             }
         });
-        if let Some(status) = status {
+        if let Some((k, s)) = hit {
+            let (fk, status) = fail_of(k, s);
+            let mut at = start;
+            if k == ErrorKind::Hang {
+                // A hang holds the node for its whole cap, then times out (Z6).
+                let cap = hang_cap(n.timeout);
+                self.items.push(PlanItem::Hop(Hop {
+                    node,
+                    kind,
+                    start,
+                    dur: cap,
+                }));
+                at += cap;
+            }
             let idx = self.items.len();
             self.items.push(PlanItem::Fail {
                 node,
                 status,
-                at: start,
+                kind: fk,
+                at,
             });
-            return Err(Flow::Fail { at: start, idx });
+            return Err(Flow::Fail { at, idx });
         }
         let dist = match kind {
             HopKind::Op(op) => n.ops.as_ref().map_or(&Dist::ZERO, |o| &o[op as usize]),
@@ -428,18 +602,33 @@ impl Walk<'_> {
     }
 
     /// **Private.** A cache lookup (E9, D12): chaos roll and hit roll are always drawn; a
-    /// down or failing cache is a miss, charged its `miss` cost plus `latency_add`.
+    /// down or failing cache is a miss, charged its `miss` cost plus `latency_add`. The node's
+    /// `timeout` caps the charge (a slower lookup is a miss costing exactly the timeout); a hang
+    /// is a miss charged the timeout, else [`HANG_CAP`] (Z17).
     fn lookup(&mut self, node: NodeId, path: u64, start: Duration) -> (bool, Duration) {
         let topo = self.topo;
         let n = &topo.nodes[node];
         let mut rng = draw_rng(path, &n.name, b"cache");
         let (roll, hit_roll): (f64, f64) = (rng.random(), rng.random());
-        let c = self.chaos.get(&node);
+        let c = (!self.chaos.is_empty()).then(|| self.chaos.resolve(node, self.ep_key));
+        let c = c.as_ref();
         let failing = c.is_some_and(|c| c.down || roll < c.error_rate);
         let model = n.cache.as_ref();
-        let hit = !failing && model.is_some_and(|m| hit_roll < m.hit_ratio);
-        let dist = model.map_or(&Dist::ZERO, |m| if hit { &m.hit } else { &m.miss });
-        let dur = dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add);
+        // A hanging cache is a miss charged its cap; a cache never fails the request (Z17).
+        let hang = failing && c.is_some_and(|c| !c.down && c.error_kind == ErrorKind::Hang);
+        let mut hit = !failing && model.is_some_and(|m| hit_roll < m.hit_ratio);
+        let mut dur = if hang {
+            hang_cap(n.timeout)
+        } else {
+            let dist = model.map_or(&Dist::ZERO, |m| if hit { &m.hit } else { &m.miss });
+            dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add)
+        };
+        if let Some(t) = n.timeout
+            && dur > t
+        {
+            hit = false;
+            dur = t;
+        }
         let kind = if hit {
             HopKind::CacheHit
         } else {

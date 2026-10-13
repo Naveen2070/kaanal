@@ -166,6 +166,7 @@ fn report(
             max_queue: c.max_queue,
             limited: c.limited,
             overflowed: c.overflowed,
+            timed_out: c.timed_out,
         })
         .collect();
     SimReport { requests, nodes }

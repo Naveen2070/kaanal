@@ -5,7 +5,8 @@ use kaanal_core::chain::{
 };
 use kaanal_core::config::ErrorMapping;
 use kaanal_core::{
-    ChainRequest, ChaosState, Config, ConfigError, Endpoints, HopKind, Op, Topology, execute,
+    ChainRequest, ChaosState, Config, ConfigError, Endpoints, FailKind, HopKind, Op, Topology,
+    execute,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -514,14 +515,64 @@ fn resolve_error_looks_up_node_then_status_then_class() {
     ]
     .into_iter()
     .collect();
+    let s = FailKind::Status;
     assert_eq!(
-        resolve_error(&map, "db", 504),
+        resolve_error(&map, "db", s, 504),
         (503, Some(json!({ "e": 1 })))
     );
-    assert_eq!(resolve_error(&map, "pay", 504), (500, None));
-    assert_eq!(resolve_error(&map, "pay", 503), (502, None));
-    assert_eq!(resolve_error(&map, "pay", 429), (400, None));
-    assert_eq!(resolve_error(&IndexMap::new(), "pay", 503), (503, None));
+    assert_eq!(resolve_error(&map, "pay", s, 504), (500, None));
+    assert_eq!(resolve_error(&map, "pay", s, 503), (502, None));
+    assert_eq!(resolve_error(&map, "pay", s, 429), (400, None));
+    assert_eq!(resolve_error(&IndexMap::new(), "pay", s, 503), (503, None));
+}
+
+#[test]
+fn error_map_resolves_node_then_kind_then_status_then_class() {
+    let map = |pairs: &[(&str, u16)]| -> IndexMap<String, ErrorMapping> {
+        pairs
+            .iter()
+            .map(|(k, s)| {
+                (
+                    k.to_string(),
+                    ErrorMapping {
+                        status: *s,
+                        body: None,
+                    },
+                )
+            })
+            .collect()
+    };
+    let m = map(&[("db", 418), ("timeout", 598), ("504", 597), ("5xx", 596)]);
+    let r = |node, kind, status| resolve_error(&m, node, kind, status).0;
+    assert_eq!(r("db", FailKind::Timeout, 504), 418, "node wins");
+    assert_eq!(r("app", FailKind::Timeout, 504), 598, "then kind");
+    assert_eq!(r("app", FailKind::Status, 504), 597, "then status");
+    assert_eq!(r("app", FailKind::Status, 503), 596, "then class");
+    // reset has no status: defaults to 502 first, then status/class keys see 502
+    let m2 = map(&[("502", 599)]);
+    assert_eq!(resolve_error(&m2, "app", FailKind::Reset, 502).0, 599);
+}
+
+#[test]
+fn error_map_accepts_the_kind_keys() {
+    let (_, eps) =
+        ok("  \"GET /users/{id}\": { error_map: { reset: 503, malformed: 502, timeout: 599 } }\n");
+    let ep = eps.get("GET /users/{id}").unwrap();
+    let keys: Vec<&str> = ep.error_map.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["reset", "malformed", "timeout"]);
+}
+
+#[test]
+fn wire_nodes_are_the_gateway_and_the_owner() {
+    let (t, eps) = ok("");
+    let ep = eps.get("GET /users/{id}").unwrap();
+    let (gw, app, db) = (
+        t.id("gw").unwrap(),
+        t.id("app").unwrap(),
+        t.id("db").unwrap(),
+    );
+    assert!(ep.is_wire_node(&t, gw) && ep.is_wire_node(&t, app) && !ep.is_wire_node(&t, db));
+    assert_eq!(ep.entry_node, Some(gw));
 }
 
 #[test]

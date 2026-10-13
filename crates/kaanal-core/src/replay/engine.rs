@@ -9,11 +9,16 @@ use std::time::Duration;
 
 use super::bucket::Bucket;
 use super::gate::{Admit, Gate};
+use crate::chaos::FailKind;
 use crate::exec::{ChainResult, Hop, HopKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
 
 /// **Private.** `starts` value of a hop that never started.
 const NOT_STARTED: u64 = u64::MAX;
+
+/// **Private.** Set on the seq of a deadline event, so it sorts after every other event of the
+/// same instant (Z14) without changing the heap key or the simulator's `(time, seq)` merge.
+const DEADLINE: u64 = 1 << 62;
 
 /// Why the engine stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +80,8 @@ pub struct NodeCounters {
     pub limited: u64,
     /// Hop starts refused by a full queue.
     pub overflowed: u64,
+    /// Requests failed by this node's deadline, counted at the span's node.
+    pub timed_out: u64,
 }
 
 /// **Private.** A walker over one plan range: the whole plan, or one `parallel` branch.
@@ -89,6 +96,8 @@ struct Token {
     queued_at: Option<(NodeId, u64)>,
     /// Node of the last own hop with no edge hop since: the current visit (Y6).
     last_own: Option<NodeId>,
+    /// Innermost span this token opened that is still open (`SpanState::parent` chains outward).
+    open_top: Option<usize>,
 }
 
 /// **Private.** A `parallel` block waiting for its branches.
@@ -97,12 +106,31 @@ struct Join {
     parent: usize,
 }
 
+/// **Private.** One span a request has entered.
+struct SpanState {
+    /// The enclosing span still open on the same token when this one was entered.
+    parent: Option<usize>,
+    /// Plan index just past the span; its opener closes it on walking on past this.
+    end: usize,
+    /// Plan index of the `Span` item.
+    idx: usize,
+    /// The node whose `timeout` this is; a timeout is counted and reported here.
+    node: NodeId,
+    /// Seq of its deadline event: identifies the span, so a recycled request slot cannot match.
+    seq: u64,
+    /// When the deadline falls (ns).
+    due: u64,
+    /// Not yet walked past by its opening token; only an open span can time the request out.
+    open: bool,
+}
+
 /// **Private.** The failure that decided a request: instant, plan index (D17), node, status.
 struct Failure {
     at: u64,
     idx: usize,
     node: NodeId,
     status: u16,
+    kind: FailKind,
     retry_after: Option<Duration>,
     /// Set when the engine itself refused the hop and counted it: the node, and whether it was the
     /// rate limit (`true`) or the queue (`false`). A planned `Fail` that replaces this failure (D17)
@@ -120,6 +148,7 @@ struct Req {
     waits: Vec<u64>,
     tokens: Vec<Token>,
     joins: Vec<Join>,
+    spans: Vec<SpanState>,
     /// Tokens holding a hop or waiting in a queue.
     busy: usize,
     fail: Option<Failure>,
@@ -136,6 +165,7 @@ struct Scratch {
     waits: Vec<u64>,
     tokens: Vec<Token>,
     joins: Vec<Join>,
+    spans: Vec<SpanState>,
 }
 
 /// **Private.** Queueing state of one node.
@@ -288,8 +318,10 @@ impl Engine {
             join: None,
             queued_at: None,
             last_own: None,
+            open_top: None,
         });
         sc.joins.clear();
+        sc.spans.clear();
         let req = Req {
             tag,
             order: self.order,
@@ -299,6 +331,7 @@ impl Engine {
             waits: sc.waits,
             tokens: sc.tokens,
             joins: sc.joins,
+            spans: sc.spans,
             busy: 0,
             fail: None,
             done: None,
@@ -323,11 +356,15 @@ impl Engine {
     /// [`EngineError::ClockOverflow`] as for [`Engine::submit`].
     pub fn step(&mut self) -> Result<bool, EngineError> {
         self.check()?;
-        let Some(Reverse((at, _, r, k))) = self.heap.pop() else {
+        let Some(Reverse((at, seq, r, k))) = self.heap.pop() else {
             return Ok(false);
         };
         self.now = at;
-        self.hop_done(r, k);
+        if seq & DEADLINE != 0 {
+            self.deadline(r, k, seq);
+        } else {
+            self.hop_done(r, k);
+        }
         self.check()?;
         Ok(true)
     }
@@ -389,6 +426,14 @@ impl Engine {
             let now = self.now;
             let req = live(&mut self.reqs, r);
             let (at, end) = (req.tokens[k].at, req.tokens[k].end);
+            // A span closes when its opener walks on past it. A fork parks the opener at the block
+            // end at once, but it only loops again at the join, so the span stays open meanwhile.
+            while let Some(i) = req.tokens[k].open_top
+                && req.spans[i].end <= at
+            {
+                req.spans[i].open = false;
+                req.tokens[k].open_top = req.spans[i].parent;
+            }
             if at == end {
                 let Some(j) = req.tokens[k].join else {
                     if req.fail.is_none() && req.done.is_none() {
@@ -413,13 +458,18 @@ impl Engine {
                 // A sibling cancelled at this instant still reaches a lower-index `Fail` through
                 // zero-duration hops that need no slot or token, as `execute` does (D17); the
                 // skipped hop never starts, so it is not recorded.
-                if tie
-                    && let PlanItem::Hop(h) = &item
-                    && h.dur.is_zero()
-                    && (h.kind == HopKind::Net
-                        || (self.nodes[h.node].gate.is_none()
-                            && self.nodes[h.node].bucket.is_none()))
-                {
+                let skip = match &item {
+                    PlanItem::Span { .. } => true,
+                    PlanItem::Hop(h) => {
+                        h.dur.is_zero()
+                            && (h.kind == HopKind::Net
+                                || h.kind == HopKind::Delay
+                                || (self.nodes[h.node].gate.is_none()
+                                    && self.nodes[h.node].bucket.is_none()))
+                    }
+                    _ => false,
+                };
+                if tie && skip {
                     req.tokens[k].at += 1;
                     continue;
                 }
@@ -432,7 +482,9 @@ impl Engine {
                     self.start_hop(r, k, &h);
                     return;
                 }
-                PlanItem::Fail { node, status, .. } => {
+                PlanItem::Fail {
+                    node, status, kind, ..
+                } => {
                     self.fail(
                         r,
                         Failure {
@@ -440,6 +492,7 @@ impl Engine {
                             idx: at,
                             node,
                             status,
+                            kind,
                             retry_after: None,
                             refused: None,
                         },
@@ -447,38 +500,75 @@ impl Engine {
                     return;
                 }
                 PlanItem::Fork { branches, size } => {
-                    let j = req.joins.len();
-                    req.joins.push(Join {
-                        left: branches,
-                        parent: k,
-                    });
-                    req.tokens[k].at = at + 1 + size;
-                    let inherited = req.tokens[k].last_own;
-                    let first = req.tokens.len();
-                    let mut b = at + 1;
-                    while b < at + 1 + size {
-                        let PlanItem::Branch { size: bs } = req.plan.items[b] else {
-                            break;
-                        };
-                        req.tokens.push(Token {
-                            at: b + 1,
-                            end: b + 1 + bs,
-                            join: Some(j),
-                            queued_at: None,
-                            last_own: inherited,
-                        });
-                        b += 1 + bs;
-                    }
-                    let last = req.tokens.len();
-                    // Branch order: a contested slot goes to the lower branch first.
-                    for c in first..last {
-                        self.advance(r, c);
-                    }
+                    self.fork(r, k, branches, size);
                     return;
                 }
+                PlanItem::Span {
+                    node,
+                    timeout,
+                    size,
+                    ..
+                } => self.open_span(r, k, node, nanos(timeout), size),
                 PlanItem::Branch { .. } => unreachable!("tokens start after their Branch marker"),
             }
         }
+    }
+
+    /// **Private.** Token `k` reaches a `Fork`: park it at the block end, start one token per branch.
+    fn fork(&mut self, r: usize, k: usize, branches: usize, size: usize) {
+        let req = live(&mut self.reqs, r);
+        let at = req.tokens[k].at;
+        let j = req.joins.len();
+        req.joins.push(Join {
+            left: branches,
+            parent: k,
+        });
+        req.tokens[k].at = at + 1 + size;
+        let inherited = req.tokens[k].last_own;
+        let first = req.tokens.len();
+        let mut b = at + 1;
+        while b < at + 1 + size {
+            let PlanItem::Branch { size: bs } = req.plan.items[b] else {
+                break;
+            };
+            req.tokens.push(Token {
+                at: b + 1,
+                end: b + 1 + bs,
+                join: Some(j),
+                queued_at: None,
+                last_own: inherited,
+                open_top: None,
+            });
+            b += 1 + bs;
+        }
+        let last = req.tokens.len();
+        // Branch order: a contested slot goes to the lower branch first.
+        for c in first..last {
+            self.advance(r, c);
+        }
+    }
+
+    /// **Private.** Token `k` enters the `Span` at its position: record it and schedule its deadline.
+    fn open_span(&mut self, r: usize, k: usize, node: NodeId, timeout: u64, size: usize) {
+        let seq = self.stamp() | DEADLINE;
+        let due = self.after(timeout);
+        let req = live(&mut self.reqs, r);
+        let at = req.tokens[k].at;
+        let si = req.spans.len();
+        req.spans.push(SpanState {
+            parent: req.tokens[k].open_top,
+            end: at + 1 + size,
+            idx: at,
+            node,
+            seq,
+            due,
+            open: true,
+        });
+        req.tokens[k].open_top = Some(si);
+        req.tokens[k].at = at + 1;
+        // ponytail: a closed span's deadline stays in the heap until its time (at most
+        // `timeout`); drop it on close if heap size under heavy timeouts ever shows up.
+        self.heap.push(Reverse((due, seq, r, si)));
     }
 
     /// **Private.** Starts token `k`'s hop now. Order (Y7): a rate-limit token if this hop starts
@@ -490,7 +580,7 @@ impl Engine {
             let req = live(&mut self.reqs, r);
             (req.tokens[k].at, req.arrival >= self.warmup)
         };
-        if h.kind == HopKind::Net {
+        if h.kind == HopKind::Net || h.kind == HopKind::Delay {
             let req = live(&mut self.reqs, r);
             req.tokens[k].last_own = None;
             req.busy += 1;
@@ -514,6 +604,7 @@ impl Engine {
                         idx,
                         node,
                         status: 429,
+                        kind: FailKind::Status,
                         retry_after,
                         refused: counted.then_some((node, true)),
                     },
@@ -548,6 +639,7 @@ impl Engine {
                                 idx,
                                 node,
                                 status,
+                                kind: FailKind::Status,
                                 retry_after: None,
                                 refused: counted.then_some((node, false)),
                             },
@@ -578,7 +670,7 @@ impl Engine {
             };
             (h.node, h.kind)
         };
-        if kind != HopKind::Net && self.nodes[node].gate.is_some() {
+        if kind != HopKind::Net && kind != HopKind::Delay && self.nodes[node].gate.is_some() {
             self.mark(node, now);
             // FIFO hand-over at this instant: the slot never looks free to a later arrival.
             let next = self.nodes[node].gate.as_mut().expect("checked").release();
@@ -617,6 +709,47 @@ impl Engine {
         }
         let done = self.after(dur);
         self.push(done, qr, qk);
+    }
+
+    /// **Private.** A span's deadline passed (Z3, Z4, Z14). Ignored unless the request is still
+    /// unanswered and the span still open; then the whole request fails as a timeout through
+    /// `fail()`: queued tokens leave their queues, running hops keep their slot until they end.
+    fn deadline(&mut self, r: usize, si: usize, seq: u64) {
+        let (now, warmup) = (self.now, self.warmup);
+        let ready = self.reqs[r].as_ref().and_then(|q| {
+            let s = q.spans.get(si)?;
+            if !(s.seq == seq && s.open && q.done.is_none() && q.fail.is_none()) {
+                return None;
+            }
+            // Z14: of this request's open spans due now, the lowest plan index (the outer) wins,
+            // as in `execute`; the others then find the request answered.
+            let w = q
+                .spans
+                .iter()
+                .filter(|x| x.open && x.due == now)
+                .min_by_key(|x| x.idx)?;
+            Some((w.idx, w.node, q.arrival >= warmup))
+        });
+        let Some((idx, node, counted)) = ready else {
+            self.flush();
+            return;
+        };
+        if counted {
+            self.counters[node].timed_out += 1;
+        }
+        self.fail(
+            r,
+            Failure {
+                at: now,
+                idx,
+                node,
+                kind: FailKind::Timeout,
+                status: 504,
+                retry_after: None,
+                refused: None,
+            },
+        );
+        self.settle(r);
     }
 
     /// **Private.** `f` decided request `r` (E14: at the failing hop's start). It wins (first, or
@@ -703,6 +836,7 @@ impl Engine {
             waits: req.waits,
             tokens: req.tokens,
             joins: req.joins,
+            spans: req.spans,
         });
     }
 }
@@ -715,6 +849,8 @@ fn record(req: &Req) -> Finished {
         Some(f) => (plan.cancelled_by(f.idx), f.at),
         None => (Vec::new(), u64::MAX),
     };
+    // A timeout cuts every hop at the failure instant, not only cancelled sibling ranges.
+    let timeout = matches!(&req.fail, Some(f) if f.kind == FailKind::Timeout);
     let mut hops = Vec::new();
     for (i, item) in plan.items.iter().enumerate() {
         let PlanItem::Hop(h) = item else { continue };
@@ -724,7 +860,7 @@ fn record(req: &Req) -> Finished {
         }
         let mut h = h.clone();
         h.start = Duration::from_nanos(s - req.arrival);
-        if cut.iter().any(|c| c.contains(&i)) {
+        if timeout || cut.iter().any(|c| c.contains(&i)) {
             if s >= fail_at {
                 continue;
             }
@@ -742,6 +878,7 @@ fn record(req: &Req) -> Finished {
         .map_or(ChainResult::Ok, |f| ChainResult::Err {
             node: f.node,
             status: f.status,
+            kind: f.kind,
             retry_after: f.retry_after,
         });
     Finished {

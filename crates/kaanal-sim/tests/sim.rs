@@ -2,9 +2,11 @@ mod common;
 
 use common::{CHAIN_ROUTES, CHAINS, compiled};
 use kaanal_core::{
-    ChainRequest, ChainResult, ChaosState, Config, Endpoints, HopKind, NodeChaos, Topology, execute,
+    ChainRequest, ChainResult, ChaosKey, ChaosLayer, ChaosState, Config, Endpoints, ErrorKind,
+    FailKind, HopKind, NodeChaos, Topology, execute,
 };
 use kaanal_sim::{SimConfig, Stream, run};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -66,6 +68,278 @@ fn sample_configs() -> Vec<Sample> {
     ]
 }
 
+/// R7.5 drift guard: streams every `keys` endpoint at 1 req/s for 2000 s and asserts each
+/// record equals the independent `execute()` outcome (hops, latency, result, no queue wait).
+/// Returns the report and how many failures cut a parallel sibling.
+fn assert_zero_load_equal(
+    t: &Topology,
+    e: &Endpoints,
+    chaos: &ChaosState,
+    label: &str,
+    keys: &[&str],
+    seed: u64,
+) -> (kaanal_sim::SimReport, usize) {
+    let sc = SimConfig {
+        streams: keys
+            .iter()
+            .map(|k| Stream {
+                endpoint_key: (*k).to_string(),
+                rate_per_s: 1.0,
+            })
+            .collect(),
+        duration: Duration::from_secs(2_000),
+        warmup: Duration::ZERO,
+        seed,
+    };
+    let rep = run(t, e, chaos, &sc).unwrap();
+    let mut cut = 0;
+    for r in &rep.requests {
+        let key = &sc.streams[r.stream].endpoint_key;
+        let live = execute(
+            t,
+            chaos,
+            &ChainRequest {
+                endpoint: e.get(key).unwrap(),
+                n: r.n,
+                seed,
+            },
+        );
+        let at = format!("{label} {key} n={}", r.n);
+        let hops: Vec<_> = r.hops.iter().map(|(h, _)| h.clone()).collect();
+        assert_eq!(hops, live.hops, "{at}");
+        assert!(
+            r.hops.iter().all(|(_, w)| w.is_zero()),
+            "{at}: no queueing at zero load"
+        );
+        assert_eq!(r.latency, live.total(), "{at}");
+        assert_eq!(r.result, live.result, "{at}");
+        cut += usize::from(
+            live.fail
+                .is_some_and(|f| !live.plan.cancelled_by(f).is_empty()),
+        );
+    }
+    (rep, cut)
+}
+
+const SEED: u64 = 5;
+const GW: &str = "type: gateway, proc: 1ms";
+const DB: &str = "type: database, ops: { read: 2ms, write: 2ms, scan: 2ms }";
+const SLOW_DB: &str = "type: database, ops: { read: 10ms, write: 10ms, scan: 10ms }";
+const KEY: &str = "GET /users/{id}";
+
+/// `GET /users/{id}` on `app` behind `nginx` and in front of `db`; `nginx` and `db` are the
+/// bodies of their flow maps, so a test sets `timeout:` and costs itself.
+fn build_with(nginx: &str, db: &str) -> (Topology, Endpoints) {
+    compiled(
+        &format!(
+            "version: 1\nseed: {SEED}\nnodes:\n  nginx: {{ {nginx} }}\n  app: {{ type: service, proc: 2ms }}\n  db: {{ {db} }}\nedges:\n  - {{ from: nginx, to: app, net: 1ms }}\n  - {{ from: app, to: db, net: 1ms }}\n"
+        ),
+        &[(KEY, "app")],
+    )
+}
+
+/// `assert_zero_load_equal` for the single endpoint `KEY`.
+fn zero_load(
+    t: &Topology,
+    e: &Endpoints,
+    chaos: &ChaosState,
+    label: &str,
+) -> kaanal_sim::SimReport {
+    assert_zero_load_equal(t, e, chaos, label, &[KEY], SEED).0
+}
+
+/// Every reported request, as a `u64` for comparing with counters.
+fn all(rep: &kaanal_sim::SimReport) -> u64 {
+    rep.requests.len() as u64
+}
+
+#[test]
+fn sim_reports_timeouts_per_node_and_errors_by_kind() {
+    // gateway deadline 2ms in front of a db whose op takes 10ms: every request times out
+    let (t, e) = build_with("type: gateway, proc: 1ms, timeout: 2ms", SLOW_DB);
+    let rep = run(&t, &e, &ChaosState::default(), &one_stream(50.0, 200)).unwrap();
+    let nginx = t.id("nginx").unwrap();
+    assert!(rep.requests.len() > 5_000);
+    assert_eq!(rep.nodes[nginx].timed_out, rep.requests.len() as u64);
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("timeout", rep.requests.len() as u64)])
+    );
+}
+
+#[test]
+fn zero_load_equals_execute_for_every_kind() {
+    // R7.5: at zero load the sim record equals the independent execute() outcome.
+    let db_timeout = format!("{DB}, timeout: 3s");
+    // (chaos kind, label, db body, error kind, whether a span deadline fires at db). A hang
+    // that ends through its planned Timeout `Fail` (no span: the default cap) is not an
+    // engine deadline, so db.timed_out stays 0 although errors_by_kind says `timeout`.
+    // With a node timeout the db span's deadline (3 s, from the edge start) comes 1 ms before
+    // the hang hop's end (edge 1 ms + 3 s cap), so the deadline fires and is counted at db.
+    for (kind, name, db, want, deadline) in [
+        (ErrorKind::Status, "status", DB, "status", false),
+        (ErrorKind::Reset, "reset", DB, "reset", false),
+        (ErrorKind::Malformed, "malformed", DB, "malformed", false),
+        (ErrorKind::Hang, "hang default cap", DB, "timeout", false),
+        (
+            ErrorKind::Hang,
+            "hang node timeout",
+            &*db_timeout,
+            "timeout",
+            true,
+        ),
+    ] {
+        let (t, e) = build_with(GW, db);
+        let chaos = ChaosState::from([(
+            t.id("db").unwrap(),
+            NodeChaos {
+                error_rate: 1.0,
+                error_kind: kind,
+                ..NodeChaos::default()
+            },
+        )]);
+        let rep = zero_load(&t, &e, &chaos, name);
+        assert_eq!(
+            rep.errors_by_kind(),
+            BTreeMap::from([(want, all(&rep))]),
+            "{name}: every request must fail with that kind"
+        );
+        let timed_out = rep.nodes[t.id("db").unwrap()].timed_out;
+        assert_eq!(timed_out, if deadline { all(&rep) } else { 0 }, "{name}");
+    }
+}
+
+#[test]
+fn zero_load_equals_execute_with_spans() {
+    // db's 3 ms deadline covers its 1 ms edge and a 10 ms op: it really times out at zero load.
+    let (t, e) = build_with(GW, &format!("{SLOW_DB}, timeout: 3ms"));
+    let rep = zero_load(&t, &e, &ChaosState::default(), "db span");
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("timeout", all(&rep))])
+    );
+    assert_eq!(rep.nodes[t.id("db").unwrap()].timed_out, all(&rep));
+}
+
+fn hang() -> NodeChaos {
+    NodeChaos {
+        error_rate: 1.0,
+        error_kind: ErrorKind::Hang,
+        ..NodeChaos::default()
+    }
+}
+
+#[test]
+fn zero_load_equals_execute_for_a_hang_under_spans() {
+    // (a) db span 3 ms (from the edge start) vs a hang hop capped at the same 3 ms that
+    // starts after the 1 ms edge: the deadline fires first, 1 ms before the planned Fail (Z6).
+    let (t, e) = build_with(GW, &format!("{DB}, timeout: 3ms"));
+    let chaos = ChaosState::from([(t.id("db").unwrap(), hang())]);
+    let rep = zero_load(&t, &e, &chaos, "hang under db span");
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("timeout", all(&rep))])
+    );
+    assert_eq!(rep.nodes[t.id("db").unwrap()].timed_out, all(&rep));
+
+    // The hanging db has no timeout (60 s cap); the gateway's root span (1 s) fires first.
+    let (t, e) = build_with("type: gateway, proc: 1ms, timeout: 1s", DB);
+    let chaos = ChaosState::from([(t.id("db").unwrap(), hang())]);
+    let rep = zero_load(&t, &e, &chaos, "hang under gateway span");
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("timeout", all(&rep))])
+    );
+    assert_eq!(rep.nodes[t.id("nginx").unwrap()].timed_out, all(&rep));
+    assert_eq!(rep.nodes[t.id("db").unwrap()].timed_out, 0);
+}
+
+#[test]
+fn zero_load_equals_execute_for_a_deadline_in_a_parallel_branch() {
+    // (b) db's 2 ms span fires inside one branch while the other (`slow`, 50 ms) is cut.
+    let (t, e) = compiled(
+        &format!(
+            "version: 1\nseed: {SEED}\nnodes:\n  nginx: {{ {GW} }}\n  app: {{ type: service, proc: 2ms }}\n  db: {{ {SLOW_DB}, timeout: 2ms }}\n  slow: {{ type: external-api, proc: 50ms }}\nedges:\n  - {{ from: nginx, to: app, net: 1ms }}\n  - {{ from: app, to: db, net: 1ms }}\n  - {{ from: app, to: slow, net: 1ms }}\nendpoints:\n  \"GET /x\": {{ chain: [ {{ parallel: [ db, slow ] }} ] }}\n"
+        ),
+        &[("GET /x", "app")],
+    );
+    let (rep, cut) = assert_zero_load_equal(
+        &t,
+        &e,
+        &ChaosState::default(),
+        "parallel",
+        &["GET /x"],
+        SEED,
+    );
+    assert!(cut > 0, "the deadline must cancel the sibling branch");
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("timeout", all(&rep))])
+    );
+    assert_eq!(rep.nodes[t.id("db").unwrap()].timed_out, all(&rep));
+    assert_eq!(rep.nodes[t.id("slow").unwrap()].timed_out, 0);
+}
+
+#[test]
+fn zero_load_equals_execute_for_endpoint_chaos() {
+    // (c) endpoint-level chaos: a 502 at the front door, a Delay hop, and a node chaos that
+    // applies only through this endpoint.
+    let (t, e) = build_with(GW, DB);
+    let db = t.id("db").unwrap();
+    let with = |key: ChaosKey, layer: ChaosLayer| {
+        let mut c = ChaosState::default();
+        c.set(key, layer);
+        c
+    };
+    let front = || ChaosKey::Endpoint(KEY.into());
+    let fail = with(
+        front(),
+        ChaosLayer {
+            error_rate: Some(1.0),
+            error_status: Some(502),
+            ..ChaosLayer::default()
+        },
+    );
+    let rep = zero_load(&t, &e, &fail, "endpoint 502");
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("status", all(&rep))])
+    );
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| matches!(r.result, ChainResult::Err { status: 502, .. }))
+    );
+
+    let slow = with(
+        front(),
+        ChaosLayer {
+            latency_add: Some(Duration::from_millis(20)),
+            ..ChaosLayer::default()
+        },
+    );
+    let rep = zero_load(&t, &e, &slow, "endpoint latency");
+    assert!(rep.errors_by_kind().is_empty());
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| r.hops.iter().any(|(h, _)| h.kind == HopKind::Delay))
+    );
+
+    let at = with(
+        ChaosKey::NodeAt(db, KEY.into()),
+        ChaosLayer {
+            error_rate: Some(1.0),
+            ..ChaosLayer::default()
+        },
+    );
+    let rep = zero_load(&t, &e, &at, "node-at db");
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("status", all(&rep))])
+    );
+}
+
 #[test]
 fn zero_load_equals_live_exactly() {
     for (name, yaml, routes) in sample_configs() {
@@ -86,46 +360,9 @@ fn zero_load_equals_live_exactly() {
             })
             .collect();
         for chaos in [ChaosState::default(), flaky] {
-            let sc = SimConfig {
-                streams: routes
-                    .iter()
-                    .map(|(k, _)| Stream {
-                        endpoint_key: (*k).to_string(),
-                        rate_per_s: 1.0,
-                    })
-                    .collect(),
-                duration: Duration::from_secs(2_000),
-                warmup: Duration::ZERO,
-                seed,
-            };
-            let rep = run(&t, &e, &chaos, &sc).unwrap();
+            let keys: Vec<&str> = routes.iter().map(|(k, _)| *k).collect();
+            let (rep, cut) = assert_zero_load_equal(&t, &e, &chaos, name, &keys, seed);
             assert!(rep.requests.len() > 5_000, "{name}: {}", rep.requests.len());
-            let mut cut = 0;
-            for r in &rep.requests {
-                let key = &sc.streams[r.stream].endpoint_key;
-                let live = execute(
-                    &t,
-                    &chaos,
-                    &ChainRequest {
-                        endpoint: e.get(key).unwrap(),
-                        n: r.n,
-                        seed,
-                    },
-                );
-                let at = format!("{name} {key} n={}", r.n);
-                let hops: Vec<_> = r.hops.iter().map(|(h, _)| h.clone()).collect();
-                assert_eq!(hops, live.hops, "{at}");
-                assert!(
-                    r.hops.iter().all(|(_, w)| w.is_zero()),
-                    "{at}: no queueing at zero load"
-                );
-                assert_eq!(r.latency, live.total(), "{at}");
-                assert_eq!(r.result, live.result, "{at}");
-                cut += usize::from(
-                    live.fail
-                        .is_some_and(|f| !live.plan.cancelled_by(f).is_empty()),
-                );
-            }
             if name == "chains" && !chaos.is_empty() {
                 assert!(
                     cut > 100,
@@ -585,6 +822,7 @@ fn zero_cost_failure_ties_go_to_the_first_branch() {
             ChainResult::Err {
                 node: s,
                 status: 503,
+                kind: FailKind::Status,
                 retry_after: None
             }
         );
@@ -593,6 +831,7 @@ fn zero_cost_failure_ties_go_to_the_first_branch() {
             ChainResult::Err {
                 node: s,
                 status: 503,
+                kind: FailKind::Status,
                 retry_after: None
             }
         );
@@ -640,6 +879,7 @@ fn cancelled_siblings_keep_their_slot_but_queued_ones_leave() {
             ChainResult::Err {
                 node: bad,
                 status: 503,
+                kind: FailKind::Status,
                 retry_after: None
             }
         );
@@ -754,6 +994,7 @@ fn failure_ties_go_to_the_lowest_branch_like_live() {
             ChainResult::Err {
                 node: s,
                 status: 503,
+                kind: FailKind::Status,
                 retry_after: None
             }
         );

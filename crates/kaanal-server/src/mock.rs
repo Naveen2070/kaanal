@@ -108,13 +108,14 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let trace = trace_header(&plan, &fin.hops, &fin.result, &st.topo);
     let mut retry = None;
     let (status, body, failed) = match &fin.result {
-        // E5: node, then status, then class; else the failure's own status and the chaos body.
+        // E5 + B2a Z8: node, then kind, then status, then class; else the failure's own status and the chaos body.
         ChainResult::Err {
             node,
             status,
+            kind,
             retry_after,
         } => {
-            let (status, body) = resolve_error(&ep.error_map, name(*node), *status);
+            let (status, body) = resolve_error(&ep.error_map, name(*node), *kind, *status);
             let body = body.unwrap_or_else(|| json!({ "error": "chaos", "node": name(*node) }));
             retry = (status == 429).then_some(*retry_after).flatten();
             (status, body, Some(name(*node).to_string()))
@@ -258,9 +259,10 @@ fn trace_header(
                     HopKind::Op(op) => format!("{}.{}={d}", name(h.node), op.name()),
                     HopKind::CacheHit => format!("{}.hit={d}", name(h.node)),
                     HopKind::CacheMiss => format!("{}.miss={d}", name(h.node)),
+                    HopKind::Delay => format!("{}.delay={d}", name(h.node)),
                 }));
             }
-            PlanItem::Hop(_) | PlanItem::Fail { .. } => {}
+            PlanItem::Hop(_) | PlanItem::Fail { .. } | PlanItem::Span { .. } => {}
         }
     }
     pieces.extend(forks.iter().map(|_| Piece::Close));

@@ -30,7 +30,10 @@ pub use chain::{
     Endpoint, Endpoints, EndpointsInput, JWKS_KEY, LOGIN_KEY, Responder, RouteSpec, compile,
     resolve_error, skeleton,
 };
-pub use chaos::{ChaosState, MAX_LATENCY_ADD, NodeChaos};
+pub use chaos::{
+    ChaosKey, ChaosLayer, ChaosState, ErrorKind, FailKind, HANG_CAP, MAX_LATENCY_ADD, NodeChaos,
+    merge,
+};
 pub use config::{Config, ConfigError, Determinism, EndpointsConfig, NodeKind, SeedSource};
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;

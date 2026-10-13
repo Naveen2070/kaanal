@@ -10,6 +10,7 @@
 
 mod engine;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,6 +69,21 @@ pub struct SimReport {
     pub nodes: Vec<NodeStats>,
 }
 
+impl SimReport {
+    /// Failed reported requests by kind: `status`, `reset`, `malformed` or `timeout`
+    /// (kinds with no failures are absent).
+    #[must_use]
+    pub fn errors_by_kind(&self) -> BTreeMap<&'static str, u64> {
+        let mut by = BTreeMap::new();
+        for r in &self.requests {
+            if let ChainResult::Err { kind, .. } = r.result {
+                *by.entry(kind.as_str()).or_insert(0) += 1;
+            }
+        }
+        by
+    }
+}
+
 /// One simulated request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RequestRecord {
@@ -79,8 +95,9 @@ pub struct RequestRecord {
     pub arrival: Duration,
     /// Completion minus arrival: service times plus queue waits.
     pub latency: Duration,
-    /// Ok, or where and how the request failed: a chaos failure, a rate limit (429, with
-    /// `retry_after`) or a full queue (the node's overflow status).
+    /// Ok, or where and how the request failed: a chaos failure (its `kind`: status, reset,
+    /// malformed or hang), a deadline that fired (kind `timeout`, 504), a rate limit (429,
+    /// with `retry_after`) or a full queue (the node's overflow status).
     pub result: ChainResult,
     /// The hops that ran, in plan order, each with the queue wait before it: `start` is the
     /// actual offset from arrival; a hop whose branch a failure cancelled is cut at the
@@ -109,6 +126,8 @@ pub struct NodeStats {
     pub limited: u64,
     /// Requests refused at this node by a full queue, over reported requests.
     pub overflowed: u64,
+    /// Deadlines (`timeout:` spans and hangs) that fired at this node, over reported requests.
+    pub timed_out: u64,
 }
 
 /// Simulates `cfg` on `topo` under fixed `chaos`. Deterministic: same inputs, same report.
@@ -201,13 +220,9 @@ fn validate(
     }
     // The same limits live mode enforces (R6.9); the 5 min latency cap, with the hop
     // cap, keeps the virtual clock far inside `u64` nanoseconds.
-    // min(): a HashMap has no order, and the error must name the same node every run.
-    if let Some((id, e)) = chaos
-        .iter()
-        .filter_map(|(id, c)| c.validate().err().map(|e| (*id, e)))
-        .min()
-    {
-        return Err(format!("chaos on node {id}: {e}"));
+    // first_error() is ordered, so the error names the same node every run.
+    if let Some(e) = chaos.first_error() {
+        return Err(e);
     }
     let (mut arrivals, mut records, mut work) = (0.0, 0.0, 0.0);
     let mut out = Vec::with_capacity(cfg.streams.len());

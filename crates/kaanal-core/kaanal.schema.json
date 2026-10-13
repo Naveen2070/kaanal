@@ -300,6 +300,12 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
             "type": {
               "const": "gateway",
               "type": "string"
@@ -364,6 +370,12 @@
                 "string",
                 "null"
               ]
+            },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
             },
             "type": {
               "const": "service",
@@ -452,6 +464,12 @@
                 "null"
               ]
             },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
             "type": {
               "const": "monolith",
               "type": "string"
@@ -521,6 +539,12 @@
                 }
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+            },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
             },
             "type": {
               "const": "database",
@@ -602,6 +626,12 @@
                 }
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+            },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
             },
             "ttl": {
               "default": null,
@@ -688,6 +718,12 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
             "type": {
               "const": "external-api",
               "type": "string"
@@ -748,6 +784,12 @@
                 }
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+            },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
             },
             "token_ttl": {
               "default": null,

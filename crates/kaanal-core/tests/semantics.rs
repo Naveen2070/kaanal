@@ -4,8 +4,8 @@
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::exec::PlanItem;
 use kaanal_core::{
-    ChainOutcome, ChainRequest, ChainResult, ChaosState, Config, Dist, Endpoints, HopKind,
-    NodeChaos, Plan, Topology, execute, resolve_error, stable_hash,
+    ChainOutcome, ChainRequest, ChainResult, ChaosState, Config, Dist, Endpoints, FailKind,
+    HopKind, NodeChaos, Plan, Topology, execute, resolve_error, stable_hash,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -102,6 +102,7 @@ fn timeline(t: &Topology, o: &ChainOutcome) -> Vec<String> {
                 HopKind::Op(op) => op.name(),
                 HopKind::CacheHit => "hit",
                 HopKind::CacheMiss => "miss",
+                HopKind::Delay => "delay",
             };
             format!(
                 "{}.{kind}@{}+{}",
@@ -122,6 +123,7 @@ fn shape(p: &Plan) -> String {
             PlanItem::Fail { .. } => "X".to_string(),
             PlanItem::Fork { branches, size } => format!("F{branches}/{size}"),
             PlanItem::Branch { size } => format!("B{size}"),
+            PlanItem::Span { size, .. } => format!("S{size}"),
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -240,11 +242,12 @@ fn error_map_belongs_to_the_served_endpoint() {
         ChainResult::Err {
             node: db,
             status: 504,
+            kind: FailKind::Status,
             retry_after: None
         }
     );
     assert_eq!(
-        resolve_error(&get.error_map, "db", 504),
+        resolve_error(&get.error_map, "db", FailKind::Status, 504),
         (502, None),
         "not POST's 503"
     );
@@ -254,11 +257,61 @@ fn error_map_belongs_to_the_served_endpoint() {
         ChainResult::Err {
             node: db,
             status: 504,
+            kind: FailKind::Status,
             retry_after: None
         }
     );
-    assert_eq!(resolve_error(&post.error_map, "db", 504), (503, None));
+    assert_eq!(
+        resolve_error(&post.error_map, "db", FailKind::Status, 504),
+        (503, None)
+    );
     assert_eq!(e.warnings.len(), 1, "{:?}", e.warnings);
+}
+
+#[test]
+fn timeout_loads_on_every_node_kind_and_reaches_the_topology() {
+    let cfg = Config::from_yaml(
+        "version: 1\nnodes:\n  gw: { type: gateway, timeout: 2s }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms }, timeout: 500ms }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, net: 1ms }\n  - { from: app, to: db, net: 1ms }\n",
+    )
+    .unwrap();
+    let t = Topology::build(&cfg).unwrap();
+    assert_eq!(
+        t.nodes[t.id("gw").unwrap()].timeout,
+        Some(Duration::from_secs(2))
+    );
+    assert_eq!(
+        t.nodes[t.id("db").unwrap()].timeout,
+        Some(Duration::from_millis(500))
+    );
+}
+
+#[test]
+fn timeout_range_is_checked_with_a_positioned_error() {
+    let at = |bad: &str| {
+        let src = format!("version: 1\nnodes:\n  gw: {{ type: gateway, timeout: {bad} }}\n");
+        Config::from_yaml(&src)
+    };
+    for bad in ["0s", "301s", "-1s", "soon"] {
+        assert!(at(bad).is_err(), "{bad} must be rejected");
+    }
+    for (bad, want) in [("0s", "above 0"), ("301s", "at most 5 min")] {
+        let e = at(bad).unwrap_err().to_string();
+        assert!(e.contains(want), "{bad}: {e}");
+    }
+}
+
+#[test]
+fn timeout_boundaries_load_on_gateway_service_and_cache() {
+    for ok in ["300s", "1ns"] {
+        for node in [
+            format!("gw: {{ type: gateway, timeout: {ok} }}"),
+            format!("app: {{ type: service, timeout: {ok} }}"),
+            format!("c: {{ type: cache, timeout: {ok} }}"),
+        ] {
+            let src = format!("version: 1\nnodes:\n  {node}\n");
+            assert!(Config::from_yaml(&src).is_ok(), "{node} must load");
+        }
+    }
 }
 
 #[test]
@@ -429,6 +482,7 @@ fn parallel_fails_at_the_earliest_failure_and_cuts_siblings() {
         ChainResult::Err {
             node: t.id("db").unwrap(),
             status: 504,
+            kind: FailKind::Status,
             retry_after: None
         }
     );
@@ -453,6 +507,7 @@ fn parallel_fails_at_the_earliest_failure_and_cuts_siblings() {
         ChainResult::Err {
             node: t.id("pay").unwrap(),
             status: 500,
+            kind: FailKind::Status,
             retry_after: None
         }
     );
@@ -475,6 +530,7 @@ fn parallel_tie_goes_to_the_lowest_branch() {
             ChainResult::Err {
                 node: t.id(winner).unwrap(),
                 status,
+                kind: FailKind::Status,
                 retry_after: None,
             },
             "{branches}"
