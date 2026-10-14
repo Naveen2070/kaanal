@@ -206,15 +206,15 @@ cargo run -p kaanal -- validate -c kaanal.yaml
 
 All CLI commands run from the project directory where `kaanal up` was executed:
 
-| Command                                             | Description                                                                    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `kaanal up [-c config] [--port port] [--host host]` | Start the mock server in foreground.                                           |
-| `kaanal validate [-c config]`                       | Validate topology, YAML syntax, and OpenAPI specs.                             |
-| `kaanal schema`                                     | Print the JSON Schema for editor autocomplete.                                 |
-| `kaanal endpoints [--write]`                        | Add skeleton entries for spec routes to the endpoints file (append-only).      |
-| `kaanal status`                                     | Show running nodes and active chaos settings.                                  |
-| `kaanal chaos set <node> [flags]`                   | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--down`). |
-| `kaanal chaos clear [node]`                         | Clear chaos on one node or all nodes.                                          |
+| Command                                             | Description                                                                                                           |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c config] [--port port] [--host host]` | Start the mock server in foreground.                                                                                  |
+| `kaanal validate [-c config]`                       | Validate topology, YAML syntax, and OpenAPI specs.                                                                    |
+| `kaanal schema`                                     | Print the JSON Schema for editor autocomplete.                                                                        |
+| `kaanal endpoints [--write]`                        | Add skeleton entries for spec routes to the endpoints file (append-only).                                             |
+| `kaanal status`                                     | Show running nodes and active chaos settings.                                                                         |
+| `kaanal chaos set [node] [flags]`                   | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--endpoint "GET /x"`, `--down`). |
+| `kaanal chaos clear [node] [--endpoint KEY]`        | Clear chaos on one node, one endpoint, or all.                                                                        |
 
 Exit codes: `0` (success), `1` (error), `2` (no running instance found).
 

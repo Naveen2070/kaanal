@@ -9,13 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, Request, State};
+use axum::extract::rejection::{JsonRejection, QueryRejection};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
-use kaanal_core::{ChaosKey, NodeChaos, merge};
+use kaanal_core::{ChaosKey, ChaosLayer, ErrorKind, merge};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio_stream::wrappers::BroadcastStream;
@@ -110,20 +110,24 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// **Private.** The public JSON shape of a node's chaos settings.
+/// **Private.** The public JSON shape of one chaos entry.
 #[derive(Serialize)]
 struct ChaosView {
     latency_ms: u64,
     error_rate: f64,
+    error_kind: &'static str,
     error_status: u16,
     down: bool,
 }
 
-impl From<&NodeChaos> for ChaosView {
-    fn from(c: &NodeChaos) -> Self {
+impl From<&ChaosLayer> for ChaosView {
+    /// Unset fields show their defaults (what the layer does on its own).
+    fn from(l: &ChaosLayer) -> Self {
+        let c = merge(&[l]);
         ChaosView {
             latency_ms: u64::try_from(c.latency_add.as_millis()).unwrap_or(u64::MAX),
             error_rate: c.error_rate,
+            error_kind: c.error_kind.as_str(),
             error_status: c.error_status,
             down: c.down,
         }
@@ -132,15 +136,93 @@ impl From<&NodeChaos> for ChaosView {
 
 /// The accepted body of `PUT /__kaanal/chaos/{node}`.
 ///
-/// All fields are optional and merged into the node's existing settings;
+/// All fields are optional and merged into the existing settings;
 /// unknown keys are rejected.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChaosPatch {
     latency_ms: Option<u64>,
     error_rate: Option<f64>,
+    error_kind: Option<String>,
     error_status: Option<u16>,
     down: Option<bool>,
+}
+
+impl ChaosPatch {
+    /// The sparse layer this patch sets.
+    fn layer(&self) -> Result<ChaosLayer, Reject> {
+        let error_kind = match &self.error_kind {
+            None => None,
+            Some(k) => Some(ErrorKind::parse(k).ok_or_else(|| {
+                reject(
+                    StatusCode::BAD_REQUEST,
+                    "error_kind must be status, reset, hang or malformed",
+                )
+            })?),
+        };
+        Ok(ChaosLayer {
+            latency_add: self.latency_ms.map(Duration::from_millis),
+            error_rate: self.error_rate,
+            error_kind,
+            error_status: self.error_status,
+            down: self.down,
+        })
+    }
+}
+
+/// The accepted body of `PUT /__kaanal/chaos`: a [`ChaosPatch`] plus where it applies.
+/// (Spelled out rather than `flatten`ed so unknown keys are still rejected.) Keep its patch fields in
+/// step with [`ChaosPatch`]: a new chaos field must be added to both.
+///
+/// A `node` + `endpoint` pair is not checked against the endpoint's chain (a node it never visits just
+/// never fires), and a `HEAD` route is a different key from its `GET`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyedPatch {
+    node: Option<String>,
+    endpoint: Option<String>,
+    latency_ms: Option<u64>,
+    error_rate: Option<f64>,
+    error_kind: Option<String>,
+    error_status: Option<u16>,
+    down: Option<bool>,
+}
+
+/// The query of `DELETE /__kaanal/chaos`. A misspelt key must be a 400, never "no filter" (which wipes all).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClearQuery {
+    node: Option<String>,
+    endpoint: Option<String>,
+}
+
+/// **Private.** Merges `patch` into the layer under `key`, validates the merged result (limits
+/// live in core, R6.9) and stores it; a bad patch changes nothing. Returns the new view.
+fn apply_patch(st: &AppState, key: ChaosKey, patch: &ChaosPatch) -> Result<Json<Value>, Reject> {
+    let patch = patch.layer()?;
+    let mut chaos = st.chaos.write().expect("chaos lock poisoned");
+    let mut cur = chaos.layer(&key).cloned().unwrap_or_default();
+    cur.apply(&patch);
+    cur.validate()
+        .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
+    let view = json!(ChaosView::from(&cur));
+    chaos.set(key, cur);
+    Ok(Json(view))
+}
+
+/// **Private.** `METHOD /path` with the method upper-cased, the key `compile` uses.
+fn endpoint_key(e: &str) -> String {
+    match e.split_once(' ') {
+        Some((m, p)) => format!("{} {}", m.to_ascii_uppercase(), p),
+        None => e.to_string(),
+    }
+}
+
+/// **Private.** The id of a node by name; unknown (or empty) → 404.
+fn node_id(st: &AppState, node: &str) -> Result<usize, Reject> {
+    st.topo
+        .id(node)
+        .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))
 }
 
 /// `GET /__kaanal/topology` — nodes, edges and sorted route keys as JSON.
@@ -165,30 +247,37 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({ "nodes": nodes, "edges": edges, "routes": st.route_keys }))
 }
 
-/// `GET /__kaanal/chaos` — all active chaos, keyed by node name.
+/// `GET /__kaanal/chaos` — all active chaos:
+/// `{ "nodes": {name: view}, "endpoints": {key: view}, "node_at": [{node, endpoint, ...view}] }`.
 pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
     let chaos = st.chaos.read().expect("chaos lock poisoned");
-    // Node-only until the control API learns endpoint scopes.
-    let map: Map<String, Value> = chaos
-        .entries()
-        .into_iter()
-        .filter_map(|(k, l)| match k {
-            ChaosKey::Node(id) => Some((
-                st.topo.nodes[id].name.clone(),
-                json!(ChaosView::from(&merge(&[l]))),
-            )),
-            _ => None,
-        })
-        .collect();
-    Json(Value::Object(map))
+    let (mut nodes, mut endpoints, mut node_at) = (Map::new(), Map::new(), Vec::new());
+    for (k, l) in chaos.entries() {
+        let view = json!(ChaosView::from(l));
+        match k {
+            ChaosKey::Node(id) => {
+                nodes.insert(st.topo.nodes[id].name.clone(), view);
+            }
+            ChaosKey::Endpoint(e) => {
+                endpoints.insert(e, view);
+            }
+            ChaosKey::NodeAt(id, e) => {
+                let Value::Object(mut o) = view else { continue };
+                o.insert("node".into(), json!(st.topo.nodes[id].name));
+                o.insert("endpoint".into(), json!(e));
+                node_at.push(Value::Object(o));
+            }
+        }
+    }
+    Json(json!({ "nodes": nodes, "endpoints": endpoints, "node_at": node_at }))
 }
 
 /// `PUT /__kaanal/chaos/{node}` — merges a [`ChaosPatch`] into the node's settings
 /// (omitted fields keep their values) and returns the merged state.
 ///
-/// The merged result is checked by [`NodeChaos::validate`] (`error_rate` 0–1, `error_status`
-/// 500–504, `latency_ms` ≤ 300 000) before it is stored; a bad patch → 400 and nothing
-/// changes. Unknown node → 404, bad body → 4xx from the extractor.
+/// The merged result is checked by [`ChaosLayer::validate`] (`error_rate` 0–1, `error_status`
+/// 500–504 for every kind, `latency_ms` ≤ 300 000) before it is stored; a bad patch → 400 and
+/// nothing changes. Unknown node → 404, bad body → 4xx from the extractor.
 ///
 /// # Errors
 /// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
@@ -197,31 +286,58 @@ pub async fn set_chaos(
     Path(node): Path<String>,
     payload: Result<Json<ChaosPatch>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
-    let id = st
-        .topo
-        .id(&node)
-        .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))?;
+    let id = node_id(&st, &node)?;
     let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let mut chaos = st.chaos.write().expect("chaos lock poisoned");
-    // Merge into a copy and validate it, so a bad patch changes nothing (limits live in core, R6.9).
-    let mut c = chaos.resolve(id, "");
-    if let Some(ms) = p.latency_ms {
-        c.latency_add = Duration::from_millis(ms);
-    }
-    if let Some(r) = p.error_rate {
-        c.error_rate = r;
-    }
-    if let Some(s) = p.error_status {
-        c.error_status = s;
-    }
-    if let Some(d) = p.down {
-        c.down = d;
-    }
-    c.validate()
-        .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
-    let view = json!(ChaosView::from(&c));
-    chaos.insert(id, c);
-    Ok(Json(view))
+    apply_patch(&st, ChaosKey::Node(id), &p)
+}
+
+/// `PUT /__kaanal/chaos` — like [`set_chaos`] but keyed by `node`, `endpoint` or both (the node
+/// only when visited through that endpoint). At least one is required; an unknown node or
+/// endpoint → 404; an endpoint with no entry node (a static route and no gateway) → 400.
+///
+/// # Errors
+/// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
+pub async fn set_chaos_keyed(
+    State(st): State<Arc<AppState>>,
+    payload: Result<Json<KeyedPatch>, JsonRejection>,
+) -> Result<Json<Value>, Reject> {
+    let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
+    let node = p.node.as_deref().map(|n| node_id(&st, n)).transpose()?;
+    let endpoint = match p.endpoint.as_deref() {
+        None => None,
+        Some(e) => {
+            let key = endpoint_key(e);
+            let ep = st.endpoints.get(&key).ok_or_else(|| {
+                reject(StatusCode::NOT_FOUND, &format!("unknown endpoint '{key}'"))
+            })?;
+            if ep.entry_node.is_none() {
+                return Err(reject(
+                    StatusCode::BAD_REQUEST,
+                    &format!("endpoint '{key}' has no entry node (a static route needs a gateway)"),
+                ));
+            }
+            Some(key)
+        }
+    };
+    let key = match (node, endpoint) {
+        (Some(n), Some(e)) => ChaosKey::NodeAt(n, e),
+        (Some(n), None) => ChaosKey::Node(n),
+        (None, Some(e)) => ChaosKey::Endpoint(e),
+        (None, None) => {
+            return Err(reject(
+                StatusCode::BAD_REQUEST,
+                "set node, endpoint or both",
+            ));
+        }
+    };
+    let patch = ChaosPatch {
+        latency_ms: p.latency_ms,
+        error_rate: p.error_rate,
+        error_kind: p.error_kind,
+        error_status: p.error_status,
+        down: p.down,
+    };
+    apply_patch(&st, key, &patch)
 }
 
 /// `DELETE /__kaanal/chaos/{node}` — removes one node's chaos (204).
@@ -232,10 +348,7 @@ pub async fn clear_node(
     State(st): State<Arc<AppState>>,
     Path(node): Path<String>,
 ) -> Result<StatusCode, Reject> {
-    let id = st
-        .topo
-        .id(&node)
-        .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))?;
+    let id = node_id(&st, &node)?;
     st.chaos
         .write()
         .expect("chaos lock poisoned")
@@ -243,12 +356,29 @@ pub async fn clear_node(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `DELETE /__kaanal/chaos` — wipes all chaos (204).
-pub async fn clear_all(State(st): State<Arc<AppState>>) -> StatusCode {
-    st.chaos.write().expect("chaos lock poisoned").clear();
-    StatusCode::NO_CONTENT
+/// `DELETE /__kaanal/chaos?node=&endpoint=` — removes exactly the entry under that key (204,
+/// also when there was none); with no query, wipes all chaos.
+///
+/// # Errors
+/// Returns [`Reject`] 404 for an unknown node name.
+pub async fn clear_keyed(
+    State(st): State<Arc<AppState>>,
+    q: Result<Query<ClearQuery>, QueryRejection>,
+) -> Result<StatusCode, Reject> {
+    let Query(q) = q.map_err(|e| reject(e.status(), &e.body_text()))?;
+    let node = q.node.as_deref().map(|n| node_id(&st, n)).transpose()?;
+    let key = match (node, q.endpoint.as_deref().map(endpoint_key)) {
+        (Some(n), Some(e)) => ChaosKey::NodeAt(n, e),
+        (Some(n), None) => ChaosKey::Node(n),
+        (None, Some(e)) => ChaosKey::Endpoint(e),
+        (None, None) => {
+            st.chaos.write().expect("chaos lock poisoned").clear();
+            return Ok(StatusCode::NO_CONTENT);
+        }
+    };
+    st.chaos.write().expect("chaos lock poisoned").remove(&key);
+    Ok(StatusCode::NO_CONTENT)
 }
-
 // limitation: no cap on concurrent event streams. Each holds one broadcast receiver, and only a
 // caller with the 256-bit token can open one. Add a connection limit if the token ever leaves the local user.
 pub async fn events(

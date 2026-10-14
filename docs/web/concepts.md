@@ -34,13 +34,20 @@ Each database hop is one of three operations, inferred from the endpoint: `GET /
 
 ## Chaos
 
-Chaos is live, per-node runtime state — never part of the config file:
+Chaos is live runtime state (per node, per endpoint, or per node-at-endpoint) — never part of the config file:
 
 - **latency**: added to every visit of the node.
 - **error rate + status**: each visit fails with that probability and HTTP status.
 - **down**: every visit fails 503.
+- **kind**: how an error shows up. `status` (default) answers with the HTTP status; `reset` sends the start of the response and then drops the connection; `malformed` sends the right status with a body that is not valid JSON; `hang` never answers and ends as a 504 after the node's `timeout` (60 s without one).
 
 A failure stops the chain at that node and its status becomes the response — a database failure surfaces as a 5xx at the gateway, after the time already spent. That's how cascading failures look in real systems.
+
+**Where the failure happens matters.** At the gateway or the service that owns the route, `reset` and `malformed` reach your client as they are. Deeper (a database, a cache call, an external API) they become a 502, and a timeout a 504, unless the endpoint's `error_map` says otherwise. `error_map` keys can be a node name, a kind (`reset`, `malformed`, `timeout`), a status or a class like `5xx`, tried in that order. A cache never fails a request: a failing cache is a miss.
+
+**Timeouts.** Any node can have `timeout: 1s`. It is a deadline for calls to that node, covering its queue wait, its own work and everything it calls. When it passes, the caller gets a 504 (the error body has `"kind":"timeout"`) at that moment — but the work that was already running keeps its slot until it ends, as a real database does. A slow dependency therefore turns into a pile of timeouts, not a clean recovery.
+
+**Chaos on one route.** Chaos can be set on a node, on an endpoint (`GET /orders`, once at its front door) or on a node only while it serves one endpoint. A node entry and a node-at-endpoint entry that match a visit **merge**: latencies add, `down` is an OR, error rates combine as independent chances, and the last-set kind and status win. An endpoint entry is separate: it is rolled once at the endpoint's front door (its latency is a leading delay on the entry node, its failure belongs to the entry node) and is not merged into the node visits behind it. See [chaos internals](../source/chaos.md). Merging differs from service meshes, where the most specific rule replaces the others; to get "only this", clear the broader entry.
 
 ## Determinism
 

@@ -69,6 +69,20 @@ impl Up {
     fn run(&self, args: &[&str]) -> Output {
         bin().args(args).current_dir(&self.dir).output().unwrap()
     }
+
+    /// The status a plain GET of `path` gets from the running mock.
+    fn get_status(&self, path: &str) -> u16 {
+        let run: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(self.dir.join(".kaanal/run.json")).unwrap(),
+        )
+        .unwrap();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let url = format!("http://127.0.0.1:{}{path}", run["port"]);
+        agent.get(&url).call().unwrap().status().as_u16()
+    }
 }
 
 impl Drop for Up {
@@ -189,6 +203,34 @@ fn live_status_chaos_and_errors() {
     let out = up.run(&["status"]);
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(text.contains("+300ms, 10% errors (503)"), "{text}");
+
+    // A failure kind shows by name, and an endpoint can be targeted.
+    let out = up.run(&[
+        "chaos",
+        "set",
+        "db",
+        "--kind",
+        "hang",
+        "--error-rate",
+        "100%",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let out = up.run(&["status"]);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(text.contains("100% errors (hang)"), "{text}");
+    let out = up.run(&["chaos", "clear", "db"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let out = up.run(&["chaos", "set", "--endpoint", "get /users/{id}", "--down"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(up.get_status("/users/42"), 503, "the endpoint is down");
+    let text = String::from_utf8_lossy(&up.run(&["status"]).stdout).into_owned();
+    assert!(
+        text.contains("endpoint GET /users/{id}:") && text.contains("DOWN"),
+        "{text}"
+    );
+    let out = up.run(&["chaos", "clear", "--endpoint", "GET /users/{id}"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(up.get_status("/users/42"), 200, "cleared");
 
     // Server-side errors print the server's text and exit 1.
     let out = up.run(&["chaos", "set", "redis", "--down"]);

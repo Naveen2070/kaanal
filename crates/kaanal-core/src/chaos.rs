@@ -118,8 +118,8 @@ impl Default for NodeChaos {
 
 impl NodeChaos {
     /// The one set of chaos limits, shared by the control API and the simulator (rule R6.9):
-    /// `latency_add` at most [`MAX_LATENCY_ADD`], `error_rate` within 0..=1, and for kind
-    /// `status` an `error_status` within 500–504 (4xx is for pins and cycle states, not
+    /// `latency_add` at most [`MAX_LATENCY_ADD`], `error_rate` within 0..=1, and an
+    /// `error_status` (whatever the kind) within 500–504 (4xx is for pins and cycle states, not
     /// random chaos).
     ///
     /// # Errors
@@ -134,7 +134,7 @@ impl NodeChaos {
         if !(0.0..=1.0).contains(&self.error_rate) {
             return Err("error_rate must be between 0 and 1".into());
         }
-        if self.error_kind == ErrorKind::Status && !(500..=504).contains(&self.error_status) {
+        if !(500..=504).contains(&self.error_status) {
             return Err("error_status must be 500-504".into());
         }
         Ok(())
@@ -183,11 +183,8 @@ impl ChaosLayer {
         if self.error_rate.is_some_and(|r| !(0.0..=1.0).contains(&r)) {
             return Err("error_rate must be between 0 and 1".into());
         }
-        // The status only matters for kind `status`; a layer that sets a status without a kind is
-        // checked as `status` because the kind it merges into may well be `status`.
-        let kind = self.error_kind.unwrap_or(ErrorKind::Status);
-        if kind == ErrorKind::Status && self.error_status.is_some_and(|s| !(500..=504).contains(&s))
-        {
+        // Range-checked whatever the kind: a status set under `reset` is still a status somebody typed.
+        if self.error_status.is_some_and(|s| !(500..=504).contains(&s)) {
             return Err("error_status must be 500-504".into());
         }
         Ok(())
@@ -202,7 +199,8 @@ impl ChaosLayer {
     }
 }
 
-/// Folds layers (least specific first) into one [`NodeChaos`]: latencies add, rates combine as
+/// Folds layers (least specific first) into one [`NodeChaos`]: latencies add (so a node layer and
+/// a node-at-endpoint layer, each within [`MAX_LATENCY_ADD`], can sum past it; the sum is not re-checked), rates combine as
 /// independent chances (`p + r - p*r`; one set rate comes back bit-for-bit), `down` is an OR,
 /// and the last kind and status set win.
 #[must_use]
@@ -363,9 +361,8 @@ impl ChaosState {
     pub fn first_error(&self) -> Option<String> {
         self.entries().into_iter().find_map(|(k, l)| {
             l.validate().err().map(|e| match k {
-                ChaosKey::Node(id) | ChaosKey::NodeAt(id, _) => {
-                    format!("chaos on node {id}: {e}")
-                }
+                ChaosKey::Node(id) => format!("chaos on node {id}: {e}"),
+                ChaosKey::NodeAt(id, ep) => format!("chaos on node {id} at endpoint '{ep}': {e}"),
                 ChaosKey::Endpoint(ep) => format!("chaos on endpoint '{ep}': {e}"),
             })
         })
@@ -385,5 +382,31 @@ impl FromIterator<(NodeId, NodeChaos)> for ChaosState {
             s.insert(n, c);
         }
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_status_is_range_checked_for_every_kind() {
+        let bad = ChaosLayer {
+            error_kind: Some(ErrorKind::Reset),
+            error_status: Some(200),
+            ..ChaosLayer::default()
+        };
+        assert!(bad.validate().is_err());
+        let kind_only = ChaosLayer {
+            error_kind: Some(ErrorKind::Reset),
+            ..ChaosLayer::default()
+        };
+        assert!(kind_only.validate().is_ok());
+        let dense = NodeChaos {
+            error_kind: ErrorKind::Hang,
+            error_status: 200,
+            ..NodeChaos::default()
+        };
+        assert!(dense.validate().is_err());
     }
 }

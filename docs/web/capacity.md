@@ -72,6 +72,5 @@ Kaanal's offline simulator runs the same rules on a virtual clock and reports pe
 
 ## Not modelled
 
-- **Queue timeouts.** A queued request waits until it gets a slot.
 - **Changing a limit while Kaanal runs.** Limits come from `kaanal.yaml`; edit the file and restart. (Runtime control comes with the control API.)
 - **Limits on edges.** Limits belong to nodes.

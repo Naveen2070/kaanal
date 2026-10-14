@@ -26,7 +26,7 @@
 <p id="err" role="alert"></p>
 <p id="note" role="status"></p>
 <div class="wrap"><table>
-  <thead><tr><th>Node</th><th>Type</th><th>rps</th><th>err %</th><th>Latency +ms</th><th>Error %</th><th>Status</th><th>Down</th><th></th></tr></thead>
+  <thead><tr><th>Node</th><th>Type</th><th>rps</th><th>err %</th><th>Latency +ms</th><th>Error %</th><th>Status</th><th>Kind</th><th>Down</th><th></th></tr></thead>
   <tbody id="nodes"></tbody>
 </table></div>
 <h2>Requests</h2>
@@ -83,16 +83,17 @@ function count(ev) {
     let c = b.get(name);
     if (!c) { c = { hits: 0, bad: 0 }; b.set(name, c); }
     c.hits++;
-    if (ev.status >= 500) c.bad++;
+    if (ev.status >= 500 || ev.failed_node) c.bad++; // a reset or cut-off body is a failure although it answers 200
   }
 }
 
 async function loadNodes() {
-  const [topo, chaos] = await Promise.all([api('/__kaanal/topology'), api('/__kaanal/chaos')]);
+  const [topo, all] = await Promise.all([api('/__kaanal/topology'), api('/__kaanal/chaos')]);
+  const chaos = all.nodes; // endpoint and node-at-endpoint chaos is CLI/API only
   const body = document.getElementById('nodes'); body.replaceChildren();
   stats.clear();
   for (const n of topo.nodes) {
-    const c = Object.hasOwn(chaos, n.name) ? chaos[n.name] : { latency_ms: 0, error_rate: 0, error_status: 503, down: false };
+    const c = Object.hasOwn(chaos, n.name) ? chaos[n.name] : { latency_ms: 0, error_rate: 0, error_status: 503, error_kind: 'status', down: false };
     const tr = el('tr');
     tr.append(el('td', n.name), el('td', n.type + (n.flavor ? ' · ' + n.flavor : '')));
     const rps = el('td', '0.0'), er = el('td', '0'); tr.append(rps, er); stats.set(n.name, { rps, er });
@@ -100,12 +101,15 @@ async function loadNodes() {
     const rate = numInput(0, 100, Math.round(c.error_rate * 100));
     const status = el('select');
     for (const s of [500, 501, 502, 503, 504]) { const o = el('option', s); o.value = s; o.selected = s === c.error_status; status.append(o); }
+    const kind = el('select');
+    for (const k of ['status', 'reset', 'hang', 'malformed']) { const o = el('option', k); o.value = k; o.selected = k === c.error_kind; kind.append(o); }
     const down = el('input'); down.type = 'checkbox'; down.checked = c.down;
     const apply = el('button', 'Apply'), clear = el('button', 'Clear');
     // Accessible names: the column headings are not associated with these controls.
     lat.setAttribute('aria-label', n.name + ': extra latency in ms');
     rate.setAttribute('aria-label', n.name + ': error percent');
     status.setAttribute('aria-label', n.name + ': error status');
+    kind.setAttribute('aria-label', n.name + ': error kind');
     down.setAttribute('aria-label', n.name + ': down');
     apply.setAttribute('aria-label', 'Apply chaos to ' + n.name);
     clear.setAttribute('aria-label', 'Clear chaos on ' + n.name);
@@ -114,11 +118,11 @@ async function loadNodes() {
       const ms = Number(lat.value), pct = Number(rate.value);
       if (!Number.isInteger(ms) || ms < 0 || ms > MAX_LATENCY_MS) return say('Latency must be a whole number from 0 to ' + MAX_LATENCY_MS + ' ms.');
       if (!Number.isFinite(pct) || pct < 0 || pct > 100) return say('Error % must be from 0 to 100.');
-      api(url, { method: 'PUT', body: JSON.stringify({ latency_ms: ms, error_rate: pct / 100, error_status: Number(status.value), down: down.checked }) })
+      api(url, { method: 'PUT', body: JSON.stringify({ latency_ms: ms, error_rate: pct / 100, error_status: Number(status.value), error_kind: kind.value, down: down.checked }) })
         .then(() => say('')).catch(e => say(e.message));
     });
     clear.addEventListener('click', () => api(url, { method: 'DELETE' }).then(() => { say(''); return loadNodes(); }).catch(e => say(e.message)));
-    for (const x of [lat, rate, status, down]) { const td = el('td'); td.append(x); tr.append(td); }
+    for (const x of [lat, rate, status, kind, down]) { const td = el('td'); td.append(x); tr.append(td); }
     const td = el('td'); td.append(apply, ' ', clear); tr.append(td);
     body.append(tr);
   }
@@ -126,9 +130,9 @@ async function loadNodes() {
 
 function addRow(ev) {
   const rows = document.getElementById('rows');
-  const tr = el('tr', undefined, ev.status >= 500 ? 'bad' : '');
+  const tr = el('tr', undefined, ev.status >= 500 || ev.failed_node ? 'bad' : '');
   tr.append(el('td', new Date(ev.ts_ms).toLocaleTimeString()), el('td', ev.method), el('td', ev.path),
-            el('td', ev.status), el('td', ev.ms), el('td', ev.failed_node || ''));
+            el('td', ev.status), el('td', ev.ms), el('td', ev.failed_node ? ev.failed_node + (ev.kind ? ' (' + ev.kind + ')' : '') : ''));
   rows.prepend(tr);
   while (rows.children.length > MAX_ROWS) rows.lastChild.remove();
 }

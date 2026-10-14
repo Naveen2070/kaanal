@@ -34,11 +34,13 @@ The running topology.
 
 ### `GET /__kaanal/chaos`
 
-All active chaos, keyed by node name. Empty object when nothing is set.
+All active chaos, in three groups. Empty groups when nothing is set. (Before the failures release this was one flat map by node name.)
 
 ```json
 {
-  "db": { "latency_ms": 300, "error_rate": 0.1, "error_status": 503, "down": false }
+  "nodes": { "db": { "latency_ms": 300, "error_rate": 0.1, "error_kind": "status", "error_status": 503, "down": false } },
+  "endpoints": { "GET /orders": { "latency_ms": 0, "error_rate": 0.5, "error_kind": "reset", "error_status": 503, "down": false } },
+  "node_at": [{ "node": "db", "endpoint": "GET /orders", "latency_ms": 100, "error_rate": 0, "error_kind": "status", "error_status": 503, "down": false }]
 }
 ```
 
@@ -47,21 +49,30 @@ All active chaos, keyed by node name. Empty object when nothing is set.
 **Merges** a patch into the node's chaos — fields you omit keep their current values. Returns the merged state.
 
 ```json
-{ "latency_ms": 300, "error_rate": 0.1, "error_status": 504, "down": true }
+{ "latency_ms": 300, "error_rate": 0.1, "error_kind": "status", "error_status": 504, "down": true }
 ```
 
-| Field          | Rules                                                      |
-| -------------- | ---------------------------------------------------------- |
-| `latency_ms`   | integer, 0 – 300 000                                       |
-| `error_rate`   | number, 0.0 – 1.0                                          |
-| `error_status` | integer, 500 – 504                                         |
-| `down`         | boolean — when true, everything through the node fails 503 |
+| Field          | Rules                                                                    |
+| -------------- | ------------------------------------------------------------------------ |
+| `latency_ms`   | integer, 0 – 300 000                                                     |
+| `error_rate`   | number, 0.0 – 1.0                                                        |
+| `error_kind`   | `status` (default), `reset`, `hang` or `malformed`; anything else is 400 |
+| `error_status` | integer, 500 – 504 (checked for every kind)                              |
+| `down`         | boolean — when true, everything through the node fails 503               |
 
 Unknown node → `404 "unknown node '<name>'"`. Out-of-range values → `400`. Unknown JSON keys → rejected.
 
+### `PUT /__kaanal/chaos`
+
+Like the per-node route, but the body also names where the chaos applies: `node`, `endpoint` (for example `"GET /orders"`; the method is case-insensitive) or both (the node only while it serves that endpoint). One of them is required (`400` otherwise); an unknown node or endpoint is `404`. A node entry and a node-at-endpoint entry that match a visit merge (latencies add, `down` is an OR, error rates combine as independent chances, the last-set kind and status win). An endpoint entry is a separate roll at the front door, before the chain, and is not merged into the nodes behind it (see [chaos internals](../source/chaos.md#endpoint-chaos-and-keys)).
+
+```json
+{ "endpoint": "GET /orders", "error_rate": 1.0, "error_kind": "reset" }
+```
+
 ### `DELETE /__kaanal/chaos/{node}` / `DELETE /__kaanal/chaos`
 
-Clear one node (`404` if unknown) or all chaos. Both return `204`.
+Clear one node (`404` if unknown) or all chaos. Both return `204`. `DELETE /__kaanal/chaos?node=&endpoint=` clears exactly the entry under that key (`node`, `endpoint` or both) and leaves the others; an unknown query parameter is `400` and clears nothing, an unknown endpoint is `204` (nothing to remove) and an empty or unknown `node` is `404`.
 
 ### `GET /__kaanal/events`
 
@@ -69,13 +80,14 @@ Server-Sent Events stream of every mock request as it completes.
 
 ```
 event: request
-data: {"ts_ms":1759900000000,"method":"GET","path":"/users/7","status":200,"ms":12,"nodes":["nginx","app","db"],"failed_node":null}
+data: {"ts_ms":1759900000000,"method":"GET","path":"/users/7","status":200,"ms":12,"nodes":["nginx","app","db"],"failed_node":null,"kind":null}
 
 event: lagged
 data: 37
 ```
 
 - `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header (parallel branches in `[a|b]`, cache lookups as `hit`/`miss`, long chains ending `,...+N hops`).
+- `kind` is `reset`, `malformed` or `timeout` when the request failed that way (a reset or cut-off body still answers `200`, so the status alone does not show it); `null` otherwise.
 - `lagged` means the stream fell behind and skipped that many events.
 
 ### `GET /__kaanal/ui`

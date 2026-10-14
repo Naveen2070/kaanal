@@ -16,12 +16,13 @@ A reverse proxy, API gateway or load balancer. Optional, at most one. With a gat
 nginx: { type: gateway, flavor: nginx, proc: 1ms }
 ```
 
-| Field         | Meaning                                                                                                      | Default   | Status     |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
-| `flavor`      | Free-text label shown in status output (`nginx`, `envoy`)                                                    | none      | active now |
-| `proc`        | Processing time per request                                                                                  | zero      | active now |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| `flavor`      | Free-text label shown in status output (`nginx`, `envoy`)                                                                                                                                                                                      | none      | active now |
+| `proc`        | Processing time per request                                                                                                                                                                                                                    | zero      | active now |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
 ## `service`
 
@@ -31,12 +32,13 @@ A backend service. It may carry an OpenAPI 3.0 `spec`. Without a gateway, the ro
 app: { type: service, spec: openapi.yaml, proc: { p50: 5ms, p99: 20ms } }
 ```
 
-| Field         | Meaning                                                                                                      | Default   | Status     |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
-| `spec`        | OpenAPI 3.0 file, relative to the config file                                                                | none      | active now |
-| `proc`        | Processing time per request, charged wherever a chain reaches the node                                       | zero      | active now |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| `spec`        | OpenAPI 3.0 file, relative to the config file                                                                                                                                                                                                  | none      | active now |
+| `proc`        | Processing time per request, charged wherever a chain reaches the node                                                                                                                                                                         | zero      | active now |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
 ## `monolith`
 
@@ -46,14 +48,15 @@ A service that can also be its own database. With `ops` or a `flavor` it has inl
 core: { type: monolith, spec: openapi.yaml, proc: 3ms, flavor: mysql, ops: { read: 1ms } }
 ```
 
-| Field         | Meaning                                                                                                      | Default   | Status     |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
-| `spec`        | OpenAPI 3.0 file, relative to the config file                                                                | none      | active now |
-| `proc`        | Processing time per request, charged wherever a chain reaches the node                                       | zero      | active now |
-| `ops`         | Inline `read`, `write`, `scan` costs; any you leave out comes from `flavor`                                  | none      | active now |
-| `flavor`      | Preset that fills `ops` you left out: `postgres`, `mysql`, `mongodb`                                         | none      | active now |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| `spec`        | OpenAPI 3.0 file, relative to the config file                                                                                                                                                                                                  | none      | active now |
+| `proc`        | Processing time per request, charged wherever a chain reaches the node                                                                                                                                                                         | zero      | active now |
+| `ops`         | Inline `read`, `write`, `scan` costs; any you leave out comes from `flavor`                                                                                                                                                                    | none      | active now |
+| `flavor`      | Preset that fills `ops` you left out: `postgres`, `mysql`, `mongodb`                                                                                                                                                                           | none      | active now |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
 ## `database`
 
@@ -63,13 +66,14 @@ A data store with costs for `read`, `write` and `scan`. Give all three, or a `fl
 db: { type: database, flavor: postgres, ops: { write: 9ms } }
 ```
 
-| Field         | Meaning                                                                                                      | Default   | Status     |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
-| `ops`         | `read`, `write`, `scan` costs; required in full unless `flavor` fills them                                   | none      | active now |
-| `flavor`      | Preset for ops you left out: `postgres`, `mysql`, `mongodb`                                                  | none      | active now |
-| `pool`        | Connection pool: `size` (at least 1), `queue` (default 0), `overflow_status` (500 to 504, default 503)       | none      | active now |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| `ops`         | `read`, `write`, `scan` costs; required in full unless `flavor` fills them                                                                                                                                                                     | none      | active now |
+| `flavor`      | Preset for ops you left out: `postgres`, `mysql`, `mongodb`                                                                                                                                                                                    | none      | active now |
+| `pool`        | Connection pool: `size` (at least 1), `queue` (default 0), `overflow_status` (500 to 504, default 503)                                                                                                                                         | none      | active now |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
 ## `cache`
 
@@ -79,15 +83,16 @@ A cache in front of slower nodes, with a hit ratio and the cost of a hit and of 
 cache: { type: cache, flavor: redis, hit_ratio: 0.8 }
 ```
 
-| Field         | Meaning                                                                                                      | Default     | Status                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | ----------- | ------------------------------------ |
-| `flavor`      | Preset for `hit_ratio`, `hit` and `miss`: `redis`, `memcached`                                               | none        | active now                           |
-| `hit_ratio`   | Share of lookups that hit, 0 to 1                                                                            | from flavor | active now                           |
-| `hit`         | Cost of a hit                                                                                                | from flavor | active now                           |
-| `miss`        | Cost of finding out it is a miss                                                                             | from flavor | active now                           |
-| `ttl`         | Entry lifetime                                                                                               | none        | accepted and checked, not active yet |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited   | active now                           |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none        | active now                           |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default     | Status                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------ |
+| `flavor`      | Preset for `hit_ratio`, `hit` and `miss`: `redis`, `memcached`                                                                                                                                                                                 | none        | active now                           |
+| `hit_ratio`   | Share of lookups that hit, 0 to 1                                                                                                                                                                                                              | from flavor | active now                           |
+| `hit`         | Cost of a hit                                                                                                                                                                                                                                  | from flavor | active now                           |
+| `miss`        | Cost of finding out it is a miss                                                                                                                                                                                                               | from flavor | active now                           |
+| `ttl`         | Entry lifetime                                                                                                                                                                                                                                 | none        | accepted and checked, not active yet |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited   | active now                           |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none        | active now                           |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none        | active now                           |
 
 ## `external-api`
 
@@ -97,14 +102,15 @@ A third-party HTTP API such as payments or email.
 pay: { type: external-api, proc: 50ms, error_rate: 0.01 }
 ```
 
-| Field         | Meaning                                                                                                      | Default   | Status                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ------------------------------------ |
-| `proc`        | Response time of the API                                                                                     | zero      | active now                           |
-| `error_rate`  | Baseline share of failing calls, 0 to 1                                                                      | none      | accepted and checked, not active yet |
-| `proxy`       | Real upstream URL (`http://` or `https://`)                                                                  | none      | accepted and checked, not active yet |
-| `pool`        | Connection pool, as on `database`                                                                            | none      | active now                           |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now                           |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now                           |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------ |
+| `proc`        | Response time of the API                                                                                                                                                                                                                       | zero      | active now                           |
+| `error_rate`  | Baseline share of failing calls, 0 to 1                                                                                                                                                                                                        | none      | accepted and checked, not active yet |
+| `proxy`       | Real upstream URL (`http://` or `https://`)                                                                                                                                                                                                    | none      | accepted and checked, not active yet |
+| `pool`        | Connection pool, as on `database`                                                                                                                                                                                                              | none      | active now                           |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now                           |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now                           |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now                           |
 
 ## `auth`
 
@@ -119,14 +125,15 @@ login:
   users: [{ username: alice, password: secret, roles: [admin], scopes: [read] }]
 ```
 
-| Field         | Meaning                                                                                                      | Default   | Status     |
-| ------------- | ------------------------------------------------------------------------------------------------------------ | --------- | ---------- |
-| `proc`        | Cost of one login, one JWKS request or one gateway token check                                               | zero      | active now |
-| `users`       | Accounts that can log in (`username` unique, `password`, `roles`, `scopes`, `claims`)                        | none      | active now |
-| `token_ttl`   | Lifetime of issued tokens, whole seconds, 1s to 1 day                                                        | 1h        | active now |
-| `claims`      | Extra claims in every token (a user's own `claims` win)                                                      | none      | active now |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited | active now |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none      | active now |
+| Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| `proc`        | Cost of one login, one JWKS request or one gateway token check                                                                                                                                                                                 | zero      | active now |
+| `users`       | Accounts that can log in (`username` unique, `password`, `roles`, `scopes`, `claims`)                                                                                                                                                          | none      | active now |
+| `token_ttl`   | Lifetime of issued tokens, whole seconds, 1s to 1 day                                                                                                                                                                                          | 1h        | active now |
+| `claims`      | Extra claims in every token (a user's own `claims` win)                                                                                                                                                                                        | none      | active now |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
+| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
 ## Edges: who may call whom
 

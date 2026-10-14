@@ -18,6 +18,7 @@ The token rides in the URL **fragment** (`#…`), which browsers never send to a
 | rps / err %   | Rolling 10-second window, recomputed every second from the event stream. |
 | Latency +ms   | Extra latency input (0–300 000).                                         |
 | Error %       | Failure probability input (0–100).                                       |
+| Kind          | Failure kind select (status, reset, hang, malformed); sent with Apply.   |
 | Status        | Failure status select (500–504).                                         |
 | Down          | Hard-outage checkbox.                                                    |
 | Apply / Clear | PUTs the merged chaos patch for that row, or DELETEs it.                 |

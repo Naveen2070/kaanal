@@ -22,14 +22,14 @@ The only public surface the binary uses. One axum router serves **both** the con
 
 ## Route table
 
-| Route                               | Handler                             | Notes                                                                     |
-| ----------------------------------- | ----------------------------------- | ------------------------------------------------------------------------- |
-| `GET /__kaanal/health`              | inline                              | `{ "ok": true }`; no token needed (liveness probe)                        |
-| `GET /__kaanal/topology`            | `control::topology`                 | nodes, edges, route keys                                                  |
-| `GET/DELETE /__kaanal/chaos`        | `control::get_chaos` / `clear_all`  | list / wipe all chaos                                                     |
-| `PUT/DELETE /__kaanal/chaos/{node}` | `control::set_chaos` / `clear_node` | merge a patch / clear one node                                            |
-| `GET /__kaanal/events`              | `control::events`                   | SSE stream of request events                                              |
-| `GET /__kaanal/ui`                  | `control::ui`                       | embedded HTML page; no token needed (page reads it from the URL fragment) |
-| _(fallback)_                        | `mock::handle`                      | every other path → mock engine                                            |
+| Route                               | Handler                                                  | Notes                                                                                       |
+| ----------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET /__kaanal/health`              | inline                                                   | `{ "ok": true }`; no token needed (liveness probe)                                          |
+| `GET /__kaanal/topology`            | `control::topology`                                      | nodes, edges, route keys                                                                    |
+| `GET/PUT/DELETE /__kaanal/chaos`    | `control::get_chaos` / `set_chaos_keyed` / `clear_keyed` | nested list / keyed set (node, endpoint or both) / clear a key or, with no query, all chaos |
+| `PUT/DELETE /__kaanal/chaos/{node}` | `control::set_chaos` / `clear_node`                      | merge a patch / clear one node                                                              |
+| `GET /__kaanal/events`              | `control::events`                                        | SSE stream of request events                                                                |
+| `GET /__kaanal/ui`                  | `control::ui`                                            | embedded HTML page; no token needed (page reads it from the URL fragment)                   |
+| _(fallback)_                        | `mock::handle`                                           | every other path → mock engine                                                              |
 
 The `route_layer(guard)` covers exactly the routes above it in the builder — a new control route added there cannot forget authentication.

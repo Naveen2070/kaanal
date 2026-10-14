@@ -82,7 +82,7 @@ nodes:
 
 ## Error mapping
 
-`error_map` turns a failure into the response you want. The failing node's name is tried first, then the exact status, then its class (`5xx`); with no match the failure passes through unchanged. A value is a status number or `{ status, body }`.
+`error_map` turns a failure into the response you want. The failing node's name is tried first, then the failure kind (`reset`, `malformed` or `timeout`), then the exact status, then its class (`5xx`); with no match a status failure keeps its own status, a deep `reset` or `malformed` becomes a 502 and a `timeout` a 504, and at the gateway or the route's owner a `reset` or `malformed` breaks the connection or the body instead (a node or kind key still wins there). A value is a status number or `{ status, body }`.
 
 An endpoint maps only its own errors: when a step uses `via:`, the `error_map` of the endpoint it points at is not used, and `kaanal validate` warns about it.
 
@@ -156,5 +156,5 @@ kaanal.endpoints.yaml:3:13: endpoint 'GET /users/{id}': unknown node 'pay'
 
 - A cache hit is a dice roll at the node's `hit_ratio`; the cache remembers nothing between requests.
 - No connection reuse and no TLS cost.
-- No retries and no timeouts.
+- No retries. A `timeout:` on a node is a deadline for calls to it (see [nodes.md](nodes.md)); there are no per-edge or per-caller timeouts.
 - A `parallel` branch cancelled by a sibling's failure still uses the capacity it had already taken (a running hop finishes; a queued one leaves the line), live and in the simulator.

@@ -16,7 +16,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/dist.rs`        | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                               |
 | `src/chaos.rs`       | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | `NodeChaos` / `ChaosState` runtime state                              |
 | `src/chain.rs`       | [kaanal-core/chain.md](kaanal-core/chain.md)             | Endpoint compile: default chains, via/with, limits, error_map lookup  |
-| `src/exec.rs`        | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, determinism                |
+| `src/exec.rs`        | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, spans, determinism         |
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)
 
@@ -38,6 +38,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/control.rs` | [kaanal-server/control.md](kaanal-server/control.md) | Control API handlers + the auth/Host guard          |
 | `src/mock.rs`    | [kaanal-server/mock.md](kaanal-server/mock.md)       | Mock request handler, trace header, CORS            |
 | `src/state.rs`   | [kaanal-server/state.md](kaanal-server/state.md)     | `AppState::build` load pipeline, route conflicts    |
+| `src/wire.rs`    | [kaanal-server/wire.md](kaanal-server/wire.md)       | `Cut` body stream for the `reset` failure kind      |
 | `src/ui.html`    | [../../web/web-ui.md](../../web/web-ui.md)           | Embedded status page (documented with the web docs) |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)

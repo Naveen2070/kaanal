@@ -144,10 +144,16 @@ fn validate_checks_only_the_fields_that_are_set() {
         .validate()
         .is_err()
     );
-    // reset/malformed ignore error_status
+    // the status is range-checked whatever the kind
     let l = ChaosLayer {
         error_kind: Some(ErrorKind::Reset),
         error_status: Some(404),
+        ..Default::default()
+    };
+    assert!(l.validate().is_err());
+    let l = ChaosLayer {
+        error_kind: Some(ErrorKind::Reset),
+        error_status: Some(503),
         ..Default::default()
     };
     assert!(l.validate().is_ok());
@@ -162,6 +168,20 @@ fn old_collect_and_insert_still_work_and_first_error_is_deterministic() {
     let s: ChaosState = [(3usize, bad.clone()), (1usize, bad)].into_iter().collect();
     let msg = s.first_error().unwrap();
     assert!(msg.contains("node 1"), "smallest key first: {msg}");
+}
+
+#[test]
+fn first_error_names_the_endpoint_of_keyed_entries() {
+    let bad = ChaosLayer {
+        error_rate: Some(2.0),
+        ..Default::default()
+    };
+    let mut s = ChaosState::default();
+    s.set(ChaosKey::NodeAt(1, "GET /x".into()), bad.clone());
+    assert!(s.first_error().unwrap().contains("GET /x"));
+    let mut s = ChaosState::default();
+    s.set(ChaosKey::Endpoint("GET /y".into()), bad);
+    assert!(s.first_error().unwrap().contains("GET /y"));
 }
 
 #[test]

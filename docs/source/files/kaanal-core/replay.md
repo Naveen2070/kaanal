@@ -61,4 +61,17 @@ A failure the engine produces cancels queued siblings exactly like a planned one
 
 **D17 through zero-duration hops.** After a failure at instant T, a sibling branch stops at its next hop, except that it steps over zero-duration hops (and zero-duration edge hops) at nodes with no slot limit and no rate limit, without starting them, so a lower-index `Fail` reached at T through them still replaces the winner, as `execute()` decides. A zero-duration hop at a gated or rate-limited node is not stepped over.
 
+## Deadlines (B2a)
+
+Full model: [../../chaos.md](../../chaos.md). The walk puts `PlanItem::Span { node, timeout, at, size }` markers in the plan; the engine alone decides deadlines (Z3), so live and the simulator cannot drift.
+
+- **Entering a span.** A token reaching a `Span` records a `SpanState` (plan index, end index, node, deadline seq, deadline time, parent span on the same token) in a per-request list kept in `Scratch` and recycled (R6.13), and pushes a `Deadline` event at `now + timeout`.
+- **Event order (Z14).** A deadline event's seq has the `DEADLINE` bit (`1 << 62`) set, so it sorts after every other event of the same instant without changing the heap key or the simulator's `(time, seq)` merge (Q1). A callee ending exactly at its deadline succeeds; a planned `Fail` reached at that instant is decided first. Of several of one request's open spans due at one instant, the lowest plan index (the outer) fires; the rest find the request answered.
+- **Closing.** A span closes when its opener has walked on past its end. A `Fork` parks the opener at the block end at once but it only loops again at the join, so a span ending in a `parallel:` stays open meanwhile. A closed span's deadline is ignored when it pops (lazy cancel), and so is one whose seq no longer matches (the request slot was recycled). Stale deadlines stay in the heap until their time, at most `timeout`.
+- **Firing.** If the request is unanswered and the span open, `fail(Failure { at: now, idx: span index, node: span node, kind: Timeout, status: 504 })` runs unchanged (Z4): queued tokens of the request leave their queues, **running hops keep their slot until they end** (zombie hops), the client is answered at the deadline. A deadline never replaces a failure that already decided the request (Q6, D17 untouched).
+- **Recording.** `record` cuts every hop at the failure instant for a timeout (not just cancelled sibling ranges); the gate still sees each hop run to its natural end.
+- **Counters.** `NodeCounters.timed_out` counts one per fired deadline at the span's node (reported requests only); `completed` keeps its meaning (a hop cut by a deadline counts as started).
+- **`Failure`, `Finished` and `ChainResult::Err`** carry the `FailKind`. A rate limit or full queue failure has kind `Status`.
+- **`HopKind::Delay`** (endpoint latency) is handled like a `Net` hop: no gate slot, no rate-limit token (Z18), so it is never a visit and never queues.
+
 **Limit L1 (Q6).** A 429 or an overflow failure that ties with another _engine_ failure at the same instant keeps the one the engine processed first. A planned `Fail` item keeps the D17 rule: a lower plan index reached at the same instant still replaces a 429 or an overflow, and then the refusal is taken back out of `limited`/`overflowed`, so the counters equal the answers. The `parallel` branches need not be zero-cost for this: any exact tie (fixed latencies, equal hop sums) can produce it.

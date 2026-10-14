@@ -19,7 +19,7 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 | From          | Items                                                                                                                                |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `chain`       | `Endpoint`, `Endpoints`, `EndpointsInput`, `JWKS_KEY`, `LOGIN_KEY`, `Responder`, `RouteSpec`, `compile`, `resolve_error`, `skeleton` |
-| `chaos`       | `ChaosState`, `NodeChaos`                                                                                                            |
+| `chaos`       | `ChaosKey`, `ChaosLayer`, `ChaosState`, `ErrorKind`, `FailKind`, `HANG_CAP`, `MAX_LATENCY_ADD`, `NodeChaos`, `merge`                 |
 | `config`      | `Config`, `ConfigError`, `Determinism`, `EndpointsConfig`, `NodeKind`, `SeedSource`                                                  |
 | `diagnostics` | `Located`, `PathSeg`                                                                                                                 |
 | `dist`        | `Dist`                                                                                                                               |

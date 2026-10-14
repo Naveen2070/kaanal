@@ -12,6 +12,7 @@ This documentation has three parts.
 | ------------------------------------------------ | --------------------------------------------------------------------------- |
 | [source/architecture.md](source/architecture.md) | How the pieces fit: crates, request flow, threading model, determinism      |
 | [source/how-to.md](source/how-to.md)             | Build, run, test; how to add a node type, a CLI command, a control endpoint |
+| [source/chaos.md](source/chaos.md)               | Failure kinds, `timeout:`, zombie hops, keyed chaos and merge rules         |
 | [source/tests.md](source/tests.md)               | Every test in every crate, explained                                        |
 | [source/files/](source/files/)                   | One page per source file: what it does, what each function does             |
 

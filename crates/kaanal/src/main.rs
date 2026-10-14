@@ -80,9 +80,18 @@ enum Cmd {
 /// **Private.** `chaos` subcommands.
 #[derive(Subcommand)]
 enum ChaosCmd {
-    /// Set chaos on a node, e.g. `kaanal chaos set db --error-rate 100% --error 503`
+    /// Set chaos on a node, an endpoint, or a node only when reached through an endpoint,
+    /// e.g. `kaanal chaos set db --error-rate 100% --error 503` or `--endpoint "GET /orders" --down`
     Set {
-        node: String,
+        /// The node (omit it to set chaos on the whole `--endpoint`)
+        #[arg(required_unless_present = "endpoint")]
+        node: Option<String>,
+        /// Endpoint key, e.g. "GET /orders"; with a node: that node, only through this endpoint
+        #[arg(long)]
+        endpoint: Option<String>,
+        /// How failures show up: status, reset, hang or malformed
+        #[arg(long)]
+        kind: Option<String>,
         /// Added latency, e.g. 300ms or 2s
         #[arg(long)]
         latency: Option<String>,
@@ -96,8 +105,13 @@ enum ChaosCmd {
         #[arg(long)]
         down: bool,
     },
-    /// Clear chaos on one node, or on all nodes
-    Clear { node: Option<String> },
+    /// Clear chaos on one node, one endpoint (`--endpoint`), or both together; none means everything
+    Clear {
+        node: Option<String>,
+        /// Endpoint key, e.g. "GET /orders"
+        #[arg(long)]
+        endpoint: Option<String>,
+    },
 }
 
 /// **Private.** Exit code (RULES R6.3: 1 error, 2 not running) and message for stderr.
@@ -158,6 +172,8 @@ fn run(cli: Cli) -> Result<(), Fail> {
             cmd:
                 ChaosCmd::Set {
                     node,
+                    endpoint,
+                    kind,
                     latency,
                     error_rate,
                     error,
@@ -174,25 +190,48 @@ fn run(cli: Cli) -> Result<(), Fail> {
             if let Some(s) = error {
                 patch.insert("error_status".into(), json!(s));
             }
+            if let Some(k) = kind {
+                patch.insert("error_kind".into(), json!(k));
+            }
             if down {
                 patch.insert("down".into(), json!(true));
             }
             if patch.is_empty() {
                 return Err(err(
-                    "nothing to set: use --latency, --error-rate, --error or --down",
+                    "nothing to set: use --latency, --error-rate, --error, --kind or --down",
                 ));
             }
-            let path = format!("/__kaanal/chaos/{}", encode_segment(&node));
-            let v = call("PUT", &path, Some(Value::Object(patch)))?;
-            println!("{}", clean(&format!("{node}: {v}")));
+            let label = match (&node, &endpoint) {
+                (Some(n), Some(e)) => format!("{n} @ {e}"),
+                (Some(n), None) => n.clone(),
+                (None, e) => e.clone().unwrap_or_default(),
+            };
+            let v = if endpoint.is_some() {
+                patch.extend(node.map(|n| ("node".to_string(), json!(n))));
+                patch.extend(endpoint.map(|e| ("endpoint".to_string(), json!(e))));
+                call("PUT", "/__kaanal/chaos", Some(Value::Object(patch)))?
+            } else {
+                // clap guarantees a node when there is no endpoint
+                let path = format!(
+                    "/__kaanal/chaos/{}",
+                    encode_segment(&node.unwrap_or_default())
+                );
+                call("PUT", &path, Some(Value::Object(patch)))?
+            };
+            println!("{}", clean(&format!("{label}: {v}")));
             Ok(())
         }
         Cmd::Chaos {
-            cmd: ChaosCmd::Clear { node },
+            cmd: ChaosCmd::Clear { node, endpoint },
         } => {
-            let path = node.map_or("/__kaanal/chaos".to_string(), |n| {
-                format!("/__kaanal/chaos/{}", encode_segment(&n))
-            });
+            let path = match (node, endpoint) {
+                (None, None) => "/__kaanal/chaos".to_string(),
+                (Some(n), None) => format!("/__kaanal/chaos/{}", encode_segment(&n)),
+                (n, Some(e)) => {
+                    let node = n.map_or(String::new(), |n| format!("node={}&", encode_segment(&n)));
+                    format!("/__kaanal/chaos?{node}endpoint={}", encode_segment(&e))
+                }
+            };
             call("DELETE", &path, None)?;
             println!("cleared");
             Ok(())
@@ -621,7 +660,8 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
 /// **Private.** Prints the node table with each node's live chaos settings.
 fn status() -> Result<(), Fail> {
     let topo = call("GET", "/__kaanal/topology", None)?;
-    let chaos = call("GET", "/__kaanal/chaos", None)?;
+    let all = call("GET", "/__kaanal/chaos", None)?;
+    let chaos = &all["nodes"];
     println!("{:<12} {:<12} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
     for n in topo["nodes"].as_array().into_iter().flatten() {
         let name = n["name"].as_str().unwrap_or("");
@@ -629,13 +669,7 @@ fn status() -> Result<(), Fail> {
         let text = if c.is_null() {
             "-".to_string()
         } else {
-            format!(
-                "+{}ms, {:.0}% errors ({}){}",
-                c["latency_ms"],
-                c["error_rate"].as_f64().unwrap_or(0.0) * 100.0,
-                c["error_status"],
-                if c["down"] == true { ", DOWN" } else { "" }
-            )
+            chaos_text(c)
         };
         let flavor = n["flavor"].as_str().unwrap_or("-");
         let line = format!(
@@ -647,7 +681,32 @@ fn status() -> Result<(), Fail> {
         );
         println!("{}", clean(&line));
     }
+    // Endpoint-wide and node-at-endpoint chaos belong to no single row.
+    for (key, c) in all["endpoints"].as_object().into_iter().flatten() {
+        println!("{}", clean(&format!("endpoint {key}: {}", chaos_text(c))));
+    }
+    for c in all["node_at"].as_array().into_iter().flatten() {
+        let (n, e) = (
+            c["node"].as_str().unwrap_or(""),
+            c["endpoint"].as_str().unwrap_or(""),
+        );
+        println!("{}", clean(&format!("{n} @ {e}: {}", chaos_text(c))));
+    }
     Ok(())
+}
+
+/// **Private.** One chaos entry as text. The status only matters for kind `status`; other kinds show by name.
+fn chaos_text(c: &Value) -> String {
+    format!(
+        "+{}ms, {:.0}% errors ({}){}",
+        c["latency_ms"],
+        c["error_rate"].as_f64().unwrap_or(0.0) * 100.0,
+        match c["error_kind"].as_str() {
+            Some(k) if k != "status" => k.to_string(),
+            _ => c["error_status"].to_string(),
+        },
+        if c["down"] == true { ", DOWN" } else { "" }
+    )
 }
 
 /// **Private.** Server text may echo user input (e.g. a node name); never let it drive the terminal.

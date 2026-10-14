@@ -100,7 +100,7 @@ pub enum PlanItem {
         status: u16,
         /// How the failure looked to the caller.
         kind: FailKind,
-        /// Zero-load instant of the failure: the failing hop's start (E14).
+        /// Zero-load instant of the failure: the failing hop's start (E14). For a `hang` it is the end\n        /// of the capped hang hop (the failure comes after the hop has run its whole length).
         at: Duration,
     },
     /// A `parallel` block: `branches` [`PlanItem::Branch`] items follow, `size` items in all.
@@ -322,8 +322,8 @@ fn deadline_failure(plan: &Plan, planned: Option<(usize, Duration)>) -> Option<(
     out
 }
 
-/// The sampling half of [`execute`]: the [`Plan`] and the deciding failure (plan index,
-/// instant), without building the client-visible hops. The simulator replays the plan
+/// The sampling half of [`execute`]: the [`Plan`] and the *planned* failure (plan index,
+/// instant; a deadline from a `timeout:` span is not planned, it fires at run time), without building the client-visible hops. The simulator replays the plan
 /// itself, so it skips that work; [`execute`] returns this same plan.
 pub fn sample_plan(
     topo: &Topology,

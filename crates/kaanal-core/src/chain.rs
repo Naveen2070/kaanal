@@ -317,8 +317,9 @@ pub fn default_status(kind: FailKind, status: u16) -> u16 {
 /// The response for a failure (E5, D11, B2a Z8): the map entry for the failing node, else for
 /// the failure kind (`reset`, `malformed`, `timeout`), else for the exact status, else for its
 /// class (`5xx`); without one the kind's default status and no body. A node named like a kind
-/// (`reset`, `malformed`, `timeout`) is found by the node lookup first (Z8), so an entry under
-/// that name targets the node, and the kind tier is never consulted for it.
+/// (`reset`, `malformed`, `timeout`) is found by the node lookup first (Z8), so for that node's own failure an entry
+/// under that name is the node's. The same key still acts as the kind key for every other node's
+/// failure of that kind (the lookup is by string, not by what the key was meant for).
 pub fn resolve_error(
     map: &IndexMap<String, ErrorMapping>,
     node: &str,

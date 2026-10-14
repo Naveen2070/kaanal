@@ -6,6 +6,8 @@
 //! `error_map` response → `X-Kaanal-Trace` (+ `Retry-After` on a 429) + an event on the
 //! broadcast bus. A built-in login reads its body before the chain runs, so a
 //! bad body still costs the full chain latency and a chain failure still wins (spec §5).
+//! A `reset` or `malformed` failure at a wire node (the gateway or the route's owner) is not
+//! JSON: it is a body that breaks off or is cut short (B2a Z7); see [`wire_failure`].
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -13,11 +15,12 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::Json;
+use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
-    ChainRequest, ChainResult, FinishedHop, HopKind, Plan, PlanItem, Responder, Topology,
+    ChainRequest, ChainResult, FailKind, FinishedHop, HopKind, Plan, PlanItem, Responder, Topology,
     resolve_error, sample_plan, stable_hash,
 };
 use percent_encoding::percent_decode_str;
@@ -25,6 +28,7 @@ use serde_json::{Value, json};
 
 use crate::auth;
 use crate::state::{AppState, Event, Route};
+use crate::wire::Cut;
 
 /// Serves one mock request.
 ///
@@ -75,19 +79,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         None
     };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
-    let plan = {
-        let chaos = st.chaos.read().expect("chaos lock poisoned");
-        let (plan, _) = sample_plan(
-            &st.topo,
-            &chaos,
-            &ChainRequest {
-                endpoint: ep,
-                n,
-                seed: st.chain_seed,
-            },
-        );
-        Arc::new(plan)
-    };
+    let plan = Arc::new(plan_of(&st, ep, n));
     // The read lock is gone before the await: the engine task owns time from here.
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
@@ -107,43 +99,50 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let name = |id: usize| st.topo.nodes[id].name.as_str();
     let trace = trace_header(&plan, &fin.hops, &fin.result, &st.topo);
     let mut retry = None;
+    let mut wire = None;
     let (status, body, failed) = match &fin.result {
-        // E5 + B2a Z8: node, then kind, then status, then class; else the failure's own status and the chaos body.
+        // E5 + B2a Z8: node, then kind, then status, then class; else the kind's default status and the chaos body.
         ChainResult::Err {
             node,
             status,
             kind,
             retry_after,
         } => {
-            let (status, body) = resolve_error(&ep.error_map, name(*node), *kind, *status);
-            let body = body.unwrap_or_else(|| json!({ "error": "chaos", "node": name(*node) }));
-            retry = (status == 429).then_some(*retry_after).flatten();
-            (status, body, Some(name(*node).to_string()))
+            // A timeout at a wire node is not a wire failure: it stays a 504 that `error_map` may
+            // remap (status or class keys, like nginx `error_page 504`); only reset and malformed break the wire.
+            let at_wire = *kind != FailKind::Status
+                && *kind != FailKind::Timeout
+                && ep.is_wire_node(&st.topo, *node);
+            let (mapped, body) = resolve_error(&ep.error_map, name(*node), *kind, *status);
+            // An error_map entry by node name or by kind is the user's stated intent and beats the wire behaviour (Z7).\n            // Same string lookup as `resolve_error`: a node named `reset` also counts as a kind key for other nodes.
+            let overridden =
+                ep.error_map.contains_key(name(*node)) || ep.error_map.contains_key(kind.as_str());
+            let (code, body) = if at_wire && !overridden {
+                let ok = answer(&st, route, &path, &params, login);
+                let (s, r) = wire_failure(*kind, ok, &trace, &method);
+                wire = Some(r);
+                (s, Value::Null)
+            } else {
+                retry = (mapped == 429).then_some(*retry_after).flatten();
+                (
+                    mapped,
+                    body.unwrap_or_else(|| default_error_body(name(*node), *kind)),
+                )
+            };
+            (code, body, Some((name(*node).to_string(), *kind)))
         }
         ChainResult::Ok => {
-            if let Some(ov) = &ep.response {
-                (ov.status, ov.body.clone(), None)
-            } else if let Some(r) = ep.responder {
-                // The responder owns its status codes; the route's 200 and schema do not apply.
-                let (status, body) = auth::respond(r, st.auth.as_ref(), login);
-                (status, body, None)
-            } else {
-                let owner = ep.owner.map_or("", name);
-                (
-                    route.status,
-                    generated_body(&st, route, owner, &path, &params),
-                    None,
-                )
-            }
+            let (status, body) = answer(&st, route, &path, &params, login);
+            (status, body, None)
         }
     };
 
-    let mut resp = response(status, body, &trace, retry);
+    let mut resp = wire.unwrap_or_else(|| response(status, body, &trace, retry));
     if ep.responder == Some(Responder::Login) {
         no_store(&mut resp);
     }
 
-    let nodes = touched_nodes(&fin.hops, failed.as_deref(), &st.topo);
+    let nodes = touched_nodes(&fin.hops, failed.as_ref().map(|f| f.0.as_str()), &st.topo);
     send_event(&st, method, path, status, started, nodes, failed);
 
     cors(resp)
@@ -170,6 +169,111 @@ fn response(status: u16, body: Value, trace: &str, retry: Option<Duration>) -> R
         resp.headers_mut().insert("x-kaanal-trace", v);
     }
     resp
+}
+
+/// **Private.** Samples the request's plan under the chaos read lock (the lock is gone on return).
+fn plan_of(st: &AppState, ep: &kaanal_core::Endpoint, n: u64) -> Plan {
+    let chaos = st.chaos.read().expect("chaos lock poisoned");
+    let req = ChainRequest {
+        endpoint: ep,
+        n,
+        seed: st.chain_seed,
+    };
+    sample_plan(&st.topo, &chaos, &req).0
+}
+
+/// **Private.** The chaos body of a failure that answers as JSON. Kind `status` keeps the
+/// original two-field shape; any other kind names itself.
+fn default_error_body(node: &str, kind: FailKind) -> Value {
+    if kind == FailKind::Status {
+        json!({ "error": "chaos", "node": node })
+    } else {
+        json!({ "error": "chaos", "node": node, "kind": kind.as_str() })
+    }
+}
+
+/// **Private.** What a route answers when nothing fails: the `override`, else the generated body.
+fn success(st: &AppState, route: &Route, path: &str, params: &[(String, String)]) -> (u16, Value) {
+    let ep = &route.endpoint;
+    if let Some(ov) = &ep.response {
+        return (ov.status, ov.body.clone());
+    }
+    let owner = ep.owner.map_or("", |id| st.topo.nodes[id].name.as_str());
+    (route.status, generated_body(st, route, owner, path, params))
+}
+
+/// **Private.** What the route answers when nothing fails: a built-in responder (it owns its status
+/// codes; the route's 200 and schema do not apply), else [`success`].
+fn answer(
+    st: &AppState,
+    route: &Route,
+    path: &str,
+    params: &[(String, String)],
+    login: Option<Result<auth::Credentials, auth::Reject>>,
+) -> (u16, Value) {
+    let ep = &route.endpoint;
+    match ep.responder.filter(|_| ep.response.is_none()) {
+        Some(r) => auth::respond(r, st.auth.as_ref(), login),
+        None => success(st, route, path, params),
+    }
+}
+
+/// **Private.** A `reset` or `malformed` failure at a wire node, as the route's success status
+/// plus a broken body. Returns the status sent and the response.
+///
+/// - `malformed`: the serialized success body cut at about half (at a char boundary), with a
+///   `Content-Length` that matches the cut, so the client gets valid HTTP with invalid JSON.
+/// - `reset`: the first half as one chunk, then the stream errors while `Content-Length` still
+///   promises the whole body, so the client sees the status and part of the body, then an abort.
+///
+/// `ok` is what the route would have answered (the real reply, built-in responders included).
+/// A `HEAD`, a 204 and a 304 have no body to break: they get the plain success response, yet
+/// the trace header still ends in `node.error=reset|malformed` and the event still names the failed node.
+/// A `reset` promises at least one byte more than it sent, so the client always sees the abort.
+// ponytail: a bare-number body ("12") can cut to valid JSON ("1"); schema bodies are objects or arrays in practice.
+fn wire_failure(
+    kind: FailKind,
+    (status, body): (u16, Value),
+    trace: &str,
+    method: &str,
+) -> (u16, Response) {
+    let no_body = method == "HEAD" || matches!(status, 204 | 304);
+    if no_body {
+        return (status, response(status, body, trace, None));
+    }
+    // A route without a body still gets something to break.
+    let full = if body.is_null() {
+        "{}".to_string()
+    } else {
+        body.to_string()
+    };
+    let mut cut = full.len() / 2;
+    while !full.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let part = if cut == 0 { "{\"" } else { &full[..cut] };
+    let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let mut resp = if kind == FailKind::Reset {
+        let mut r = Response::new(Body::from_stream(Cut::new(Bytes::copy_from_slice(
+            part.as_bytes(),
+        ))));
+        r.headers_mut().insert(
+            header::CONTENT_LENGTH,
+            HeaderValue::from(full.len().max(part.len() + 1)),
+        );
+        r
+    } else {
+        Response::new(Body::from(part.to_string()))
+    };
+    *resp.status_mut() = code;
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    if let Ok(v) = HeaderValue::from_str(trace) {
+        resp.headers_mut().insert("x-kaanal-trace", v);
+    }
+    (status, resp)
 }
 
 /// **Private.** The spec-schema body of a successful route (`null` when it has no schema).
@@ -212,7 +316,8 @@ enum Piece {
 /// **Private.** The `X-Kaanal-Trace` value: visible hops in plan order with one decimal
 /// (`1.0ms`, never a truncated `0ms`); a `parallel` block is `[a,b|c]` (branches split by
 /// `|`); cache hops are `node.hit` / `node.miss`; `node.wait=T` comes before a hop that
-/// queued; a failure appends `node.error=STATUS`. Over [`TRACE_CAP`] bytes it stops before a
+/// queued; a failure appends `node.error=STATUS`, or `node.error=reset` / `node.error=malformed`
+/// for those kinds (they have no status). Over [`TRACE_CAP`] bytes it stops before a
 /// hop, closes open brackets and adds `,...+N hops` (ASCII, D13), N being the pieces left out.
 fn trace_header(
     plan: &Plan,
@@ -268,7 +373,14 @@ fn trace_header(
     pieces.extend(forks.iter().map(|_| Piece::Close));
     let pieces = without_empty_blocks(pieces);
     let error = match result {
-        ChainResult::Err { node, status, .. } => format!("{}.error={status}", name(*node)),
+        ChainResult::Err {
+            node, status, kind, ..
+        } => match kind {
+            FailKind::Reset | FailKind::Malformed => {
+                format!("{}.error={}", name(*node), kind.as_str())
+            }
+            _ => format!("{}.error={status}", name(*node)),
+        },
         ChainResult::Ok => String::new(),
     };
     let tail = if error.is_empty() { 0 } else { error.len() + 1 };
@@ -390,7 +502,7 @@ fn send_event(
     status: u16,
     started: Instant,
     nodes: Vec<String>,
-    failed: Option<String>,
+    failed: Option<(String, FailKind)>,
 ) {
     let ts_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -405,7 +517,12 @@ fn send_event(
         status,
         ms,
         nodes,
-        failed_node: failed,
+        kind: failed
+            .as_ref()
+            .map(|f| f.1)
+            .filter(|k| *k != FailKind::Status)
+            .map(FailKind::as_str),
+        failed_node: failed.map(|f| f.0),
     });
 }
 

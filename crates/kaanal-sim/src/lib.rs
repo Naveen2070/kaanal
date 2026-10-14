@@ -96,7 +96,7 @@ pub struct RequestRecord {
     /// Completion minus arrival: service times plus queue waits.
     pub latency: Duration,
     /// Ok, or where and how the request failed: a chaos failure (its `kind`: status, reset,
-    /// malformed or hang), a deadline that fired (kind `timeout`, 504), a rate limit (429,
+    /// malformed or hang; a hang is reported as kind `timeout`, 504), a deadline that fired (kind `timeout`, 504), a rate limit (429,
     /// with `retry_after`) or a full queue (the node's overflow status).
     pub result: ChainResult,
     /// The hops that ran, in plan order, each with the queue wait before it: `start` is the
@@ -126,7 +126,7 @@ pub struct NodeStats {
     pub limited: u64,
     /// Requests refused at this node by a full queue, over reported requests.
     pub overflowed: u64,
-    /// Deadlines (`timeout:` spans and hangs) that fired at this node, over reported requests.
+    /// Deadlines (`timeout:` spans) that fired at this node, over reported requests. A `hang` that\n    /// runs to its planned 504 is a timeout in [`SimReport::errors_by_kind`] but not counted here (no deadline fired).
     pub timed_out: u64,
 }
 

@@ -281,6 +281,29 @@ fn zero_load_equals_execute_for_a_deadline_in_a_parallel_branch() {
 }
 
 #[test]
+fn zero_load_equals_execute_for_a_hang_in_a_parallel_branch() {
+    // A hang in one branch (60 s cap, planned `Fail` at the hang hop's end) while the sibling
+    // (`slow`, 50 ms) finishes long before: the failure ends the block at the hang's end.
+    let (t, e) = compiled(
+        &format!(
+            "version: 1\nseed: {SEED}\nnodes:\n  nginx: {{ {GW} }}\n  app: {{ type: service, proc: 2ms }}\n  db: {{ {DB} }}\n  slow: {{ type: external-api, proc: 50ms }}\nedges:\n  - {{ from: nginx, to: app, net: 1ms }}\n  - {{ from: app, to: db, net: 1ms }}\n  - {{ from: app, to: slow, net: 1ms }}\nendpoints:\n  \"GET /x\": {{ chain: [ {{ parallel: [ db, slow ] }} ] }}\n"
+        ),
+        &[("GET /x", "app")],
+    );
+    let chaos = ChaosState::from([(t.id("db").unwrap(), hang())]);
+    let (rep, _) = assert_zero_load_equal(&t, &e, &chaos, "hang in parallel", &["GET /x"], SEED);
+    assert_eq!(
+        rep.errors_by_kind(),
+        BTreeMap::from([("timeout", all(&rep))])
+    );
+    assert_eq!(
+        rep.nodes[t.id("db").unwrap()].timed_out,
+        0,
+        "no deadline fired, the hang ran to its Fail"
+    );
+}
+
+#[test]
 fn zero_load_equals_execute_for_endpoint_chaos() {
     // (c) endpoint-level chaos: a 502 at the front door, a Delay hop, and a node chaos that
     // applies only through this endpoint.

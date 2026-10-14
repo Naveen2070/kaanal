@@ -13,6 +13,7 @@ mod auth;
 mod control;
 mod mock;
 mod state;
+mod wire;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
@@ -152,7 +153,9 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/topology", get(control::topology))
         .route(
             "/__kaanal/chaos",
-            get(control::get_chaos).delete(control::clear_all),
+            get(control::get_chaos)
+                .put(control::set_chaos_keyed)
+                .delete(control::clear_keyed),
         )
         .route(
             "/__kaanal/chaos/{node}",

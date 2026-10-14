@@ -53,6 +53,9 @@ pub struct Event {
     pub nodes: Vec<String>,
     /// The node whose chaos failed the request, if any.
     pub failed_node: Option<String>,
+    /// How it failed when not a plain status (`reset`, `malformed` or `timeout`); `None` for a
+    /// status failure or a success. A reset or cut-off body answers 200, so this is how a client tells.
+    pub kind: Option<&'static str>,
 }
 
 /// Shared server state; one `Arc` clones into every handler.
@@ -63,6 +66,8 @@ pub struct AppState {
     pub paths: matchit::Router<Vec<Route>>,
     /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status` (synthesized HEAD routes excluded, R6.8).
     pub route_keys: Vec<String>,
+    /// Every compiled endpoint, static and synthesized HEAD ones included (the control API checks keys here).
+    pub endpoints: Endpoints,
     /// Live chaos settings; written by the control API, read (briefly) per request.
     pub chaos: RwLock<ChaosState>,
     /// Request-event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
@@ -295,6 +300,7 @@ impl AppState {
             topo,
             paths,
             route_keys,
+            endpoints,
             chaos: RwLock::new(ChaosState::default()),
             events,
             token,
