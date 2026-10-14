@@ -47,10 +47,72 @@ pub struct Config {
     /// file, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `"METHOD /path"`.
     #[serde(default)]
     pub endpoints: Option<EndpointsConfig>,
+    /// Named chaos scenarios (a list of chaos entries each), switched on and off at runtime.
+    /// More can live in `scenarios/NAME.yaml` next to this file.
+    #[serde(default)]
+    pub scenarios: IndexMap<String, ScenarioConfig>,
     /// **Private.** Phase One's `routes:` key, kept only to explain that it was replaced.
     #[serde(default)]
     #[schemars(skip)]
     routes: Option<serde::de::IgnoredAny>,
+}
+
+/// One named scenario: chaos entries applied together when it is active.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioConfig {
+    /// Free text for humans.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The chaos entries. Each names a `node`, an `endpoint` or both, and sets at least one
+    /// of the patch fields.
+    pub chaos: Vec<ChaosEntry>,
+    /// **Private.** Reserved: runtime limit overrides; rejected as "not supported yet".
+    /// An explicit `null` reads as absent.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub(crate) limits: Option<serde::de::IgnoredAny>,
+    /// **Private.** Reserved for B2b-2; rejected as "not supported yet".
+    #[serde(default)]
+    #[schemars(skip)]
+    pub(crate) pins: Option<serde::de::IgnoredAny>,
+}
+
+/// One chaos entry of a scenario: where it applies plus the fields it sets.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChaosEntry {
+    /// A node name. With `endpoint`: only when visited through that endpoint.
+    #[serde(default)]
+    pub node: Option<String>,
+    /// `METHOD /path`: the front door of that endpoint.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    /// Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc
+    /// attribute cannot compute it, so keep the two in step).
+    #[serde(default)]
+    pub latency_ms: Option<u64>,
+    /// Failure probability, 0 to 1.
+    #[serde(default)]
+    pub error_rate: Option<f64>,
+    /// How a failure shows up: `status` (default), `reset`, `hang` or `malformed`.
+    #[serde(default)]
+    pub error_kind: Option<String>,
+    /// Status of a failed visit, 500 to 504 (default 503).
+    #[serde(default)]
+    pub error_status: Option<u16>,
+    /// Hard outage.
+    #[serde(default)]
+    pub down: Option<bool>,
+}
+
+/// Parses one `scenarios/NAME.yaml` file (a BOM is stripped).
+///
+/// # Errors
+/// Malformed YAML, an unknown key or a wrong type, with serde's line and column.
+pub fn parse_scenario(src: &str) -> Result<ScenarioConfig, ConfigError> {
+    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
+    serde_yaml_ng::from_str(src).map_err(|e| serde_error(&e))
 }
 
 /// **Private.** serde default for [`Config::port`].

@@ -15,7 +15,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
-use kaanal_core::{ChaosKey, ChaosLayer, ErrorKind, merge};
+use kaanal_core::{ChaosKey, ChaosLayer, ErrorKind, endpoint_key, merge};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio_stream::wrappers::BroadcastStream;
@@ -166,6 +166,7 @@ impl ChaosPatch {
             error_kind,
             error_status: self.error_status,
             down: self.down,
+            replace: None,
         })
     }
 }
@@ -208,14 +209,6 @@ fn apply_patch(st: &AppState, key: ChaosKey, patch: &ChaosPatch) -> Result<Json<
     let view = json!(ChaosView::from(&cur));
     chaos.set(key, cur);
     Ok(Json(view))
-}
-
-/// **Private.** `METHOD /path` with the method upper-cased, the key `compile` uses.
-fn endpoint_key(e: &str) -> String {
-    match e.split_once(' ') {
-        Some((m, p)) => format!("{} {}", m.to_ascii_uppercase(), p),
-        None => e.to_string(),
-    }
 }
 
 /// **Private.** The id of a node by name; unknown (or empty) → 404.
@@ -293,7 +286,8 @@ pub async fn set_chaos(
 
 /// `PUT /__kaanal/chaos` — like [`set_chaos`] but keyed by `node`, `endpoint` or both (the node
 /// only when visited through that endpoint). At least one is required; an unknown node or
-/// endpoint → 404; an endpoint with no entry node (a static route and no gateway) → 400.
+/// endpoint → 404; a malformed endpoint (not `METHOD /path`) → 400; an endpoint with no entry
+/// node (a static route and no gateway) → 400.
 ///
 /// # Errors
 /// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
@@ -306,7 +300,7 @@ pub async fn set_chaos_keyed(
     let endpoint = match p.endpoint.as_deref() {
         None => None,
         Some(e) => {
-            let key = endpoint_key(e);
+            let key = endpoint_key(e).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
             let ep = st.endpoints.get(&key).ok_or_else(|| {
                 reject(StatusCode::NOT_FOUND, &format!("unknown endpoint '{key}'"))
             })?;
@@ -360,14 +354,20 @@ pub async fn clear_node(
 /// also when there was none); with no query, wipes all chaos.
 ///
 /// # Errors
-/// Returns [`Reject`] 404 for an unknown node name.
+/// Returns [`Reject`] 404 for an unknown node name, 400 for a malformed endpoint (not `METHOD /path`).
 pub async fn clear_keyed(
     State(st): State<Arc<AppState>>,
     q: Result<Query<ClearQuery>, QueryRejection>,
 ) -> Result<StatusCode, Reject> {
     let Query(q) = q.map_err(|e| reject(e.status(), &e.body_text()))?;
     let node = q.node.as_deref().map(|n| node_id(&st, n)).transpose()?;
-    let key = match (node, q.endpoint.as_deref().map(endpoint_key)) {
+    let endpoint = q
+        .endpoint
+        .as_deref()
+        .map(endpoint_key)
+        .transpose()
+        .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
+    let key = match (node, endpoint) {
         (Some(n), Some(e)) => ChaosKey::NodeAt(n, e),
         (Some(n), None) => ChaosKey::Node(n),
         (None, Some(e)) => ChaosKey::Endpoint(e),

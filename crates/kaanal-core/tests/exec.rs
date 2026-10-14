@@ -33,7 +33,7 @@ fn topo() -> (Topology, Endpoints) {
 fn run_key(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState, n: u64) -> ChainOutcome {
     execute(
         t,
-        chaos,
+        &chaos.compile(),
         &ChainRequest {
             endpoint: e.get(key).unwrap(),
             n,

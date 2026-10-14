@@ -756,7 +756,7 @@ fn login_without_the_auth_edge_runs_auth_inline() {
     let jwks = eps.get(JWKS_KEY).unwrap();
     let o = execute(
         &t,
-        &ChaosState::default(),
+        &ChaosState::default().compile(),
         &ChainRequest {
             endpoint: jwks,
             n: 0,

@@ -88,7 +88,7 @@ fn zero_load_matches_live_distribution() {
             .map(|n| {
                 execute(
                     &t,
-                    &chaos,
+                    &chaos.compile(),
                     &ChainRequest {
                         endpoint: e.get(key).unwrap(),
                         n,

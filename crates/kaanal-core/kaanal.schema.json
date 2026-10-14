@@ -46,6 +46,75 @@
         }
       ]
     },
+    "ChaosEntry": {
+      "additionalProperties": false,
+      "description": "One chaos entry of a scenario: where it applies plus the fields it sets.",
+      "properties": {
+        "down": {
+          "default": null,
+          "description": "Hard outage.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "default": null,
+          "description": "`METHOD /path`: the front door of that endpoint.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_kind": {
+          "default": null,
+          "description": "How a failure shows up: `status` (default), `reset`, `hang` or `malformed`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_rate": {
+          "default": null,
+          "description": "Failure probability, 0 to 1.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "error_status": {
+          "default": null,
+          "description": "Status of a failed visit, 500 to 504 (default 503).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "latency_ms": {
+          "default": null,
+          "description": "Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc\nattribute cannot compute it, so keep the two in step).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "node": {
+          "default": null,
+          "description": "A node name. With `endpoint`: only when visited through that endpoint.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "DbFlavor": {
       "description": "Database flavors with preset op costs (estimates, see [`crate::presets`]).",
       "oneOf": [
@@ -950,6 +1019,31 @@
       ],
       "type": "object"
     },
+    "ScenarioConfig": {
+      "additionalProperties": false,
+      "description": "One named scenario: chaos entries applied together when it is active.",
+      "properties": {
+        "chaos": {
+          "description": "The chaos entries. Each names a `node`, an `endpoint` or both, and sets at least one\nof the patch fields.",
+          "items": {
+            "$ref": "#/$defs/ChaosEntry"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "description": "Free text for humans.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "chaos"
+      ],
+      "type": "object"
+    },
     "Step": {
       "description": "One step: a node name (call its default chain), `call`, `cache` or `parallel`.",
       "oneOf": [
@@ -1132,6 +1226,13 @@
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "scenarios": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ScenarioConfig"
+      },
+      "description": "Named chaos scenarios (a list of chaos entries each), switched on and off at runtime.\nMore can live in `scenarios/NAME.yaml` next to this file.",
+      "type": "object"
     },
     "seed": {
       "default": 0,

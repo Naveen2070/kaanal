@@ -88,7 +88,7 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Submit>) {
 mod tests {
     use super::*;
     use kaanal_core::chain::{EndpointsInput, RouteSpec};
-    use kaanal_core::{ChainRequest, ChaosState, Config, Topology, compile, sample_plan};
+    use kaanal_core::{ChainRequest, Config, EffectiveChaos, Topology, compile, sample_plan};
 
     const YAML: &str = "version: 1\nnodes:\n  gw: { type: gateway, proc: 2ms, concurrency: 1 }\n  app: { type: service, proc: 3ms }\nedges:\n  - { from: gw, to: app, net: 1ms }\n";
 
@@ -111,7 +111,7 @@ mod tests {
                 Arc::new(
                     sample_plan(
                         &t,
-                        &ChaosState::default(),
+                        &EffectiveChaos::default(),
                         &ChainRequest {
                             endpoint: ep,
                             n: i,

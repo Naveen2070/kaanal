@@ -14,7 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use kaanal_core::{ChainResult, ChaosState, Dist, Endpoint, Endpoints, Hop, Topology};
+use kaanal_core::{
+    ChainResult, ChaosState, Dist, EffectiveChaos, Endpoint, Endpoints, Hop, Topology,
+};
 
 /// **Private.** Most hop records one run may produce (R6.13): expected reported (post-warmup) arrivals × the most
 /// hops each stream's chain can take (`Seq::hops`, repeats included). A record costs about
@@ -153,7 +155,21 @@ pub fn run(
     chaos: &ChaosState,
     cfg: &SimConfig,
 ) -> Result<SimReport, String> {
-    let streams = validate(topo, endpoints, chaos, cfg)?;
+    let streams = validate(topo, endpoints, Some(chaos), cfg)?;
+    engine::simulate(topo, &streams, &chaos.compile(), cfg).map(|(report, _)| report)
+}
+
+/// [`run`] with chaos already compiled (the caller validated its limits, R6.9).
+///
+/// # Errors
+/// As [`run`], except for chaos entry limits.
+pub fn run_effective(
+    topo: &Topology,
+    endpoints: &Endpoints,
+    chaos: &EffectiveChaos,
+    cfg: &SimConfig,
+) -> Result<SimReport, String> {
+    let streams = validate(topo, endpoints, None, cfg)?;
     engine::simulate(topo, &streams, chaos, cfg).map(|(report, _)| report)
 }
 
@@ -170,7 +186,7 @@ fn worst_case_secs(d: &Dist) -> f64 {
 fn validate(
     topo: &Topology,
     endpoints: &Endpoints,
-    chaos: &ChaosState,
+    chaos: Option<&ChaosState>,
     cfg: &SimConfig,
 ) -> Result<Vec<Arc<Endpoint>>, String> {
     if cfg.streams.len() > MAX_STREAMS {
@@ -221,7 +237,7 @@ fn validate(
     // The same limits live mode enforces (R6.9); the 5 min latency cap, with the hop
     // cap, keeps the virtual clock far inside `u64` nanoseconds.
     // first_error() is ordered, so the error names the same node every run.
-    if let Some(e) = chaos.first_error() {
+    if let Some(e) = chaos.and_then(ChaosState::first_error) {
         return Err(e);
     }
     let (mut arrivals, mut records, mut work) = (0.0, 0.0, 0.0);

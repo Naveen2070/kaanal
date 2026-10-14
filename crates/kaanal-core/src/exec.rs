@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::chain::{Endpoint, Seq, Step};
-use crate::chaos::{ChaosState, ErrorKind, FailKind, HANG_CAP, merge};
+use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, HANG_CAP};
 use crate::dist::Dist;
 use crate::stable_hash;
 use crate::topology::{NodeId, Topology};
@@ -261,7 +261,7 @@ impl Plan {
 /// `path` starts as `stable_hash(seed, endpoint key, n)` and every `call`/`cache` step
 /// extends it with `(target name, occurrence, repetition)` (R1.34, D8). Own hops draw the
 /// chaos roll first and caches also their hit roll, always, so chaos never shifts a timing.
-pub fn execute(topo: &Topology, chaos: &ChaosState, req: &ChainRequest) -> ChainOutcome {
+pub fn execute(topo: &Topology, chaos: &EffectiveChaos, req: &ChainRequest) -> ChainOutcome {
     let (plan, planned) = sample_plan(topo, chaos, req);
     let decided = deadline_failure(&plan, planned).or(planned);
     let result = match decided.map(|(i, _)| &plan.items[i]) {
@@ -327,7 +327,7 @@ fn deadline_failure(plan: &Plan, planned: Option<(usize, Duration)>) -> Option<(
 /// itself, so it skips that work; [`execute`] returns this same plan.
 pub fn sample_plan(
     topo: &Topology,
-    chaos: &ChaosState,
+    chaos: &EffectiveChaos,
     req: &ChainRequest,
 ) -> (Plan, Option<(usize, Duration)>) {
     let ep = req.endpoint;
@@ -346,16 +346,10 @@ pub fn sample_plan(
     let root_span = entry.and_then(|n| w.open_span(n, Duration::ZERO));
     let mut start = Duration::ZERO;
     let mut flow = None;
-    if let (Some(entry), Some(layer)) = (entry, chaos.endpoint(&ep.key)) {
-        let c = merge(&[layer]);
+    if let (Some(entry), Some(c)) = (entry, chaos.endpoint(&ep.key)) {
         let name = &topo.nodes[entry].name;
         let roll: f64 = draw_rng(root, name, b"endpoint").random();
-        if c.down || roll < c.error_rate {
-            let (k, s) = if c.down {
-                (ErrorKind::Status, 503)
-            } else {
-                (c.error_kind, c.error_status)
-            };
+        if let Some((k, s)) = c.hit(roll) {
             let (kind, status) = fail_of(k, s);
             let mut at = Duration::ZERO;
             if k == ErrorKind::Hang {
@@ -438,7 +432,7 @@ enum Flow {
 /// **Private.** One walk in progress: borrowed inputs plus the plan so far.
 struct Walk<'a> {
     topo: &'a Topology,
-    chaos: &'a ChaosState,
+    chaos: &'a EffectiveChaos,
     /// Key of the endpoint being walked, for endpoint-scoped chaos.
     ep_key: &'a str,
     items: Vec<PlanItem>,
@@ -553,17 +547,10 @@ impl Walk<'_> {
         let n = &topo.nodes[node];
         let mut rng = draw_rng(path, &n.name, tag);
         let roll: f64 = rng.random();
-        let c = (!self.chaos.is_empty()).then(|| self.chaos.resolve(node, self.ep_key));
-        let c = c.as_ref();
-        let hit = c.and_then(|c| {
-            if c.down {
-                Some((ErrorKind::Status, 503))
-            } else if roll < c.error_rate {
-                Some((c.error_kind, c.error_status))
-            } else {
-                None
-            }
-        });
+        let c = (!self.chaos.is_empty())
+            .then(|| self.chaos.visit(node, self.ep_key))
+            .flatten();
+        let hit = c.and_then(|c| c.hit(roll));
         if let Some((k, s)) = hit {
             let (fk, status) = fail_of(k, s);
             let mut at = start;
@@ -610,12 +597,14 @@ impl Walk<'_> {
         let n = &topo.nodes[node];
         let mut rng = draw_rng(path, &n.name, b"cache");
         let (roll, hit_roll): (f64, f64) = (rng.random(), rng.random());
-        let c = (!self.chaos.is_empty()).then(|| self.chaos.resolve(node, self.ep_key));
-        let c = c.as_ref();
-        let failing = c.is_some_and(|c| c.down || roll < c.error_rate);
+        let c = (!self.chaos.is_empty())
+            .then(|| self.chaos.visit(node, self.ep_key))
+            .flatten();
+        let fault = c.and_then(|c| c.hit(roll));
+        let failing = fault.is_some();
         let model = n.cache.as_ref();
         // A hanging cache is a miss charged its cap; a cache never fails the request (Z17).
-        let hang = failing && c.is_some_and(|c| !c.down && c.error_kind == ErrorKind::Hang);
+        let hang = fault.is_some_and(|(k, _)| k == ErrorKind::Hang);
         let mut hit = !failing && model.is_some_and(|m| hit_roll < m.hit_ratio);
         let mut dur = if hang {
             hang_cap(n.timeout)

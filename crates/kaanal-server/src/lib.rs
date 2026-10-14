@@ -12,6 +12,7 @@ mod actor;
 mod auth;
 mod control;
 mod mock;
+mod scenarios;
 mod state;
 mod wire;
 

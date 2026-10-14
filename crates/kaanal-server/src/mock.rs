@@ -179,7 +179,8 @@ fn plan_of(st: &AppState, ep: &kaanal_core::Endpoint, n: u64) -> Plan {
         n,
         seed: st.chain_seed,
     };
-    sample_plan(&st.topo, &chaos, &req).0
+    // ponytail: compiled per request as a stop-gap; Task 4 stores the compiled value.
+    sample_plan(&st.topo, &chaos.compile(), &req).0
 }
 
 /// **Private.** The chaos body of a failure that answers as JSON. Kind `status` keeps the

@@ -7,14 +7,19 @@
 //! warning.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::config::{EndpointsConfig, NodeConfig, SeedSource, parse_endpoints};
 use kaanal_core::diagnostics::{Located, keys};
-use kaanal_core::{ChaosState, Config, Endpoint, Endpoints, NodeId, Topology};
+use kaanal_core::{
+    ChaosState, Config, Endpoint, Endpoints, NodeId, ScenarioSet, Source, Topology,
+    resolve_scenario, valid_name,
+};
+
+use crate::scenarios;
 use kaanal_data::ApiModel;
 use serde::Serialize;
 use serde_json::Value;
@@ -68,6 +73,12 @@ pub struct AppState {
     pub route_keys: Vec<String>,
     /// Every compiled endpoint, static and synthesized HEAD ones included (the control API checks keys here).
     pub endpoints: Endpoints,
+    /// Every scenario known at startup (inline and files).
+    #[allow(dead_code)] // read by the scenario control API (next task)
+    pub scenarios: ScenarioSet,
+    /// The `scenarios/` directory next to the config, under its canonical directory (it may not exist).
+    #[allow(dead_code)] // read by save (next task)
+    pub scenarios_dir: PathBuf,
     /// Live chaos settings; written by the control API, read (briefly) per request.
     pub chaos: RwLock<ChaosState>,
     /// Request-event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
@@ -216,6 +227,45 @@ fn compile_endpoints(
     )
 }
 
+/// **Private.** Every scenario: the inline ones, then `scenarios/*.yaml` next to the config
+/// (S2, S16). Inline errors are placed in `kaanal.yaml`, file errors in the file. Returns the
+/// set and the scenarios directory (under the canonical config directory; it may not exist).
+fn load_scenarios(
+    cfg: &Config,
+    base_dir: &Path,
+    topo: &Topology,
+    endpoints: &Endpoints,
+    warnings: &mut Vec<String>,
+) -> Result<(ScenarioSet, PathBuf), Located> {
+    let mut set = ScenarioSet::default();
+    for (name, sc) in &cfg.scenarios {
+        let at = keys(&["scenarios", name.as_str()]);
+        valid_name(name).map_err(|m| Located::new(at.clone(), m))?;
+        let (s, w) =
+            resolve_scenario(name, sc, topo, endpoints).map_err(|e| e.located(at.clone()))?;
+        warnings.extend(w);
+        set.insert(s, Source::Inline)
+            .map_err(|m| Located::new(at, m))?;
+    }
+    // Canonicalized once, so a later `cd` cannot move it (S16). A symlinked `scenarios/` is
+    // followed here, once; its target is what `save` writes through. Absent: the joined path.
+    let dir = base_dir
+        .canonicalize()
+        .unwrap_or_else(|_| base_dir.to_path_buf())
+        .join("scenarios");
+    let dir = dir.canonicalize().unwrap_or(dir);
+    let (found, found_warnings) = scenarios::discover(&dir)?;
+    warnings.extend(found_warnings);
+    for (name, sc, file) in found {
+        let (s, w) = resolve_scenario(&name, &sc, topo, endpoints)
+            .map_err(|e| e.located(Vec::new()).in_file(file.clone()))?;
+        warnings.extend(w);
+        set.insert(s, Source::File)
+            .map_err(|m| Located::new(Vec::new(), m).in_file(file))?;
+    }
+    Ok((set, dir))
+}
+
 impl AppState {
     /// Runs the full load pipeline: topology → spec files → endpoints (inline or file) →
     /// compiled routes → matchit router.
@@ -253,6 +303,8 @@ impl AppState {
         let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings)?;
         let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
         warnings.extend(endpoints.warnings.iter().cloned());
+        let (scenarios, scenarios_dir) =
+            load_scenarios(cfg, base_dir, &topo, &endpoints, &mut warnings)?;
         // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         for ep in endpoints.iter() {
@@ -301,6 +353,8 @@ impl AppState {
             paths,
             route_keys,
             endpoints,
+            scenarios,
+            scenarios_dir,
             chaos: RwLock::new(ChaosState::default()),
             events,
             token,

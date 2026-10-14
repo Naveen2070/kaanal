@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kaanal_core::replay::{Engine, EngineError};
-use kaanal_core::{ChainRequest, ChaosState, Dist, Endpoint, Topology, sample_plan, stable_hash};
+use kaanal_core::{
+    ChainRequest, Dist, EffectiveChaos, Endpoint, Topology, sample_plan, stable_hash,
+};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -61,7 +63,7 @@ fn schedule(
 pub(crate) fn simulate(
     topo: &Topology,
     endpoints: &[Arc<Endpoint>],
-    chaos: &ChaosState,
+    chaos: &EffectiveChaos,
     cfg: &SimConfig,
 ) -> Result<(SimReport, usize), String> {
     let overflow = |_: EngineError| OVERFLOW.to_string();
@@ -177,7 +179,7 @@ mod tests {
     use super::simulate;
     use crate::{SimConfig, Stream};
     use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-    use kaanal_core::{ChaosState, Config, Topology};
+    use kaanal_core::{Config, EffectiveChaos, Topology};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -205,7 +207,7 @@ mod tests {
             seed: 7,
         };
         let one = [Arc::clone(eps.get("GET /x/{id}").unwrap())];
-        let (rep, peak) = simulate(&t, &one, &ChaosState::default(), &cfg).unwrap();
+        let (rep, peak) = simulate(&t, &one, &EffectiveChaos::default(), &cfg).unwrap();
         assert!(rep.requests.len() > 300, "{}", rep.requests.len());
         assert!(peak < 64, "requests held at once: {peak}");
     }

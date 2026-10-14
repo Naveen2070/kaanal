@@ -5,9 +5,9 @@
 //!
 //! Chaos is stored as sparse [`ChaosLayer`]s (only the fields a caller set) under a
 //! [`ChaosKey`] (a node, an endpoint, or a node at one endpoint). The executor resolves the
-//! layers that apply to a visit into one dense [`NodeChaos`] with [`merge`].
+//! layers into an [`EffectiveChaos`] (see [`compile_layers`]) once, so a visit is one lookup.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use crate::topology::NodeId;
@@ -148,12 +148,15 @@ pub struct ChaosLayer {
     pub latency_add: Option<Duration>,
     /// Failure probability, combined across layers as independent chances.
     pub error_rate: Option<f64>,
-    /// Failure kind; the last layer that sets it wins.
+    /// Failure kind; one unit with this layer's own `error_rate`: it adds a fault only when
+    /// this layer also sets a rate (S7).
     pub error_kind: Option<ErrorKind>,
-    /// Failure status; the last layer that sets it wins.
+    /// Failure status; same unit as `error_kind`, defaults to 503 with a rate.
     pub error_status: Option<u16>,
     /// Hard outage; any layer setting `true` wins.
     pub down: Option<bool>,
+    /// `true` drops every lower layer's contribution to this key (an override).
+    pub replace: Option<bool>,
 }
 
 impl From<NodeChaos> for ChaosLayer {
@@ -164,6 +167,7 @@ impl From<NodeChaos> for ChaosLayer {
             error_kind: Some(c.error_kind),
             error_status: Some(c.error_status),
             down: Some(c.down),
+            replace: None,
         }
     }
 }
@@ -174,20 +178,38 @@ impl ChaosLayer {
     /// # Errors
     /// A message naming the first field out of range.
     pub fn validate(&self) -> Result<(), String> {
+        self.check().map_err(|(_, m)| m)
+    }
+
+    /// Like [`validate`](Self::validate), but also names the failing field
+    /// (`latency_add`, `error_rate` or `error_status`).
+    ///
+    /// # Errors
+    /// The first field out of range and a message about it.
+    pub fn check(&self) -> Result<(), (&'static str, String)> {
         if self.latency_add.is_some_and(|d| d > MAX_LATENCY_ADD) {
-            return Err(format!(
-                "latency_add must be at most {} ms (5 min)",
-                MAX_LATENCY_ADD.as_millis()
+            return Err((
+                "latency_add",
+                format!(
+                    "latency_add must be at most {} ms (5 min)",
+                    MAX_LATENCY_ADD.as_millis()
+                ),
             ));
         }
         if self.error_rate.is_some_and(|r| !(0.0..=1.0).contains(&r)) {
-            return Err("error_rate must be between 0 and 1".into());
+            return Err(("error_rate", "error_rate must be between 0 and 1".into()));
         }
         // Range-checked whatever the kind: a status set under `reset` is still a status somebody typed.
         if self.error_status.is_some_and(|s| !(500..=504).contains(&s)) {
-            return Err("error_status must be 500-504".into());
+            return Err(("error_status", "error_status must be 500-504".into()));
         }
         Ok(())
+    }
+
+    /// True when a kind or status is set without a rate: it has no effect (S7).
+    #[must_use]
+    pub fn has_orphan_fault_fields(&self) -> bool {
+        (self.error_kind.is_some() || self.error_status.is_some()) && self.error_rate.is_none()
     }
 
     /// Overwrites every field `patch` sets, leaving the rest untouched.
@@ -195,24 +217,25 @@ impl ChaosLayer {
         macro_rules! take {
             ($($f:ident),*) => { $( if patch.$f.is_some() { self.$f = patch.$f; } )* }
         }
-        take!(latency_add, error_rate, error_kind, error_status, down);
+        take!(
+            latency_add,
+            error_rate,
+            error_kind,
+            error_status,
+            down,
+            replace
+        );
     }
 }
 
-/// Folds layers (least specific first) into one [`NodeChaos`]: latencies add (so a node layer and
-/// a node-at-endpoint layer, each within [`MAX_LATENCY_ADD`], can sum past it; the sum is not re-checked), rates combine as
-/// independent chances (`p + r - p*r`; one set rate comes back bit-for-bit), `down` is an OR,
-/// and the last kind and status set win.
+/// Dense view of a single stored layer, for the control API's GET (defaults filled in). Not
+/// the executor's rule: that is [`compile_layers`], where kind and status belong to their own
+/// rate. With several layers this folds rates as independent chances and takes the last kind.
 #[must_use]
 pub fn merge(layers: &[&ChaosLayer]) -> NodeChaos {
-    merge_iter(layers.iter().copied())
-}
-
-/// **Private.** [`merge`] over any iterator, so [`ChaosState::resolve`] needs no heap.
-fn merge_iter<'a>(layers: impl Iterator<Item = &'a ChaosLayer>) -> NodeChaos {
     let mut out = NodeChaos::default();
     let mut rate: Option<f64> = None;
-    for l in layers {
+    for l in layers.iter().copied() {
         if let Some(d) = l.latency_add {
             out.latency_add = out.latency_add.saturating_add(d);
         }
@@ -290,6 +313,24 @@ impl ChaosState {
         }
     }
 
+    /// One message per stored layer whose kind or status has no effect for lack of an
+    /// `error_rate`, in [`ChaosState::entries`] order. Not an error (S7).
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        self.entries()
+            .into_iter()
+            .filter(|(_, l)| l.has_orphan_fault_fields())
+            .map(|(k, _)| {
+                let at = match k {
+                    ChaosKey::Node(id) => format!("node {id}"),
+                    ChaosKey::NodeAt(id, ep) => format!("node {id} at endpoint '{ep}'"),
+                    ChaosKey::Endpoint(ep) => format!("endpoint '{ep}'"),
+                };
+                format!("chaos on {at}: error_kind/error_status have no effect without error_rate")
+            })
+            .collect()
+    }
+
     /// Deletes exactly the layer under `key`; true when there was one.
     pub fn remove(&mut self, key: &ChaosKey) -> bool {
         match key {
@@ -315,20 +356,24 @@ impl ChaosState {
         self.node_at.clear();
     }
 
-    /// The chaos in force for a visit of `node` through `endpoint`: the node layer, then the
-    /// node-at-endpoint layer, merged with the most specific last. The endpoint-wide layer is not
-    /// here: it applies once at the front door, not per node (Z10); see [`ChaosState::endpoint`].
-    #[must_use]
-    pub fn resolve(&self, node: NodeId, endpoint: &str) -> NodeChaos {
-        let n = self.nodes.get(&node);
-        let at = self.node_at.get(&node).and_then(|m| m.get(endpoint)); // borrows: no allocation
-        merge_iter([n, at].into_iter().flatten())
-    }
-
     /// The endpoint-wide layer for `endpoint`, if any.
     #[must_use]
     pub fn endpoint(&self, endpoint: &str) -> Option<&ChaosLayer> {
         self.endpoints.get(endpoint)
+    }
+
+    /// Compiles this single layer set; same as `compile_layers(&[self])`.
+    #[must_use]
+    pub fn compile(&self) -> EffectiveChaos {
+        compile_layers(&[self])
+    }
+
+    /// How many layers are set: nodes, endpoints and (node, endpoint) pairs.
+    #[must_use]
+    pub fn entry_count(&self) -> usize {
+        self.nodes.len()
+            + self.endpoints.len()
+            + self.node_at.values().map(HashMap::len).sum::<usize>()
     }
 
     /// Every layer with its key, sorted: nodes by id, then endpoints by name, then
@@ -367,6 +412,231 @@ impl ChaosState {
             })
         })
     }
+}
+
+/// Most failure bands one visit can carry; further faults fold into the last band.
+pub const MAX_FAULTS: usize = 8;
+
+/// One failure band: a roll below `upto` (cumulative) fails this way.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fault {
+    /// Cumulative probability bound of this band.
+    pub upto: f64,
+    /// How the failure shows up.
+    pub kind: ErrorKind,
+    /// HTTP status for a `status` failure.
+    pub status: u16,
+}
+
+/// Chaos compiled for one visit (or one endpoint front door): no allocation to read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Resolved {
+    /// Extra latency, at most [`MAX_LATENCY_ADD`].
+    pub latency_add: Duration,
+    /// Hard outage: every visit fails with 503.
+    pub down: bool,
+    faults: [Fault; MAX_FAULTS],
+    len: u8,
+}
+
+impl Resolved {
+    fn empty() -> Self {
+        Resolved {
+            latency_add: Duration::ZERO,
+            down: false,
+            faults: [Fault {
+                upto: 0.0,
+                kind: ErrorKind::Status,
+                status: 503,
+            }; MAX_FAULTS],
+            len: 0,
+        }
+    }
+
+    /// The failure bands, top layer first.
+    #[must_use]
+    pub fn faults(&self) -> &[Fault] {
+        &self.faults[..self.len as usize]
+    }
+
+    /// Total failure probability (the last band's bound), 0.0 when none.
+    #[must_use]
+    pub fn rate(&self) -> f64 {
+        self.faults().last().map_or(0.0, |f| f.upto)
+    }
+
+    /// The failure a roll in 0..1 lands on; `down` always fails with 503.
+    #[must_use]
+    pub fn hit(&self, roll: f64) -> Option<(ErrorKind, u16)> {
+        if self.down {
+            return Some((ErrorKind::Status, 503));
+        }
+        self.faults()
+            .iter()
+            .find(|f| roll < f.upto)
+            .map(|f| (f.kind, f.status))
+    }
+
+    fn push(&mut self, r: f64, kind: ErrorKind, status: u16) {
+        let n = self.len as usize;
+        let upto = if n == 0 {
+            r
+        } else {
+            let u = self.faults[n - 1].upto;
+            u + r - u * r
+        };
+        if n < MAX_FAULTS {
+            self.faults[n] = Fault { upto, kind, status };
+            self.len += 1;
+        } else {
+            self.faults[n - 1].upto = upto; // fold the tail into the last band
+        }
+    }
+}
+
+/// (rank, specificity, layer)
+type Entry<'a> = (usize, u8, &'a ChaosLayer);
+
+fn resolve_entries(mut entries: Vec<Entry<'_>>) -> Resolved {
+    entries.sort_by_key(|e| std::cmp::Reverse((e.0, e.1))); // highest layer first, then most specific
+    let mut out = Resolved::empty();
+    for (_, _, l) in entries {
+        if let Some(d) = l.latency_add {
+            out.latency_add = out.latency_add.saturating_add(d);
+        }
+        if l.down == Some(true) {
+            out.down = true;
+        }
+        if let Some(r) = l.error_rate
+            && r > 0.0
+        {
+            out.push(
+                r,
+                l.error_kind.unwrap_or(ErrorKind::Status),
+                l.error_status.unwrap_or(503),
+            );
+        }
+    }
+    out.latency_add = out.latency_add.min(MAX_LATENCY_ADD);
+    out
+}
+
+/// Entries of one key across the layers, truncated at the last `replace`.
+fn entries_of<'a>(
+    layers: &[&'a ChaosState],
+    spec: u8,
+    get: impl Fn(&'a ChaosState) -> Option<&'a ChaosLayer>,
+) -> Vec<Entry<'a>> {
+    let mut v: Vec<Entry<'a>> = layers
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| get(s).map(|l| (i, spec, l)))
+        .collect();
+    if let Some(p) = v.iter().rposition(|e| e.2.replace == Some(true)) {
+        v.drain(..p);
+    }
+    v
+}
+
+/// Every key's chaos, compiled from the layer stack. Read-only on the hot path.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EffectiveChaos {
+    nodes: HashMap<NodeId, Resolved>,
+    node_at: HashMap<NodeId, HashMap<String, Resolved>>,
+    endpoints: HashMap<String, Resolved>,
+}
+
+impl EffectiveChaos {
+    /// True when nothing is set (the executor's fast path).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.node_at.is_empty() && self.endpoints.is_empty()
+    }
+
+    /// The chaos for a visit of `node` through `endpoint`: the node-at-endpoint entry (which
+    /// already folds in the node's own), else the node entry. The endpoint-wide entry is not
+    /// here: it applies once at the front door.
+    #[must_use]
+    pub fn visit(&self, node: NodeId, endpoint: &str) -> Option<&Resolved> {
+        self.node_at
+            .get(&node)
+            .and_then(|m| m.get(endpoint))
+            .or_else(|| self.nodes.get(&node))
+    }
+
+    /// The endpoint-wide entry, if any.
+    #[must_use]
+    pub fn endpoint(&self, endpoint: &str) -> Option<&Resolved> {
+        self.endpoints.get(endpoint)
+    }
+
+    /// Every entry with its key, sorted like [`ChaosState::entries`].
+    #[must_use]
+    pub fn entries(&self) -> Vec<(ChaosKey, &Resolved)> {
+        let mut nodes: Vec<_> = self.nodes.iter().collect();
+        nodes.sort_by_key(|(n, _)| **n);
+        let mut eps: Vec<_> = self.endpoints.iter().collect();
+        eps.sort_by(|a, b| a.0.cmp(b.0));
+        let mut at: Vec<_> = self
+            .node_at
+            .iter()
+            .flat_map(|(n, m)| m.iter().map(move |(e, l)| ((*n, e), l)))
+            .collect();
+        at.sort_by(|a, b| a.0.cmp(&b.0));
+        let nodes = nodes.into_iter().map(|(n, l)| (ChaosKey::Node(*n), l));
+        let eps = eps
+            .into_iter()
+            .map(|(e, l)| (ChaosKey::Endpoint(e.clone()), l));
+        let at = at
+            .into_iter()
+            .map(|((n, e), l)| (ChaosKey::NodeAt(n, e.clone()), l));
+        nodes.chain(eps).chain(at).collect()
+    }
+}
+
+/// Compiles layers (bottom to top) into one [`EffectiveChaos`]. Per key, the higher layer's
+/// fault takes the first band (layer order beats specificity; within a layer the more specific
+/// key goes first), latencies add (then clamp to [`MAX_LATENCY_ADD`]), `down` is an OR, and
+/// a layer with `replace` drops the lower layers' contribution to that key. A node override
+/// also drops the lower layers' entries of that node's node-at-endpoint pairs.
+#[must_use]
+pub fn compile_layers(layers: &[&ChaosState]) -> EffectiveChaos {
+    let mut node_ids = BTreeSet::new();
+    let mut eps = BTreeSet::new();
+    let mut pairs = BTreeSet::new();
+    for s in layers {
+        node_ids.extend(s.nodes.keys().copied());
+        eps.extend(s.endpoints.keys().cloned());
+        for (n, m) in &s.node_at {
+            pairs.extend(m.keys().map(|e| (*n, e.clone())));
+        }
+    }
+    let mut out = EffectiveChaos::default();
+    for id in node_ids {
+        let e = entries_of(layers, 0, |s| s.nodes.get(&id));
+        out.nodes.insert(id, resolve_entries(e));
+    }
+    for ep in eps {
+        let e = entries_of(layers, 0, |s| s.endpoints.get(&ep));
+        out.endpoints.insert(ep, resolve_entries(e));
+    }
+    for (n, ep) in pairs {
+        let mut e = entries_of(layers, 0, |s| s.nodes.get(&n));
+        // A node override also calms the node's pairs from lower layers; a pair override
+        // leaves the node-level entries alone.
+        let floor = layers
+            .iter()
+            .rposition(|s| s.nodes.get(&n).is_some_and(|l| l.replace == Some(true)))
+            .unwrap_or(0);
+        let mut at = entries_of(layers, 1, |s| s.node_at.get(&n).and_then(|m| m.get(&ep)));
+        at.retain(|x| x.0 >= floor);
+        e.extend(at);
+        out.node_at
+            .entry(n)
+            .or_default()
+            .insert(ep, resolve_entries(e));
+    }
+    out
 }
 
 impl<const N: usize> From<[(NodeId, NodeChaos); N]> for ChaosState {

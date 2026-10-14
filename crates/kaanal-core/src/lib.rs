@@ -23,6 +23,7 @@ pub mod dist;
 pub mod exec;
 pub mod presets;
 pub mod replay;
+pub mod scenario;
 pub mod schema;
 pub mod topology;
 
@@ -31,16 +32,23 @@ pub use chain::{
     resolve_error, skeleton,
 };
 pub use chaos::{
-    ChaosKey, ChaosLayer, ChaosState, ErrorKind, FailKind, HANG_CAP, MAX_LATENCY_ADD, NodeChaos,
-    merge,
+    ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, ErrorKind, FailKind, Fault, HANG_CAP,
+    MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers, merge,
 };
-pub use config::{Config, ConfigError, Determinism, EndpointsConfig, NodeKind, SeedSource};
+pub use config::{
+    ChaosEntry, Config, ConfigError, Determinism, EndpointsConfig, NodeKind, ScenarioConfig,
+    SeedSource, parse_scenario,
+};
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
 pub use exec::{
     ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute, sample_plan,
 };
 pub use replay::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
+pub use scenario::{
+    ChaosStack, MAX_ENTRIES, MAX_SCENARIOS, Scenario, ScenarioError, ScenarioSet, Source,
+    endpoint_key, resolve_scenario, valid_name,
+};
 pub use schema::config_schema;
 pub use topology::{Admission, CacheModel, Edge, Node, NodeId, RateLimit, Topology, TopologyError};
 

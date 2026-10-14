@@ -408,6 +408,31 @@ async fn unknown_node_is_404_with_message() {
 }
 
 #[tokio::test]
+async fn a_malformed_endpoint_is_400_on_set_and_clear() {
+    let s = start().await;
+    let r = s
+        .auth(
+            s.client
+                .put(format!("{}/__kaanal/chaos", s.base))
+                .json(&json!({ "endpoint": "GET", "down": true })),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    assert!(r.json::<Value>().await.unwrap()["error"].is_string());
+    let r = s
+        .auth(
+            s.client
+                .delete(format!("{}/__kaanal/chaos?endpoint=nope", s.base)),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+}
+
+#[tokio::test]
 async fn bad_chaos_values_are_4xx_with_json_errors() {
     let s = start().await;
     for bad in [

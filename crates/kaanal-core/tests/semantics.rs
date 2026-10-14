@@ -82,7 +82,7 @@ fn fails(rate: f64, status: u16) -> NodeChaos {
 fn run(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState) -> ChainOutcome {
     execute(
         t,
-        chaos,
+        &chaos.compile(),
         &ChainRequest {
             endpoint: e.get(key).unwrap(),
             n: 0,
@@ -626,7 +626,7 @@ fn draws_follow_the_r1_34_formula() {
     .unwrap();
     let o = execute(
         &t,
-        &ChaosState::default(),
+        &ChaosState::default().compile(),
         &ChainRequest {
             endpoint: e.get("GET /x/{id}").unwrap(),
             n: 3,
@@ -668,7 +668,7 @@ fn error_rate_holds_across_seeds() {
         .filter(|&seed| {
             execute(
                 &t,
-                &c,
+                &c.compile(),
                 &ChainRequest {
                     endpoint: ep,
                     n: 0,

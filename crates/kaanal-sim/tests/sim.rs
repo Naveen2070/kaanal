@@ -97,7 +97,7 @@ fn assert_zero_load_equal(
         let key = &sc.streams[r.stream].endpoint_key;
         let live = execute(
             t,
-            chaos,
+            &chaos.compile(),
             &ChainRequest {
                 endpoint: e.get(key).unwrap(),
                 n: r.n,
@@ -833,7 +833,7 @@ fn zero_cost_failure_ties_go_to_the_first_branch() {
     for r in &rep.requests {
         let live = execute(
             &t,
-            &chaos,
+            &chaos.compile(),
             &ChainRequest {
                 endpoint: e.get("GET /x").unwrap(),
                 n: r.n,
@@ -1023,7 +1023,7 @@ fn failure_ties_go_to_the_lowest_branch_like_live() {
         );
         let live = execute(
             &t,
-            &chaos,
+            &chaos.compile(),
             &ChainRequest {
                 endpoint: e.get("GET /x").unwrap(),
                 n: r.n,
@@ -1157,7 +1157,7 @@ fn login_and_jwks_equal_live_at_zero_load() {
                 let key = &sc.streams[r.stream].endpoint_key;
                 let live = execute(
                     &t,
-                    &chaos,
+                    &chaos.compile(),
                     &ChainRequest {
                         endpoint: e.get(key).unwrap(),
                         n: r.n,
