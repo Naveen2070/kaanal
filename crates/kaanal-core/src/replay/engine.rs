@@ -236,6 +236,18 @@ impl Engine {
         }
     }
 
+    /// Refills every rate-limit bucket (full, as at startup). Safe at any moment: a bucket is
+    /// read only when a hop starts, and holds no per-request state. Gates (slots, queues) and
+    /// pools are **not** touched: they hold in-flight requests, and each frees its own as it
+    /// finishes, so after the last in-flight request ends they are idle again.
+    pub fn refill_buckets(&mut self) {
+        for n in &mut self.nodes {
+            if let Some(b) = &mut n.bucket {
+                b.refill();
+            }
+        }
+    }
+
     /// Reporting window: counters and [`Engine::drain_finished`] cover requests arriving at or
     /// after `warmup`; utilisation integrates busy time inside `[warmup, end]`.
     pub fn set_window(&mut self, warmup: u64, end: u64) {

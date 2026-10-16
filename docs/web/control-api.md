@@ -34,37 +34,50 @@ The running topology.
 
 ### `GET /__kaanal/chaos`
 
-All active chaos, in three groups. Empty groups when nothing is set. (Before the failures release this was one flat map by node name.)
+The **live layer**: chaos set through `PUT /__kaanal/chaos...`, in three groups (empty when nothing is set), plus `effective`, the result of the active [scenarios](#scenarios) and the live layer together. (Before the failures release this was one flat map by node name.)
 
 ```json
 {
   "nodes": { "db": { "latency_ms": 300, "error_rate": 0.1, "error_kind": "status", "error_status": 503, "down": false } },
   "endpoints": { "GET /orders": { "latency_ms": 0, "error_rate": 0.5, "error_kind": "reset", "error_status": 503, "down": false } },
-  "node_at": [{ "node": "db", "endpoint": "GET /orders", "latency_ms": 100, "error_rate": 0, "error_kind": "status", "error_status": 503, "down": false }]
+  "node_at": [{ "node": "db", "endpoint": "GET /orders", "latency_ms": 100, "error_rate": 0, "error_kind": "status", "error_status": 503, "down": false }],
+  "effective": {
+    "nodes": { "db": { "latency_ms": 300, "down": false, "faults": [{ "upto": 0.1, "kind": "status", "status": 503 }] } },
+    "endpoints": { "GET /orders": { "latency_ms": 0, "down": false, "faults": [{ "upto": 0.5, "kind": "reset", "status": 503 }] } },
+    "node_at": [{ "node": "db", "endpoint": "GET /orders", "latency_ms": 400, "down": false, "faults": [{ "upto": 0.1, "kind": "status", "status": 503 }] }]
+  }
 }
 ```
 
+- An entry set with `mode: override` shows `"mode": "override"`.
+- `effective` is what requests actually experience. Per key: `latency_ms` (the sum over all layers, at most 300 000), `down`, and `faults`, the failure bands from the top layer down. `upto` is the cumulative probability, so `[{"upto":0.3,"kind":"reset"},{"upto":0.51,"kind":"status","status":503}]` means 30% resets and 21% 503s. **Keys that do nothing are left out** (for example one a live override calmed), so an empty `effective` means no chaos at all.
+
 ### `PUT /__kaanal/chaos/{node}`
 
-**Merges** a patch into the node's chaos — fields you omit keep their current values. Returns the merged state.
+**Merges** a patch into the node's live chaos — fields you omit keep their current values. Returns the stored state of that node's live entry, plus `effective` and `warnings`.
 
 ```json
-{ "latency_ms": 300, "error_rate": 0.1, "error_kind": "status", "error_status": 504, "down": true }
+{ "latency_ms": 300, "error_rate": 0.1, "error_kind": "status", "error_status": 504, "down": true, "mode": "merge" }
 ```
 
-| Field          | Rules                                                                    |
-| -------------- | ------------------------------------------------------------------------ |
-| `latency_ms`   | integer, 0 – 300 000                                                     |
-| `error_rate`   | number, 0.0 – 1.0                                                        |
-| `error_kind`   | `status` (default), `reset`, `hang` or `malformed`; anything else is 400 |
-| `error_status` | integer, 500 – 504 (checked for every kind)                              |
-| `down`         | boolean — when true, everything through the node fails 503               |
+| Field          | Rules                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `latency_ms`   | integer, 0 – 300 000                                                                                                   |
+| `error_rate`   | number, 0.0 – 1.0                                                                                                      |
+| `error_kind`   | `status` (default), `reset`, `hang` or `malformed`; anything else is 400                                               |
+| `error_status` | integer, 500 – 504 (checked for every kind)                                                                            |
+| `down`         | boolean — when true, everything through the node fails 503                                                             |
+| `mode`         | `merge` (default) or `override`; anything else is 400. `override` replaces what scenarios add to this key (see below). |
 
 Unknown node → `404 "unknown node '<name>'"`. Out-of-range values → `400`. Unknown JSON keys → rejected.
 
+**`warnings`** is an array of strings, empty when all is well. An `error_kind` or `error_status` without an `error_rate` **in the same entry** does nothing, because a failure kind belongs to its own rate; the response says so (`"chaos on node 'app': error_kind/error_status have no effect without error_rate"`). Only the key you just wrote is reported. It is a warning, not an error: the write succeeds.
+
+**`mode: override`.** By default a live entry adds to the active scenarios (latencies sum, `down` ORs, error rates stack). With `"mode": "override"` the entry replaces everything lower layers contribute to that key, so `{"mode":"override","down":false}` or a bare `{"mode":"override"}` calms a scenario that takes the node down. A node override also calms that node's node-at-endpoint entries from scenarios; an endpoint or node-at-endpoint override affects only its own key, so a node-at-endpoint override cannot calm chaos set on the node itself (use a node override for that). The mode **sticks**: a later `PUT` without `mode` keeps it, and `"mode": "merge"` goes back to stacking.
+
 ### `PUT /__kaanal/chaos`
 
-Like the per-node route, but the body also names where the chaos applies: `node`, `endpoint` (for example `"GET /orders"`; the method is case-insensitive) or both (the node only while it serves that endpoint). One of them is required (`400` otherwise); an unknown node or endpoint is `404`. A node entry and a node-at-endpoint entry that match a visit merge (latencies add, `down` is an OR, error rates combine as independent chances, the last-set kind and status win). An endpoint entry is a separate roll at the front door, before the chain, and is not merged into the nodes behind it (see [chaos internals](../source/chaos.md#endpoint-chaos-and-keys)).
+Like the per-node route, but the body also names where the chaos applies: `node`, `endpoint` (for example `"GET /orders"`; the method is case-insensitive) or both (the node only while it serves that endpoint). One of them is required (`400` otherwise); an unknown node or endpoint is `404`; an endpoint that is not `METHOD /path` is `400`. Entries from different layers stack: a node entry and a node-at-endpoint entry, or a live entry and a scenario, all apply (latencies add, `down` is an OR, error rates combine as independent chances). **A higher layer wins over a lower one** for the same field, whatever the key; inside one layer the node-at-endpoint entry goes before the node's. An endpoint entry is a separate roll at the front door, before the chain, and is not merged into the nodes behind it (see [chaos internals](../source/chaos.md#endpoint-chaos-and-keys)). Answers like the per-node route.
 
 ```json
 { "endpoint": "GET /orders", "error_rate": 1.0, "error_kind": "reset" }
@@ -72,15 +85,75 @@ Like the per-node route, but the body also names where the chaos applies: `node`
 
 ### `DELETE /__kaanal/chaos/{node}` / `DELETE /__kaanal/chaos`
 
-Clear one node (`404` if unknown) or all chaos. Both return `204`. `DELETE /__kaanal/chaos?node=&endpoint=` clears exactly the entry under that key (`node`, `endpoint` or both) and leaves the others; an unknown query parameter is `400` and clears nothing, an unknown endpoint is `204` (nothing to remove) and an empty or unknown `node` is `404`.
+Clear one node (`404` if unknown) or all **live** chaos. Both return `204`. `DELETE /__kaanal/chaos?node=&endpoint=` clears exactly the entry under that key (`node`, `endpoint` or both) and leaves the others; an unknown query parameter is `400` and clears nothing, a malformed `endpoint` is `400`, an unknown endpoint is `204` (nothing to remove) and an empty or unknown `node` is `404`. **Scenarios are not touched**; use `DELETE /__kaanal/scenarios` or `POST /__kaanal/reset`.
+
+### Scenarios
+
+A [scenario](scenarios.md) is a named list of chaos entries. The scenarios you activate form a stack, in activation order, with the live chaos above them. Names follow `^[a-z0-9][a-z0-9_-]{0,63}$`; `active`, `save`, `reset` and Windows device names are reserved. All of these need the token. Every write is atomic: a bad request changes nothing, and once a `2xx` response is back, every later request sees the new state.
+
+| Method and path                              | Purpose                                                           | Success                                                         |
+| -------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------- |
+| `GET /__kaanal/scenarios`                    | List the defined scenarios                                        | `200` array                                                     |
+| `GET /__kaanal/scenarios/{name}`             | One definition (export it for a bug report)                       | `200`                                                           |
+| `PUT /__kaanal/scenarios/{name}`             | Define or replace a runtime scenario                              | `200 { "name", "warnings" }`                                    |
+| `DELETE /__kaanal/scenarios/{name}`          | Undefine a runtime scenario                                       | `204`                                                           |
+| `POST /__kaanal/scenarios/{name}/activate`   | Push to the top of the scenarios (a re-activation moves it there) | `200 { "active", "effective" }`                                 |
+| `POST /__kaanal/scenarios/{name}/deactivate` | Remove from the stack                                             | `204` (also when it was not active, or the name is not defined) |
+| `GET /__kaanal/scenarios/active`             | The stack and the compiled result                                 | `200 { "active", "effective" }`                                 |
+| `PUT /__kaanal/scenarios/active`             | Set the whole stack at once, body `["a","b"]` (bottom to top)     | `200 { "active", "effective" }`                                 |
+| `DELETE /__kaanal/scenarios`                 | Deactivate every scenario; live chaos stays                       | `204`                                                           |
+| `POST /__kaanal/scenarios/save`              | Write `scenarios/NAME.yaml`                                       | `200 { "name", "path" }`                                        |
+| `POST /__kaanal/reset`                       | Clean slate for tests                                             | `204`                                                           |
+
+`active` is the list of active names, bottom to top; `effective` has the same shape as in `GET /__kaanal/chaos` (calm keys omitted).
+
+**List.** `GET /__kaanal/scenarios` returns `[{ "name", "source", "description", "entries", "active" }]` in definition order; `source` is `inline` (`kaanal.yaml`), `file` (`scenarios/NAME.yaml`) or `runtime`.
+
+**Define.** `PUT /__kaanal/scenarios/{name}` takes the same body as a scenario file:
+
+```json
+{
+  "description": "Payments hard down",
+  "chaos": [
+    { "node": "payments", "down": true },
+    { "endpoint": "POST /checkout", "latency_ms": 800 },
+    { "node": "db", "endpoint": "GET /orders", "error_rate": 0.3, "error_kind": "reset" }
+  ]
+}
+```
+
+It is checked exactly like a file: names against your topology, limits, duplicate keys, `mode` is not allowed in entries (scenario entries always stack). `warnings` lists entries that do nothing (an orphan kind or status) or never fire (a node the endpoint does not visit). Replacing an **active** scenario takes effect at once. Only runtime scenarios can be replaced or undefined: a scenario from `kaanal.yaml` or a file answers `409`.
+
+| Status | When                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `400`  | Bad name, bad entry (the message says where: `chaos[2].node: ...`), `limits:`/`pins:` keys |
+| `404`  | Unknown scenario, or an entry naming an unknown node or endpoint                           |
+| `422`  | The body is not a scenario (for example an unknown key such as `mode` in an entry)         |
+| `409`  | Redefining or undefining a scenario that comes from the config or a file                   |
+
+**Save.** `POST /__kaanal/scenarios/save` with
+
+```json
+{ "name": "flaky-db", "from": "live", "force": false, "clear_live": true }
+```
+
+- `name` is required. `from` is `"live"` (default), `"effective"` or `{ "scenario": "other" }`; any other shape, including a bare scenario name, is `422`.
+- Writes `scenarios/NAME.yaml` next to `kaanal.yaml` (created if missing), with only the fields that were set, and defines the scenario at once. `path` in the response is the file.
+- `400`: bad name; the name is defined inline in `kaanal.yaml` (even with `force`); nothing to save; a live `mode: override` with `from: "live"`; `from: "effective"` with a key that has two or more failure kinds stacked, or a node-at-endpoint entry whose node also has chaos (the message names the key). `404`: the `from` scenario does not exist. `409`: the scenario or file exists and `force` is not true. `500`: the file could not be written.
+- `clear_live: true` clears the live chaos after writing, so activating the saved scenario does not count it twice. Saving over an active scenario updates it in place.
+
+**Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats) and refills rate-limit buckets. Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.
 
 ### `GET /__kaanal/events`
 
-Server-Sent Events stream of every mock request as it completes.
+Server-Sent Events stream of every mock request as it completes, and of scenario changes.
 
 ```
 event: request
 data: {"ts_ms":1759900000000,"method":"GET","path":"/users/7","status":200,"ms":12,"nodes":["nginx","app","db"],"failed_node":null,"kind":null}
+
+event: scenario
+data: {"action":"activate","name":"payments-down","active":["payments-down"]}
 
 event: lagged
 data: 37
@@ -88,6 +161,7 @@ data: 37
 
 - `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header (parallel branches in `[a|b]`, cache lookups as `hit`/`miss`, long chains ending `,...+N hops`).
 - `kind` is `reset`, `malformed` or `timeout` when the request failed that way (a reset or cut-off body still answers `200`, so the status alone does not show it); `null` otherwise.
+- `scenario` events carry the `action` — `activate`, `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, or `update` (the definition of an active scenario changed) — the `name` it concerns (or `null`) and the `active` stack afterwards.
 - `lagged` means the stream fell behind and skipped that many events.
 
 ### `GET /__kaanal/ui`
@@ -103,4 +177,11 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json
      -d '{"down": true}' "http://127.0.0.1:$PORT/__kaanal/chaos/db"
 # ... run the test ...
 curl -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/__kaanal/chaos"
+```
+
+Or start every test clean and switch on a [scenario](scenarios.md):
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/__kaanal/reset"
+curl -X POST -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/__kaanal/scenarios/payments-down/activate"
 ```

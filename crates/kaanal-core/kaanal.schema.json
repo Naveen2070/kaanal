@@ -51,7 +51,6 @@
       "description": "One chaos entry of a scenario: where it applies plus the fields it sets.",
       "properties": {
         "down": {
-          "default": null,
           "description": "Hard outage.",
           "type": [
             "boolean",
@@ -59,7 +58,6 @@
           ]
         },
         "endpoint": {
-          "default": null,
           "description": "`METHOD /path`: the front door of that endpoint.",
           "type": [
             "string",
@@ -67,7 +65,6 @@
           ]
         },
         "error_kind": {
-          "default": null,
           "description": "How a failure shows up: `status` (default), `reset`, `hang` or `malformed`.",
           "type": [
             "string",
@@ -75,7 +72,6 @@
           ]
         },
         "error_rate": {
-          "default": null,
           "description": "Failure probability, 0 to 1.",
           "format": "double",
           "type": [
@@ -84,7 +80,6 @@
           ]
         },
         "error_status": {
-          "default": null,
           "description": "Status of a failed visit, 500 to 504 (default 503).",
           "format": "uint16",
           "maximum": 65535,
@@ -95,7 +90,6 @@
           ]
         },
         "latency_ms": {
-          "default": null,
           "description": "Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc\nattribute cannot compute it, so keep the two in step).",
           "format": "uint64",
           "minimum": 0,
@@ -105,7 +99,6 @@
           ]
         },
         "node": {
-          "default": null,
           "description": "A node name. With `endpoint`: only when visited through that endpoint.",
           "type": [
             "string",

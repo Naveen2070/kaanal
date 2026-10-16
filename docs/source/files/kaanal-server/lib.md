@@ -4,7 +4,7 @@ Server entry: binds the port, builds state, installs the router.
 
 ## What it does
 
-The only public surface the binary uses. One axum router serves **both** the control API and the mocks on one port (spec FR-API-12). Control routes are mounted first and wrapped in the `guard` middleware via `route_layer`, so the mock fallback can never accidentally bypass authentication. Mock requests run through one replay-engine actor task, so queues, pools and rate limits are shared by every request.
+The only public surface the binary uses. One axum router serves **both** the control API and the mocks on one port (spec FR-API-12). Control routes are mounted first and wrapped in the `guard` middleware via `route_layer`, so the mock fallback can never accidentally bypass authentication. Declares the private `scenarios` module (file discovery and atomic save, [scenarios.md](scenarios.md)). Mock requests run through one replay-engine actor task, so queues, pools and rate limits are shared by every request.
 
 ## Items
 
@@ -22,14 +22,20 @@ The only public surface the binary uses. One axum router serves **both** the con
 
 ## Route table
 
-| Route                               | Handler                                                  | Notes                                                                                       |
-| ----------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `GET /__kaanal/health`              | inline                                                   | `{ "ok": true }`; no token needed (liveness probe)                                          |
-| `GET /__kaanal/topology`            | `control::topology`                                      | nodes, edges, route keys                                                                    |
-| `GET/PUT/DELETE /__kaanal/chaos`    | `control::get_chaos` / `set_chaos_keyed` / `clear_keyed` | nested list / keyed set (node, endpoint or both) / clear a key or, with no query, all chaos |
-| `PUT/DELETE /__kaanal/chaos/{node}` | `control::set_chaos` / `clear_node`                      | merge a patch / clear one node                                                              |
-| `GET /__kaanal/events`              | `control::events`                                        | SSE stream of request events                                                                |
-| `GET /__kaanal/ui`                  | `control::ui`                                            | embedded HTML page; no token needed (page reads it from the URL fragment)                   |
-| _(fallback)_                        | `mock::handle`                                           | every other path → mock engine                                                              |
+| Route                                                        | Handler                                                      | Notes                                                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `GET /__kaanal/health`                                       | inline                                                       | `{ "ok": true }`; no token needed (liveness probe)                                          |
+| `GET /__kaanal/topology`                                     | `control::topology`                                          | nodes, edges, route keys                                                                    |
+| `GET/PUT/DELETE /__kaanal/chaos`                             | `control::get_chaos` / `set_chaos_keyed` / `clear_keyed`     | nested list / keyed set (node, endpoint or both) / clear a key or, with no query, all chaos |
+| `PUT/DELETE /__kaanal/chaos/{node}`                          | `control::set_chaos` / `clear_node`                          | merge a patch / clear one node                                                              |
+| `GET/DELETE /__kaanal/scenarios`                             | `control::list_scenarios` / `clear_scenarios`                | defined scenarios / deactivate all (live stays)                                             |
+| `GET/PUT /__kaanal/scenarios/active`                         | `control::get_active` / `set_active`                         | the stack and the compiled result / set the whole stack atomically                          |
+| `POST /__kaanal/scenarios/save`                              | `control::save_scenario`                                     | write `scenarios/NAME.yaml`                                                                 |
+| `GET/PUT/DELETE /__kaanal/scenarios/{name}`                  | `control::get_scenario` / `put_scenario` / `delete_scenario` | one definition / define at runtime / undefine a runtime scenario                            |
+| `POST /__kaanal/scenarios/{name}/activate`, `.../deactivate` | `control::activate` / `deactivate`                           | push to the top / remove from the stack                                                     |
+| `POST /__kaanal/reset`                                       | `control::reset`                                             | clean slate for `beforeEach`                                                                |
+| `GET /__kaanal/events`                                       | `control::events`                                            | SSE stream: `request` and `scenario` events                                                 |
+| `GET /__kaanal/ui`                                           | `control::ui`                                                | embedded HTML page; no token needed (page reads it from the URL fragment)                   |
+| _(fallback)_                                                 | `mock::handle`                                               | every other path → mock engine                                                              |
 
-The `route_layer(guard)` covers exactly the routes above it in the builder — a new control route added there cannot forget authentication.
+The static segments `active` and `save` win over the `{name}` capture (matchit prefers static segments; both are also reserved scenario names). The `route_layer(guard)` covers exactly the routes above it in the builder — a new control route added there cannot forget authentication.

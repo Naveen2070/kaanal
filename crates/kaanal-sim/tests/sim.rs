@@ -2,10 +2,11 @@ mod common;
 
 use common::{CHAIN_ROUTES, CHAINS, compiled};
 use kaanal_core::{
-    ChainRequest, ChainResult, ChaosKey, ChaosLayer, ChaosState, Config, Endpoints, ErrorKind,
-    FailKind, HopKind, NodeChaos, Topology, execute,
+    ChainRequest, ChainResult, ChaosKey, ChaosLayer, ChaosStack, ChaosState, Config,
+    EffectiveChaos, Endpoints, ErrorKind, FailKind, HopKind, NodeChaos, Scenario, ScenarioSet,
+    Source, Topology, execute,
 };
-use kaanal_sim::{SimConfig, Stream, run};
+use kaanal_sim::{SimConfig, Stream, run, run_effective};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -79,7 +80,30 @@ fn assert_zero_load_equal(
     keys: &[&str],
     seed: u64,
 ) -> (kaanal_sim::SimReport, usize) {
-    let sc = SimConfig {
+    let sc = zero_load_config(keys, seed);
+    let rep = run(t, e, chaos, &sc).unwrap();
+    let cut = compare_with_execute(t, e, &chaos.compile(), &rep, &sc, label);
+    (rep, cut)
+}
+
+/// [`assert_zero_load_equal`] for chaos compiled elsewhere (a scenario stack), through
+/// `run_effective`.
+fn assert_effective_equal(
+    t: &Topology,
+    e: &Endpoints,
+    chaos: &EffectiveChaos,
+    label: &str,
+    keys: &[&str],
+    seed: u64,
+) -> (kaanal_sim::SimReport, usize) {
+    let sc = zero_load_config(keys, seed);
+    let rep = run_effective(t, e, chaos, &sc).unwrap();
+    let cut = compare_with_execute(t, e, chaos, &rep, &sc, label);
+    (rep, cut)
+}
+
+fn zero_load_config(keys: &[&str], seed: u64) -> SimConfig {
+    SimConfig {
         streams: keys
             .iter()
             .map(|k| Stream {
@@ -90,14 +114,24 @@ fn assert_zero_load_equal(
         duration: Duration::from_secs(2_000),
         warmup: Duration::ZERO,
         seed,
-    };
-    let rep = run(t, e, chaos, &sc).unwrap();
+    }
+}
+
+fn compare_with_execute(
+    t: &Topology,
+    e: &Endpoints,
+    chaos: &EffectiveChaos,
+    rep: &kaanal_sim::SimReport,
+    sc: &SimConfig,
+    label: &str,
+) -> usize {
+    let seed = sc.seed;
     let mut cut = 0;
     for r in &rep.requests {
         let key = &sc.streams[r.stream].endpoint_key;
         let live = execute(
             t,
-            &chaos.compile(),
+            chaos,
             &ChainRequest {
                 endpoint: e.get(key).unwrap(),
                 n: r.n,
@@ -118,7 +152,7 @@ fn assert_zero_load_equal(
                 .is_some_and(|f| !live.plan.cancelled_by(f).is_empty()),
         );
     }
-    (rep, cut)
+    cut
 }
 
 const SEED: u64 = 5;
@@ -394,6 +428,135 @@ fn zero_load_equals_live_exactly() {
             }
         }
     }
+}
+
+fn layer(rate: f64, kind: ErrorKind, status: u16) -> ChaosLayer {
+    ChaosLayer {
+        error_rate: Some(rate),
+        error_kind: Some(kind),
+        error_status: Some(status),
+        ..ChaosLayer::default()
+    }
+}
+
+fn scenario(name: &str, entries: Vec<(ChaosKey, ChaosLayer)>) -> Scenario {
+    let mut layers = ChaosState::default();
+    for (k, l) in entries {
+        layers.set(k, l);
+    }
+    Scenario {
+        name: name.into(),
+        description: None,
+        layers,
+    }
+}
+
+/// Two scenarios plus a live override, compiled; asserts sim == execute at zero load.
+fn stack_drift(
+    label: &str,
+    s1: Vec<(ChaosKey, ChaosLayer)>,
+    s2: Vec<(ChaosKey, ChaosLayer)>,
+    live: Vec<(ChaosKey, ChaosLayer)>,
+) -> kaanal_sim::SimReport {
+    let (t, e) = build_with(GW, DB);
+    let mut set = ScenarioSet::default();
+    set.insert(scenario("s1", s1), Source::Runtime).unwrap();
+    set.insert(scenario("s2", s2), Source::Runtime).unwrap();
+    let mut stack = ChaosStack::default();
+    stack.activate(&set, "s1").unwrap();
+    stack.activate(&set, "s2").unwrap();
+    for (k, l) in live {
+        stack.live_mut().set(k, l);
+    }
+    let eff = stack.compile(&set);
+    assert!(!eff.is_empty(), "{label}: the stack must compile to chaos");
+    assert_effective_equal(&t, &e, &eff, label, &[KEY], SEED).0
+}
+
+#[test]
+fn zero_load_equals_execute_for_a_scenario_stack() {
+    let (t, _) = build_with(GW, DB);
+    let (db, app) = (t.id("db").unwrap(), t.id("app").unwrap());
+    // A live latency bump rides on top of every case.
+    let live = || {
+        vec![(
+            ChaosKey::Node(t.id("nginx").unwrap()),
+            ChaosLayer {
+                latency_add: Some(Duration::from_millis(3)),
+                ..ChaosLayer::default()
+            },
+        )]
+    };
+    for (kind, name) in [
+        (ErrorKind::Status, "status"),
+        (ErrorKind::Reset, "reset"),
+        (ErrorKind::Hang, "hang"),
+        (ErrorKind::Malformed, "malformed"),
+    ] {
+        let rep = stack_drift(
+            name,
+            vec![(ChaosKey::Node(db), layer(0.5, kind, 502))],
+            vec![(ChaosKey::Node(app), layer(0.2, ErrorKind::Status, 503))],
+            live(),
+        );
+        let want = if name == "hang" { "timeout" } else { name };
+        assert!(
+            rep.errors_by_kind().contains_key(want),
+            "{name}: its fault must fire: {:?}",
+            rep.errors_by_kind()
+        );
+    }
+
+    // Banded mix: 30% reset under 30% 503 on one node (about 51% total, two kinds).
+    let rep = stack_drift(
+        "banded",
+        vec![(ChaosKey::Node(db), layer(0.3, ErrorKind::Status, 503))],
+        vec![(ChaosKey::Node(db), layer(0.3, ErrorKind::Reset, 503))],
+        live(),
+    );
+    let by = rep.errors_by_kind();
+    assert!(
+        by.contains_key("reset") && by.contains_key("status"),
+        "{by:?}"
+    );
+
+    // node@endpoint pair.
+    let rep = stack_drift(
+        "node-at",
+        vec![(
+            ChaosKey::NodeAt(db, KEY.into()),
+            layer(0.4, ErrorKind::Reset, 503),
+        )],
+        vec![(ChaosKey::Node(db), layer(0.2, ErrorKind::Status, 503))],
+        live(),
+    );
+    assert!(rep.errors_by_kind().contains_key("reset"));
+
+    // endpoint-level entry with latency.
+    let front = ChaosLayer {
+        latency_add: Some(Duration::from_millis(20)),
+        ..layer(0.3, ErrorKind::Status, 502)
+    };
+    let rep = stack_drift(
+        "endpoint",
+        vec![(ChaosKey::Endpoint(KEY.into()), front)],
+        vec![(ChaosKey::Node(db), layer(0.2, ErrorKind::Malformed, 503))],
+        live(),
+    );
+    assert!(rep.errors_by_kind().contains_key("status"));
+
+    // A live override calms a scenario: nothing fails, and the sim still agrees with execute.
+    let calm = ChaosLayer {
+        replace: Some(true),
+        ..ChaosLayer::default()
+    };
+    let rep = stack_drift(
+        "calmed",
+        vec![(ChaosKey::Node(db), layer(1.0, ErrorKind::Reset, 503))],
+        vec![(ChaosKey::Node(db), layer(1.0, ErrorKind::Status, 503))],
+        vec![(ChaosKey::Node(db), calm)],
+    );
+    assert!(rep.errors_by_kind().is_empty());
 }
 
 /// Asserts every request's queue wait at `app` equals the Lindley recursion, exactly.

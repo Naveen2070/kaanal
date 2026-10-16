@@ -25,7 +25,7 @@ flowchart TD
             Executor["Synchronous Chain Executor"]
             Topo["Topology Graph (DAG)"]
             CostModel["Cost Model (Lognormal / Fixed)"]
-            ChaosState["Runtime Chaos State (RwLock)"]
+            ChaosState["Runtime Chaos (compiled Arc snapshot)"]
         end
 
         subgraph Data["Mock Synthesis (kaanal-data)"]
@@ -206,15 +206,17 @@ cargo run -p kaanal -- validate -c kaanal.yaml
 
 All CLI commands run from the project directory where `kaanal up` was executed:
 
-| Command                                             | Description                                                                                                           |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `kaanal up [-c config] [--port port] [--host host]` | Start the mock server in foreground.                                                                                  |
-| `kaanal validate [-c config]`                       | Validate topology, YAML syntax, and OpenAPI specs.                                                                    |
-| `kaanal schema`                                     | Print the JSON Schema for editor autocomplete.                                                                        |
-| `kaanal endpoints [--write]`                        | Add skeleton entries for spec routes to the endpoints file (append-only).                                             |
-| `kaanal status`                                     | Show running nodes and active chaos settings.                                                                         |
-| `kaanal chaos set [node] [flags]`                   | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--endpoint "GET /x"`, `--down`). |
-| `kaanal chaos clear [node] [--endpoint KEY]`        | Clear chaos on one node, one endpoint, or all.                                                                        |
+| Command                                                                            | Description                                                                                                                            |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c config] [--port port] [--host host]`                                | Start the mock server in foreground.                                                                                                   |
+| `kaanal validate [-c config]`                                                      | Validate topology, YAML syntax, and OpenAPI specs.                                                                                     |
+| `kaanal schema`                                                                    | Print the JSON Schema for editor autocomplete.                                                                                         |
+| `kaanal endpoints [--write]`                                                       | Add skeleton entries for spec routes to the endpoints file (append-only).                                                              |
+| `kaanal status`                                                                    | Show running nodes, the effective chaos and the active scenarios.                                                                      |
+| `kaanal chaos set [node] [flags]`                                                  | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--endpoint "GET /x"`, `--down`).                  |
+| `kaanal chaos clear [node] [--endpoint KEY]`                                       | Clear live chaos on one node, one endpoint, or all (scenarios stay).                                                                   |
+| `kaanal scenario list\|show\|activate\|deactivate\|set\|clear\|active\|load\|save` | Named chaos scenarios from `scenarios:` or `scenarios/*.yaml`: switch on and off, stack, save. See [scenarios](docs/web/scenarios.md). |
+| `kaanal reset`                                                                     | Clean slate for tests: scenarios off, runtime-defined scenarios undefined, live chaos cleared, counters and rate limits reset.         |
 
 Exit codes: `0` (success), `1` (error), `2` (no running instance found).
 
@@ -240,6 +242,7 @@ Full documentation is located in the [`docs/`](docs/) directory:
 - [Per-File Code Reference](docs/source/files/index.md) — Deep walkthrough of every crate source file.
 - [User Guide](docs/web/user-guide.md) — End-user operational guide and configuration reference.
 - [Control API Reference](docs/web/control-api.md) — HTTP reference for `/__kaanal/*`.
+- [Scenarios](docs/web/scenarios.md) — Named chaos bundles: YAML, stacking, CLI, API, and a Playwright `beforeEach` recipe.
 - [Core Concepts](docs/web/concepts.md) — Topology DAGs, cost models, and chaos propagation explained.
 - [Web UI Guide](docs/web/web-ui.md) — Live status page features, telemetry counters, and security rules.
 - [Contributor Coding Guide](docs/coding-guide/index.md) — Architectural invariants, coding standards, and lint policies.

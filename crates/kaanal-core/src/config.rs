@@ -16,7 +16,7 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::de::value::MapAccessDeserializer;
 use serde::de::{self, Error as _, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::exec::Op;
@@ -72,37 +72,56 @@ pub struct ScenarioConfig {
     #[serde(default)]
     #[schemars(skip)]
     pub(crate) limits: Option<serde::de::IgnoredAny>,
-    /// **Private.** Reserved for B2b-2; rejected as "not supported yet".
+    /// **Private.** Reserved for B2b-2; rejected as "not supported yet". An explicit `null`
+    /// reads as absent, like `limits`.
     #[serde(default)]
     #[schemars(skip)]
     pub(crate) pins: Option<serde::de::IgnoredAny>,
 }
 
+impl ScenarioConfig {
+    /// Rejects the reserved keys that parse but do nothing yet (`limits`, `pins`). One source
+    /// for the message: the server and `kaanal scenario load` both call it. A `null` (a key
+    /// with no value) counts as absent; any other value, even `{}`, is rejected.
+    ///
+    /// # Errors
+    /// `"limits: not supported yet (...)"` or `"pins: not supported yet (...)"`.
+    pub fn check_supported(&self) -> Result<(), String> {
+        if self.limits.is_some() {
+            return Err("limits: not supported yet (runtime limit overrides)".into());
+        }
+        if self.pins.is_some() {
+            return Err("pins: not supported yet (planned for B2b-2)".into());
+        }
+        Ok(())
+    }
+}
+
 /// One chaos entry of a scenario: where it applies plus the fields it sets.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChaosEntry {
     /// A node name. With `endpoint`: only when visited through that endpoint.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<String>,
     /// `METHOD /path`: the front door of that endpoint.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
     /// Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc
     /// attribute cannot compute it, so keep the two in step).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
     /// Failure probability, 0 to 1.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_rate: Option<f64>,
     /// How a failure shows up: `status` (default), `reset`, `hang` or `malformed`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_kind: Option<String>,
     /// Status of a failed visit, 500 to 504 (default 503).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_status: Option<u16>,
     /// Hard outage.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub down: Option<bool>,
 }
 

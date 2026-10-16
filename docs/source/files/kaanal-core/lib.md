@@ -4,7 +4,7 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 
 ## What it does
 
-- Declares the modules `chain`, `chaos`, `config`, `diagnostics`, `dist`, `exec`, `presets`, `replay`, `schema`, `topology`.
+- Declares the modules `chain`, `chaos`, `config`, `diagnostics`, `dist`, `exec`, `presets`, `replay`, `scenario`, `schema`, `topology`.
 - Re-exports the public API so users of the crate write `kaanal_core::{Config, Topology, execute, ...}` instead of knowing module paths.
 - Defines the one hash function the whole project uses for seeding.
 
@@ -16,16 +16,17 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 
 ## Re-exports
 
-| From          | Items                                                                                                                                |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `chain`       | `Endpoint`, `Endpoints`, `EndpointsInput`, `JWKS_KEY`, `LOGIN_KEY`, `Responder`, `RouteSpec`, `compile`, `resolve_error`, `skeleton` |
-| `chaos`       | `ChaosKey`, `ChaosLayer`, `ChaosState`, `ErrorKind`, `FailKind`, `HANG_CAP`, `MAX_LATENCY_ADD`, `NodeChaos`, `merge`                 |
-| `config`      | `Config`, `ConfigError`, `Determinism`, `EndpointsConfig`, `NodeKind`, `SeedSource`                                                  |
-| `diagnostics` | `Located`, `PathSeg`                                                                                                                 |
-| `dist`        | `Dist`                                                                                                                               |
-| `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `Plan`, `PlanItem`, `execute`, `sample_plan`                  |
-| `replay`      | `Engine`, `EngineError`, `Finished`, `FinishedHop`, `NodeCounters`                                                                   |
-| `topology`    | `Admission`, `CacheModel`, `Edge`, `Node`, `NodeId`, `RateLimit`, `Topology`, `TopologyError`                                        |
+| From          | Items                                                                                                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chain`       | `Endpoint`, `Endpoints`, `EndpointsInput`, `JWKS_KEY`, `LOGIN_KEY`, `Responder`, `RouteSpec`, `compile`, `resolve_error`, `skeleton`                                               |
+| `chaos`       | `ChaosKey`, `ChaosLayer`, `ChaosState`, `EffectiveChaos`, `ErrorKind`, `FailKind`, `Fault`, `HANG_CAP`, `MAX_FAULTS`, `MAX_LATENCY_ADD`, `NodeChaos`, `Resolved`, `compile_layers` |
+| `config`      | `ChaosEntry`, `Config`, `ConfigError`, `Determinism`, `EndpointsConfig`, `NodeKind`, `ScenarioConfig`, `SeedSource`, `parse_scenario`                                              |
+| `diagnostics` | `Located`, `PathSeg`                                                                                                                                                               |
+| `dist`        | `Dist`                                                                                                                                                                             |
+| `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `Plan`, `PlanItem`, `execute`, `sample_plan`                                                                |
+| `replay`      | `Engine`, `EngineError`, `Finished`, `FinishedHop`, `NodeCounters`                                                                                                                 |
+| `scenario`    | `ChaosStack`, `MAX_ENTRIES`, `MAX_SCENARIOS`, `Scenario`, `ScenarioError`, `ScenarioSet`, `Source`, `endpoint_key`, `resolve_scenario`, `valid_name`                               |
+| `topology`    | `Admission`, `CacheModel`, `Edge`, `Node`, `NodeId`, `RateLimit`, `Topology`, `TopologyError`                                                                                      |
 
 ## Notes
 

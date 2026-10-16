@@ -48,6 +48,7 @@ These are enforced by static tests in `crates/kaanal-server/tests/http.rs`:
 
 ## Known limitations
 
+- The page shows and edits **only the chaos you set by hand** (the live layer, `GET /__kaanal/chaos`). Chaos that comes from an active [scenario](scenarios.md) is not in the table; a scenario panel arrives with the M2 UI. Use `kaanal status` or `GET /__kaanal/scenarios/active` to see the effective result. The page ignores `scenario` events.
 - Chaos set from the **CLI** shows in the page only after a Clear or a stream reconnect — there is no polling of `/__kaanal/chaos`.
 - Each open tab holds one SSE connection; browsers allow ~6 connections per host over HTTP/1.1, so many tabs can stall other requests to the port. Close extra tabs.
 

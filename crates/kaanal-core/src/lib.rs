@@ -33,7 +33,7 @@ pub use chain::{
 };
 pub use chaos::{
     ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, ErrorKind, FailKind, Fault, HANG_CAP,
-    MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers, merge,
+    MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers,
 };
 pub use config::{
     ChaosEntry, Config, ConfigError, Determinism, EndpointsConfig, NodeKind, ScenarioConfig,
@@ -47,7 +47,7 @@ pub use exec::{
 pub use replay::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
 pub use scenario::{
     ChaosStack, MAX_ENTRIES, MAX_SCENARIOS, Scenario, ScenarioError, ScenarioSet, Source,
-    endpoint_key, resolve_scenario, valid_name,
+    endpoint_key, resolve_scenario, valid_name, validate_scenario_shape,
 };
 pub use schema::config_schema;
 pub use topology::{Admission, CacheModel, Edge, Node, NodeId, RateLimit, Topology, TopologyError};

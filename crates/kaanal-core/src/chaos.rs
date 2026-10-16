@@ -212,6 +212,22 @@ impl ChaosLayer {
         (self.error_kind.is_some() || self.error_status.is_some()) && self.error_rate.is_none()
     }
 
+    /// This one layer with the unset fields filled in with their defaults, for the control
+    /// API's GET. Not the executor's rule (that is [`compile_layers`], where a kind and status
+    /// belong to their own rate); there is deliberately no multi-layer version of this.
+    #[must_use]
+    pub fn dense(&self) -> NodeChaos {
+        NodeChaos {
+            latency_add: self.latency_add.unwrap_or_default(),
+            error_rate: self.error_rate.unwrap_or(0.0),
+            error_kind: self.error_kind.unwrap_or_default(),
+            error_status: self
+                .error_status
+                .unwrap_or(NodeChaos::default().error_status),
+            down: self.down == Some(true),
+        }
+    }
+
     /// Overwrites every field `patch` sets, leaving the rest untouched.
     pub fn apply(&mut self, patch: &ChaosLayer) {
         macro_rules! take {
@@ -226,34 +242,6 @@ impl ChaosLayer {
             replace
         );
     }
-}
-
-/// Dense view of a single stored layer, for the control API's GET (defaults filled in). Not
-/// the executor's rule: that is [`compile_layers`], where kind and status belong to their own
-/// rate. With several layers this folds rates as independent chances and takes the last kind.
-#[must_use]
-pub fn merge(layers: &[&ChaosLayer]) -> NodeChaos {
-    let mut out = NodeChaos::default();
-    let mut rate: Option<f64> = None;
-    for l in layers.iter().copied() {
-        if let Some(d) = l.latency_add {
-            out.latency_add = out.latency_add.saturating_add(d);
-        }
-        if let Some(r) = l.error_rate {
-            rate = Some(rate.map_or(r, |p| p + r - p * r));
-        }
-        if let Some(k) = l.error_kind {
-            out.error_kind = k;
-        }
-        if let Some(s) = l.error_status {
-            out.error_status = s;
-        }
-        if l.down == Some(true) {
-            out.down = true;
-        }
-    }
-    out.error_rate = rate.unwrap_or(0.0);
-    out
 }
 
 /// Where a chaos layer applies.
@@ -314,7 +302,10 @@ impl ChaosState {
     }
 
     /// One message per stored layer whose kind or status has no effect for lack of an
-    /// `error_rate`, in [`ChaosState::entries`] order. Not an error (S7).
+    /// `error_rate`, in [`ChaosState::entries`] order. Not an error (S7). Names nodes by id, as
+    /// core knows no names; the server words its own messages from the topology. Meant for
+    /// tests of core itself.
+    #[doc(hidden)]
     #[must_use]
     pub fn warnings(&self) -> Vec<String> {
         self.entries()
@@ -354,12 +345,6 @@ impl ChaosState {
         self.nodes.clear();
         self.endpoints.clear();
         self.node_at.clear();
-    }
-
-    /// The endpoint-wide layer for `endpoint`, if any.
-    #[must_use]
-    pub fn endpoint(&self, endpoint: &str) -> Option<&ChaosLayer> {
-        self.endpoints.get(endpoint)
     }
 
     /// Compiles this single layer set; same as `compile_layers(&[self])`.

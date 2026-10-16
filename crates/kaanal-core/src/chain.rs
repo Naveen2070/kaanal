@@ -629,7 +629,8 @@ impl Compiler<'_> {
             if !p.starts_with('/') {
                 return Err(place.err("path must start with '/'"));
             }
-            let key = format!("{m} {p}");
+            // The checks above make this infallible; one normalizer for every endpoint key.
+            let key = crate::scenario::endpoint_key(written).map_err(|e| place.err(e))?;
             if let Some(first) = written_as.get(&key) {
                 return Err(place.err(format!("same route as '{first}'")));
             }

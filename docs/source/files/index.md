@@ -14,7 +14,8 @@ One page per source file: what the file does and what each function/type in it d
 | `src/topology.rs`    | [kaanal-core/topology.md](kaanal-core/topology.md)       | Graph build + validation (optional gateway, edge table, DAG, presets) |
 | `src/replay/`        | [kaanal-core/replay.md](kaanal-core/replay.md)           | Token bucket (GCRA) and slot gate with FIFO hand-over                 |
 | `src/dist.rs`        | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                               |
-| `src/chaos.rs`       | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | `NodeChaos` / `ChaosState` runtime state                              |
+| `src/chaos.rs`       | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | Chaos layers, `ChaosState`, compiled `EffectiveChaos` / `Resolved`    |
+| `src/scenario.rs`    | [kaanal-core/scenario.md](kaanal-core/scenario.md)       | Scenarios: names, `ScenarioSet`, `ChaosStack`, `resolve_scenario`     |
 | `src/chain.rs`       | [kaanal-core/chain.md](kaanal-core/chain.md)             | Endpoint compile: default chains, via/with, limits, error_map lookup  |
 | `src/exec.rs`        | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, spans, determinism         |
 
@@ -30,16 +31,17 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-server](kaanal-server/) (HTTP)
 
-| File             | Page                                                 | Contents                                            |
-| ---------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| `src/lib.rs`     | [kaanal-server/lib.md](kaanal-server/lib.md)         | `serve`/`check`, router, port binding               |
-| `src/actor.rs`   | [kaanal-server/actor.md](kaanal-server/actor.md)     | Live replay-engine actor task and its handle        |
-| `src/auth.rs`    | [kaanal-server/auth.md](kaanal-server/auth.md)       | Signing key, JWKS, RS256 tokens, login              |
-| `src/control.rs` | [kaanal-server/control.md](kaanal-server/control.md) | Control API handlers + the auth/Host guard          |
-| `src/mock.rs`    | [kaanal-server/mock.md](kaanal-server/mock.md)       | Mock request handler, trace header, CORS            |
-| `src/state.rs`   | [kaanal-server/state.md](kaanal-server/state.md)     | `AppState::build` load pipeline, route conflicts    |
-| `src/wire.rs`    | [kaanal-server/wire.md](kaanal-server/wire.md)       | `Cut` body stream for the `reset` failure kind      |
-| `src/ui.html`    | [../../web/web-ui.md](../../web/web-ui.md)           | Embedded status page (documented with the web docs) |
+| File               | Page                                                     | Contents                                            |
+| ------------------ | -------------------------------------------------------- | --------------------------------------------------- |
+| `src/lib.rs`       | [kaanal-server/lib.md](kaanal-server/lib.md)             | `serve`/`check`, router, port binding               |
+| `src/actor.rs`     | [kaanal-server/actor.md](kaanal-server/actor.md)         | Live replay-engine actor task and its handle        |
+| `src/auth.rs`      | [kaanal-server/auth.md](kaanal-server/auth.md)           | Signing key, JWKS, RS256 tokens, login              |
+| `src/control.rs`   | [kaanal-server/control.md](kaanal-server/control.md)     | Control API handlers + the auth/Host guard          |
+| `src/mock.rs`      | [kaanal-server/mock.md](kaanal-server/mock.md)           | Mock request handler, trace header, CORS            |
+| `src/scenarios.rs` | [kaanal-server/scenarios.md](kaanal-server/scenarios.md) | Scenario file discovery and atomic save             |
+| `src/state.rs`     | [kaanal-server/state.md](kaanal-server/state.md)         | `AppState::build` load pipeline, route conflicts    |
+| `src/wire.rs`      | [kaanal-server/wire.md](kaanal-server/wire.md)           | `Cut` body stream for the `reset` failure kind      |
+| `src/ui.html`      | [../../web/web-ui.md](../../web/web-ui.md)               | Embedded status page (documented with the web docs) |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
 

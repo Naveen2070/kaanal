@@ -12,7 +12,7 @@ This documentation has three parts.
 | ------------------------------------------------ | --------------------------------------------------------------------------- |
 | [source/architecture.md](source/architecture.md) | How the pieces fit: crates, request flow, threading model, determinism      |
 | [source/how-to.md](source/how-to.md)             | Build, run, test; how to add a node type, a CLI command, a control endpoint |
-| [source/chaos.md](source/chaos.md)               | Failure kinds, `timeout:`, zombie hops, keyed chaos and merge rules         |
+| [source/chaos.md](source/chaos.md)               | Failure kinds, `timeout:`, zombie hops, keyed chaos, layers, scenarios      |
 | [source/tests.md](source/tests.md)               | Every test in every crate, explained                                        |
 | [source/files/](source/files/)                   | One page per source file: what it does, what each function does             |
 
@@ -29,6 +29,7 @@ This documentation has three parts.
 | [web/index.md](web/index.md)             | What the docs site is and how it is organised                   |
 | [web/user-guide.md](web/user-guide.md)   | Install, `kaanal.yaml`, CLI commands, the embedded UI           |
 | [web/control-api.md](web/control-api.md) | The `/__kaanal/*` HTTP control API reference                    |
+| [web/scenarios.md](web/scenarios.md)     | Named chaos scenarios: YAML, stacking, CLI, API, test recipes   |
 | [web/concepts.md](web/concepts.md)       | Topology, call chains, chaos, determinism — explained for users |
 | [web/web-ui.md](web/web-ui.md)           | Embedded status page guide, live counters, security rules       |
 
@@ -38,6 +39,8 @@ This documentation has three parts.
 kaanal up -c kaanal.yaml        # serve mocks on http://localhost:8080
 kaanal chaos set db --down      # take the database node down, live
 kaanal chaos clear              # back to normal
+kaanal scenario activate payments-down   # a named bundle of chaos from kaanal.yaml
+kaanal reset                    # clean slate between tests
 kaanal validate -c kaanal.yaml  # check config without starting
 kaanal status                   # nodes and active chaos of the running instance
 ```

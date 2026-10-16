@@ -9,13 +9,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::config::{EndpointsConfig, NodeConfig, SeedSource, parse_endpoints};
 use kaanal_core::diagnostics::{Located, keys};
 use kaanal_core::{
-    ChaosState, Config, Endpoint, Endpoints, NodeId, ScenarioSet, Source, Topology,
+    ChaosStack, Config, EffectiveChaos, Endpoint, Endpoints, NodeId, ScenarioSet, Source, Topology,
     resolve_scenario, valid_name,
 };
 
@@ -38,7 +38,7 @@ pub struct Route {
     /// Response schema for generated bodies (`None`: empty body, or a static route).
     pub schema: Option<Value>,
     /// Requests seen so far; becomes `ChainRequest.n`.
-    pub counter: AtomicU64,
+    pub counter: Arc<AtomicU64>,
 }
 
 /// One finished request, broadcast to `/__kaanal/events` subscribers.
@@ -63,6 +63,40 @@ pub struct Event {
     pub kind: Option<&'static str>,
 }
 
+/// What the bus carries: a finished request, or a scenario change (S21).
+#[derive(Debug, Clone)]
+pub enum BusEvent {
+    /// A finished mock request (SSE message `request`).
+    Request(Event),
+    /// A scenario stack change (SSE message `scenario`).
+    Scenario {
+        /// `activate`, `deactivate`, `set`, `clear`, `reset` or `update` (an active scenario's definition changed).
+        action: &'static str,
+        /// The scenario concerned, when one.
+        name: Option<String>,
+        /// The active stack after the change, bottom to top.
+        active: Vec<String>,
+    },
+}
+
+/// One published chaos state: the stack it was compiled from and the compiled result. Immutable
+/// once published; a request clones the `Arc` and uses that one value (S10).
+pub struct Effective {
+    /// The active scenarios and the live layer, as they were when this was compiled.
+    pub stack: ChaosStack,
+    /// What the executor reads.
+    pub chaos: EffectiveChaos,
+}
+
+/// The mutable side of chaos. Behind [`AppState::control`]: the only writer path (S11).
+#[derive(Clone, Default)]
+pub struct Control {
+    /// Every defined scenario.
+    pub scenarios: ScenarioSet,
+    /// The active scenarios and the live layer.
+    pub stack: ChaosStack,
+}
+
 /// Shared server state; one `Arc` clones into every handler.
 pub struct AppState {
     /// The validated topology graph (immutable after build).
@@ -73,16 +107,17 @@ pub struct AppState {
     pub route_keys: Vec<String>,
     /// Every compiled endpoint, static and synthesized HEAD ones included (the control API checks keys here).
     pub endpoints: Endpoints,
-    /// Every scenario known at startup (inline and files).
-    #[allow(dead_code)] // read by the scenario control API (next task)
-    pub scenarios: ScenarioSet,
     /// The `scenarios/` directory next to the config, under its canonical directory (it may not exist).
-    #[allow(dead_code)] // read by save (next task)
     pub scenarios_dir: PathBuf,
-    /// Live chaos settings; written by the control API, read (briefly) per request.
-    pub chaos: RwLock<ChaosState>,
-    /// Request-event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
-    pub events: broadcast::Sender<Event>,
+    /// The published chaos state; readers clone the `Arc` and drop the lock ([`AppState::snapshot`]).
+    pub chaos: RwLock<Arc<Effective>>,
+    /// The scenarios and the stack. Every control write locks it, mutates, and calls
+    /// [`AppState::publish`] before unlocking. Never held across an `.await`.
+    pub control: Mutex<Control>,
+    /// Every route's request counter (`POST /reset` zeroes them).
+    pub counters: Vec<Arc<AtomicU64>>,
+    /// Event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
+    pub events: broadcast::Sender<BusEvent>,
     /// Bearer token the control API requires.
     pub token: String,
     /// The config's `seed:`: generated bodies use it in both determinism modes (D14).
@@ -267,6 +302,39 @@ fn load_scenarios(
 }
 
 impl AppState {
+    /// The published chaos state. One `Arc` clone; the lock is gone on return.
+    pub fn snapshot(&self) -> Arc<Effective> {
+        Arc::clone(&self.chaos.read().expect("chaos lock poisoned"))
+    }
+
+    /// Compiles `c` and swaps the result in; returns what was published. Taking the guard
+    /// proves the caller holds the [`Control`] lock, so publishes happen in write order (S11).
+    ///
+    /// # Errors
+    /// The compiled result breaks a chaos limit (a fault rate outside 0..=1 or a status outside
+    /// 500-504). Each layer is validated on entry and latency is clamped by the compile, so
+    /// this cannot happen today; it guards the invariant. Nothing is swapped.
+    pub fn publish(&self, c: &MutexGuard<'_, Control>) -> Result<Arc<Effective>, String> {
+        let chaos = c.stack.compile(&c.scenarios);
+        for (_, r) in chaos.entries() {
+            for f in r.faults() {
+                // The union folds in floats, so allow a hair of rounding above 1.
+                if !(0.0..=1.0 + 1e-9).contains(&f.upto) || !(500..=504).contains(&f.status) {
+                    return Err(
+                        "the combined chaos is out of range (error_rate 0-1, error_status 500-504)"
+                            .into(),
+                    );
+                }
+            }
+        }
+        let next = Arc::new(Effective {
+            stack: c.stack.clone(),
+            chaos,
+        });
+        *self.chaos.write().expect("chaos lock poisoned") = Arc::clone(&next);
+        Ok(next)
+    }
+
     /// Runs the full load pipeline: topology → spec files → endpoints (inline or file) →
     /// compiled routes → matchit router.
     ///
@@ -307,6 +375,7 @@ impl AppState {
             load_scenarios(cfg, base_dir, &topo, &endpoints, &mut warnings)?;
         // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
+        let mut counters = Vec::new();
         for ep in endpoints.iter() {
             let (method, path) = ep.key.split_once(' ').unwrap_or((ep.key.as_str(), ""));
             if ep.owner.is_none() {
@@ -322,13 +391,15 @@ impl AppState {
                 }
             });
             let (status, schema) = spec.cloned().unwrap_or((200, None));
+            let counter = Arc::new(AtomicU64::new(0));
+            counters.push(Arc::clone(&counter));
             by_path.entry(path.to_string()).or_default().push(Route {
                 method: method.to_string(),
                 key: ep.key.clone(),
                 endpoint: Arc::clone(ep),
                 status,
                 schema,
-                counter: AtomicU64::new(0),
+                counter,
             });
         }
         let route_keys: Vec<String> = endpoints
@@ -353,9 +424,16 @@ impl AppState {
             paths,
             route_keys,
             endpoints,
-            scenarios,
             scenarios_dir,
-            chaos: RwLock::new(ChaosState::default()),
+            chaos: RwLock::new(Arc::new(Effective {
+                stack: ChaosStack::default(),
+                chaos: EffectiveChaos::default(),
+            })),
+            control: Mutex::new(Control {
+                scenarios,
+                stack: ChaosStack::default(),
+            }),
+            counters,
             events,
             token,
             seed: cfg.seed,

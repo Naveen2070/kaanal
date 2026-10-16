@@ -4,7 +4,7 @@ The live driver of the replay engine: one task owns the `Engine` and a catch-up 
 
 ## What it does
 
-`spawn(engine)` starts one tokio task and returns an `EngineHandle` (`Clone`; clones share the task). A handler calls `handle.run(plan).await`, which sends the sampled `Plan` and waits for its `Finished` (result, arrival and done times, per-hop waits). `None` means the task has stopped (a clock overflow or runtime shutdown); `mock.rs` answers 500 `engine stopped`.
+`spawn(engine)` starts one tokio task and returns an `EngineHandle` (`Clone`; clones share the task). The channel carries `Cmd::Run { plan, reply }` and `Cmd::Refill`. A handler calls `handle.run(plan).await`, which sends the sampled `Plan` and waits for its `Finished` (result, arrival and done times, per-hop waits). `None` means the task has stopped (a clock overflow or runtime shutdown); `mock.rs` answers 500 `engine stopped`.
 
 The task loop waits for the first of: a new plan, or the engine's next due event (`Engine::next_due`, as a `sleep_until` on the task's start instant). On wake it runs `advance_to(now)`; for a new plan it calls `submit(now, plan, tag)` alone (it runs every event due strictly before `now` itself, so an arrival that ties with a release goes first, as in the simulator; the select is biased toward queued plans for the same reason), then answers every finished request.
 
@@ -12,21 +12,26 @@ The task loop waits for the first of: a new plan, or the engine's next due event
 
 `advance_to` runs every event due **at its scheduled time**, not at wake-up time. A late wake-up (the Windows timer ticks about every 15 ms) therefore delays only the answer; the hop starts, queue order and waits of the requests behind it are exact.
 
+## Refill (`POST /reset`)
+
+`EngineHandle::refill_buckets()` is fire and forget (so the control handler can call it under its lock). The actor handles `Cmd::Refill` by first running `advance_to(now)`, so events already due take their tokens from the old bucket, then calling `Engine::refill_buckets()`. The channel is FIFO, so every request **started** after the reset returns sees full buckets. Gates and pools are not reset (they hold in-flight requests). A request already in flight keeps its slots and queue places, but its later hops at a rate-limited node take tokens from the refilled bucket. The buckets are time-based (GCRA), so repeating a rate-limited run needs the same wall-clock pacing, not only the same request order.
+
 ## Dropped clients
 
 A request whose client went away stays in the engine until it ends, like a call still running on a real server. Its slot and queue place are released by the engine at the normal time; only the reply is dropped.
 
 ## Items
 
-| Item                | Kind   | What it does                                                    |
-| ------------------- | ------ | --------------------------------------------------------------- |
-| `EngineHandle`      | struct | `Clone` sender to the task; `run(plan) -> Option<Finished>`.    |
-| `spawn(engine)`     | fn     | Starts the task on the current runtime (`serve` calls it once). |
-| `drive` _(private)_ | fn     | The task loop; the `tag → reply` map lives here.                |
+| Item                | Kind   | What it does                                                                                 |
+| ------------------- | ------ | -------------------------------------------------------------------------------------------- |
+| `EngineHandle`      | struct | `Clone` sender to the task; `run(plan) -> Option<Finished>`, and `refill_buckets()` (below). |
+| `Cmd` _(private)_   | enum   | `Run { plan, reply }` or `Refill`.                                                           |
+| `spawn(engine)`     | fn     | Starts the task on the current runtime (`serve` calls it once).                              |
+| `drive` _(private)_ | fn     | The task loop; the `tag → reply` map lives here.                                             |
 
 ## Tests
 
-[../../tests.md](../../tests.md#crateskaanal-serversrcactorrs-unit--the-live-engine-task): the differential test against the engine driven directly, the dropped-receiver test, and the ignored throughput benchmark.
+[../../tests.md](../../tests.md#crateskaanal-serversrcactorrs-unit--the-live-engine-task): the differential test against the engine driven directly, the dropped-receiver test, the refill-ordering test, and the ignored throughput benchmark.
 
 ## Known limits
 

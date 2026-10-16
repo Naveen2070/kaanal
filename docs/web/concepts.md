@@ -34,7 +34,7 @@ Each database hop is one of three operations, inferred from the endpoint: `GET /
 
 ## Chaos
 
-Chaos is live runtime state (per node, per endpoint, or per node-at-endpoint) — never part of the config file:
+Chaos is live runtime state (per node, per endpoint, or per node-at-endpoint). You set it by hand, or switch on a named [scenario](scenarios.md); neither is part of a node's configuration:
 
 - **latency**: added to every visit of the node.
 - **error rate + status**: each visit fails with that probability and HTTP status.
@@ -47,7 +47,9 @@ A failure stops the chain at that node and its status becomes the response — a
 
 **Timeouts.** Any node can have `timeout: 1s`. It is a deadline for calls to that node, covering its queue wait, its own work and everything it calls. When it passes, the caller gets a 504 (the error body has `"kind":"timeout"`) at that moment — but the work that was already running keeps its slot until it ends, as a real database does. A slow dependency therefore turns into a pile of timeouts, not a clean recovery.
 
-**Chaos on one route.** Chaos can be set on a node, on an endpoint (`GET /orders`, once at its front door) or on a node only while it serves one endpoint. A node entry and a node-at-endpoint entry that match a visit **merge**: latencies add, `down` is an OR, error rates combine as independent chances, and the last-set kind and status win. An endpoint entry is separate: it is rolled once at the endpoint's front door (its latency is a leading delay on the entry node, its failure belongs to the entry node) and is not merged into the node visits behind it. See [chaos internals](../source/chaos.md). Merging differs from service meshes, where the most specific rule replaces the others; to get "only this", clear the broader entry.
+**Chaos on one route.** Chaos can be set on a node, on an endpoint (`GET /orders`, once at its front door) or on a node only while it serves one endpoint. Entries that match a visit **stack**: latencies add (clamped to 5 minutes per entry key: the node, endpoint and node-at-endpoint entries each clamp on their own), `down` is an OR, and error rates combine as independent chances. Each failure keeps its own kind and status, which belong to the entry's own `error_rate` (a kind with no rate in the same entry does nothing and is reported as a warning). Two failing entries are drawn from one roll, so 30% `reset` plus 30% `503` gives about 30% resets and 21% 503s. Entries come in layers, bottom to top: the active scenarios in the order you activated them, then the chaos you set by hand, always on top. **A higher layer wins over a lower one** for the same field, whatever the key; inside one layer the node-at-endpoint entry goes before the node's. A hand-set entry with `mode: override` replaces everything below it for that key instead (see the [control API](control-api.md)). An endpoint entry is separate: it is rolled once at the endpoint's front door (its latency is a leading delay on the entry node, its failure belongs to the entry node) and is not merged into the node visits behind it. See [chaos internals](../source/chaos.md). Stacking differs from service meshes, where the most specific rule replaces the others; to get "only this", clear the broader entry, or use `mode: override`.
+
+**Scenarios.** A scenario is a named bundle of chaos entries from `kaanal.yaml` or `scenarios/NAME.yaml`: "payments is down", "slow database". Switch them on and off live, stack several, save what you built by hand, and reset everything between tests. See [scenarios.md](scenarios.md).
 
 ## Determinism
 

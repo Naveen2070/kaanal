@@ -2,6 +2,8 @@
 
 The thin driver behind `run`. It owns the stream arrivals on a virtual clock in integer nanoseconds and merges them, by `(time, seq)`, with the events of the replay `Engine` in `kaanal-core` (`docs/source/files/kaanal-core/replay.md`), which walks every request's `Plan`: fork/join, FIFO queueing, failure cancellation (D17), request-table reuse (R6.13). This file has no timing model of its own.
 
+`simulate` takes the chaos as `&EffectiveChaos` (B2b-1): the same compiled form live mode reads, so scenario stacks, banded faults and overrides reach the simulator through `kaanal_sim::run_effective` with no sim-side logic. Both drivers consume one compiled state, so drift can only come from `exec`; `zero_load_equals_execute_for_a_scenario_stack` pins it (R7.5).
+
 1. **Arrivals.** Each stream has an RNG seeded by `stable_hash(seed, "arrivals", key)` and exponential gaps of mean `1 / rate`. The next arrival of every stream sits in a small heap of `(time, seq, stream)`; its `seq` comes from `Engine::stamp()`, so an arrival and a hop end at the same instant order as they did when one heap held both.
 2. **Loop.** Take whichever is earlier, the next arrival or `Engine::peek()`. An arrival calls `sample_plan()` on the stream's compiled endpoint with the request counter `n` and `seed`, schedules the stream's next arrival (the stamp comes before `submit`'s own events), then `submit`s the plan. Otherwise it `step`s one engine event. After each, `drain_finished()` turns answers into `RequestRecord`s.
 3. **Tags.** A request's tag is `(stream << 48) | n`; `run` rejects more than 65 535 streams so the stream index always fits. `n` stays far below 2^48.

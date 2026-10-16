@@ -97,13 +97,13 @@ sequenceDiagram
     participant Router as Axum Router (matchit)
     participant Mock as Mock Handler (mock.rs)
     participant Core as Chain Executor (exec.rs)
-    participant Chaos as ChaosState (RwLock)
+    participant Chaos as Effective (Arc snapshot)
     participant Data as Data Generator (generate.rs)
     participant Bus as SSE Broadcast Bus
 
     Client->>Router: GET /users/42
     Router->>Mock: Dispatched Route (its compiled endpoint: chain, op, override, error_map)
-    Mock->>Chaos: Acquire Read Lock (brief)
+    Mock->>Chaos: snapshot() (clone one Arc)
     Mock->>Core: execute(topology, chaos, endpoint, n, chain_seed)
     Note over Core: Pure Synchronous Evaluation:<br/>1. Gateway proc (1.0ms)<br/>2. Net hop (1.0ms)<br/>3. Service proc (5.0ms)<br/>4. Net hop (1.0ms)<br/>5. DB read op (4.2ms)
     Core-->>Mock: ChainOutcome { hops, total: 12.2ms, status: Ok }
@@ -157,7 +157,7 @@ Node processing (`proc`), network hops (`net`), and database operations (`ops`) 
 
 ## 5. Live Chaos Engine & Upstream Propagation
 
-Chaos settings live in `AppState.chaos` as an in-memory `std::sync::RwLock<ChaosState>`. Chaos is never persisted to `kaanal.yaml` and does not require server restarts.
+Chaos settings live in `AppState.chaos` as an in-memory `std::sync::RwLock<Arc<Effective>>`: the stack of active scenarios plus the live layer, **compiled on every write** into an `EffectiveChaos`. A request clones the `Arc` once and uses that one snapshot; control writes take one `Mutex<Control>`, fold, validate and swap the `Arc`, so readers never wait for a fold. Chaos is never persisted to `kaanal.yaml` (scenarios may be defined there or in `scenarios/*.yaml`, but activation and live changes are runtime state) and does not require server restarts. The model is in [chaos.md](chaos.md).
 
 ```mermaid
 flowchart LR
@@ -165,11 +165,11 @@ flowchart LR
         CLI["kaanal chaos set"] -->|PUT /__kaanal/chaos/{node}| Guard["Security Guard"]
         UI["Web UI"] -->|PUT /__kaanal/chaos/{node}| Guard
         Guard --> Handler["set_chaos Handler"]
-        Handler -->|Write Lock| State[("RwLock<ChaosState>")]
+        Handler -->|"Control mutex: compile, swap Arc"| State[("RwLock<Arc<Effective>>")]
     end
 
     subgraph Runtime["Mock Request Pipeline"]
-        MockHandler["mock::handle"] -->|Read Lock| State
+        MockHandler["mock::handle"] -->|"snapshot: one Arc clone"| State
         MockHandler --> Exec["kaanal_core::execute"]
         Exec --> Output["X-Kaanal-Trace & Error Status"]
     end

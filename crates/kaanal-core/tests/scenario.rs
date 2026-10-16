@@ -90,7 +90,7 @@ fn live_is_always_on_top_and_deactivate_restores() {
     .unwrap();
     let mut st = ChaosStack::default();
     st.activate(&set, "down").unwrap();
-    st.live.set(
+    st.live_mut().set(
         ChaosKey::Node(0),
         ChaosLayer {
             error_rate: Some(1.0),
@@ -102,7 +102,7 @@ fn live_is_always_on_top_and_deactivate_restores() {
         st.compile(&set).visit(0, "e").unwrap().hit(0.5).unwrap().0,
         ErrorKind::Hang
     ); // live first
-    st.live.clear();
+    st.live_mut().clear();
     assert_eq!(
         st.compile(&set).visit(0, "e").unwrap().hit(0.5).unwrap().0,
         ErrorKind::Reset

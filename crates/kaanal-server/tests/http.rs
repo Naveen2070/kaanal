@@ -307,7 +307,9 @@ async fn chaos_patch_merges_and_lists() {
         .await
         .unwrap();
     assert_eq!(wiped.status(), 204);
-    let all: Value = s.get_authed("/__kaanal/chaos").await.json().await.unwrap();
+    let mut all: Value = s.get_authed("/__kaanal/chaos").await.json().await.unwrap();
+    // `effective` (the compiled view) is checked in scenarios_http.rs; this is the live layer.
+    all.as_object_mut().unwrap().remove("effective");
     assert_eq!(all, json!({ "nodes": {}, "endpoints": {}, "node_at": [] }));
 }
 
@@ -454,7 +456,9 @@ async fn bad_chaos_values_are_4xx_with_json_errors() {
     let slow = s.put_chaos("db", json!({ "latency_ms": 300_001 })).await;
     assert_eq!(slow.status(), 400);
     // A rejected patch changes nothing.
-    let all: Value = s.get_authed("/__kaanal/chaos").await.json().await.unwrap();
+    let mut all: Value = s.get_authed("/__kaanal/chaos").await.json().await.unwrap();
+    // `effective` (the compiled view) is checked in scenarios_http.rs; this is the live layer.
+    all.as_object_mut().unwrap().remove("effective");
     assert_eq!(all, json!({ "nodes": {}, "endpoints": {}, "node_at": [] }));
     let cap = s.put_chaos("db", json!({ "latency_ms": 300_000 })).await;
     assert_eq!(cap.status(), 200);

@@ -43,6 +43,7 @@ endpoints:                       # optional: per-endpoint overrides (a file path
 
 - **nodes** — seven kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth` (see [nodes.md](nodes.md) for every field; `auth` serves login and JWKS, see [auth.md](auth.md)). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). Live mode and the simulator both enforce it: extra requests queue, and the trace shows how long with `node.wait=`.
 - **edges** — the dependency graph, limited to the [edge table](nodes.md#edges-who-may-call-whom). No cycles, no self or duplicate edges, no dangling references; all rejected at startup. `calls: N` sets how many times the target is called per request.
+- **scenarios** — optional named chaos bundles (`scenarios:` here, or one file each in `scenarios/` next to this file), switched on live; see [scenarios.md](scenarios.md).
 - **endpoints** — per-endpoint behaviour, fully described in [endpoints.md](endpoints.md). An entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
 
 Check a file without starting:
@@ -55,15 +56,17 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 
 ## CLI
 
-| Command                                                                                                                   | What it does                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C stops.                                                               |
-| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                               |
-| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                       |
-| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file. |
-| `kaanal status`                                                                                                           | Table of nodes with their live chaos settings.                                                  |
-| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                       |
-| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or everything with no argument.     |
+| Command                                                                                                                   | What it does                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C stops.                                                                                    |
+| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                                                    |
+| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                            |
+| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                      |
+| `kaanal status`                                                                                                           | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                       |
+| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                                            |
+| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).     |
+| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`           | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md). |
+| `kaanal reset`                                                                                                            | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset.                            |
 
 Exit codes: `0` ok, `1` error, `2` no running instance.
 
@@ -95,6 +98,14 @@ kaanal chaos set db --error-rate 10% --error 504
 kaanal chaos set app --down                # hard outage: 503 for everything through app
 kaanal status                              # see what's active
 kaanal chaos clear db                      # back to normal
+```
+
+For a whole situation at once, define a [scenario](scenarios.md) and switch it on:
+
+```bash
+kaanal scenario activate payments-down     # defined under scenarios: in kaanal.yaml
+kaanal scenario deactivate payments-down
+kaanal reset                               # start a test from a clean slate
 ```
 
 Failures propagate upstream the way real ones do: a failing database makes the request fail with the database's status, after spending the time of the hops before it. The trace header names the failing node (`...,db.error=504`).

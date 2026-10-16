@@ -172,6 +172,26 @@ impl ScenarioSet {
         }
     }
 
+    /// Registers a scenario that `save` just wrote to a file: creates it or replaces a file or
+    /// runtime one (keeping its position), as [`Source::File`].
+    ///
+    /// # Errors
+    /// The name is defined in the config, or [`insert`](Self::insert) would fail.
+    pub fn set_file(&mut self, s: Scenario) -> Result<(), String> {
+        match self.map.get(&s.name) {
+            Some((_, Source::Inline)) => Err(format!(
+                "scenario '{}' is defined in the config; pick another name",
+                s.name
+            )),
+            Some(_) => {
+                check(&s)?;
+                self.map.insert(s.name.clone(), (s, Source::File));
+                Ok(())
+            }
+            None => self.insert(s, Source::File),
+        }
+    }
+
     /// Removes a runtime scenario.
     ///
     /// # Errors
@@ -213,6 +233,9 @@ pub struct ScenarioError {
     pub value: bool,
     /// What is wrong.
     pub message: String,
+    /// The entry names a node or endpoint that does not exist (the control API answers 404 for
+    /// this, 400 for everything else).
+    pub not_found: bool,
 }
 
 impl ScenarioError {
@@ -264,19 +287,29 @@ fn err(path: Vec<PathSeg>, value: bool, message: String) -> ScenarioError {
         path,
         value,
         message,
+        not_found: false,
     }
 }
 
-/// **Private.** One entry as its key and layer; pushes a warning when the entry's `endpoint`
-/// never visits its `node`.
-fn resolve_entry(
-    name: &str,
-    i: usize,
-    e: &ChaosEntry,
-    topo: &Topology,
-    endpoints: &Endpoints,
-    warnings: &mut Vec<String>,
-) -> Result<(ChaosKey, ChaosLayer), ScenarioError> {
+/// **Private.** Like [`err`], for a node or endpoint that is not defined.
+fn missing(path: Vec<PathSeg>, message: String) -> ScenarioError {
+    ScenarioError {
+        not_found: true,
+        ..err(path, true, message)
+    }
+}
+
+/// **Private.** One entry after the topology-free checks: where it points (the node as
+/// written, the endpoint normalized) and the layer it sets.
+struct Shaped {
+    node: Option<String>,
+    endpoint: Option<String>,
+    layer: ChaosLayer,
+}
+
+/// **Private.** The checks of one entry that need no topology: something to point at, a
+/// well-formed endpoint, a known kind, something set, every value in range.
+fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
     let item = || vec![PathSeg::Key("chaos".into()), PathSeg::Index(i)];
     let field = |f: &str| {
         let mut p = item();
@@ -286,29 +319,9 @@ fn resolve_entry(
     if e.node.is_none() && e.endpoint.is_none() {
         return Err(err(item(), false, "entry needs a node or endpoint".into()));
     }
-    let node = match &e.node {
-        None => None,
-        Some(n) => Some(
-            topo.id(n)
-                .ok_or_else(|| err(field("node"), true, format!("unknown node '{n}'")))?,
-        ),
-    };
     let endpoint = match &e.endpoint {
         None => None,
-        Some(raw) => {
-            let key = endpoint_key(raw).map_err(|m| err(field("endpoint"), true, m))?;
-            let ep = endpoints
-                .get(&key)
-                .ok_or_else(|| err(field("endpoint"), true, format!("unknown endpoint '{key}'")))?;
-            if ep.entry_node.is_none() {
-                return Err(err(
-                    field("endpoint"),
-                    true,
-                    format!("endpoint '{key}' has no entry node (a static route and no gateway)"),
-                ));
-            }
-            Some((key, ep))
-        }
+        Some(raw) => Some(endpoint_key(raw).map_err(|m| err(field("endpoint"), true, m))?),
     };
     let kind = match &e.error_kind {
         None => None,
@@ -350,60 +363,26 @@ fn resolve_entry(
             err(field(f), true, m)
         });
     }
-    if layer.has_orphan_fault_fields() {
-        warnings.push(format!(
-            "scenario '{name}': chaos[{i}]: error_kind/error_status have no effect without error_rate"
-        ));
-    }
-    let key = match (node, endpoint) {
-        (Some(n), Some((k, ep))) => {
-            if !visits(ep, n) {
-                warnings.push(format!(
-                    "scenario '{name}': chaos[{i}]: endpoint '{k}' never visits node '{}', so this entry never fires",
-                    e.node.as_deref().unwrap_or_default()
-                ));
-            }
-            ChaosKey::NodeAt(n, k)
-        }
-        (Some(n), None) => ChaosKey::Node(n),
-        (None, Some((k, _))) => ChaosKey::Endpoint(k),
-        (None, None) => return Err(err(item(), false, "entry needs a node or endpoint".into())),
-    };
-    Ok((key, layer))
+    Ok(Shaped {
+        node: e.node.clone(),
+        endpoint,
+        layer,
+    })
 }
 
-/// Turns the parsed form of a scenario into layers, checking it against the topology and the
-/// compiled endpoints. Returns the scenario and its warnings (a kind or status without a
-/// rate; a `node` + `endpoint` pair the chain never visits).
-///
-/// # Errors
-/// The first problem, placed by entry index and field. Name rules and the scenario count are
-/// [`ScenarioSet`]'s business, not checked here.
-pub fn resolve_scenario(
-    name: &str,
-    cfg: &ScenarioConfig,
-    topo: &Topology,
-    endpoints: &Endpoints,
-) -> Result<(Scenario, Vec<String>), ScenarioError> {
-    for (field, present, what) in [
-        ("limits", cfg.limits.is_some(), "runtime limit overrides"),
-        ("pins", cfg.pins.is_some(), "planned for B2b-2"),
-    ] {
-        if present {
-            return Err(err(
-                vec![PathSeg::Key(field.into())],
-                false,
-                format!("{field}: not supported yet ({what})"),
-            ));
-        }
-    }
+/// **Private.** [`validate_scenario_shape`] keeping the checked entries.
+fn shape(cfg: &ScenarioConfig) -> Result<Vec<Shaped>, ScenarioError> {
+    cfg.check_supported().map_err(|m| {
+        let field = m.split(':').next().unwrap_or_default().to_string();
+        err(vec![PathSeg::Key(field)], false, m)
+    })?;
     // The raw count, before duplicate keys could collapse a huge list into a small one.
     if cfg.chaos.len() > MAX_ENTRIES {
         return Err(err(
             vec![PathSeg::Key("chaos".into())],
             false,
             format!(
-                "scenario '{name}' has {} entries; at most {MAX_ENTRIES}",
+                "scenario has {} entries; at most {MAX_ENTRIES}",
                 cfg.chaos.len()
             ),
         ));
@@ -415,12 +394,11 @@ pub fn resolve_scenario(
             "scenario has no chaos entries".into(),
         ));
     }
-    let mut layers = ChaosState::default();
-    let mut warnings = Vec::new();
-    let mut first_at: HashMap<ChaosKey, usize> = HashMap::new();
+    let mut out = Vec::with_capacity(cfg.chaos.len());
+    let mut first_at: HashMap<(Option<String>, Option<String>), usize> = HashMap::new();
     for (i, e) in cfg.chaos.iter().enumerate() {
-        let (key, layer) = resolve_entry(name, i, e, topo, endpoints, &mut warnings)?;
-        if let Some(j) = first_at.insert(key.clone(), i) {
+        let s = shape_entry(i, e)?;
+        if let Some(j) = first_at.insert((s.node.clone(), s.endpoint.clone()), i) {
             let at = vec![PathSeg::Key("chaos".into()), PathSeg::Index(i)];
             return Err(err(
                 at,
@@ -428,6 +406,103 @@ pub fn resolve_scenario(
                 format!("entry has the same key as chaos[{j}]; merge them into one"),
             ));
         }
+        out.push(s);
+    }
+    Ok(out)
+}
+
+/// Every check of a scenario that needs neither the topology nor the endpoints: the reserved
+/// `limits` / `pins` keys, the entry count, an empty list, and per entry a node or endpoint,
+/// the endpoint's `METHOD /path` shape, the error kind, something set, every value in range,
+/// and duplicate keys. [`resolve_scenario`] runs it first; a client (`kaanal scenario load`)
+/// runs it alone to place the error in the file.
+///
+/// # Errors
+/// The first problem, placed by entry index and field.
+pub fn validate_scenario_shape(cfg: &ScenarioConfig) -> Result<(), ScenarioError> {
+    shape(cfg).map(|_| ())
+}
+
+/// **Private.** Looks one checked entry up in the topology and the endpoints; pushes a warning
+/// when the entry's `endpoint` never visits its `node`.
+fn resolve_entry(
+    name: &str,
+    i: usize,
+    s: Shaped,
+    topo: &Topology,
+    endpoints: &Endpoints,
+    warnings: &mut Vec<String>,
+) -> Result<(ChaosKey, ChaosLayer), ScenarioError> {
+    let field = |f: &str| {
+        vec![
+            PathSeg::Key("chaos".into()),
+            PathSeg::Index(i),
+            PathSeg::Key(f.into()),
+        ]
+    };
+    let node = match &s.node {
+        None => None,
+        Some(n) => Some(
+            topo.id(n)
+                .ok_or_else(|| missing(field("node"), format!("unknown node '{n}'")))?,
+        ),
+    };
+    let endpoint = match s.endpoint {
+        None => None,
+        Some(key) => {
+            let ep = endpoints
+                .get(&key)
+                .ok_or_else(|| missing(field("endpoint"), format!("unknown endpoint '{key}'")))?;
+            if ep.entry_node.is_none() {
+                return Err(err(
+                    field("endpoint"),
+                    true,
+                    format!("endpoint '{key}' has no entry node (a static route and no gateway)"),
+                ));
+            }
+            Some((key, ep))
+        }
+    };
+    if s.layer.has_orphan_fault_fields() {
+        warnings.push(format!(
+            "scenario '{name}': chaos[{i}]: error_kind/error_status have no effect without error_rate"
+        ));
+    }
+    let key = match (node, endpoint) {
+        (Some(n), Some((k, ep))) => {
+            if !visits(ep, n) {
+                warnings.push(format!(
+                    "scenario '{name}': chaos[{i}]: endpoint '{k}' never visits node '{}', so this entry never fires",
+                    s.node.as_deref().unwrap_or_default()
+                ));
+            }
+            ChaosKey::NodeAt(n, k)
+        }
+        (Some(n), None) => ChaosKey::Node(n),
+        (None, Some((k, _))) => ChaosKey::Endpoint(k),
+        (None, None) => unreachable!("shape_entry requires a node or an endpoint"),
+    };
+    Ok((key, s.layer))
+}
+
+/// Turns the parsed form of a scenario into layers, checking it against the topology and the
+/// compiled endpoints. Returns the scenario and its warnings (a kind or status without a
+/// rate; a `node` + `endpoint` pair the chain never visits). Runs
+/// [`validate_scenario_shape`] first.
+///
+/// # Errors
+/// The first problem, placed by entry index and field. Name rules and the scenario count are
+/// [`ScenarioSet`]'s business, not checked here.
+pub fn resolve_scenario(
+    name: &str,
+    cfg: &ScenarioConfig,
+    topo: &Topology,
+    endpoints: &Endpoints,
+) -> Result<(Scenario, Vec<String>), ScenarioError> {
+    let mut layers = ChaosState::default();
+    let mut warnings = Vec::new();
+    for (i, s) in shape(cfg)?.into_iter().enumerate() {
+        let (key, layer) = resolve_entry(name, i, s, topo, endpoints, &mut warnings)?;
         layers.set(key, layer);
     }
     Ok((
@@ -445,10 +520,21 @@ pub fn resolve_scenario(
 pub struct ChaosStack {
     active: Vec<String>,
     /// Ad-hoc chaos set through the control API; wins over every scenario.
-    pub live: ChaosState,
+    live: ChaosState,
 }
 
 impl ChaosStack {
+    /// The live chaos, which sits on top of every scenario.
+    #[must_use]
+    pub fn live(&self) -> &ChaosState {
+        &self.live
+    }
+
+    /// The live chaos, to change it.
+    pub fn live_mut(&mut self) -> &mut ChaosState {
+        &mut self.live
+    }
+
     /// Activates a scenario on top of the stack (moving it there if already active).
     ///
     /// # Errors

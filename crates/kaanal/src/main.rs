@@ -6,6 +6,7 @@
 //! interface is a thin client, no per-interface logic). `up` loads (or creates) the auth
 //! signing key only when the config has an auth node (`keys`).
 
+use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,7 +16,10 @@ use clap::{Parser, Subcommand};
 use kaanal_core::chain::skeleton;
 use kaanal_core::config::{NodeConfig, parse_endpoints};
 use kaanal_core::diagnostics::Located;
-use kaanal_core::{Config, ConfigError, EndpointsConfig};
+use kaanal_core::{
+    Config, ConfigError, EndpointsConfig, ScenarioConfig, parse_scenario, valid_name,
+    validate_scenario_shape,
+};
 use kaanal_server::ServeOpts;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
@@ -68,8 +72,16 @@ enum Cmd {
         #[arg(long)]
         write: bool,
     },
-    /// Show nodes and active chaos of the running instance
+    /// Show nodes and the effective chaos (scenarios plus live) of the running instance
     Status,
+    /// Switch named chaos scenarios on and off
+    Scenario {
+        #[command(subcommand)]
+        cmd: ScenarioCmd,
+    },
+    /// Clean slate: deactivate scenarios, undefine runtime-defined ones (inline and file ones
+    /// stay), clear live chaos, zero route counters, refill rate-limit buckets
+    Reset,
     /// Change chaos on the running instance
     Chaos {
         #[command(subcommand)]
@@ -111,6 +123,40 @@ enum ChaosCmd {
         /// Endpoint key, e.g. "GET /orders"
         #[arg(long)]
         endpoint: Option<String>,
+    },
+}
+
+/// **Private.** `scenario` subcommands.
+#[derive(Subcommand)]
+enum ScenarioCmd {
+    /// List every scenario with its source and whether it is active
+    List,
+    /// Show one scenario's chaos entries
+    Show { name: String },
+    /// Put a scenario on top of the stack
+    Activate { name: String },
+    /// Take a scenario off the stack
+    Deactivate { name: String },
+    /// Set the whole stack, bottom to top (no names: deactivate all)
+    Set { names: Vec<String> },
+    /// Deactivate every scenario (live chaos stays)
+    Clear,
+    /// Print the active scenarios, bottom to top
+    Active,
+    /// Define a scenario from a YAML file (name = file stem) and activate it
+    Load { file: PathBuf },
+    /// Write scenarios/NAME.yaml from live chaos (default), the effective chaos or a scenario
+    Save {
+        name: String,
+        /// live, effective or scenario:NAME
+        #[arg(long, default_value = "live")]
+        from: String,
+        /// Replace an existing scenario or file
+        #[arg(long)]
+        force: bool,
+        /// Clear the live chaos after saving
+        #[arg(long = "clear-live")]
+        clear_live: bool,
     },
 }
 
@@ -168,6 +214,12 @@ fn run(cli: Cli) -> Result<(), Fail> {
         Cmd::Up { config, port, host } => up(&config, port, host),
         Cmd::Endpoints { config, write } => endpoints(&config, write),
         Cmd::Status => status(),
+        Cmd::Scenario { cmd } => scenario(cmd),
+        Cmd::Reset => {
+            call("POST", "/__kaanal/reset", None)?;
+            println!("reset");
+            Ok(())
+        }
         Cmd::Chaos {
             cmd:
                 ChaosCmd::Set {
@@ -219,6 +271,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
                 call("PUT", &path, Some(Value::Object(patch)))?
             };
             println!("{}", clean(&format!("{label}: {v}")));
+            warn_all(&v);
             Ok(())
         }
         Cmd::Chaos {
@@ -350,6 +403,163 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         }
         res
     })
+}
+
+/// **Private.** Prints a response's `warnings` to stderr.
+fn warn_all(v: &Value) {
+    for w in v["warnings"].as_array().into_iter().flatten() {
+        eprintln!("warning: {}", clean(w.as_str().unwrap_or("")));
+    }
+}
+
+/// **Private.** `/__kaanal/scenarios/NAME` plus `tail`.
+fn scenario_path(name: &str, tail: &str) -> String {
+    format!("/__kaanal/scenarios/{}{tail}", encode_segment(name))
+}
+
+/// **Private.** The `active` names of a stack answer.
+fn active_names(v: &Value) -> Vec<&str> {
+    v["active"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect()
+}
+
+/// **Private.** The PUT body for a parsed scenario file.
+fn scenario_body(cfg: &ScenarioConfig) -> Value {
+    let mut body = json!({ "chaos": cfg.chaos });
+    if let Some(d) = &cfg.description {
+        body["description"] = json!(d);
+    }
+    body
+}
+
+/// **Private.** A scenario name checked here, so a reserved one (`active`, `save`, `reset`) is
+/// refused with a message instead of hitting another route.
+fn named(name: &str) -> Result<&str, Fail> {
+    valid_name(name).map_err(err)?;
+    Ok(name)
+}
+
+/// **Private.** `--from` as the API's tagged form: `live`, `effective` or `scenario:NAME`.
+fn save_from(from: &str) -> Result<Value, Fail> {
+    match from {
+        "live" | "effective" => Ok(json!(from)),
+        f => match f.strip_prefix("scenario:") {
+            Some(n) if !n.is_empty() => Ok(json!({ "scenario": n })),
+            _ => Err(err(format!(
+                "bad --from '{}': use live, effective or scenario:NAME",
+                clean(f)
+            ))),
+        },
+    }
+}
+
+/// **Private.** `kaanal scenario ...`: thin calls to the control API, except `load`, which
+/// parses the file here so a mistake shows as `file:line:col`.
+fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
+    match cmd {
+        ScenarioCmd::List => {
+            let v = call("GET", "/__kaanal/scenarios", None)?;
+            println!(
+                "{:<24} {:<8} {:<7} DESCRIPTION",
+                "NAME", "SOURCE", "ENTRIES"
+            );
+            for s in v.as_array().into_iter().flatten() {
+                let line = format!(
+                    "{:<24} {:<8} {:<7} {}{}",
+                    s["name"].as_str().unwrap_or(""),
+                    s["source"].as_str().unwrap_or(""),
+                    s["entries"],
+                    s["description"].as_str().unwrap_or(""),
+                    if s["active"] == true { " (active)" } else { "" }
+                );
+                println!("{}", clean(&line));
+            }
+        }
+        ScenarioCmd::Show { name } => {
+            let v = call("GET", &scenario_path(named(&name)?, ""), None)?;
+            let head = format!(
+                "{} ({}){}",
+                v["name"].as_str().unwrap_or(""),
+                v["source"].as_str().unwrap_or(""),
+                v["description"]
+                    .as_str()
+                    .map_or(String::new(), |d| format!(": {d}"))
+            );
+            println!("{}", clean(&head));
+            for e in v["chaos"].as_array().into_iter().flatten() {
+                println!("  - {}", clean(&e.to_string()));
+            }
+        }
+        ScenarioCmd::Activate { name } => {
+            let v = call("POST", &scenario_path(named(&name)?, "/activate"), None)?;
+            println!("active scenarios: {}", active_names(&v).join(", "));
+        }
+        ScenarioCmd::Deactivate { name } => {
+            let name = named(&name)?;
+            // ponytail: the answer is a bare 204, so "was it active" is read just before; a
+            // concurrent change in between can make this line wrong, never the state.
+            let was = call("GET", "/__kaanal/scenarios/active", None)?;
+            call("POST", &scenario_path(name, "/deactivate"), None)?;
+            if active_names(&was).contains(&name) {
+                println!("deactivated {name}");
+            } else {
+                println!("ok: {name} is not active");
+            }
+        }
+        ScenarioCmd::Set { names } => {
+            let v = call("PUT", "/__kaanal/scenarios/active", Some(json!(names)))?;
+            println!("active scenarios: {}", active_names(&v).join(", "));
+        }
+        ScenarioCmd::Clear => {
+            call("DELETE", "/__kaanal/scenarios", None)?;
+            println!("cleared");
+        }
+        ScenarioCmd::Active => {
+            let v = call("GET", "/__kaanal/scenarios/active", None)?;
+            for n in active_names(&v) {
+                println!("{}", clean(n));
+            }
+        }
+        ScenarioCmd::Load { file } => {
+            let name = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| err(format!("{}: no usable file name", file.display())))?;
+            valid_name(name).map_err(|m| err(format!("{}: {m}", file.display())))?;
+            let src = std::fs::read_to_string(&file)
+                .map_err(|e| err(format!("{}: {e}", file.display())))?;
+            let cfg = parse_scenario(&src).map_err(|e| config_err(&file, &e))?;
+            // Everything that needs no topology is checked here, placed in the file; the server
+            // checks names against the topology.
+            validate_scenario_shape(&cfg)
+                .map_err(|e| config_err(&file, &e.located(Vec::new()).in_source(&src)))?;
+            let body = scenario_body(&cfg);
+            let v = call("PUT", &scenario_path(name, ""), Some(body))?;
+            warn_all(&v);
+            let v = call("POST", &scenario_path(name, "/activate"), None)?;
+            println!(
+                "loaded {name}; active scenarios: {}",
+                active_names(&v).join(", ")
+            );
+        }
+        ScenarioCmd::Save {
+            name,
+            from,
+            force,
+            clear_live,
+        } => {
+            let from = save_from(&from)?;
+            let body =
+                json!({ "name": name, "from": from, "force": force, "clear_live": clear_live });
+            let v = call("POST", "/__kaanal/scenarios/save", Some(body))?;
+            println!("saved {}", clean(v["path"].as_str().unwrap_or("")));
+        }
+    }
+    Ok(())
 }
 
 /// **Private.** First line of every block `kaanal endpoints` adds (D22).
@@ -633,6 +843,16 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
             .header("Host", &host)
             .header("Authorization", &auth)
             .send_json(&b),
+        ("POST", Some(b)) => agent
+            .post(&url)
+            .header("Host", &host)
+            .header("Authorization", &auth)
+            .send_json(&b),
+        ("POST", None) => agent
+            .post(&url)
+            .header("Host", &host)
+            .header("Authorization", &auth)
+            .send_empty(),
         ("DELETE", _) => agent
             .delete(&url)
             .header("Host", &host)
@@ -657,15 +877,17 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
     Ok(v)
 }
 
-/// **Private.** Prints the node table with each node's live chaos settings.
+/// **Private.** Prints the node table with each node's effective chaos (scenarios plus live)
+/// and the active scenarios.
 fn status() -> Result<(), Fail> {
     let topo = call("GET", "/__kaanal/topology", None)?;
-    let all = call("GET", "/__kaanal/chaos", None)?;
-    let chaos = &all["nodes"];
+    // One call, so the stack and the chaos compiled from it come from the same snapshot.
+    let active = call("GET", "/__kaanal/scenarios/active", None)?;
+    let eff = &active["effective"];
     println!("{:<12} {:<12} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
     for n in topo["nodes"].as_array().into_iter().flatten() {
         let name = n["name"].as_str().unwrap_or("");
-        let c = &chaos[name];
+        let c = &eff["nodes"][name];
         let text = if c.is_null() {
             "-".to_string()
         } else {
@@ -682,31 +904,48 @@ fn status() -> Result<(), Fail> {
         println!("{}", clean(&line));
     }
     // Endpoint-wide and node-at-endpoint chaos belong to no single row.
-    for (key, c) in all["endpoints"].as_object().into_iter().flatten() {
+    for (key, c) in eff["endpoints"].as_object().into_iter().flatten() {
         println!("{}", clean(&format!("endpoint {key}: {}", chaos_text(c))));
     }
-    for c in all["node_at"].as_array().into_iter().flatten() {
+    for c in eff["node_at"].as_array().into_iter().flatten() {
         let (n, e) = (
             c["node"].as_str().unwrap_or(""),
             c["endpoint"].as_str().unwrap_or(""),
         );
         println!("{}", clean(&format!("{n} @ {e}: {}", chaos_text(c))));
     }
+    let names = active_names(&active);
+    println!(
+        "active scenarios: {}",
+        if names.is_empty() {
+            "-".to_string()
+        } else {
+            clean(&names.join(", "))
+        }
+    );
     Ok(())
 }
 
-/// **Private.** One chaos entry as text. The status only matters for kind `status`; other kinds show by name.
+/// **Private.** One effective chaos entry as text: latency, each failure band (kinds other
+/// than `status` show by name, `status` shows its code), then DOWN.
 fn chaos_text(c: &Value) -> String {
-    format!(
-        "+{}ms, {:.0}% errors ({}){}",
-        c["latency_ms"],
-        c["error_rate"].as_f64().unwrap_or(0.0) * 100.0,
-        match c["error_kind"].as_str() {
+    let mut s = format!("+{}ms", c["latency_ms"]);
+    // `upto` is cumulative; show each band's own share of the requests.
+    let mut prev = 0.0;
+    for f in c["faults"].as_array().into_iter().flatten() {
+        let upto = f["upto"].as_f64().unwrap_or(0.0);
+        let own = upto - prev;
+        prev = upto;
+        let what = match f["kind"].as_str() {
             Some(k) if k != "status" => k.to_string(),
-            _ => c["error_status"].to_string(),
-        },
-        if c["down"] == true { ", DOWN" } else { "" }
-    )
+            _ => f["status"].to_string(),
+        };
+        let _ = write!(s, ", {:.0}% errors ({what})", own * 100.0);
+    }
+    if c["down"] == true {
+        s.push_str(", DOWN");
+    }
+    s
 }
 
 /// **Private.** Server text may echo user input (e.g. a node name); never let it drive the terminal.

@@ -20,7 +20,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::routing::{get, put};
+use axum::routing::{get, post, put};
 use axum::{Router, middleware};
 use kaanal_core::chain::RouteSpec;
 use kaanal_core::diagnostics::Located;
@@ -162,6 +162,28 @@ fn router(st: Arc<state::AppState>) -> Router {
             "/__kaanal/chaos/{node}",
             put(control::set_chaos).delete(control::clear_node),
         )
+        .route(
+            "/__kaanal/scenarios",
+            get(control::list_scenarios).delete(control::clear_scenarios),
+        )
+        // Static `active` and `save` win over the `{name}` capture below (matchit prefers static segments).
+        .route(
+            "/__kaanal/scenarios/active",
+            get(control::get_active).put(control::set_active),
+        )
+        .route("/__kaanal/scenarios/save", post(control::save_scenario))
+        .route(
+            "/__kaanal/scenarios/{name}",
+            get(control::get_scenario)
+                .put(control::put_scenario)
+                .delete(control::delete_scenario),
+        )
+        .route("/__kaanal/scenarios/{name}/activate", post(control::activate))
+        .route(
+            "/__kaanal/scenarios/{name}/deactivate",
+            post(control::deactivate),
+        )
+        .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/events", get(control::events))
         .route("/__kaanal/ui", get(control::ui))
         // route_layer: wraps only the control routes above, never the mock fallback.

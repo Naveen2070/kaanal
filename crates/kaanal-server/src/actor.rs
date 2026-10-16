@@ -15,16 +15,21 @@ use kaanal_core::replay::{Engine, Finished};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
-/// **Private.** One request for the engine task.
-struct Submit {
-    plan: Arc<Plan>,
-    reply: oneshot::Sender<Finished>,
+/// **Private.** One message for the engine task.
+enum Cmd {
+    /// Run a plan.
+    Run {
+        plan: Arc<Plan>,
+        reply: oneshot::Sender<Finished>,
+    },
+    /// Refill the rate-limit buckets (`POST /reset`).
+    Refill,
 }
 
 /// A handle to the engine task; clones share it.
 #[derive(Clone)]
 pub struct EngineHandle {
-    tx: mpsc::UnboundedSender<Submit>,
+    tx: mpsc::UnboundedSender<Cmd>,
 }
 
 impl EngineHandle {
@@ -32,8 +37,22 @@ impl EngineHandle {
     /// has stopped (a clock overflow, or the runtime is shutting down).
     pub async fn run(&self, plan: Arc<Plan>) -> Option<Finished> {
         let (reply, rx) = oneshot::channel();
-        self.tx.send(Submit { plan, reply }).ok()?;
+        self.tx.send(Cmd::Run { plan, reply }).ok()?;
         rx.await.ok()
+    }
+}
+
+impl EngineHandle {
+    /// Refills the engine's rate-limit buckets so a seeded run can repeat with limits. Fire and
+    /// forget, so it can be called under the control lock; the channel is FIFO, so every request
+    /// *started* after this returns sees full buckets (events already due are run first, so they
+    /// do not take post-refill tokens). A request already in flight keeps its slots and queue
+    /// places (the gates are not reset: that would leak or double-free a slot) and finishes
+    /// normally; but its *later* hops at a rate-limited node take tokens from the refilled
+    /// bucket. The bucket is time-based (GCRA), so a repeat of a run needs the same wall-clock
+    /// pacing after the reset, not just the same request order.
+    pub fn refill_buckets(&self) {
+        let _ = self.tx.send(Cmd::Refill);
     }
 }
 
@@ -45,7 +64,7 @@ pub fn spawn(engine: Engine) -> EngineHandle {
 }
 
 /// **Private.** The task: wait for a command or the next due event, advance, answer.
-async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Submit>) {
+async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
     let t0 = Instant::now();
     let now = || u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let mut waiting: HashMap<u64, oneshot::Sender<Finished>> = HashMap::new();
@@ -63,12 +82,19 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Submit>) {
             biased;
             cmd = rx.recv() => match cmd {
                 None => return,
-                Some(c) => {
+                Some(Cmd::Refill) => {
+                    // Run what is already due first, so past-due hops take their tokens
+                    // before the refill and not from the fresh bucket.
+                    let ok = engine.advance_to(now()).is_ok();
+                    engine.refill_buckets();
+                    ok
+                }
+                Some(Cmd::Run { plan, reply }) => {
                     let t = now();
                     next_tag += 1;
-                    waiting.insert(next_tag, c.reply);
+                    waiting.insert(next_tag, reply);
                     // `submit` runs every event due strictly before `t` itself; an event exactly at `t` stays queued, so an arrival wins a tie as in the simulator.
-                    engine.submit(t, c.plan, next_tag).is_ok()
+                    engine.submit(t, plan, next_tag).is_ok()
                 }
             },
             () = wake => engine.advance_to(now()).is_ok(),
@@ -200,6 +226,26 @@ mod tests {
         assert!(f.done > f.arrival);
     }
 
+    /// A hop already due when the refill arrives takes its token from the old bucket, not the
+    /// fresh one: the actor runs due events before refilling. (`advance` moves the paused clock
+    /// without letting the actor run, so the refill is queued while A's hop is due but unrun.)
+    #[tokio::test(start_paused = true)]
+    async fn the_refill_runs_already_due_events_before_it_refills() {
+        let yaml = "version: 1\nnodes:\n  gw: { type: gateway, proc: 10ms }\n  app: { type: service, proc: 1ms, rate_limit: { rps: 1, burst: 1 } }\nedges:\n  - { from: gw, to: app, net: 1ms }\n";
+        let (t, plans) = plans_for(yaml, 2);
+        let h = spawn(Engine::new(&t));
+        let a = tokio::spawn({
+            let (h, p) = (h.clone(), Arc::clone(&plans[0]));
+            async move { h.run(p).await.unwrap() }
+        });
+        tokio::time::sleep(Duration::from_millis(1)).await; // A is in; its app hop is due at ~11 ms
+        tokio::time::advance(Duration::from_millis(19)).await;
+        h.refill_buckets();
+        let b = h.run(Arc::clone(&plans[1])).await.unwrap();
+        assert_eq!(a.await.unwrap().result, kaanal_core::ChainResult::Ok);
+        // A spent the old bucket's token before the refill, so B finds a full bucket.
+        assert_eq!(b.result, kaanal_core::ChainResult::Ok, "{:?}", b.result);
+    }
     /// Zero-duration hops, so the benchmark measures the actor and not the sleeps.
     const YAML0: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n";
 

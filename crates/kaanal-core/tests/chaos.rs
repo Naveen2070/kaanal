@@ -1,5 +1,6 @@
 use kaanal_core::{
-    ChaosKey, ChaosLayer, ChaosState, ErrorKind, MAX_LATENCY_ADD, NodeChaos, compile_layers, merge,
+    ChaosKey, ChaosLayer, ChaosState, ErrorKind, MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos,
+    compile_layers,
 };
 use std::time::Duration;
 
@@ -9,61 +10,20 @@ fn ms(n: u64) -> Option<Duration> {
 }
 
 #[test]
-fn merge_sums_latency_ors_down_unions_rates() {
-    let a = ChaosLayer {
-        latency_add: ms(200),
-        error_rate: Some(0.5),
+fn dense_fills_defaults_for_one_layer() {
+    assert_eq!(ChaosLayer::default().dense(), NodeChaos::default());
+    let l = ChaosLayer {
+        latency_add: ms(40),
+        error_rate: Some(0.3),
+        error_kind: Some(ErrorKind::Reset),
         down: Some(false),
         ..Default::default()
     };
-    let b = ChaosLayer {
-        latency_add: ms(1000),
-        error_rate: Some(0.5),
-        down: Some(true),
-        ..Default::default()
-    };
-    let m = merge(&[&a, &b]);
-    assert_eq!(m.latency_add, Duration::from_millis(1200));
-    assert!((m.error_rate - 0.75).abs() < 1e-12, "1-(1-.5)(1-.5)");
-    assert!(m.down);
-}
-
-#[test]
-fn layer_without_kind_keeps_the_inherited_kind() {
-    let node = ChaosLayer {
-        error_kind: Some(ErrorKind::Reset),
-        error_status: Some(502),
-        error_rate: Some(1.0),
-        ..Default::default()
-    };
-    let at = ChaosLayer {
-        error_rate: Some(0.2),
-        ..Default::default()
-    }; // sets only the rate
-    let m = merge(&[&node, &at]);
-    assert_eq!(m.error_kind, ErrorKind::Reset);
-    assert_eq!(m.error_status, 502);
-}
-
-#[test]
-fn last_set_kind_and_status_win_and_defaults_apply_after() {
-    let a = ChaosLayer {
-        error_kind: Some(ErrorKind::Reset),
-        ..Default::default()
-    };
-    let b = ChaosLayer {
-        error_kind: Some(ErrorKind::Malformed),
-        error_status: Some(500),
-        ..Default::default()
-    };
-    let m = merge(&[&a, &b]);
-    assert_eq!((m.error_kind, m.error_status), (ErrorKind::Malformed, 500));
-    let none = merge(&[]);
-    assert_eq!(none, NodeChaos::default());
-    assert_eq!(
-        (none.error_kind, none.error_status),
-        (ErrorKind::Status, 503)
-    );
+    let d = l.dense();
+    assert_eq!(d.latency_add, Duration::from_millis(40));
+    assert_eq!(d.error_rate, 0.3, "bit for bit");
+    assert_eq!((d.error_kind, d.error_status), (ErrorKind::Reset, 503));
+    assert!(!d.down);
 }
 
 #[test]
@@ -193,18 +153,6 @@ fn error_kind_parses_its_names() {
 }
 
 #[test]
-fn a_single_rate_survives_merge_bit_for_bit() {
-    for r in [0.3, 0.1, 0.0, 1.0] {
-        let l = ChaosLayer {
-            error_rate: Some(r),
-            ..Default::default()
-        };
-        assert_eq!(merge(&[&l]).error_rate, r);
-    }
-    assert_eq!(merge(&[]).error_rate, 0.0);
-}
-
-#[test]
 fn node_at_goes_before_node_in_a_layer_and_the_endpoint_layer_is_left_to_the_front_door() {
     let mut s = ChaosState::default();
     // B2b1: a kind only counts with its own rate, so each layer carries rate 1.0.
@@ -235,18 +183,6 @@ fn fail_kind_names() {
     ]
     .map(FailKind::as_str);
     assert_eq!(names, ["status", "reset", "malformed", "timeout"]);
-}
-
-#[test]
-fn three_layer_rate_union_skips_unset_layers() {
-    let r = |error_rate| ChaosLayer {
-        error_rate,
-        ..Default::default()
-    };
-    let (a, none, b, c) = (r(Some(0.5)), r(None), r(Some(0.5)), r(Some(0.5)));
-    for m in [merge(&[&a, &b, &c]), merge(&[&a, &none, &b, &c])] {
-        assert!((m.error_rate - 0.875).abs() < 1e-12, "1-(1-.5)^3");
-    }
 }
 
 #[test]
@@ -432,6 +368,66 @@ fn faults_past_the_cap_fold_into_the_last_band() {
     assert_eq!(r.hit(r.rate() - 1e-9).unwrap().0, ErrorKind::Reset);
 }
 
+/// Slow, obvious model of what `compile_layers` must do for one key: the entries are
+/// `(layer index, specificity, layer)`; a `replace` drops everything below it.
+type Model = Vec<(usize, u8, ChaosLayer)>;
+
+fn truncate_at_replace(v: &mut Model) {
+    if let Some(p) = v.iter().rposition(|e| e.2.replace == Some(true)) {
+        v.drain(..p);
+    }
+}
+
+/// Latency, down and failure bands (cumulative `upto`, kind, status) of a model.
+fn fold(mut v: Model) -> (Duration, bool, Vec<(f64, ErrorKind, u16)>) {
+    v.sort_by_key(|e| std::cmp::Reverse((e.0, e.1)));
+    let (mut lat, mut down) = (Duration::ZERO, false);
+    let mut bands: Vec<(f64, ErrorKind, u16)> = Vec::new();
+    for (_, _, x) in &v {
+        lat += x.latency_add.unwrap_or_default();
+        down |= x.down == Some(true);
+        if let Some(r) = x.error_rate
+            && r > 0.0
+        {
+            let upto = bands.last().map_or(r, |b| b.0 + r - b.0 * r);
+            let band = (
+                upto,
+                x.error_kind.unwrap_or(ErrorKind::Status),
+                x.error_status.unwrap_or(503),
+            );
+            if bands.len() < MAX_FAULTS {
+                bands.push(band);
+            } else if let Some(last) = bands.last_mut() {
+                last.0 = upto; // fold the tail into the last band
+            }
+        }
+    }
+    (lat.min(MAX_LATENCY_ADD), down, bands)
+}
+
+fn assert_resolved(got: Option<&kaanal_core::Resolved>, want: &Model, what: &str) {
+    let (lat, down, bands) = fold(want.clone());
+    let Some(r) = got else {
+        assert!(
+            lat.is_zero() && !down && bands.is_empty(),
+            "{what}: missing entry"
+        );
+        return;
+    };
+    assert_eq!(r.latency_add, lat, "{what}: latency");
+    assert_eq!(r.down, down, "{what}: down");
+    assert_eq!(r.faults().len(), bands.len(), "{what}: bands");
+    for (h, w) in r.faults().iter().zip(&bands) {
+        assert!(
+            (h.upto - w.0).abs() < 1e-12,
+            "{what}: {} vs {}",
+            h.upto,
+            w.0
+        );
+        assert_eq!((h.kind, h.status), (w.1, w.2), "{what}");
+    }
+}
+
 #[test]
 #[allow(
     clippy::cast_precision_loss,
@@ -446,53 +442,82 @@ fn compile_matches_a_slow_reference_over_random_stacks() {
         seed ^= seed << 17;
         (seed >> 11) as f64 / (1u64 << 53) as f64
     };
-    for _ in 0..200 {
-        let n_layers = 1 + (rnd() * 4.0) as usize;
+    let ep = || "e".to_string();
+    for _ in 0..400 {
+        // up to 12 layers, so some stacks pass MAX_FAULTS on one key
+        let n_layers = 1 + (rnd() * 12.0) as usize;
         let layers: Vec<ChaosState> = (0..n_layers)
             .map(|_| {
                 let mut s = ChaosState::default();
-                let pick = |a: f64, b: f64| {
-                    let k = [
+                for key in [
+                    ChaosKey::Node(0),
+                    ChaosKey::NodeAt(0, ep()),
+                    ChaosKey::Endpoint(ep()),
+                ] {
+                    if rnd() > 0.6 {
+                        continue;
+                    }
+                    let kind = [
                         ErrorKind::Status,
                         ErrorKind::Reset,
                         ErrorKind::Hang,
                         ErrorKind::Malformed,
-                    ][(a * 4.0) as usize];
-                    (k, 500 + (b * 5.0) as u16)
-                };
-                if rnd() < 0.7 {
-                    let (k, st) = pick(rnd(), rnd());
-                    s.set(ChaosKey::Node(0), l(rnd(), k, st));
-                }
-                if rnd() < 0.4 {
-                    let (k, st) = pick(rnd(), rnd());
-                    s.set(ChaosKey::NodeAt(0, "e".into()), l(rnd(), k, st));
+                    ][(rnd() * 4.0) as usize];
+                    let mut layer = l(rnd() * 0.5, kind, 500 + (rnd() * 5.0) as u16);
+                    if rnd() < 0.3 {
+                        layer.error_rate = None; // a kind without a rate adds nothing
+                    }
+                    if rnd() < 0.5 {
+                        // up to 150 s, so stacks sometimes pass the 5 minute clamp
+                        layer.latency_add = Some(Duration::from_millis((rnd() * 150_000.0) as u64));
+                    }
+                    if rnd() < 0.2 {
+                        layer.down = Some(rnd() < 0.7);
+                    }
+                    if rnd() < 0.2 {
+                        layer.replace = Some(true);
+                    }
+                    s.set(key, layer);
                 }
                 s
             })
             .collect();
         let refs: Vec<&ChaosState> = layers.iter().collect();
         let got = compile_layers(&refs);
-        // Layer-major reference: top layer first, node-at before node within a layer.
-        let mut want: Vec<(f64, ErrorKind, u16)> = Vec::new();
-        for s in layers.iter().rev() {
-            for k in [ChaosKey::NodeAt(0, "e".into()), ChaosKey::Node(0)] {
-                if let Some(x) = s.layer(&k)
-                    && let Some(r) = x.error_rate
-                    && r > 0.0
-                {
-                    let u = want.last().map_or(0.0, |w| w.0);
-                    let upto = if want.is_empty() { r } else { u + r - u * r };
-                    want.push((upto, x.error_kind.unwrap(), x.error_status.unwrap()));
-                }
-            }
-        }
-        let have = got.visit(0, "e").map_or(&[][..], |r| r.faults());
-        assert_eq!(have.len(), want.len());
-        for (h, w) in have.iter().zip(&want) {
-            assert!((h.upto - w.0).abs() < 1e-12, "{} vs {}", h.upto, w.0);
-            assert_eq!((h.kind, h.status), (w.1, w.2));
-        }
+
+        let pick = |key: &ChaosKey, spec: u8| -> Model {
+            layers
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| s.layer(key).map(|x| (i, spec, x.clone())))
+                .collect()
+        };
+        let mut node = pick(&ChaosKey::Node(0), 0);
+        truncate_at_replace(&mut node);
+        // A node override also drops the lower layers' pair entries.
+        let floor = layers
+            .iter()
+            .rposition(|s| {
+                s.layer(&ChaosKey::Node(0))
+                    .is_some_and(|x| x.replace == Some(true))
+            })
+            .unwrap_or(0);
+        let mut at = pick(&ChaosKey::NodeAt(0, ep()), 1);
+        truncate_at_replace(&mut at);
+        at.retain(|x| x.0 >= floor);
+        let has_pair = !at.is_empty()
+            || layers
+                .iter()
+                .any(|s| s.layer(&ChaosKey::NodeAt(0, ep())).is_some());
+        let visit: Model = if has_pair {
+            node.iter().cloned().chain(at).collect()
+        } else {
+            node
+        };
+        assert_resolved(got.visit(0, "e"), &visit, "visit");
+        let mut endpoint = pick(&ChaosKey::Endpoint(ep()), 0);
+        truncate_at_replace(&mut endpoint);
+        assert_resolved(got.endpoint("e"), &endpoint, "endpoint");
     }
 }
 

@@ -118,3 +118,92 @@ fn read(path: &Path) -> Result<String, Located> {
     }
     String::from_utf8(buf).map_err(|_| fail("not valid UTF-8".into()))
 }
+
+/// **Private.** Makes the new directory entry durable (unix). Best effort: a failure here
+/// loses nothing already written. Windows has no directory fsync, so it is a no-op there.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
+/// Why [`write`] failed.
+pub enum WriteError {
+    /// The file exists and `force` was not set.
+    Exists,
+    /// Anything else: a bad name, a directory that is not the canonical one, an IO error.
+    Other(String),
+}
+
+/// Writes `NAME.yaml` into `dir` (S17) and returns its path. Without `force` the file is made
+/// with `create_new`, so two saves cannot both win; with `force` the text goes to `.NAME.tmp`
+/// and is renamed over the target (which replaces a symlink instead of following it).
+/// Edge cases: two processes saving the same name at once share the temp path (one may fail
+/// with a 500; the target is never half-written). On Windows a target held open by another
+/// program makes the rename fail (500). Either way no data is lost. The directory is fsynced on unix (a no-op on Windows).
+/// `dir` is `AppState.scenarios_dir`; it is created if missing, and the resolved parent of the
+/// target must equal it.
+///
+/// # Errors
+/// [`WriteError::Exists`] or [`WriteError::Other`].
+pub fn write(dir: &Path, name: &str, yaml: &str, force: bool) -> Result<PathBuf, WriteError> {
+    use std::io::Write as _;
+    let other = |e: &dyn std::fmt::Display| WriteError::Other(format!("{}: {e}", dir.display()));
+    valid_name(name).map_err(WriteError::Other)?;
+    std::fs::create_dir_all(dir).map_err(|e| other(&e))?;
+    let target = dir.join(format!("{name}.yaml"));
+    let parent = target
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .ok_or_else(|| other(&"cannot resolve the scenarios directory"))?;
+    if plain(&parent) != plain(dir) {
+        return Err(other(&"the scenarios directory moved since startup"));
+    }
+    if force {
+        let tmp = dir.join(format!(".{name}.tmp"));
+        // A planted file or symlink at the temp path is removed (the link itself, never its
+        // target), then the temp is made with `create_new`, so the write cannot follow it.
+        let done = match std::fs::remove_file(&tmp) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+        .and_then(|()| {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
+            f.write_all(yaml.as_bytes())?;
+            f.sync_all()?;
+            std::fs::rename(&tmp, &target)?;
+            sync_dir(dir);
+            Ok(())
+        });
+        if let Err(e) = done {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(other(&e));
+        }
+    } else {
+        let mut f = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(WriteError::Exists);
+            }
+            Err(e) => return Err(other(&e)),
+        };
+        if let Err(e) = f.write_all(yaml.as_bytes()).and_then(|()| f.sync_all()) {
+            drop(f);
+            let _ = std::fs::remove_file(&target);
+            return Err(other(&e));
+        }
+        sync_dir(dir);
+    }
+    Ok(plain(&target))
+}

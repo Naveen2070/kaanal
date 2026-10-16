@@ -27,7 +27,7 @@ use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::auth;
-use crate::state::{AppState, Event, Route};
+use crate::state::{AppState, BusEvent, Event, Route};
 use crate::wire::Cut;
 
 /// Serves one mock request.
@@ -80,7 +80,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     let plan = Arc::new(plan_of(&st, ep, n));
-    // The read lock is gone before the await: the engine task owns time from here.
+    // The snapshot is gone before the await: the engine task owns time from here.
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
     let Some(fin) = (match &st.engine {
@@ -171,16 +171,16 @@ fn response(status: u16, body: Value, trace: &str, retry: Option<Duration>) -> R
     resp
 }
 
-/// **Private.** Samples the request's plan under the chaos read lock (the lock is gone on return).
+/// **Private.** Samples the request's plan from one chaos snapshot (S10): the `Arc` is cloned
+/// once here and dropped on return, so a swap mid-request never reaches this request.
 fn plan_of(st: &AppState, ep: &kaanal_core::Endpoint, n: u64) -> Plan {
-    let chaos = st.chaos.read().expect("chaos lock poisoned");
+    let snap = st.snapshot();
     let req = ChainRequest {
         endpoint: ep,
         n,
         seed: st.chain_seed,
     };
-    // ponytail: compiled per request as a stop-gap; Task 4 stores the compiled value.
-    sample_plan(&st.topo, &chaos.compile(), &req).0
+    sample_plan(&st.topo, &snap.chaos, &req).0
 }
 
 /// **Private.** The chaos body of a failure that answers as JSON. Kind `status` keeps the
@@ -511,7 +511,7 @@ fn send_event(
     // Measured, not simulated: shows what a client really waited (timer granularity, load).
     // The trace header keeps the simulated per-hop times.
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let _ = st.events.send(Event {
+    let _ = st.events.send(BusEvent::Request(Event {
         ts_ms,
         method,
         path,
@@ -524,7 +524,7 @@ fn send_event(
             .filter(|k| *k != FailKind::Status)
             .map(FailKind::as_str),
         failed_node: failed.map(|f| f.0),
-    });
+    }));
 }
 
 /// **Private.** Adds permissive CORS headers (mock routes only) and exposes

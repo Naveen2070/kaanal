@@ -23,6 +23,11 @@ impl Bucket {
         }
     }
 
+    /// Back to full, as if never used.
+    pub fn refill(&mut self) {
+        self.tat = 0;
+    }
+
     /// Takes a token at `now` (ns). `Err(wait)` says how many nanoseconds until one is
     /// available; a refusal spends nothing.
     ///
