@@ -1371,3 +1371,45 @@ fn keys_dir_is_restricted_to_the_current_user_on_windows() {
         assert!(!acl.contains(other), "{other} must not have access: {acl}");
     }
 }
+
+#[test]
+fn activate_with_ttl_lists_and_expires() {
+    let (up, _dir) = scenario_up("scn-ttl");
+    let out = ok(&up, &["scenario", "activate", "db-down", "--ttl", "300ms"]);
+    assert!(out.contains("active scenarios: db-down"), "{out}");
+    let line = |up: &Up| {
+        ok(up, &["scenario", "list"])
+            .lines()
+            .find(|l| l.starts_with("db-down"))
+            .unwrap()
+            .to_string()
+    };
+    // The server may already have expired it on a slow box, so only check the format if live.
+    let first = line(&up);
+    assert!(
+        first.contains("(active, expires in ") || !first.contains("(active"),
+        "{first}"
+    );
+    let end = Instant::now() + Duration::from_secs(3);
+    while line(&up).contains("(active") {
+        assert!(Instant::now() < end, "never expired");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn bad_ttl_is_rejected_here() {
+    let (up, _dir) = scenario_up("scn-badttl");
+    let e = fails(&up, &["scenario", "activate", "db-down", "--ttl", "5"]);
+    assert!(e.contains("bad ttl"), "{e}");
+    assert!(!ok(&up, &["scenario", "list"]).contains("(active"));
+}
+
+#[test]
+fn active_stays_names_only() {
+    let (up, _dir) = scenario_up("scn-ttlnames");
+    ok(&up, &["scenario", "activate", "db-down", "--ttl", "30s"]);
+    assert_eq!(ok(&up, &["scenario", "active"]).trim(), "db-down");
+    let list = ok(&up, &["scenario", "list"]);
+    assert!(list.contains("(active, expires in "), "{list}");
+}

@@ -27,6 +27,7 @@ use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::auth;
+use crate::scope::{self, Scoped};
 use crate::state::{AppState, BusEvent, Event, Route};
 use crate::wire::Cut;
 
@@ -61,6 +62,11 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         let body = Json(json!({ "error": "method not allowed", "path": path }));
         return cors((StatusCode::METHOD_NOT_ALLOWED, body).into_response());
     };
+    // Before the login body read and the counter, so a bad scope costs no draw (B2b-3).
+    let scope = match scope_of(&st, req.headers()) {
+        Ok(s) => s,
+        Err(detail) => return cors(bad_scope(&detail)),
+    };
     let params: Vec<(String, String)> = matched
         .params
         .iter()
@@ -79,7 +85,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         None
     };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
-    let plan = Arc::new(plan_of(&st, ep, n));
+    let plan = Arc::new(plan_of(&st, ep, n, scope.as_ref().map(|s| &*s.1)));
     // The snapshot is gone before the await: the engine task owns time from here.
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
@@ -87,13 +93,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         Some(e) => e.run(Arc::clone(&plan)).await,
         None => None,
     }) else {
-        return cors(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "engine stopped" })),
-            )
-                .into_response(),
-        );
+        return cors(engine_stopped());
     };
 
     let name = |id: usize| st.topo.nodes[id].name.as_str();
@@ -142,9 +142,17 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         no_store(&mut resp);
     }
 
+    let scope = scope.map(|s| s.0);
+    if let Some(v) = scope.as_deref().and_then(|k| HeaderValue::from_str(k).ok()) {
+        resp.headers_mut().insert(scope::SCOPE_ECHO, v);
+    }
     let nodes = touched_nodes(&fin.hops, failed.as_ref().map(|f| f.0.as_str()), &st.topo);
-    send_event(&st, method, path, status, started, nodes, failed);
-
+    let who = Who {
+        method,
+        path,
+        scope,
+    };
+    send_event(&st, who, status, started, nodes, failed);
     cors(resp)
 }
 
@@ -171,16 +179,50 @@ fn response(status: u16, body: Value, trace: &str, retry: Option<Duration>) -> R
     resp
 }
 
-/// **Private.** Samples the request's plan from one chaos snapshot (S10): the `Arc` is cloned
-/// once here and dropped on return, so a swap mid-request never reaches this request.
-fn plan_of(st: &AppState, ep: &kaanal_core::Endpoint, n: u64) -> Plan {
-    let snap = st.snapshot();
+/// **Private.** The 500 for a replay engine that is gone.
+fn engine_stopped() -> Response {
+    let body = Json(json!({ "error": "engine stopped" }));
+    (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+}
+
+/// **Private.** The request's scope: its key and compiled stack, `None` without the header.
+/// The error is the detail of a 400.
+fn scope_of(
+    st: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<(String, Arc<Scoped>)>, String> {
+    let Some(names) = scope::parse(headers)? else {
+        return Ok(None);
+    };
+    let key = scope::key(&names);
+    let scoped = st.scoped(&key, &names)?;
+    Ok(Some((key, scoped)))
+}
+
+/// **Private.** The 400 for a bad `X-Kaanal-Scenario` header.
+fn bad_scope(detail: &str) -> Response {
+    let body = Json(json!({ "error": "bad scenario scope", "detail": detail }));
+    (StatusCode::BAD_REQUEST, body).into_response()
+}
+
+/// **Private.** Samples the request's plan from the scoped stack, or else from one chaos snapshot
+/// (S10): the `Arc` is cloned once here and dropped on return, so a swap mid-request never
+/// reaches this request.
+fn plan_of(st: &AppState, ep: &kaanal_core::Endpoint, n: u64, scoped: Option<&Scoped>) -> Plan {
+    let snap;
+    let chaos = if let Some(s) = scoped {
+        &s.chaos
+    } else {
+        snap = st.snapshot();
+        &snap.chaos
+    };
+
     let req = ChainRequest {
         endpoint: ep,
         n,
         seed: st.chain_seed,
     };
-    sample_plan(&st.topo, &snap.chaos, &req).0
+    sample_plan(&st.topo, chaos, &req).0
 }
 
 /// **Private.** The chaos body of a failure that answers as JSON. Kind `status` keeps the
@@ -494,12 +536,18 @@ fn touched_nodes(hops: &[FinishedHop], failed: Option<&str>, topo: &Topology) ->
     nodes
 }
 
+/// **Private.** Who asked: the request line and scope an [`Event`] reports.
+struct Who {
+    method: String,
+    path: String,
+    scope: Option<String>,
+}
+
 /// **Private.** Broadcasts the finished request on the event bus. No subscribers is
 /// fine: send only errors when nobody listens.
 fn send_event(
     st: &AppState,
-    method: String,
-    path: String,
+    who: Who,
     status: u16,
     started: Instant,
     nodes: Vec<String>,
@@ -513,8 +561,9 @@ fn send_event(
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let _ = st.events.send(BusEvent::Request(Event {
         ts_ms,
-        method,
-        path,
+        method: who.method,
+        path: who.path,
+        scope: who.scope,
         status,
         ms,
         nodes,
@@ -545,7 +594,7 @@ fn with_cors(mut r: Response) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("x-kaanal-trace, retry-after"),
+        HeaderValue::from_static("x-kaanal-trace, x-kaanal-scope, retry-after"),
     );
     r
 }

@@ -4,7 +4,7 @@ Server entry: binds the port, builds state, installs the router.
 
 ## What it does
 
-The only public surface the binary uses. One axum router serves **both** the control API and the mocks on one port (spec FR-API-12). Control routes are mounted first and wrapped in the `guard` middleware via `route_layer`, so the mock fallback can never accidentally bypass authentication. Declares the private `scenarios` module (file discovery and atomic save, [scenarios.md](scenarios.md)). Mock requests run through one replay-engine actor task, so queues, pools and rate limits are shared by every request.
+The only public surface the binary uses. One axum router serves **both** the control API and the mocks on one port (spec FR-API-12). Control routes are mounted first and wrapped in the `guard` middleware via `route_layer`, so the mock fallback can never accidentally bypass authentication. Declares the private `scenarios` module (file discovery and atomic save, [scenarios.md](scenarios.md)) and the private `scope` module (`X-Kaanal-Scenario` scoping, [scope.md](scope.md)). `serve` also spawns `control::lease_task`, which expires `ttl` leases. Mock requests run through one replay-engine actor task, so queues, pools and rate limits are shared by every request.
 
 ## Items
 
@@ -32,9 +32,9 @@ The only public surface the binary uses. One axum router serves **both** the con
 | `GET/PUT /__kaanal/scenarios/active`                         | `control::get_active` / `set_active`                         | the stack and the compiled result / set the whole stack atomically                          |
 | `POST /__kaanal/scenarios/save`                              | `control::save_scenario`                                     | write `scenarios/NAME.yaml`                                                                 |
 | `GET/PUT/DELETE /__kaanal/scenarios/{name}`                  | `control::get_scenario` / `put_scenario` / `delete_scenario` | one definition / define at runtime / undefine a runtime scenario                            |
-| `POST /__kaanal/scenarios/{name}/activate`, `.../deactivate` | `control::activate` / `deactivate`                           | push to the top / remove from the stack                                                     |
+| `POST /__kaanal/scenarios/{name}/activate`, `.../deactivate` | `control::activate` / `deactivate`                           | push to the top (optional `{"ttl"}` lease) / remove from the stack                          |
 | `POST /__kaanal/reset`                                       | `control::reset`                                             | clean slate for `beforeEach`                                                                |
-| `GET /__kaanal/events`                                       | `control::events`                                            | SSE stream: `request` and `scenario` events                                                 |
+| `GET /__kaanal/events`                                       | `control::events`                                            | SSE stream: `request` and `scenario` events (incl. `expire`)                                |
 | `GET /__kaanal/ui`                                           | `control::ui`                                                | embedded HTML page; no token needed (page reads it from the URL fragment)                   |
 | _(fallback)_                                                 | `mock::handle`                                               | every other path → mock engine                                                              |
 

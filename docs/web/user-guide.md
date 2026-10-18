@@ -104,6 +104,7 @@ For a whole situation at once, define a [scenario](scenarios.md) and switch it o
 
 ```bash
 kaanal scenario activate payments-down     # defined under scenarios: in kaanal.yaml
+kaanal scenario activate payments-down --ttl 30s   # turns itself off after 30 s
 kaanal scenario deactivate payments-down
 kaanal reset                               # start a test from a clean slate
 ```

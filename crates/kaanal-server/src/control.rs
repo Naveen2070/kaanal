@@ -12,6 +12,7 @@ use std::sync::{Arc, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -24,6 +25,7 @@ use kaanal_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::{Stream, StreamExt};
@@ -251,6 +253,9 @@ fn commit(
 ) -> Result<Arc<Effective>, Reject> {
     let backup = (**c).clone();
     let done = f(c).and_then(|()| {
+        // A lease outlives neither its activation nor its scenario.
+        let ctl = &mut **c;
+        ctl.leases.retain(|n, _| ctl.stack.active().contains(n));
         st.publish(c)
             .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))
     });
@@ -327,7 +332,23 @@ fn effective_json(st: &AppState, e: &EffectiveChaos) -> Value {
 
 /// **Private.** `{ active, effective }` of a published snapshot.
 fn active_json(st: &AppState, snap: &Effective) -> Value {
-    json!({ "active": snap.stack.active(), "effective": effective_json(st, &snap.chaos) })
+    let now = Instant::now();
+    let expires: Map<String, Value> = snap
+        .leases
+        .iter()
+        .map(|(n, d)| (n.clone(), json!(remaining_ms(*d, now))))
+        .collect();
+    json!({
+        "active": snap.stack.active(),
+        "expires_in_ms": expires,
+        "effective": effective_json(st, &snap.chaos),
+    })
+}
+
+/// **Private.** Milliseconds from `now` to `deadline`, rounded up (0 once past).
+fn remaining_ms(deadline: Instant, now: Instant) -> u64 {
+    let ns = deadline.saturating_duration_since(now).as_nanos();
+    u64::try_from(ns.div_ceil(1_000_000)).unwrap_or(u64::MAX)
 }
 
 /// `GET /__kaanal/chaos` — the live layer
@@ -712,19 +733,24 @@ pub async fn list_scenarios(State(st): State<Arc<AppState>>) -> Json<Value> {
     // Locked first, so the set and the active stack are from the same write.
     let c = lock(&st);
     let snap = st.snapshot();
+    let now = Instant::now();
     let out: Vec<Value> = c
         .scenarios
         .names()
         .into_iter()
         .filter_map(|n| c.scenarios.get(n))
         .map(|(s, src)| {
-            json!({
+            let mut o = json!({
                 "name": s.name,
                 "source": source_name(src),
                 "description": s.description,
                 "entries": s.layers.entry_count(),
                 "active": snap.stack.active().contains(&s.name),
-            })
+            });
+            if let Some(d) = snap.leases.get(&s.name) {
+                o["expires_in_ms"] = json!(remaining_ms(*d, now));
+            }
+            o
         })
         .collect();
     Json(Value::Array(out))
@@ -833,22 +859,110 @@ pub async fn delete_scenario(
 }
 
 /// `POST /__kaanal/scenarios/{name}/activate` — pushes (or moves) the scenario to the top of
-/// the stack. Answers `{ active, effective }`.
+/// the stack. Answers `{ active, expires_in_ms, effective }`.
+///
+/// An empty body is a plain activation (it also removes any lease the scenario had). A body
+/// `{ "ttl": "30s" }` (100 ms to 24 h, humantime) leases it: when the time is up the scenario is
+/// deactivated and an `expire` event is sent. Activating again replaces the lease.
 ///
 /// # Errors
-/// 404 for an unknown name.
+/// 400 for a bad body or ttl, 404 for an unknown name.
 pub async fn activate(
     State(st): State<Arc<AppState>>,
     Path(name): Path<String>,
+    body: Bytes,
 ) -> Result<Json<Value>, Reject> {
+    let ttl = if body.is_empty() {
+        None
+    } else {
+        let b: ActivateBody = serde_json::from_slice(&body)
+            .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad body: {e}")))?;
+        b.ttl.as_deref().map(parse_ttl).transpose()?
+    };
     let mut c = lock(&st);
     let snap = commit(&st, &mut c, |c| {
         c.stack
             .activate(&c.scenarios, &name)
-            .map_err(|_| unknown(&name))
+            .map_err(|_| unknown(&name))?;
+        match ttl {
+            Some(t) => c.leases.insert(name.clone(), Instant::now() + t),
+            None => c.leases.remove(&name),
+        };
+        Ok(())
     })?;
     emit(&st, "activate", Some(&name), &snap);
+    drop(c);
+    st.lease_wake.notify_one();
     Ok(Json(active_json(&st, &snap)))
+}
+
+/// The accepted body of `POST /__kaanal/scenarios/{name}/activate`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ActivateBody {
+    ttl: Option<String>,
+}
+
+/// **Private.** A `ttl` string such as `30s`, within 100 ms to 24 h.
+fn parse_ttl(s: &str) -> Result<Duration, Reject> {
+    humantime::parse_duration(s)
+        .ok()
+        .filter(|d| (Duration::from_millis(100)..=Duration::from_hours(24)).contains(d))
+        .ok_or_else(|| {
+            reject(
+                StatusCode::BAD_REQUEST,
+                "ttl must be 100ms to 24h, e.g. \"30s\"",
+            )
+        })
+}
+
+/// Deactivates every scenario whose lease deadline has passed, one `expire` event each, earliest
+/// first. Returns how many. The deadline is compared under the lock, so a lease replaced between
+/// the task's wake-up and here is not expired early.
+pub fn expire_due(st: &AppState) -> usize {
+    let mut c = lock(st);
+    let now = Instant::now();
+    let mut due: Vec<(Instant, String)> = c
+        .leases
+        .iter()
+        .filter(|(_, d)| **d <= now)
+        .map(|(n, d)| (*d, n.clone()))
+        .collect();
+    due.sort();
+    let mut n = 0;
+    for (_, name) in due {
+        // `commit` drops the lease with the activation.
+        let done = commit(st, &mut c, |c| {
+            c.stack.deactivate(&name);
+            Ok(())
+        });
+        if let Ok(snap) = done {
+            emit(st, "expire", Some(&name), &snap);
+            n += 1;
+        } else {
+            // The restore put the past-due lease back; left there, `lease_task` would spin.
+            // Drop only the lease: the scenario stays active, so Control and the published
+            // state still agree, and a manual deactivate works through `commit`.
+            eprintln!("kaanal: could not expire '{name}'; left it active and dropped its lease");
+            c.leases.remove(&name);
+        }
+    }
+    n
+}
+
+/// Expires leases as their deadlines pass; spawned once by `serve`. Sleeps to the earliest
+/// deadline, or until a write adds or replaces a lease.
+pub async fn lease_task(st: Arc<AppState>) {
+    loop {
+        let next = lock(&st).leases.values().min().copied();
+        match next {
+            None => st.lease_wake.notified().await,
+            Some(d) => tokio::select! {
+                () = tokio::time::sleep_until(d) => { expire_due(&st); }
+                () = st.lease_wake.notified() => {}
+            },
+        }
+    }
 }
 
 /// `POST /__kaanal/scenarios/{name}/deactivate` — removes it from the stack (204; also when it
@@ -879,6 +993,7 @@ pub async fn set_active(
     let Json(names) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
     let mut c = lock(&st);
     let snap = commit(&st, &mut c, |c| {
+        c.leases.clear();
         c.stack
             .set_active(&c.scenarios, &names)
             .map_err(|m| reject(StatusCode::NOT_FOUND, &m))
@@ -1165,7 +1280,113 @@ pub async fn ui() -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{ct_eq, host_allowed, query_token};
+    use super::{activate, ct_eq, expire_due, host_allowed, lease_task, lock, query_token};
+    use crate::state::{AppState, BusEvent};
+    use axum::body::Bytes;
+    use axum::extract::{Path, State};
+    use kaanal_core::Config;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn state() -> Arc<AppState> {
+        let yaml = "version: 1\nnodes:\n  gw: { type: gateway }\n  db: { type: database, flavor: postgres }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: db }\nscenarios:\n  a: { chaos: [ { node: db, latency_ms: 1 } ] }\n  b: { chaos: [ { node: db, latency_ms: 2 } ] }\n";
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let st = AppState::build(&Config::from_yaml(yaml).unwrap(), &dir, String::new(), 0)
+            .map_err(|e| e.to_string())
+            .unwrap();
+        Arc::new(st)
+    }
+
+    async fn lease(st: &Arc<AppState>, name: &str, ttl: &str) {
+        let body = Bytes::from(format!(r#"{{"ttl":"{ttl}"}}"#));
+        let _ = activate(State(Arc::clone(st)), Path(name.into()), body)
+            .await
+            .unwrap();
+    }
+
+    async fn settle() {
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn expiries(rx: &mut tokio::sync::broadcast::Receiver<BusEvent>) -> Vec<String> {
+        let mut out = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let BusEvent::Scenario {
+                action: "expire",
+                name,
+                ..
+            } = ev
+            {
+                out.push(name.unwrap());
+            }
+        }
+        out
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lease_task_expires_on_the_paused_clock() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        lease(&st, "a", "5s").await;
+        tokio::time::advance(Duration::from_secs(4)).await;
+        settle().await;
+        assert_eq!(st.snapshot().stack.active(), ["a"]);
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(st.snapshot().stack.active(), [] as [String; 0]);
+        assert_eq!(expiries(&mut rx), ["a"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lease_survives_a_poisoned_lock() {
+        let st = state();
+        let s2 = Arc::clone(&st);
+        let _ = std::thread::spawn(move || {
+            let _g = s2.control.lock().unwrap();
+            panic!("poison");
+        })
+        .join();
+        assert!(st.control.is_poisoned());
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        lease(&st, "a", "1s").await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(st.snapshot().stack.active(), [] as [String; 0]);
+        assert!(lock(&st).leases.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_leases_expire_in_order_with_one_event_each() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        lease(&st, "b", "2s").await;
+        lease(&st, "a", "1s").await;
+        tokio::time::advance(Duration::from_millis(1500)).await;
+        settle().await;
+        assert_eq!(st.snapshot().stack.active(), ["b"]);
+        assert_eq!(expiries(&mut rx), ["a"]);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        settle().await;
+        assert_eq!(st.snapshot().stack.active(), [] as [String; 0]);
+        assert_eq!(expiries(&mut rx), ["b"]);
+        assert_eq!(expire_due(&st), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_leases_due_in_one_call_expire_in_order() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        lease(&st, "b", "1s").await;
+        lease(&st, "a", "1s").await;
+        tokio::time::advance(Duration::from_secs(3)).await;
+        assert_eq!(expire_due(&st), 2);
+        assert_eq!(st.snapshot().stack.active(), [] as [String; 0]);
+        assert_eq!(expiries(&mut rx), ["a", "b"]);
+    }
 
     #[test]
     fn hosts() {

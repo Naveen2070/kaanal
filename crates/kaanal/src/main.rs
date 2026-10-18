@@ -134,7 +134,12 @@ enum ScenarioCmd {
     /// Show one scenario's chaos entries
     Show { name: String },
     /// Put a scenario on top of the stack
-    Activate { name: String },
+    Activate {
+        name: String,
+        /// Deactivate on its own after this long (100ms to 24h, e.g. 30s)
+        #[arg(long)]
+        ttl: Option<String>,
+    },
     /// Take a scenario off the stack
     Deactivate { name: String },
     /// Set the whole stack, bottom to top (no names: deactivate all)
@@ -474,7 +479,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
                     s["source"].as_str().unwrap_or(""),
                     s["entries"],
                     s["description"].as_str().unwrap_or(""),
-                    if s["active"] == true { " (active)" } else { "" }
+                    active_suffix(s)
                 );
                 println!("{}", clean(&line));
             }
@@ -494,8 +499,9 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
                 println!("  - {}", clean(&e.to_string()));
             }
         }
-        ScenarioCmd::Activate { name } => {
-            let v = call("POST", &scenario_path(named(&name)?, "/activate"), None)?;
+        ScenarioCmd::Activate { name, ttl } => {
+            let body = ttl_body(ttl)?;
+            let v = call("POST", &scenario_path(named(&name)?, "/activate"), body)?;
             println!("active scenarios: {}", active_names(&v).join(", "));
         }
         ScenarioCmd::Deactivate { name } => {
@@ -972,6 +978,34 @@ fn encode_segment(s: &str) -> String {
     utf8_percent_encode(s, SEGMENT).to_string()
 }
 
+/// **Private.** The activate body for `--ttl`, validated here so a typo sends nothing.
+fn ttl_body(ttl: Option<String>) -> Result<Option<Value>, Fail> {
+    ttl.map(|t| {
+        let t = t.trim();
+        humantime::parse_duration(t).map_err(|_| err(format!("bad ttl '{t}' (use e.g. 30s)")))?;
+        Ok(json!({ "ttl": t }))
+    })
+    .transpose()
+}
+
+/// **Private.** ` (active)` or ` (active, expires in X)` for one list row, else nothing.
+fn active_suffix(s: &Value) -> String {
+    match (s["active"] == true, s["expires_in_ms"].as_u64()) {
+        (true, Some(ms)) => format!(" (active, expires in {})", remaining(ms)),
+        (true, None) => " (active)".to_string(),
+        _ => String::new(),
+    }
+}
+
+/// **Private.** Time left on a lease: whole seconds rounded up, or `Nms` under a second.
+fn remaining(ms: u64) -> String {
+    if ms >= 1000 {
+        format!("{}s", ms.div_ceil(1000))
+    } else {
+        format!("{ms}ms")
+    }
+}
+
 /// **Private.** `300ms` / `2s` / `1m 30s` → milliseconds. A unit is required.
 fn parse_ms(s: &str) -> Result<u64, String> {
     humantime::parse_duration(s.trim())
@@ -997,7 +1031,23 @@ fn parse_rate(s: &str) -> Result<f64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean, encode_segment, parse_ms, parse_rate};
+    use super::{clean, encode_segment, parse_ms, parse_rate, remaining, ttl_body};
+
+    #[test]
+    fn remaining_rounds_up_to_whole_seconds() {
+        assert_eq!(remaining(999), "999ms");
+        assert_eq!(remaining(1000), "1s");
+        assert_eq!(remaining(1001), "2s");
+        assert_eq!(remaining(59_001), "60s");
+    }
+
+    #[test]
+    fn ttl_body_sends_the_trimmed_value() {
+        let b = ttl_body(Some(" 30s ".into())).ok().flatten().unwrap();
+        assert_eq!(b["ttl"], "30s");
+        assert!(ttl_body(Some("soon".into())).is_err());
+        assert!(matches!(ttl_body(None), Ok(None)));
+    }
 
     #[test]
     fn latency_parsing() {

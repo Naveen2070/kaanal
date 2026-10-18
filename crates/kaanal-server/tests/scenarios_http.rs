@@ -1002,3 +1002,179 @@ async fn mode_only_patches() {
     s.put_chaos("db", json!({ "mode": "override" })).await;
     assert_eq!(s.status("/users/42").await, 200);
 }
+
+const TTL_SCENARIOS: &str = "scenarios:
+  db-down: { chaos: [ { node: db, down: true } ] }
+  slow: { chaos: [ { node: db, latency_ms: 1 } ] }
+";
+
+impl Sc {
+    async fn activate_raw(&self, name: &str, body: &str) -> reqwest::Response {
+        self.client
+            .post(format!("{}/__kaanal/scenarios/{name}/activate", self.base))
+            .bearer_auth(&self.token)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap()
+    }
+    async fn active_names(&self) -> Value {
+        self.active().await["active"].clone()
+    }
+}
+
+/// Polls `f` for up to 3 s.
+async fn until<F: std::future::Future<Output = bool>>(mut f: impl FnMut() -> F) -> bool {
+    let end = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < end {
+        if f().await {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn ttl_expires_and_chaos_clears() {
+    let s = start_with_scenarios(TTL_SCENARIOS).await;
+    let mut stream = s
+        .client
+        .get(format!("{}/__kaanal/events?token={}", s.base, s.token))
+        .send()
+        .await
+        .unwrap();
+    let r = s.activate_raw("db-down", r#"{"ttl":"300ms"}"#).await;
+    assert_eq!(r.status(), 200);
+    let b: Value = r.json().await.unwrap();
+    let ms = b["expires_in_ms"]["db-down"].as_u64().unwrap();
+    assert!((1..=300).contains(&ms), "{b}");
+    assert_eq!(s.status("/users/1").await, 503);
+    assert!(until(|| async { s.status("/users/1").await == 200 }).await);
+    assert_eq!(s.active_names().await, json!([]));
+    assert_eq!(s.active().await["expires_in_ms"], json!({}));
+    let mut seen = String::new();
+    let ok = tokio::time::timeout(Duration::from_secs(3), async {
+        while let Some(chunk) = stream.chunk().await.unwrap() {
+            seen.push_str(&String::from_utf8_lossy(&chunk));
+            if seen.contains("\"action\":\"expire\"") {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    assert!(ok, "{seen}");
+}
+
+#[tokio::test]
+async fn reactivate_restarts_or_clears_the_lease() {
+    let s = start_with_scenarios(TTL_SCENARIOS).await;
+    s.activate_raw("db-down", r#"{"ttl":"300ms"}"#).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        s.activate_raw("db-down", r#"{"ttl":"600ms"}"#)
+            .await
+            .status(),
+        200
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(s.active_names().await, json!(["db-down"]));
+    assert!(until(|| async { s.active_names().await == json!([]) }).await);
+
+    s.activate_raw("db-down", r#"{"ttl":"300ms"}"#).await;
+    let r = s.activate_raw("db-down", "").await;
+    let b: Value = r.json().await.unwrap();
+    assert_eq!(b["expires_in_ms"], json!({}));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(s.active_names().await, json!(["db-down"]));
+}
+
+#[tokio::test]
+async fn ttl_bounds_and_shape() {
+    let s = start_with_scenarios(TTL_SCENARIOS).await;
+    for bad in [
+        r#"{"ttl":"99ms"}"#,
+        r#"{"ttl":"25h"}"#,
+        r#"{"ttl":"abc"}"#,
+        r#"{"ttl":5}"#,
+        r#"{"x":1}"#,
+        "{not json",
+    ] {
+        let r = s.activate_raw("db-down", bad).await;
+        assert_eq!(r.status(), 400, "{bad}");
+        assert_eq!(s.active_names().await, json!([]), "{bad}");
+    }
+    for ok in [
+        r#"{"ttl":"100ms"}"#,
+        r#"{"ttl":"24h"}"#,
+        "{}",
+        r#"{"ttl":null}"#,
+    ] {
+        assert_eq!(s.activate_raw("db-down", ok).await.status(), 200, "{ok}");
+    }
+}
+
+#[tokio::test]
+async fn lease_dropped_with_the_activation() {
+    let s = start_with_scenarios(TTL_SCENARIOS).await;
+    let lease = r#"{"ttl":"1h"}"#;
+    assert_eq!(s.activate_raw("db-down", lease).await.status(), 200);
+    s.post("/__kaanal/scenarios/db-down/deactivate").await;
+    assert_eq!(s.active().await["expires_in_ms"], json!({}));
+    s.activate_raw("db-down", lease).await;
+    s.put("/__kaanal/scenarios/active", json!(["slow"])).await;
+    assert_eq!(s.active().await["expires_in_ms"], json!({}));
+    s.activate_raw("db-down", lease).await;
+    s.delete("/__kaanal/scenarios").await;
+    assert_eq!(s.active().await["expires_in_ms"], json!({}));
+    s.activate_raw("db-down", lease).await;
+    s.post("/__kaanal/reset").await;
+    assert_eq!(s.active().await["expires_in_ms"], json!({}));
+
+    // A runtime scenario with a short lease, deleted: nothing left to expire.
+    s.put(
+        "/__kaanal/scenarios/rt",
+        json!({ "chaos": [ { "node": "db", "down": true } ] }),
+    )
+    .await;
+    s.activate_raw("rt", r#"{"ttl":"300ms"}"#).await;
+    assert_eq!(s.delete("/__kaanal/scenarios/rt").await.status(), 204);
+    assert_eq!(s.active().await["expires_in_ms"], json!({}));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(s.active_names().await, json!([]));
+    assert_eq!(s.status("/users/1").await, 200);
+}
+
+#[tokio::test]
+async fn lease_and_live_write_both_survive() {
+    let s = start_with_scenarios(TTL_SCENARIOS).await;
+    s.activate_raw("slow", r#"{"ttl":"300ms"}"#).await;
+    assert_eq!(
+        s.put_chaos("db", json!({ "down": true })).await.status(),
+        200
+    );
+    assert!(until(|| async { s.active_names().await == json!([]) }).await);
+    assert_eq!(s.live().await["nodes"]["db"]["down"], true);
+    assert_eq!(s.status("/users/1").await, 503);
+}
+
+#[tokio::test]
+async fn list_shows_expires_in_ms() {
+    let s = start_with_scenarios(TTL_SCENARIOS).await;
+    s.activate_raw("db-down", r#"{"ttl":"1h"}"#).await;
+    let list: Value = s.ctl("/__kaanal/scenarios").await.json().await.unwrap();
+    let get = |n: &str| {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["name"] == n)
+            .unwrap()
+            .clone()
+    };
+    let ms = get("db-down")["expires_in_ms"].as_u64().unwrap();
+    assert!((3_599_000..=3_600_000).contains(&ms), "{ms}");
+    assert!(get("slow").get("expires_in_ms").is_none());
+}

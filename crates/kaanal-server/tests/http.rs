@@ -1576,6 +1576,7 @@ fn pct(sorted: &[f64], pct: usize) -> f64 {
 /// pooled database at about 75% utilisation, so some requests queue. Checks that every hop
 /// keeps its exact simulated duration, that the trace never claims more time than the client
 /// really waited, and how far the real latency drifts above the trace (HTTP + timer lag).
+/// Every other request sends an empty `X-Kaanal-Scenario`, so the scoped path is under load too.
 ///
 /// `cargo test -p kaanal-server --release --test http -- --ignored --nocapture load_`
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1593,12 +1594,18 @@ async fn load_pooled_node_keeps_latency_and_trace_accurate() {
     let mut tick = tokio::time::interval(Duration::from_nanos(1_000_000_000 / RPS));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
     let mut tasks = Vec::new();
-    for _ in 0..RPS * SECS {
+    for i in 0..RPS * SECS {
         tick.tick().await;
         let (client, url) = (client.clone(), url.clone());
         tasks.push(tokio::spawn(async move {
             let t = std::time::Instant::now();
-            let r = client.get(url).send().await.unwrap();
+            // Half the requests carry an empty scope (an explicit baseline): the scoped path
+            // (one read lock, one short-string hash) must not move the p99.
+            let mut req = client.get(url);
+            if i % 2 == 1 {
+                req = req.header("X-Kaanal-Scenario", "");
+            }
+            let r = req.send().await.unwrap();
             let status = r.status().as_u16();
             let trace = r.headers()["x-kaanal-trace"].to_str().unwrap().to_string();
             (status, t.elapsed().as_secs_f64() * 1000.0, trace)

@@ -61,6 +61,9 @@ pub struct Event {
     /// How it failed when not a plain status (`reset`, `malformed` or `timeout`); `None` for a
     /// status failure or a success. A reset or cut-off body answers 200, so this is how a client tells.
     pub kind: Option<&'static str>,
+    /// The request's scenario scope: `None` for the global stack, `Some(key)` for an
+    /// `X-Kaanal-Scenario` stack (the names joined by `,`), `Some("")` for an empty header.
+    pub scope: Option<String>,
 }
 
 /// What the bus carries: a finished request, or a scenario change (S21).
@@ -70,7 +73,7 @@ pub enum BusEvent {
     Request(Event),
     /// A scenario stack change (SSE message `scenario`).
     Scenario {
-        /// `activate`, `deactivate`, `set`, `clear`, `reset` or `update` (an active scenario's definition changed).
+        /// `activate`, `deactivate`, `set`, `clear`, `reset`, `expire` (a `ttl` ran out) or `update` (an active scenario's definition changed).
         action: &'static str,
         /// The scenario concerned, when one.
         name: Option<String>,
@@ -86,6 +89,8 @@ pub struct Effective {
     pub stack: ChaosStack,
     /// What the executor reads.
     pub chaos: EffectiveChaos,
+    /// When each leased activation expires (a copy of [`Control::leases`]).
+    pub leases: HashMap<String, tokio::time::Instant>,
 }
 
 /// The mutable side of chaos. Behind [`AppState::control`]: the only writer path (S11).
@@ -95,6 +100,9 @@ pub struct Control {
     pub scenarios: ScenarioSet,
     /// The active scenarios and the live layer.
     pub stack: ChaosStack,
+    /// Activations with a `ttl`: scenario name to deadline. Only active names keep one
+    /// (`commit` drops the rest).
+    pub leases: HashMap<String, tokio::time::Instant>,
 }
 
 /// Shared server state; one `Arc` clones into every handler.
@@ -114,6 +122,11 @@ pub struct AppState {
     /// The scenarios and the stack. Every control write locks it, mutates, and calls
     /// [`AppState::publish`] before unlocking. Never held across an `.await`.
     pub control: Mutex<Control>,
+    /// Woken when a lease is added or replaced, so the lease task re-reads the earliest deadline.
+    pub lease_wake: tokio::sync::Notify,
+    /// Compiled scoped stacks by key (see [`AppState::scoped`]). Lock order: `control`, then this.
+    /// [`AppState::publish`] clears it on every publish.
+    pub scoped: RwLock<HashMap<String, Arc<crate::scope::Scoped>>>,
     /// Every route's request counter (`POST /reset` zeroes them).
     pub counters: Vec<Arc<AtomicU64>>,
     /// Event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
@@ -330,8 +343,11 @@ impl AppState {
         let next = Arc::new(Effective {
             stack: c.stack.clone(),
             chaos,
+            leases: c.leases.clone(),
         });
         *self.chaos.write().expect("chaos lock poisoned") = Arc::clone(&next);
+        // Any definition or stack change may alter a scoped stack; the caller holds `control`.
+        self.scoped.write().expect("scoped lock poisoned").clear();
         Ok(next)
     }
 
@@ -428,11 +444,15 @@ impl AppState {
             chaos: RwLock::new(Arc::new(Effective {
                 stack: ChaosStack::default(),
                 chaos: EffectiveChaos::default(),
+                leases: HashMap::new(),
             })),
             control: Mutex::new(Control {
                 scenarios,
                 stack: ChaosStack::default(),
+                leases: HashMap::new(),
             }),
+            lease_wake: tokio::sync::Notify::new(),
+            scoped: RwLock::new(HashMap::new()),
             counters,
             events,
             token,

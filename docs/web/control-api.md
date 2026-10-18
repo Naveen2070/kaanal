@@ -97,7 +97,7 @@ A [scenario](scenarios.md) is a named list of chaos entries. The scenarios you a
 | `GET /__kaanal/scenarios/{name}`             | One definition (export it for a bug report)                       | `200`                                                           |
 | `PUT /__kaanal/scenarios/{name}`             | Define or replace a runtime scenario                              | `200 { "name", "warnings" }`                                    |
 | `DELETE /__kaanal/scenarios/{name}`          | Undefine a runtime scenario                                       | `204`                                                           |
-| `POST /__kaanal/scenarios/{name}/activate`   | Push to the top of the scenarios (a re-activation moves it there) | `200 { "active", "effective" }`                                 |
+| `POST /__kaanal/scenarios/{name}/activate`   | Push to the top of the scenarios (a re-activation moves it there) | `200 { "active", "expires_in_ms", "effective" }`                |
 | `POST /__kaanal/scenarios/{name}/deactivate` | Remove from the stack                                             | `204` (also when it was not active, or the name is not defined) |
 | `GET /__kaanal/scenarios/active`             | The stack and the compiled result                                 | `200 { "active", "effective" }`                                 |
 | `PUT /__kaanal/scenarios/active`             | Set the whole stack at once, body `["a","b"]` (bottom to top)     | `200 { "active", "effective" }`                                 |
@@ -105,7 +105,11 @@ A [scenario](scenarios.md) is a named list of chaos entries. The scenarios you a
 | `POST /__kaanal/scenarios/save`              | Write `scenarios/NAME.yaml`                                       | `200 { "name", "path" }`                                        |
 | `POST /__kaanal/reset`                       | Clean slate for tests                                             | `204`                                                           |
 
-`active` is the list of active names, bottom to top; `effective` has the same shape as in `GET /__kaanal/chaos` (calm keys omitted).
+`active` is the list of active names, bottom to top; `effective` has the same shape as in `GET /__kaanal/chaos` (calm keys omitted); `expires_in_ms` maps each leased active scenario to the milliseconds left, rounded up (`{}` when none is leased). `GET`/`PUT` of `scenarios/active` carry it too, and each active leased row of the list has an `expires_in_ms` number.
+
+**Activate with a lease.** `POST .../activate` takes an optional JSON body `{ "ttl": "30s" }` (humantime, 100 ms to 24 h). The scenario is deactivated when the time is up and an `expire` event is sent. An empty body, `{}` or `{"ttl":null}` is a plain activation and removes any lease the scenario had; activating again with a `ttl` replaces the lease. Anything else is `400`: a `ttl` outside the range or not parseable, a non-string `ttl`, another key, invalid JSON. Nothing changes on a `400`. A lease is dropped when its activation ends (deactivate, `PUT scenarios/active`, `DELETE scenarios`, `reset`, deleting the scenario).
+
+**Scoping a mock request.** A request to a mock route may carry `X-Kaanal-Scenario: a,b` (comma separated names, at most 16, at most 256 bytes) and is then answered with exactly that stack, ignoring the global stack and the live layer. The response echoes it as `X-Kaanal-Scope: a,b` (an empty request header echoes an empty value). A bad header answers `400 { "error": "bad scenario scope", "detail": "..." }`. `404` and `405` answers, and the `/__kaanal` namespace, ignore the header. Details and the shared-counter caveat: [scenarios](scenarios.md#parallel-test-workers).
 
 **List.** `GET /__kaanal/scenarios` returns `[{ "name", "source", "description", "entries", "active" }]` in definition order; `source` is `inline` (`kaanal.yaml`), `file` (`scenarios/NAME.yaml`) or `runtime`.
 
@@ -150,7 +154,7 @@ Server-Sent Events stream of every mock request as it completes, and of scenario
 
 ```
 event: request
-data: {"ts_ms":1759900000000,"method":"GET","path":"/users/7","status":200,"ms":12,"nodes":["nginx","app","db"],"failed_node":null,"kind":null}
+data: {"ts_ms":1759900000000,"method":"GET","path":"/users/7","status":200,"ms":12,"nodes":["nginx","app","db"],"failed_node":null,"kind":null,"scope":null}
 
 event: scenario
 data: {"action":"activate","name":"payments-down","active":["payments-down"]}
@@ -161,7 +165,8 @@ data: 37
 
 - `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header (parallel branches in `[a|b]`, cache lookups as `hit`/`miss`, long chains ending `,...+N hops`).
 - `kind` is `reset`, `malformed` or `timeout` when the request failed that way (a reset or cut-off body still answers `200`, so the status alone does not show it); `null` otherwise.
-- `scenario` events carry the `action` — `activate`, `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, or `update` (the definition of an active scenario changed) — the `name` it concerns (or `null`) and the `active` stack afterwards.
+- `request` events carry `scope`: `null` for a request without `X-Kaanal-Scenario`, otherwise the stack it was answered with (`""` for an empty header).
+- `scenario` events carry the `action` — `activate`, `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, `update` (the definition of an active scenario changed) or `expire` (a `ttl` lease ran out and the scenario was deactivated) — the `name` it concerns (or `null`) and the `active` stack afterwards.
 - `lagged` means the stream fell behind and skipped that many events.
 
 ### `GET /__kaanal/ui`

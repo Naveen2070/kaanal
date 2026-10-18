@@ -82,7 +82,7 @@ Several scenarios can be active at once. They form a **stack**, in the order you
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kaanal scenario list`                                                                        | Every scenario with its source (`inline`, `file`, `runtime`), entry count, description, `(active)`.                                                  |
 | `kaanal scenario show NAME`                                                                   | The entries of one scenario.                                                                                                                         |
-| `kaanal scenario activate NAME`                                                               | Put it on top of the stack. Prints the active scenarios.                                                                                             |
+| `kaanal scenario activate NAME [--ttl 30s]`                                                   | Put it on top of the stack. Prints the active scenarios. With `--ttl` it turns itself off later (see "Auto-expiring activations").                   |
 | `kaanal scenario deactivate NAME`                                                             | Take it off the stack (`ok: NAME is not active` if it was not).                                                                                      |
 | `kaanal scenario set A B ...`                                                                 | Set the whole stack at once, bottom to top. With no names: deactivate all.                                                                           |
 | `kaanal scenario clear`                                                                       | Deactivate every scenario. Chaos you set by hand stays.                                                                                              |
@@ -175,12 +175,74 @@ test('a slow database shows the loading state', async ({ page }) => {
 });
 ```
 
-**One instance per worker.** Kaanal's chaos state is global to a running instance. With Playwright's default parallel workers, one test's `reset` or activation would change the others' backend. Run with `workers: 1`, or start one Kaanal per worker in its own folder and port (the instance lock is `.kaanal/lock` in the folder where you ran `kaanal up`). Per-request scenario selection (a header or cookie) for shared instances is planned.
+**Parallel workers.** Global activation and `reset` change the backend for everyone. With Playwright's default parallel workers, scope each worker with the `X-Kaanal-Scenario` header instead of activating globally (see "Parallel test workers"), or run `workers: 1`, or start one Kaanal per worker in its own folder and port (the instance lock is `.kaanal/lock` in the folder where you ran `kaanal up`).
+
+## Parallel test workers
+
+Chaos state is global to an instance, but a single request can opt out of it. Send the header `X-Kaanal-Scenario` with the scenarios that request should see, and it is answered with exactly that stack and nothing else: no globally active scenarios, no hand-set (live) chaos.
+
+```bash
+curl -H 'X-Kaanal-Scenario: payments-down' http://127.0.0.1:8080/checkout
+curl -H 'X-Kaanal-Scenario: slow-db,payments-down' http://127.0.0.1:8080/checkout   # later names win, like activation order
+curl -H 'X-Kaanal-Scenario:' http://127.0.0.1:8080/checkout                          # empty = baseline, no chaos at all
+```
+
+- **No header**: the request sees the global stack (what `kaanal scenario activate` built), as before.
+- **Empty header** (`X-Kaanal-Scenario:`): an explicit baseline. The request sees no chaos, whatever is active globally.
+- **Names**: comma separated, spaces around a name ignored, the last position wins when a name repeats (`a,b,a` is `b,a`). The stack is in header order, bottom to top.
+- **Bad header**: `400 { "error": "bad scenario scope", "detail": "..." }`, and the request does not run (no counter draw, no chaos draw). That covers an unknown or invalid name, an empty name (`a,,b`), more than one header line, a non-ASCII value, more than 16 names and a value over 256 bytes.
+- **Echo**: the response carries `X-Kaanal-Scope` with the deduplicated stack that answered it (`b,a` for `a,b,a`; an empty value for an empty header). Without the request header there is no echo. It is exposed to browsers through CORS, and the request header is allowed by the preflight.
+- A `404` (no such route) or `405` (wrong method) is answered before the header is read, so a bad header never changes them. The `/__kaanal` control API ignores the header.
+- The header is read per request, so a scenario defined, replaced, deleted or saved afterwards is seen by the next request.
+- The request event on the [SSE stream](control-api.md#get-__kaanalevents) has a `scope` field: `null` without the header, the echoed stack (or `""`) with it.
+
+Playwright: set it once per browser context, so every request that context makes (page loads, `fetch`, XHR) is scoped.
+
+```ts
+const context = await browser.newContext({
+  extraHTTPHeaders: { 'X-Kaanal-Scenario': 'payments-down' },
+});
+```
+
+Cypress: add the header to the calls your app makes to Kaanal.
+
+```ts
+cy.intercept('http://127.0.0.1:8080/**', (req) => {
+  req.headers['x-kaanal-scenario'] = 'payments-down';
+});
+```
+
+A browser calling Kaanal from another origin sends a preflight; Kaanal answers it with permissive CORS headers on the mock routes, so the custom header is allowed.
+
+Scoping isolates chaos only. Route counters and the engine's rate limits, queues and pools are shared by every request, because they model shared infrastructure. With a `seed:`, a worker's outcomes are reproducible only when it runs alone; two workers running at once draw from the same per-route counters in an interleaved order. For exact replay, run one worker per instance.
+
+Cost: a scoped request does one shared read lock and one short-string hash to find its compiled stack. A stack is compiled once, on its first request, then cached. Any change to scenarios or the stack (activate, deactivate, define, delete, save, reset, a live write, an expiry) clears the cache, so the next scoped request recompiles; that costs microseconds. In the 3000 requests/s load check, with half the requests carrying an empty header, there were no errors and the lag over the trace stayed in its bound (p50 10.3 ms, p99 17.4 ms).
+
+## Auto-expiring activations
+
+A test that crashes after activating a scenario leaves it on. Give the activation a lease and Kaanal turns it off for you:
+
+```bash
+kaanal scenario activate payments-down --ttl 30s     # 100ms to 24h, e.g. 500ms, 30s, 5m, 2h
+```
+
+```bash
+curl -X POST -H "$H" -H 'Content-Type: application/json' -d '{"ttl":"30s"}' "$B/scenarios/payments-down/activate"
+# { "active": ["payments-down"], "expires_in_ms": { "payments-down": 30000 }, "effective": {...} }
+```
+
+- When the time is up the scenario is deactivated and an `expire` event is sent on the [event stream](control-api.md#get-__kaanalevents). Nothing else changes: other scenarios and hand-set chaos stay.
+- Activating the same scenario again **replaces** the lease: with a new `--ttl` the clock restarts, with a plain `activate` (no body) the lease is removed and the scenario stays until you deactivate it.
+- A lease lives only as long as the activation. Deactivating, `scenario set`, `scenario clear`, `reset` and deleting the scenario all drop it, so a stale lease can never switch off a scenario you activated later.
+- `kaanal scenario list` shows the time left: `(active, expires in 28s)`, rounded up to whole seconds (`Nms` under one second). `scenario active` stays names-only.
+- The CLI checks only that `--ttl` is a valid duration (e.g. `30s`) before sending; the server enforces the 100 ms to 24 h range (400 otherwise) and rejects a body with other keys. Leases are in memory: they do not survive a restart, and neither does the activation.
+- Several leases expire in deadline order, one `expire` event each.
 
 ## Limits worth knowing
 
 - Chaos only: no `limits:` or `pins:` yet.
 - The status page shows and edits only the chaos you set by hand, not scenarios (a scenario panel comes with the M2 UI). Use `kaanal status` or `GET /__kaanal/scenarios/active` to see the effective result.
-- Scenarios cannot expire on their own yet (no `ttl`): a test that crashes after activating leaves the scenario on until you `reset`. Start every test run with a reset.
+- An activation without `--ttl` stays on until you deactivate it or `reset`. Use `--ttl` for tests that might crash, and start every test run with a reset.
+- Scoping covers chaos only (see the shared-counter caveat above), and the header must be on the mock requests themselves; it has no effect on `/__kaanal`.
 - Edits to `kaanal.yaml` or `scenarios/` need a restart (no hot reload yet). `kaanal scenario load` defines a scenario at runtime without one.
 - Internals: [source/chaos.md](../source/chaos.md).

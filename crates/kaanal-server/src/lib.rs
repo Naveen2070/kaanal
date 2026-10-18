@@ -13,6 +13,7 @@ mod auth;
 mod control;
 mod mock;
 mod scenarios;
+mod scope;
 mod state;
 mod wire;
 
@@ -116,6 +117,8 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
     let st = Arc::new(st);
     let warnings = st.warnings.clone();
     let drawn_seed = st.drawn_seed;
+    // ponytail: detached; it ends with the process. Keep the handle if serve ever needs a clean stop.
+    tokio::spawn(control::lease_task(Arc::clone(&st)));
     let app = router(st);
     let handle = tokio::spawn(async move { axum::serve(listener, app).await });
     Ok(BoundServer {

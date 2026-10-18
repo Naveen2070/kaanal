@@ -41,6 +41,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/scenarios.rs` | [kaanal-server/scenarios.md](kaanal-server/scenarios.md) | Scenario file discovery and atomic save             |
 | `src/state.rs`     | [kaanal-server/state.md](kaanal-server/state.md)         | `AppState::build` load pipeline, route conflicts    |
 | `src/wire.rs`      | [kaanal-server/wire.md](kaanal-server/wire.md)           | `Cut` body stream for the `reset` failure kind      |
+| `src/scope.rs`     | [kaanal-server/scope.md](kaanal-server/scope.md)         | `X-Kaanal-Scenario` scoping and its stack cache     |
 | `src/ui.html`      | [../../web/web-ui.md](../../web/web-ui.md)               | Embedded status page (documented with the web docs) |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
