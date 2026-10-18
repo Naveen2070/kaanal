@@ -216,6 +216,7 @@ All CLI commands run from the project directory where `kaanal up` was executed:
 | `kaanal chaos set [node] [flags]`                                                  | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--endpoint "GET /x"`, `--down`).                  |
 | `kaanal chaos clear [node] [--endpoint KEY]`                                       | Clear live chaos on one node, one endpoint, or all (scenarios stay).                                                                   |
 | `kaanal scenario list\|show\|activate\|deactivate\|set\|clear\|active\|load\|save` | Named chaos scenarios from `scenarios:` or `scenarios/*.yaml`: switch on and off, stack, save. See [scenarios](docs/web/scenarios.md). |
+| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                     | Pin an endpoint to the next UI state (loading, empty, error, slow, success). `kaanal pins` lists them.                                 |
 | `kaanal reset`                                                                     | Clean slate for tests: scenarios off, runtime-defined scenarios undefined, live chaos cleared, counters and rate limits reset.         |
 
 Exit codes: `0` (success), `1` (error), `2` (no running instance found).
@@ -243,6 +244,7 @@ Full documentation is located in the [`docs/`](docs/) directory:
 - [User Guide](docs/web/user-guide.md) — End-user operational guide and configuration reference.
 - [Control API Reference](docs/web/control-api.md) — HTTP reference for `/__kaanal/*`.
 - [Scenarios](docs/web/scenarios.md) — Named chaos bundles: YAML, stacking, CLI, API, and a Playwright `beforeEach` recipe.
+- [Pins](docs/web/pins.md) — Force an endpoint to answer as loading, empty, error or slow; `kaanal cycle`.
 - [Core Concepts](docs/web/concepts.md) — Topology DAGs, cost models, and chaos propagation explained.
 - [Web UI Guide](docs/web/web-ui.md) — Live status page features, telemetry counters, and security rules.
 - [Contributor Coding Guide](docs/coding-guide/index.md) — Architectural invariants, coding standards, and lint policies.

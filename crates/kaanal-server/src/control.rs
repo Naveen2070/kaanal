@@ -34,12 +34,12 @@ use crate::scenarios::{self, WriteError};
 use crate::state::{AppState, BusEvent, Control, Effective};
 
 /// **Private.** Uniform JSON error shape returned by handlers: `(status, {"error": msg})`.
-type Reject = (StatusCode, Json<Value>);
+pub(crate) type Reject = (StatusCode, Json<Value>);
 
 // limitation: error messages echo the node name from the URL path (`unknown node '...'`) unsanitized.
 // It is JSON-encoded, so the browser UI is safe, and the CLI replaces control characters before printing.
 // Other clients that print it to a terminal must do the same.
-fn reject(code: StatusCode, msg: &str) -> Reject {
+pub(crate) fn reject(code: StatusCode, msg: &str) -> Reject {
     (code, Json(json!({ "error": msg })))
 }
 
@@ -239,14 +239,14 @@ pub struct ClearQuery {
 ///
 /// Only writers and the scenario GETs (`list_scenarios`, `get_scenario`, whose data lives in
 /// the set) take this mutex. The request path never does: it reads the published `Arc`.
-fn lock(st: &AppState) -> MutexGuard<'_, Control> {
+pub(crate) fn lock(st: &AppState) -> MutexGuard<'_, Control> {
     st.control.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// **Private.** The one write path (S11): runs `f` on the locked control state, publishes the
 /// compiled result and returns it. If `f` or the publish fails, the state is put back, so a bad
 /// request changes nothing.
-fn commit(
+pub(crate) fn commit(
     st: &AppState,
     c: &mut MutexGuard<'_, Control>,
     f: impl FnOnce(&mut Control) -> Result<(), Reject>,
@@ -266,7 +266,7 @@ fn commit(
 }
 
 /// **Private.** Tells SSE subscribers the stack changed.
-fn emit(st: &AppState, action: &'static str, name: Option<&str>, snap: &Effective) {
+pub(crate) fn emit(st: &AppState, action: &'static str, name: Option<&str>, snap: &Effective) {
     let _ = st.events.send(BusEvent::Scenario {
         action,
         name: name.map(str::to_string),
@@ -744,9 +744,10 @@ pub async fn list_scenarios(State(st): State<Arc<AppState>>) -> Json<Value> {
                 "name": s.name,
                 "source": source_name(src),
                 "description": s.description,
-                "entries": s.layers.entry_count(),
+                "entries": s.layers.entry_count() + s.pins.len(),
                 "active": snap.stack.active().contains(&s.name),
             });
+            o["pins"] = json!(pins_json(&s.pins));
             if let Some(d) = snap.leases.get(&s.name) {
                 o["expires_in_ms"] = json!(remaining_ms(*d, now));
             }
@@ -771,7 +772,24 @@ pub async fn get_scenario(
         "source": source_name(src),
         "description": s.description,
         "chaos": layers_json(&st, &s.layers),
+        "pins": pins_json(&s.pins),
     })))
+}
+
+/// **Private.** A scenario's pins as the entries a `PUT` accepts.
+pub(crate) fn pins_json(pins: &kaanal_core::PinLayer) -> Vec<Value> {
+    pins.iter()
+        .map(|(k, e)| {
+            let mut o = json!({ "endpoint": k, "state": e.state.name() });
+            if let Some(s) = e.status {
+                o["status"] = json!(s);
+            }
+            if let Some(d) = e.delay {
+                o["delay"] = json!(humantime::format_duration(d).to_string());
+            }
+            o
+        })
+        .collect()
 }
 
 /// `PUT /__kaanal/scenarios/{name}` — defines or replaces a runtime scenario. The body is a
@@ -789,15 +807,17 @@ pub async fn put_scenario(
 ) -> Result<Json<Value>, Reject> {
     valid_name(&name).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
     let Json(cfg) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let (scenario, warnings) =
-        resolve_scenario(&name, &cfg, &st.topo, &st.endpoints).map_err(|e| {
-            let code = if e.not_found {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::BAD_REQUEST
-            };
-            reject(code, &place(&e.path, &e.message))
-        })?;
+    let (scenario, warnings) = resolve_scenario(&name, &cfg, &st.topo, &st.endpoints, &|ep| {
+        st.empty_ok_for(ep)
+    })
+    .map_err(|e| {
+        let code = if e.not_found {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        reject(code, &place(&e.path, &e.message))
+    })?;
     let mut c = lock(&st);
     let was_active = c.stack.active().contains(&name);
     let snap = commit(&st, &mut c, |c| {
@@ -1107,6 +1127,87 @@ pub struct SaveBody {
     clear_live: Option<bool>,
 }
 
+/// **Private.** A scenario file's text. JSON is YAML: one flow mapping per entry, strings
+/// escaped by `serde_json`.
+fn scenario_yaml(description: Option<&str>, chaos: &[Value], pins: &[Value]) -> String {
+    let mut yaml = String::new();
+    if let Some(d) = description {
+        let _ = writeln!(yaml, "description: {}", Value::String(d.to_string()));
+    }
+    for (head, list) in [("chaos", chaos), ("pins", pins)] {
+        if list.is_empty() {
+            continue;
+        }
+        let _ = writeln!(yaml, "{head}:");
+        for e in list {
+            let _ = writeln!(yaml, "  - {e}");
+        }
+    }
+    yaml
+}
+
+/// **Private.** What a save writes: the chaos entries, the pin entries and a description.
+struct SaveSource {
+    chaos: Vec<Value>,
+    pins: Vec<Value>,
+    description: Option<String>,
+}
+
+/// **Private.** The [`SaveSource`] of a save's `from`. Runs under the control lock, so
+/// `effective` is the latest published state.
+fn save_source(
+    st: &AppState,
+    c: &MutexGuard<'_, Control>,
+    from: SaveFrom,
+) -> Result<SaveSource, Reject> {
+    let (chaos, pins, description) = match from {
+        SaveFrom::Live => {
+            if let Some((k, _)) = c
+                .stack
+                .live()
+                .entries()
+                .into_iter()
+                .find(|(_, l)| l.replace == Some(true))
+            {
+                return Err(reject(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        "the live chaos on {} is an override, which a scenario file cannot hold; save from effective",
+                        key_label(st, &k)
+                    ),
+                ));
+            }
+            (
+                layers_json(st, c.stack.live()),
+                pins_json(c.stack.live_pins()),
+                None,
+            )
+        }
+        // Under the lock, so this is the latest published state.
+        SaveFrom::Effective => {
+            let snap = st.snapshot();
+            let mut won = kaanal_core::PinLayer::default();
+            for (k, r) in snap.pins.iter() {
+                won.insert(k.clone(), r.entry);
+            }
+            (effective_entries(st, &snap.chaos)?, pins_json(&won), None)
+        }
+        SaveFrom::Scenario(other) => match c.scenarios.get(&other) {
+            None => return Err(unknown(&other)),
+            Some((s, _)) => (
+                layers_json(st, &s.layers),
+                pins_json(&s.pins),
+                s.description.clone(),
+            ),
+        },
+    };
+    Ok(SaveSource {
+        chaos,
+        pins,
+        description,
+    })
+}
+
 /// `POST /__kaanal/scenarios/save` — writes `scenarios/NAME.yaml` (S17) from the live layer
 /// (default), the compiled `effective` result, or another scenario, and registers it as a file
 /// scenario. Sparse: only the fields that were set. Answers `{ name, path }`.
@@ -1157,48 +1258,21 @@ pub async fn save_scenario(
         }
         _ => {}
     }
-    let (entries, description) = match b.from.unwrap_or(SaveFrom::Live) {
-        SaveFrom::Live => {
-            if let Some((k, _)) = c
-                .stack
-                .live()
-                .entries()
-                .into_iter()
-                .find(|(_, l)| l.replace == Some(true))
-            {
-                return Err(reject(
-                    StatusCode::BAD_REQUEST,
-                    &format!(
-                        "the live chaos on {} is an override, which a scenario file cannot hold; save from effective",
-                        key_label(&st, &k)
-                    ),
-                ));
-            }
-            (layers_json(&st, c.stack.live()), None)
-        }
-        // Under the lock, so this is the latest published state.
-        SaveFrom::Effective => (effective_entries(&st, &st.snapshot().chaos)?, None),
-        SaveFrom::Scenario(other) => match c.scenarios.get(&other) {
-            None => return Err(unknown(&other)),
-            Some((s, _)) => (layers_json(&st, &s.layers), s.description.clone()),
-        },
-    };
-    if entries.is_empty() {
+    let SaveSource {
+        chaos: entries,
+        pins,
+        description,
+    } = save_source(&st, &c, b.from.unwrap_or(SaveFrom::Live))?;
+    if entries.is_empty() && pins.is_empty() {
         return Err(reject(StatusCode::BAD_REQUEST, "nothing to save"));
     }
-    // JSON is YAML: one flow mapping per entry, strings escaped by serde_json.
-    let mut yaml = String::new();
-    if let Some(d) = &description {
-        let _ = writeln!(yaml, "description: {}", Value::String(d.clone()));
-    }
-    yaml.push_str("chaos:\n");
-    for e in &entries {
-        let _ = writeln!(yaml, "  - {e}");
-    }
+    let yaml = scenario_yaml(description.as_deref(), &entries, &pins);
     // The memory copy comes from the same parse a reload would do, so disk and memory agree.
     let cfg = parse_scenario(&yaml).map_err(|e| reject(StatusCode::BAD_REQUEST, &e.to_string()))?;
-    let (scenario, _) = resolve_scenario(&b.name, &cfg, &st.topo, &st.endpoints)
-        .map_err(|e| reject(StatusCode::BAD_REQUEST, &place(&e.path, &e.message)))?;
+    let (scenario, _) = resolve_scenario(&b.name, &cfg, &st.topo, &st.endpoints, &|ep| {
+        st.empty_ok_for(ep)
+    })
+    .map_err(|e| reject(StatusCode::BAD_REQUEST, &place(&e.path, &e.message)))?;
     // ponytail: blocking file IO under the control mutex; a save is rare and tiny. Move the write
     // out (stage, then publish) if a slow disk ever stalls the control plane.
     let path = scenarios::write(&st.scenarios_dir, &b.name, &yaml, force).map_err(|e| match e {
@@ -1218,6 +1292,7 @@ pub async fn save_scenario(
             .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
         if b.clear_live.unwrap_or(false) {
             c.stack.live_mut().clear();
+            c.stack.live_pins_mut().clear();
         }
         Ok(())
     })?;

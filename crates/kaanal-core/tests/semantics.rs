@@ -87,6 +87,7 @@ fn run(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState) -> ChainOutco
             endpoint: e.get(key).unwrap(),
             n: 0,
             seed: 1,
+            pin_delay: std::time::Duration::ZERO,
         },
     )
 }
@@ -631,6 +632,7 @@ fn draws_follow_the_r1_34_formula() {
             endpoint: e.get("GET /x/{id}").unwrap(),
             n: 3,
             seed: 7,
+            pin_delay: std::time::Duration::ZERO,
         },
     );
     // D8: root = H(seed, key, n); a call's path = H(parent, target, occurrence, repetition);
@@ -673,6 +675,7 @@ fn error_rate_holds_across_seeds() {
                     endpoint: ep,
                     n: 0,
                     seed,
+                    pin_delay: std::time::Duration::ZERO,
                 },
             )
             .result

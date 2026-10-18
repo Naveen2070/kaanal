@@ -21,6 +21,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod dist;
 pub mod exec;
+pub mod pin;
 pub mod presets;
 pub mod replay;
 pub mod scenario;
@@ -43,6 +44,10 @@ pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
 pub use exec::{
     ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute, sample_plan,
+};
+pub use pin::{
+    EffectivePins, EmptyOk, Outcome, PinEntry, PinEntryConfig, PinLayer, PinSource, PinState,
+    ResolvedPin, StateOverride, StateOverrideConfig, StateOverrides, resolve, validate_entry,
 };
 pub use replay::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
 pub use scenario::{

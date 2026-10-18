@@ -1576,7 +1576,8 @@ fn pct(sorted: &[f64], pct: usize) -> f64 {
 /// pooled database at about 75% utilisation, so some requests queue. Checks that every hop
 /// keeps its exact simulated duration, that the trace never claims more time than the client
 /// really waited, and how far the real latency drifts above the trace (HTTP + timer lag).
-/// Every other request sends an empty `X-Kaanal-Scenario`, so the scoped path is under load too.
+/// A third of the requests hit an `empty`-pinned endpoint (pinned by a scenario, so the pin path runs
+/// under load), and every other one of the rest sends an empty `X-Kaanal-Scenario`, so the scoped path is under load too.
 ///
 /// `cargo test -p kaanal-server --release --test http -- --ignored --nocapture load_`
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1585,24 +1586,34 @@ async fn load_pooled_node_keeps_latency_and_trace_accurate() {
     const RPS: u64 = 3000;
     const SECS: u64 = 4;
     // db: 8 slots (concurrency: unbounded queue) x 2 ms = 4000 requests/s; 3000/s offered = 75% busy.
-    let s = start_yaml("version: 1\nnodes:\n  nginx: { type: gateway }\n  app: { type: service, spec: openapi.yaml }\n  db: { type: database, ops: { read: 2ms, write: 2ms, scan: 2ms }, concurrency: 8 }\nedges:\n  - { from: nginx, to: app }\n  - { from: app, to: db }\nendpoints:\n").await;
+    let s = start_yaml("version: 1\nnodes:\n  nginx: { type: gateway }\n  app: { type: service, spec: openapi.yaml }\n  db: { type: database, ops: { read: 2ms, write: 2ms, scan: 2ms }, concurrency: 8 }\nedges:\n  - { from: nginx, to: app }\n  - { from: app, to: db }\nendpoints:\nscenarios:\n  pin-empty: { pins: [ { endpoint: \"GET /users\", state: empty } ] }\n").await;
     let client = reqwest::Client::builder()
         .pool_max_idle_per_host(256)
         .build()
         .unwrap();
     let url = format!("{}/users/1", s.base);
+    let pinned_url = format!("{}/users", s.base);
     let mut tick = tokio::time::interval(Duration::from_nanos(1_000_000_000 / RPS));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
     let mut tasks = Vec::new();
     for i in 0..RPS * SECS {
         tick.tick().await;
         let (client, url) = (client.clone(), url.clone());
+        let pinned_url = pinned_url.clone();
         tasks.push(tokio::spawn(async move {
             let t = std::time::Instant::now();
-            // Half the requests carry an empty scope (an explicit baseline): the scoped path
-            // (one read lock, one short-string hash) must not move the p99.
-            let mut req = client.get(url);
-            if i % 2 == 1 {
+            // A third of the requests hit an `empty`-pinned endpoint (the pin comes from a
+            // scenario, so it rides the scoped path; the chain still runs under a pin). Of the
+            // rest, every other one carries an empty scope (an explicit baseline): the scoped
+            // path (one read lock, one short-string hash) must not move the p99.
+            let mut req = if i % 3 == 2 {
+                client
+                    .get(pinned_url)
+                    .header("X-Kaanal-Scenario", "pin-empty")
+            } else {
+                client.get(url)
+            };
+            if i % 3 != 2 && i % 2 == 1 {
                 req = req.header("X-Kaanal-Scenario", "");
             }
             let r = req.send().await.unwrap();
@@ -1612,11 +1623,18 @@ async fn load_pooled_node_keeps_latency_and_trace_accurate() {
         }));
     }
     let (mut lag, mut waits, mut waited) = (Vec::new(), Vec::new(), 0usize);
-    for t in tasks {
+    let mut pinned = 0usize;
+    for (i, t) in tasks.into_iter().enumerate() {
         let (status, real, trace) = t.await.unwrap();
         assert_eq!(status, 200, "unbounded queue: nothing may fail ({trace})");
+        if i % 3 == 2 {
+            pinned += 1;
+            assert!(trace.ends_with("pinned=empty"), "pin missing: {trace}");
+        } else {
+            assert!(!trace.contains("pinned="), "stray pin: {trace}");
+        }
         assert!(
-            trace.contains("db.read=2.0ms"),
+            trace.contains("db.read=2.0ms") || trace.contains("db.scan=2.0ms"),
             "every db hop keeps its exact 2 ms: {trace}"
         );
         let sim = trace_total_ms(&trace);
@@ -1641,6 +1659,7 @@ async fn load_pooled_node_keeps_latency_and_trace_accurate() {
         waits.first().map_or(0.0, |_| pct(&waits, 50)),
         waits.first().map_or(0.0, |_| pct(&waits, 99)),
     );
+    assert_eq!(pinned, (RPS * SECS / 3) as usize, "a third hit the pin");
     assert!(waited > 0, "at 75% load some requests must queue");
     assert!(
         pct(&lag, 50) < 25.0,

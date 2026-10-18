@@ -38,6 +38,7 @@ fn run_key(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState, n: u64) -
             endpoint: e.get(key).unwrap(),
             n,
             seed: 42,
+            pin_delay: std::time::Duration::ZERO,
         },
     )
 }
@@ -959,6 +960,7 @@ fn a_banded_mix_fails_with_each_kind_at_its_share() {
                 endpoint: e.get("GET /users/{id}").unwrap(),
                 n,
                 seed: 42,
+                pin_delay: std::time::Duration::ZERO,
             },
         );
         match fail_kind(&o) {
@@ -985,6 +987,7 @@ fn a_stack_is_deterministic_and_a_single_layer_ignores_the_stack() {
                 endpoint: ep,
                 n,
                 seed: 42,
+                pin_delay: std::time::Duration::ZERO,
             },
         )
     };

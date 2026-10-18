@@ -15,6 +15,7 @@ use crate::chaos::{
 };
 use crate::config::{ChaosEntry, ScenarioConfig};
 use crate::diagnostics::{Located, PathSeg};
+use crate::pin::{EffectivePins, EmptyOk, PinEntry, PinLayer, PinSource, PinState, check_entry};
 use crate::topology::{NodeId, Topology};
 
 /// Most scenarios a [`ScenarioSet`] holds.
@@ -93,7 +94,7 @@ impl Source {
 /// Name rules and the entry bound, shared by `insert` and `replace`.
 fn check(s: &Scenario) -> Result<(), String> {
     valid_name(&s.name)?;
-    let n = s.layers.entry_count();
+    let n = s.layers.entry_count() + s.pins.len();
     if n > MAX_ENTRIES {
         return Err(format!(
             "scenario '{}' has {n} entries; at most {MAX_ENTRIES}",
@@ -112,6 +113,8 @@ pub struct Scenario {
     pub description: Option<String>,
     /// The layers this scenario applies when active.
     pub layers: ChaosState,
+    /// The pins this scenario applies when active.
+    pub pins: PinLayer,
 }
 
 /// Every known scenario, in definition order.
@@ -370,28 +373,41 @@ fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
     })
 }
 
+/// **Private.** One pin after the topology-free checks.
+struct ShapedPin {
+    key: String,
+    entry: PinEntry,
+}
+
 /// **Private.** [`validate_scenario_shape`] keeping the checked entries.
-fn shape(cfg: &ScenarioConfig) -> Result<Vec<Shaped>, ScenarioError> {
+fn shape(cfg: &ScenarioConfig) -> Result<(Vec<Shaped>, Vec<ShapedPin>), ScenarioError> {
     cfg.check_supported().map_err(|m| {
         let field = m.split(':').next().unwrap_or_default().to_string();
         err(vec![PathSeg::Key(field)], false, m)
     })?;
-    // The raw count, before duplicate keys could collapse a huge list into a small one.
-    if cfg.chaos.len() > MAX_ENTRIES {
+    // The raw counts, before duplicate keys could collapse a huge list into a small one.
+    for (name, n) in [("chaos", cfg.chaos.len()), ("pins", cfg.pins.len())] {
+        if n > MAX_ENTRIES {
+            return Err(err(
+                vec![PathSeg::Key(name.into())],
+                false,
+                format!("scenario has {n} entries; at most {MAX_ENTRIES}"),
+            ));
+        }
+    }
+    if cfg.chaos.is_empty() && cfg.pins.is_empty() {
         return Err(err(
             vec![PathSeg::Key("chaos".into())],
             false,
-            format!(
-                "scenario has {} entries; at most {MAX_ENTRIES}",
-                cfg.chaos.len()
-            ),
+            "scenario needs at least one of chaos or pins".into(),
         ));
     }
-    if cfg.chaos.is_empty() {
+    let total = cfg.chaos.len() + cfg.pins.len();
+    if total > MAX_ENTRIES {
         return Err(err(
-            vec![PathSeg::Key("chaos".into())],
+            vec![PathSeg::Key("pins".into())],
             false,
-            "scenario has no chaos entries".into(),
+            format!("scenario has {total} entries (chaos and pins); at most {MAX_ENTRIES}"),
         ));
     }
     let mut out = Vec::with_capacity(cfg.chaos.len());
@@ -408,14 +424,50 @@ fn shape(cfg: &ScenarioConfig) -> Result<Vec<Shaped>, ScenarioError> {
         }
         out.push(s);
     }
+    Ok((out, shape_pins(cfg)?))
+}
+
+/// **Private.** The topology-free checks of the pins: a well-formed endpoint, status and delay
+/// in range for the state, no endpoint twice.
+fn shape_pins(cfg: &ScenarioConfig) -> Result<Vec<ShapedPin>, ScenarioError> {
+    let mut out: Vec<ShapedPin> = Vec::with_capacity(cfg.pins.len());
+    for (i, p) in cfg.pins.iter().enumerate() {
+        let field = |f: &str| {
+            vec![
+                PathSeg::Key("pins".into()),
+                PathSeg::Index(i),
+                PathSeg::Key(f.into()),
+            ]
+        };
+        let key = endpoint_key(&p.endpoint).map_err(|m| err(field("endpoint"), true, m))?;
+        check_entry(p.state, p.status, p.delay).map_err(|(f, m)| err(field(f), true, m))?;
+        if let Some(j) = out.iter().position(|o| o.key == key) {
+            return Err(err(
+                vec![PathSeg::Key("pins".into()), PathSeg::Index(i)],
+                false,
+                format!(
+                    "pins[{i}] pins '{key}' again; pins[{j}] already does, merge them into one"
+                ),
+            ));
+        }
+        out.push(ShapedPin {
+            key,
+            entry: PinEntry {
+                state: p.state,
+                status: p.status,
+                delay: p.delay,
+            },
+        });
+    }
     Ok(out)
 }
 
 /// Every check of a scenario that needs neither the topology nor the endpoints: the reserved
-/// `limits` / `pins` keys, the entry count, an empty list, and per entry a node or endpoint,
-/// the endpoint's `METHOD /path` shape, the error kind, something set, every value in range,
-/// and duplicate keys. [`resolve_scenario`] runs it first; a client (`kaanal scenario load`)
-/// runs it alone to place the error in the file.
+/// `limits` key, the entry counts, a scenario with neither `chaos` nor `pins`, per chaos entry
+/// a node or endpoint, the endpoint's `METHOD /path` shape, the error kind, something set,
+/// every value in range, per pin the endpoint shape and a status and delay valid for its
+/// state, and duplicate keys. [`resolve_scenario`] runs it first; a client
+/// (`kaanal scenario load`) runs it alone to place the error in the file.
 ///
 /// # Errors
 /// The first problem, placed by entry index and field.
@@ -498,21 +550,72 @@ pub fn resolve_scenario(
     cfg: &ScenarioConfig,
     topo: &Topology,
     endpoints: &Endpoints,
+    empty_ok: EmptyOk,
 ) -> Result<(Scenario, Vec<String>), ScenarioError> {
     let mut layers = ChaosState::default();
+    let mut pins = PinLayer::default();
     let mut warnings = Vec::new();
-    for (i, s) in shape(cfg)?.into_iter().enumerate() {
+    let (chaos, shaped_pins) = shape(cfg)?;
+    for (i, s) in chaos.into_iter().enumerate() {
         let (key, layer) = resolve_entry(name, i, s, topo, endpoints, &mut warnings)?;
         layers.set(key, layer);
+    }
+    for (i, p) in shaped_pins.into_iter().enumerate() {
+        resolve_pin(i, &p, endpoints, empty_ok)?;
+        pins.insert(p.key, p.entry);
     }
     Ok((
         Scenario {
             name: name.to_string(),
             description: cfg.description.clone(),
             layers,
+            pins,
         },
         warnings,
     ))
+}
+
+/// **Private.** Looks one checked pin up in the endpoints: it must exist, be a real route (not
+/// a synthesized `HEAD`), enter the chain, and for `empty` have an empty form.
+fn resolve_pin(
+    i: usize,
+    p: &ShapedPin,
+    endpoints: &Endpoints,
+    empty_ok: EmptyOk,
+) -> Result<(), ScenarioError> {
+    let field = |f: &str| {
+        vec![
+            PathSeg::Key("pins".into()),
+            PathSeg::Index(i),
+            PathSeg::Key(f.into()),
+        ]
+    };
+    let key = &p.key;
+    let ep = endpoints
+        .get(key)
+        .ok_or_else(|| missing(field("endpoint"), format!("unknown endpoint '{key}'")))?;
+    if ep.synthesized {
+        return Err(err(
+            field("endpoint"),
+            true,
+            format!("'{key}' is a HEAD made from its GET; pin the GET route"),
+        ));
+    }
+    if ep.entry_node.is_none() {
+        return Err(err(
+            field("endpoint"),
+            true,
+            format!("endpoint '{key}' has no entry node (a static route and no gateway)"),
+        ));
+    }
+    if p.entry.state == PinState::Empty && !empty_ok(ep) {
+        return Err(err(
+            field("state"),
+            true,
+            format!("no empty form for '{key}'; add states.empty.body to its endpoints entry"),
+        ));
+    }
+    Ok(())
 }
 
 /// The active scenarios (an ordered stack) plus the live chaos that always sits on top.
@@ -521,6 +624,8 @@ pub struct ChaosStack {
     active: Vec<String>,
     /// Ad-hoc chaos set through the control API; wins over every scenario.
     live: ChaosState,
+    /// Ad-hoc pins; win over every scenario's.
+    live_pins: PinLayer,
 }
 
 impl ChaosStack {
@@ -533,6 +638,17 @@ impl ChaosStack {
     /// The live chaos, to change it.
     pub fn live_mut(&mut self) -> &mut ChaosState {
         &mut self.live
+    }
+
+    /// The live pins, which sit on top of every scenario's.
+    #[must_use]
+    pub fn live_pins(&self) -> &PinLayer {
+        &self.live_pins
+    }
+
+    /// The live pins, to change them.
+    pub fn live_pins_mut(&mut self) -> &mut PinLayer {
+        &mut self.live_pins
     }
 
     /// Activates a scenario on top of the stack (moving it there if already active).
@@ -584,10 +700,11 @@ impl ChaosStack {
         self.active.clear();
     }
 
-    /// Deactivates every scenario and clears the live chaos.
+    /// Deactivates every scenario and clears the live chaos and the live pins.
     pub fn clear_all(&mut self) {
         self.active.clear();
         self.live.clear();
+        self.live_pins.clear();
     }
 
     /// Active scenario names, bottom to top.
@@ -607,5 +724,20 @@ impl ChaosStack {
             .collect();
         layers.push(&self.live);
         compile_layers(&layers)
+    }
+
+    /// Folds the pins of the active scenarios (bottom to top) and the live pins (last, so
+    /// they win). A later layer replaces an endpoint's pin whole; a `success` pin is kept so
+    /// it masks a lower one.
+    #[must_use]
+    pub fn compile_pins(&self, set: &ScenarioSet) -> EffectivePins {
+        let mut out = EffectivePins::default();
+        for n in &self.active {
+            if let Some((s, _)) = set.get(n) {
+                out.overlay(&s.pins, &PinSource::Scenario(n.clone()));
+            }
+        }
+        out.overlay(&self.live_pins, &PinSource::Live);
+        out
     }
 }

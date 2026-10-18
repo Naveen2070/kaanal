@@ -7,7 +7,7 @@
 use std::sync::{Arc, PoisonError};
 
 use axum::http::HeaderMap;
-use kaanal_core::{ChaosStack, EffectiveChaos, valid_name};
+use kaanal_core::{ChaosStack, EffectiveChaos, EffectivePins, valid_name};
 
 use crate::state::AppState;
 
@@ -27,6 +27,8 @@ pub const MAX_CACHED: usize = 256;
 pub struct Scoped {
     /// What the executor reads for a request carrying this scope.
     pub chaos: EffectiveChaos,
+    /// The pins of the same stack (never the live pins).
+    pub pins: EffectivePins,
 }
 
 /// The cache key (and echo value) of a stack: the names joined by `,`.
@@ -98,6 +100,7 @@ impl AppState {
         stack.set_active(&c.scenarios, names)?;
         let built = Arc::new(Scoped {
             chaos: stack.compile(&c.scenarios),
+            pins: stack.compile_pins(&c.scenarios),
         });
         let mut cache = self.scoped.write().expect("scoped lock poisoned");
         if cache.len() >= MAX_CACHED {

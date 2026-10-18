@@ -15,6 +15,7 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | [auth.md](auth.md)               | Everyone                      | Login and JWKS from an auth node: config, tokens, keys, limits              |
 | [capacity.md](capacity.md)       | Everyone                      | Slots, queues, rate limits, 429s and the `wait` trace piece                 |
 | [scenarios.md](scenarios.md)     | Everyone                      | Named chaos scenarios: YAML, stacking, CLI, API, reset, test-runner recipes |
+| [pins.md](pins.md)               | Frontend developers, testers  | Pinned UI states (loading, empty, error, slow) and `kaanal cycle`           |
 
 ## Conventions for these docs
 

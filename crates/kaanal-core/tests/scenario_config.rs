@@ -37,7 +37,7 @@ chaos:
 "#,
     )
     .unwrap();
-    let (s, warns) = resolve_scenario("pd", &cfg, &topo, &eps).unwrap();
+    let (s, warns) = resolve_scenario("pd", &cfg, &topo, &eps, &|_| true).unwrap();
     assert!(warns.is_empty(), "{warns:?}");
     assert_eq!(s.description.as_deref(), Some("payments down"));
     assert_eq!(s.layers.entry_count(), 3);
@@ -78,7 +78,7 @@ fn bad_scenarios_are_rejected_with_the_entry_and_field() {
             "chaos.0.endpoint",
         ),
         ("chaos: [ { node: db } ]", "sets nothing", "chaos.0"),
-        ("chaos: []", "no chaos entries", "chaos"),
+        ("chaos: []", "at least one of chaos or pins", "chaos"),
         (
             "chaos: [ { node: db, error_kind: status, error_status: 200, error_rate: 0.1 } ]",
             "500-504",
@@ -114,15 +114,10 @@ fn bad_scenarios_are_rejected_with_the_entry_and_field() {
             "not supported yet",
             "limits",
         ),
-        (
-            "chaos: [ { node: db, down: true } ]\npins: {}",
-            "not supported yet",
-            "pins",
-        ),
     ];
     for (y, want, at) in cases {
         let cfg: ScenarioConfig = serde_yaml_ng::from_str(y).unwrap();
-        let e = resolve_scenario("x", &cfg, &topo, &eps).unwrap_err();
+        let e = resolve_scenario("x", &cfg, &topo, &eps, &|_| true).unwrap_err();
         assert!(e.message.contains(want), "{y}: {}", e.message);
         let path: Vec<String> = e
             .path
@@ -141,7 +136,7 @@ fn too_many_raw_entries_are_refused_even_if_keys_collapse() {
     let (topo, eps) = fixture();
     let entries = vec!["{ node: db, down: true }"; 257].join(", ");
     let cfg: ScenarioConfig = serde_yaml_ng::from_str(&format!("chaos: [ {entries} ]")).unwrap();
-    let e = resolve_scenario("x", &cfg, &topo, &eps).unwrap_err();
+    let e = resolve_scenario("x", &cfg, &topo, &eps, &|_| true).unwrap_err();
     assert!(e.message.contains("at most 256"), "{}", e.message);
 }
 
@@ -153,7 +148,7 @@ fn unreachable_pair_and_orphan_fields_are_warnings() {
         "chaos: [ { node: db, endpoint: \"GET /health\", down: true }, { node: db, error_kind: reset } ]",
     )
     .unwrap();
-    let (_, warns) = resolve_scenario("x", &cfg, &topo, &eps).unwrap();
+    let (_, warns) = resolve_scenario("x", &cfg, &topo, &eps, &|_| true).unwrap();
     assert_eq!(warns.len(), 2, "{warns:?}");
     assert!(warns[0].contains("never visits"), "{warns:?}");
     assert!(warns[1].contains("error_rate"), "{warns:?}");
@@ -166,10 +161,8 @@ fn scenario_files_parse_and_reject_unknown_keys() {
     assert_eq!(ok.chaos.len(), 1);
     let e = parse_scenario("chaos: []\nbogus: 1\n").unwrap_err();
     assert!(e.line.is_some(), "{e}");
-    assert!(
-        parse_scenario("description: x\n").is_err(),
-        "chaos is required"
-    );
+    // `chaos` is optional (a scenario may be pins only); the shape check wants one of the two
+    assert!(parse_scenario("description: x\n").is_ok());
 }
 
 #[test]
@@ -188,7 +181,7 @@ fn duplicate_key_names_the_earlier_entry() {
         "chaos: [ { node: db, down: true }, { endpoint: GET /health, down: true }, { node: db, latency_ms: 5 } ]",
     )
     .unwrap();
-    let e = resolve_scenario("x", &cfg, &topo, &eps).unwrap_err();
+    let e = resolve_scenario("x", &cfg, &topo, &eps, &|_| true).unwrap_err();
     assert!(e.message.contains("same key as chaos[0]"), "{}", e.message);
 }
 
@@ -198,5 +191,5 @@ fn null_limits_and_pins_read_as_absent() {
     let cfg: ScenarioConfig =
         serde_yaml_ng::from_str("chaos: [ { node: db, down: true } ]\nlimits: null\npins: ~\n")
             .unwrap();
-    resolve_scenario("x", &cfg, &topo, &eps).unwrap();
+    resolve_scenario("x", &cfg, &topo, &eps, &|_| true).unwrap();
 }

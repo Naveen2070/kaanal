@@ -20,6 +20,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::exec::Op;
+use crate::pin::{PinEntryConfig, StateOverrideConfig};
 
 /// The parsed `kaanal.yaml` file.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -57,7 +58,7 @@ pub struct Config {
     routes: Option<serde::de::IgnoredAny>,
 }
 
-/// One named scenario: chaos entries applied together when it is active.
+/// One named scenario: chaos entries and UI-state pins applied together when it is active.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
@@ -65,33 +66,36 @@ pub struct ScenarioConfig {
     #[serde(default)]
     pub description: Option<String>,
     /// The chaos entries. Each names a `node`, an `endpoint` or both, and sets at least one
-    /// of the patch fields.
+    /// of the patch fields. A scenario needs `chaos`, `pins` or both.
+    #[serde(default)]
     pub chaos: Vec<ChaosEntry>,
+    /// UI-state pins applied together with the chaos: each forces one endpoint to
+    /// `loading`, `empty`, `error`, `slow` or `success`.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    #[schemars(schema_with = "crate::schema::pins")]
+    pub pins: Vec<PinEntryConfig>,
     /// **Private.** Reserved: runtime limit overrides; rejected as "not supported yet".
     /// An explicit `null` reads as absent.
     #[serde(default)]
     #[schemars(skip)]
     pub(crate) limits: Option<serde::de::IgnoredAny>,
-    /// **Private.** Reserved for B2b-2; rejected as "not supported yet". An explicit `null`
-    /// reads as absent, like `limits`.
-    #[serde(default)]
-    #[schemars(skip)]
-    pub(crate) pins: Option<serde::de::IgnoredAny>,
+}
+
+/// **Private.** A list where an explicit `null` reads as empty.
+fn null_as_empty<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
 impl ScenarioConfig {
-    /// Rejects the reserved keys that parse but do nothing yet (`limits`, `pins`). One source
-    /// for the message: the server and `kaanal scenario load` both call it. A `null` (a key
-    /// with no value) counts as absent; any other value, even `{}`, is rejected.
+    /// Rejects the reserved key that parses but does nothing yet (`limits`). One source for
+    /// the message: the server and `kaanal scenario load` both call it. A `null` (a key with
+    /// no value) counts as absent; any other value, even `{}`, is rejected.
     ///
     /// # Errors
-    /// `"limits: not supported yet (...)"` or `"pins: not supported yet (...)"`.
+    /// `"limits: not supported yet (...)"`.
     pub fn check_supported(&self) -> Result<(), String> {
         if self.limits.is_some() {
             return Err("limits: not supported yet (runtime limit overrides)".into());
-        }
-        if self.pins.is_some() {
-            return Err("pins: not supported yet (planned for B2b-2)".into());
         }
         Ok(())
     }
@@ -892,6 +896,10 @@ pub struct EndpointConfig {
     /// (`5xx`, `4xx`); a value is a status or `{ status, body }`.
     #[serde(default)]
     pub error_map: IndexMap<String, ErrorMapping>,
+    /// Overrides for the UI states a pin can force, keyed `loading`, `empty`, `error` or
+    /// `slow`: a `status`, a `body` and a `delay` each.
+    #[serde(default)]
+    pub states: IndexMap<String, StateOverrideConfig>,
 }
 
 /// An `error_map` value: the status to answer with and an optional body.

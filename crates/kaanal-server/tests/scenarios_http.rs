@@ -731,8 +731,8 @@ async fn runtime_scenarios_define_list_show_and_undefine() {
     assert_eq!(
         list,
         json!([
-            { "name": "inl", "source": "inline", "description": null, "entries": 1, "active": false },
-            { "name": "rt", "source": "runtime", "description": "d", "entries": 2, "active": false },
+            { "name": "inl", "source": "inline", "description": null, "entries": 1, "pins": [], "active": false },
+            { "name": "rt", "source": "runtime", "description": "d", "entries": 2, "pins": [], "active": false },
         ])
     );
     let one: Value = s.ctl("/__kaanal/scenarios/rt").await.json().await.unwrap();

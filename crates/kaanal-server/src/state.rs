@@ -15,8 +15,8 @@ use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::config::{EndpointsConfig, NodeConfig, SeedSource, parse_endpoints};
 use kaanal_core::diagnostics::{Located, keys};
 use kaanal_core::{
-    ChaosStack, Config, EffectiveChaos, Endpoint, Endpoints, NodeId, ScenarioSet, Source, Topology,
-    resolve_scenario, valid_name,
+    ChaosStack, Config, EffectiveChaos, EffectivePins, Endpoint, Endpoints, NodeId, ScenarioSet,
+    Source, Topology, resolve_scenario, valid_name,
 };
 
 use crate::scenarios;
@@ -58,6 +58,8 @@ pub struct Event {
     pub nodes: Vec<String>,
     /// The node whose chaos failed the request, if any.
     pub failed_node: Option<String>,
+    /// The UI state a pin forced on this request (`loading`, `empty`, `error`, `slow` or `success`).
+    pub pin: Option<&'static str>,
     /// How it failed when not a plain status (`reset`, `malformed` or `timeout`); `None` for a
     /// status failure or a success. A reset or cut-off body answers 200, so this is how a client tells.
     pub kind: Option<&'static str>,
@@ -89,6 +91,8 @@ pub struct Effective {
     pub stack: ChaosStack,
     /// What the executor reads.
     pub chaos: EffectiveChaos,
+    /// The pins in force, folded from the same stack.
+    pub pins: EffectivePins,
     /// When each leased activation expires (a copy of [`Control::leases`]).
     pub leases: HashMap<String, tokio::time::Instant>,
 }
@@ -280,6 +284,7 @@ fn compile_endpoints(
 /// set and the scenarios directory (under the canonical config directory; it may not exist).
 fn load_scenarios(
     cfg: &Config,
+    empty_ok: kaanal_core::EmptyOk,
     base_dir: &Path,
     topo: &Topology,
     endpoints: &Endpoints,
@@ -289,8 +294,8 @@ fn load_scenarios(
     for (name, sc) in &cfg.scenarios {
         let at = keys(&["scenarios", name.as_str()]);
         valid_name(name).map_err(|m| Located::new(at.clone(), m))?;
-        let (s, w) =
-            resolve_scenario(name, sc, topo, endpoints).map_err(|e| e.located(at.clone()))?;
+        let (s, w) = resolve_scenario(name, sc, topo, endpoints, empty_ok)
+            .map_err(|e| e.located(at.clone()))?;
         warnings.extend(w);
         set.insert(s, Source::Inline)
             .map_err(|m| Located::new(at, m))?;
@@ -305,7 +310,7 @@ fn load_scenarios(
     let (found, found_warnings) = scenarios::discover(&dir)?;
     warnings.extend(found_warnings);
     for (name, sc, file) in found {
-        let (s, w) = resolve_scenario(&name, &sc, topo, endpoints)
+        let (s, w) = resolve_scenario(&name, &sc, topo, endpoints, empty_ok)
             .map_err(|e| e.located(Vec::new()).in_file(file.clone()))?;
         warnings.extend(w);
         set.insert(s, Source::File)
@@ -343,6 +348,7 @@ impl AppState {
         let next = Arc::new(Effective {
             stack: c.stack.clone(),
             chaos,
+            pins: c.stack.compile_pins(&c.scenarios),
             leases: c.leases.clone(),
         });
         *self.chaos.write().expect("chaos lock poisoned") = Arc::clone(&next);
@@ -387,8 +393,10 @@ impl AppState {
         let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings)?;
         let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
         warnings.extend(endpoints.warnings.iter().cloned());
+        // The seed only changes generated values, not whether an empty form exists.
+        let ok = crate::pins::empty_ok(&specs.info, cfg.seed);
         let (scenarios, scenarios_dir) =
-            load_scenarios(cfg, base_dir, &topo, &endpoints, &mut warnings)?;
+            load_scenarios(cfg, &ok, base_dir, &topo, &endpoints, &mut warnings)?;
         // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         let mut counters = Vec::new();
@@ -444,6 +452,7 @@ impl AppState {
             chaos: RwLock::new(Arc::new(Effective {
                 stack: ChaosStack::default(),
                 chaos: EffectiveChaos::default(),
+                pins: EffectivePins::default(),
                 leases: HashMap::new(),
             })),
             control: Mutex::new(Control {

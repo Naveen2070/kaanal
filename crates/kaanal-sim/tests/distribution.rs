@@ -93,6 +93,7 @@ fn zero_load_matches_live_distribution() {
                         endpoint: e.get(key).unwrap(),
                         n,
                         seed,
+                        pin_delay: std::time::Duration::ZERO,
                     },
                 )
             })

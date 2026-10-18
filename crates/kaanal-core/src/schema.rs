@@ -46,6 +46,18 @@ pub(crate) fn claims(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
+/// **Private.** Schema of a scenario's `pins`: a list, or null (read as empty)
+/// (`#[schemars(schema_with = "crate::schema::pins")]`).
+pub(crate) fn pins(generator: &mut SchemaGenerator) -> Schema {
+    let list = generator.subschema_for::<Vec<crate::pin::PinEntryConfig>>();
+    json_schema!({
+        "description": "UI-state pins applied together with the chaos: each forces one endpoint to
+    `loading`, `empty`, `error`, `slow` or `success`.",
+        "default": [],
+        "anyOf": [list, { "type": "null" }]
+    })
+}
+
 /// **Private.** Schema of `concurrency`: a positive number, or the map form
 /// (`#[schemars(schema_with = "crate::schema::concurrency")]`).
 pub(crate) fn concurrency(generator: &mut SchemaGenerator) -> Schema {

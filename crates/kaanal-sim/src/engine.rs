@@ -110,6 +110,7 @@ pub(crate) fn simulate(
                     endpoint: &endpoints[s],
                     n,
                     seed: cfg.seed,
+                    pin_delay: std::time::Duration::ZERO,
                 },
             );
             schedule(&mut engine, &mut arrivals, &mut pending, s, at, end)?;

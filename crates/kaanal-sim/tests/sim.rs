@@ -136,6 +136,7 @@ fn compare_with_execute(
                 endpoint: e.get(key).unwrap(),
                 n: r.n,
                 seed,
+                pin_delay: std::time::Duration::ZERO,
             },
         );
         let at = format!("{label} {key} n={}", r.n);
@@ -448,6 +449,7 @@ fn scenario(name: &str, entries: Vec<(ChaosKey, ChaosLayer)>) -> Scenario {
         name: name.into(),
         description: None,
         layers,
+        pins: kaanal_core::PinLayer::default(),
     }
 }
 
@@ -1001,6 +1003,7 @@ fn zero_cost_failure_ties_go_to_the_first_branch() {
                 endpoint: e.get("GET /x").unwrap(),
                 n: r.n,
                 seed: cfg.seed,
+                pin_delay: std::time::Duration::ZERO,
             },
         );
         assert_eq!(
@@ -1191,6 +1194,7 @@ fn failure_ties_go_to_the_lowest_branch_like_live() {
                 endpoint: e.get("GET /x").unwrap(),
                 n: r.n,
                 seed: cfg.seed,
+                pin_delay: std::time::Duration::ZERO,
             },
         );
         let hops: Vec<_> = r.hops.iter().map(|(h, _)| h.clone()).collect();
@@ -1325,6 +1329,7 @@ fn login_and_jwks_equal_live_at_zero_load() {
                         endpoint: e.get(key).unwrap(),
                         n: r.n,
                         seed,
+                        pin_delay: std::time::Duration::ZERO,
                     },
                 );
                 let at = format!("{name} {key} n={}", r.n);

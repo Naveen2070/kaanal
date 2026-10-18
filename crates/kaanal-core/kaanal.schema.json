@@ -266,6 +266,14 @@
             }
           ],
           "description": "A fixed response served instead of generated data (`status` default 200, `body`)."
+        },
+        "states": {
+          "additionalProperties": {
+            "$ref": "#/$defs/StateOverrideConfig"
+          },
+          "default": {},
+          "description": "Overrides for the UI states a pin can force, keyed `loading`, `empty`, `error` or\n`slow`: a `status`, a `body` and a `delay` each.",
+          "type": "object"
         }
       },
       "type": "object"
@@ -957,6 +965,70 @@
       },
       "type": "object"
     },
+    "PinEntryConfig": {
+      "additionalProperties": false,
+      "description": "A pin as written in a scenario file or sent to the API.",
+      "properties": {
+        "delay": {
+          "description": "Extra delay before the answer (above 0, at most 5 min).",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        "endpoint": {
+          "description": "`METHOD /path` of the endpoint to pin.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/PinState",
+          "description": "The state to force."
+        },
+        "status": {
+          "description": "Status of the response: 400-599 for `error`, 200-299 for `empty`.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "endpoint",
+        "state"
+      ],
+      "type": "object"
+    },
+    "PinState": {
+      "description": "The UI state a pin forces.",
+      "oneOf": [
+        {
+          "const": "loading",
+          "description": "The response arrives late (default +10 s).",
+          "type": "string"
+        },
+        {
+          "const": "empty",
+          "description": "A well-formed response with no data.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "An error status (default 500).",
+          "type": "string"
+        },
+        {
+          "const": "slow",
+          "description": "A response a little late (default +2 s).",
+          "type": "string"
+        },
+        {
+          "const": "success",
+          "description": "The normal response (masks a lower pin).",
+          "type": "string"
+        }
+      ]
+    },
     "PoolConfig": {
       "additionalProperties": false,
       "description": "A connection pool (`database`, `external-api`).",
@@ -1014,10 +1086,11 @@
     },
     "ScenarioConfig": {
       "additionalProperties": false,
-      "description": "One named scenario: chaos entries applied together when it is active.",
+      "description": "One named scenario: chaos entries and UI-state pins applied together when it is active.",
       "properties": {
         "chaos": {
-          "description": "The chaos entries. Each names a `node`, an `endpoint` or both, and sets at least one\nof the patch fields.",
+          "default": [],
+          "description": "The chaos entries. Each names a `node`, an `endpoint` or both, and sets at least one\nof the patch fields. A scenario needs `chaos`, `pins` or both.",
           "items": {
             "$ref": "#/$defs/ChaosEntry"
           },
@@ -1030,11 +1103,48 @@
             "string",
             "null"
           ]
+        },
+        "pins": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PinEntryConfig"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "UI-state pins applied together with the chaos: each forces one endpoint to\n`loading`, `empty`, `error`, `slow` or `success`."
         }
       },
-      "required": [
-        "chaos"
-      ],
+      "type": "object"
+    },
+    "StateOverrideConfig": {
+      "additionalProperties": false,
+      "description": "A `states:` override as written on an `endpoints:` entry.",
+      "properties": {
+        "body": {
+          "description": "Body for this state, returned verbatim."
+        },
+        "delay": {
+          "description": "Delay for this state (above 0, at most 5 min).",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        "status": {
+          "description": "Status for this state (400-599 for `error`, 200-299 for `empty`).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "Step": {

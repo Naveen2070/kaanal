@@ -142,6 +142,7 @@ mod tests {
                             endpoint: ep,
                             n: i,
                             seed: 1,
+                            pin_delay: std::time::Duration::ZERO,
                         },
                     )
                     .0,

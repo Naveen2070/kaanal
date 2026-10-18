@@ -192,6 +192,9 @@ pub struct ChainRequest<'a> {
     /// The chain seed: `seed:` (controlled, and the simulator always) or the startup draw
     /// (realistic). See [`crate::config::SeedSource`].
     pub seed: u64,
+    /// A pin's delay: a pre-chain `Delay` hop outside every `timeout:` span, after which the
+    /// chain starts. Zero (always, in the simulator) plans exactly as without a pin.
+    pub pin_delay: Duration,
 }
 
 impl Plan {
@@ -343,22 +346,37 @@ pub fn sample_plan(
         items: Vec::new(),
     };
     let entry = ep.entry_node;
-    let root_span = entry.and_then(|n| w.open_span(n, Duration::ZERO));
-    let mut start = Duration::ZERO;
+    // A pin's delay runs before the root span opens, so no `timeout:` counts it.
+    let base = req.pin_delay;
+    debug_assert!(
+        base.is_zero() || entry.is_some(),
+        "a pin delay needs an entry node (resolve_scenario rejects pins without one)"
+    );
+    if let Some(n) = entry.filter(|_| !base.is_zero()) {
+        w.items.push(PlanItem::Hop(Hop {
+            node: n,
+            kind: HopKind::Delay,
+            start: Duration::ZERO,
+            dur: base,
+        }));
+    }
+    let root_span = entry.and_then(|n| w.open_span(n, base));
+    let mut start = base;
     let mut flow = None;
     if let (Some(entry), Some(c)) = (entry, chaos.endpoint(&ep.key)) {
         let name = &topo.nodes[entry].name;
         let roll: f64 = draw_rng(root, name, b"endpoint").random();
         if let Some((k, s)) = c.hit(roll) {
             let (kind, status) = fail_of(k, s);
-            let mut at = Duration::ZERO;
+            let mut at = base;
             if k == ErrorKind::Hang {
-                at = hang_cap(topo.nodes[entry].timeout);
+                let cap = hang_cap(topo.nodes[entry].timeout);
+                at = base + cap;
                 w.items.push(PlanItem::Hop(Hop {
                     node: entry,
                     kind: HopKind::Delay,
-                    start: Duration::ZERO,
-                    dur: at,
+                    start: base,
+                    dur: cap,
                 }));
             }
             let idx = w.items.len();
@@ -373,10 +391,10 @@ pub fn sample_plan(
             w.items.push(PlanItem::Hop(Hop {
                 node: entry,
                 kind: HopKind::Delay,
-                start: Duration::ZERO,
+                start: base,
                 dur: c.latency_add,
             }));
-            start = c.latency_add;
+            start = base + c.latency_add;
         }
     }
     let flow = flow.unwrap_or_else(|| w.seq(&ep.chain, root, ep.op, start));

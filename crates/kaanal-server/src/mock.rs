@@ -20,13 +20,14 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
-    ChainRequest, ChainResult, FailKind, FinishedHop, HopKind, Plan, PlanItem, Responder, Topology,
-    resolve_error, sample_plan, stable_hash,
+    ChainRequest, ChainResult, FailKind, FinishedHop, HopKind, Outcome, PinState, Plan, PlanItem,
+    Responder, Topology, resolve, resolve_error, sample_plan,
 };
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::auth;
+use crate::pins;
 use crate::scope::{self, Scoped};
 use crate::state::{AppState, BusEvent, Event, Route};
 use crate::wire::Cut;
@@ -85,7 +86,8 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         None
     };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
-    let plan = Arc::new(plan_of(&st, ep, n, scope.as_ref().map(|s| &*s.1)));
+    let (plan, pin) = plan_of(&st, route, n, scope.as_ref().map(|s| &*s.1));
+    let plan = Arc::new(plan);
     // The snapshot is gone before the await: the engine task owns time from here.
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
@@ -96,45 +98,23 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         return cors(engine_stopped());
     };
 
-    let name = |id: usize| st.topo.nodes[id].name.as_str();
-    let trace = trace_header(&plan, &fin.hops, &fin.result, &st.topo);
-    let mut retry = None;
-    let mut wire = None;
-    let (status, body, failed) = match &fin.result {
-        // E5 + B2a Z8: node, then kind, then status, then class; else the kind's default status and the chaos body.
-        ChainResult::Err {
-            node,
-            status,
-            kind,
-            retry_after,
-        } => {
-            // A timeout at a wire node is not a wire failure: it stays a 504 that `error_map` may
-            // remap (status or class keys, like nginx `error_page 504`); only reset and malformed break the wire.
-            let at_wire = *kind != FailKind::Status
-                && *kind != FailKind::Timeout
-                && ep.is_wire_node(&st.topo, *node);
-            let (mapped, body) = resolve_error(&ep.error_map, name(*node), *kind, *status);
-            // An error_map entry by node name or by kind is the user's stated intent and beats the wire behaviour (Z7).\n            // Same string lookup as `resolve_error`: a node named `reset` also counts as a kind key for other nodes.
-            let overridden =
-                ep.error_map.contains_key(name(*node)) || ep.error_map.contains_key(kind.as_str());
-            let (code, body) = if at_wire && !overridden {
-                let ok = answer(&st, route, &path, &params, login);
-                let (s, r) = wire_failure(*kind, ok, &trace, &method);
-                wire = Some(r);
-                (s, Value::Null)
-            } else {
-                retry = (mapped == 429).then_some(*retry_after).flatten();
-                (
-                    mapped,
-                    body.unwrap_or_else(|| default_error_body(name(*node), *kind)),
-                )
-            };
-            (code, body, Some((name(*node).to_string(), *kind)))
-        }
-        ChainResult::Ok => {
-            let (status, body) = answer(&st, route, &path, &params, login);
-            (status, body, None)
-        }
+    let pinned = pin.as_ref().map(|o| o.state.name());
+    let trace = trace_header(&plan, &fin.hops, &fin.result, &st.topo, pinned);
+    let ask = Ask {
+        method: &method,
+        path: &path,
+        params: &params,
+    };
+    // P2: a pin wins over whatever the chain did; the chain still ran (its hops and delay are real).
+    let Reply {
+        status,
+        body,
+        failed,
+        retry,
+        wire,
+    } = match &pin {
+        Some(o) => pinned_reply(&st, route, &ask, login, o),
+        None => chaos_reply(&st, route, &fin.result, &ask, login, &trace),
     };
 
     let mut resp = wire.unwrap_or_else(|| response(status, body, &trace, retry));
@@ -146,11 +126,17 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     if let Some(v) = scope.as_deref().and_then(|k| HeaderValue::from_str(k).ok()) {
         resp.headers_mut().insert(scope::SCOPE_ECHO, v);
     }
-    let nodes = touched_nodes(&fin.hops, failed.as_ref().map(|f| f.0.as_str()), &st.topo);
+    // The event lists what the chain touched, its failing node too, even when a pin hid the failure.
+    let chain_failed = match &fin.result {
+        ChainResult::Err { node, .. } => Some(st.topo.nodes[*node].name.as_str()),
+        ChainResult::Ok => None,
+    };
+    let nodes = touched_nodes(&fin.hops, chain_failed, &st.topo);
     let who = Who {
         method,
         path,
         scope,
+        pin: pinned,
     };
     send_event(&st, who, status, started, nodes, failed);
     cors(resp)
@@ -205,24 +191,188 @@ fn bad_scope(detail: &str) -> Response {
     (StatusCode::BAD_REQUEST, body).into_response()
 }
 
-/// **Private.** Samples the request's plan from the scoped stack, or else from one chaos snapshot
-/// (S10): the `Arc` is cloned once here and dropped on return, so a swap mid-request never
-/// reaches this request.
-fn plan_of(st: &AppState, ep: &kaanal_core::Endpoint, n: u64, scoped: Option<&Scoped>) -> Plan {
+/// **Private.** Samples the request's plan and settles its pin from one view: the scoped stack,
+/// or else one snapshot (S10; the `Arc` is cloned once here and dropped on return, so a swap
+/// mid-request never reaches this request). A scoped request never sees the live pins. A pin's
+/// delay goes into the plan; a synthesized `HEAD` follows its `GET`'s pin.
+fn plan_of(
+    st: &AppState,
+    route: &Route,
+    n: u64,
+    scoped: Option<&Scoped>,
+) -> (Plan, Option<Outcome>) {
     let snap;
-    let chaos = if let Some(s) = scoped {
-        &s.chaos
+    let (chaos, pins) = if let Some(s) = scoped {
+        (&s.chaos, &s.pins)
     } else {
         snap = st.snapshot();
-        &snap.chaos
+        (&snap.chaos, &snap.pins)
     };
-
+    let ep = &route.endpoint;
+    let pin = if pins.is_empty() {
+        None
+    } else if ep.synthesized {
+        pins.get(&route.key.replacen("HEAD ", "GET ", 1))
+    } else {
+        pins.get(&route.key)
+    };
+    let pin = pin.map(|p| resolve(&p.entry, &ep.states));
     let req = ChainRequest {
         endpoint: ep,
         n,
         seed: st.chain_seed,
+        pin_delay: pin.as_ref().map_or(Duration::ZERO, |o| o.delay),
     };
-    sample_plan(&st.topo, chaos, &req).0
+    (sample_plan(&st.topo, chaos, &req).0, pin)
+}
+
+/// **Private.** What a request answers: status and body, the failing node, a `Retry-After` and,
+/// for a wire failure, the broken response itself.
+struct Reply {
+    status: u16,
+    body: Value,
+    failed: Option<(String, FailKind)>,
+    retry: Option<Duration>,
+    wire: Option<Response>,
+}
+
+/// **Private.** The request line and path parameters a reply is built from.
+struct Ask<'a> {
+    method: &'a str,
+    path: &'a str,
+    params: &'a [(String, String)],
+}
+
+/// **Private.** The reply of a request with no pin: the chain's verdict decides.
+fn chaos_reply(
+    st: &AppState,
+    route: &Route,
+    result: &ChainResult,
+    ask: &Ask,
+    login: Option<Result<auth::Credentials, auth::Reject>>,
+    trace: &str,
+) -> Reply {
+    let ep = &route.endpoint;
+    let name = |id: usize| st.topo.nodes[id].name.as_str();
+    match result {
+        // E5 + B2a Z8: node, then kind, then status, then class; else the kind's default status and the chaos body.
+        ChainResult::Err {
+            node,
+            status,
+            kind,
+            retry_after,
+        } => {
+            // A timeout at a wire node is not a wire failure: it stays a 504 that `error_map` may
+            // remap (status or class keys, like nginx `error_page 504`); only reset and malformed break the wire.
+            let at_wire = *kind != FailKind::Status
+                && *kind != FailKind::Timeout
+                && ep.is_wire_node(&st.topo, *node);
+            let (mapped, body) = resolve_error(&ep.error_map, name(*node), *kind, *status);
+            // An error_map entry by node name or by kind is the user's stated intent and beats the wire behaviour (Z7).
+            // Same string lookup as `resolve_error`: a node named `reset` also counts as a kind key for other nodes.
+            let overridden =
+                ep.error_map.contains_key(name(*node)) || ep.error_map.contains_key(kind.as_str());
+            let failed = Some((name(*node).to_string(), *kind));
+            if at_wire && !overridden {
+                let ok = answer(st, route, ask.path, ask.params, login);
+                let (s, r) = wire_failure(*kind, ok, trace, ask.method);
+                return Reply {
+                    status: s,
+                    body: Value::Null,
+                    failed,
+                    retry: None,
+                    wire: Some(r),
+                };
+            }
+            Reply {
+                status: mapped,
+                body: body.unwrap_or_else(|| default_error_body(name(*node), *kind)),
+                failed,
+                retry: (mapped == 429).then_some(*retry_after).flatten(),
+                wire: None,
+            }
+        }
+        ChainResult::Ok => {
+            let (status, body) = answer(st, route, ask.path, ask.params, login);
+            Reply {
+                status,
+                body,
+                failed: None,
+                retry: None,
+                wire: None,
+            }
+        }
+    }
+}
+
+/// **Private.** The reply of a pinned request (P2: the pin beats `down`, `error_map`, wire
+/// failures, 429 and overflow; the chain's verdict is not read). Never a failed node.
+fn pinned_reply(
+    st: &AppState,
+    route: &Route,
+    ask: &Ask,
+    login: Option<Result<auth::Credentials, auth::Reject>>,
+    out: &Outcome,
+) -> Reply {
+    let (status, body, retry) = pinned_response(st, route, ask, login, out);
+    Reply {
+        status,
+        body,
+        failed: None,
+        retry,
+        wire: None,
+    }
+}
+
+/// **Private.** What a pin answers. `loading`, `slow` and `success` answer as the route normally
+/// does. `empty`: the derived body (`states.empty.body`, else the emptied `override:` body or
+/// schema) with the path parameters applied, the pin's or `states:` status or the normal success
+/// status; a 204 or 304 (the route's own or a pinned one) never has a body. `error`: the pin's status
+/// (500 by default) with the `states.error.body` or a small default, plus `Retry-After: 1` for
+/// 429 and 503. Never `error_map`, never a wire failure.
+fn pinned_response(
+    st: &AppState,
+    route: &Route,
+    ask: &Ask,
+    login: Option<Result<auth::Credentials, auth::Reject>>,
+    out: &Outcome,
+) -> (u16, Value, Option<Duration>) {
+    match out.state {
+        PinState::Error => {
+            let status = out.status.unwrap_or(500);
+            let body = out
+                .body
+                .clone()
+                .unwrap_or_else(|| json!({ "error": "pinned", "state": "error" }));
+            let retry = matches!(status, 429 | 503).then_some(Duration::from_secs(1));
+            (status, body, retry)
+        }
+        PinState::Empty => {
+            let normal = route
+                .endpoint
+                .response
+                .as_ref()
+                .map_or(route.status, |o| o.status);
+            let status = out.status.unwrap_or(normal);
+            // A 204 or 304 never carries a body, whichever way the status was chosen.
+            if matches!(status, 204 | 304) {
+                return (status, Value::Null, None);
+            }
+            let ep = &route.endpoint;
+            let owner = ep.owner.map_or("", |id| st.topo.nodes[id].name.as_str());
+            let seed = pins::route_seed(st.seed, owner, ask.path);
+            let mut body = pins::empty_form(ep, route.schema.as_ref(), seed).unwrap_or(Value::Null);
+            // P9: a `states.empty.body` is returned verbatim; only a derived body gets the params.
+            if ep.states.empty.as_ref().is_none_or(|o| o.body.is_none()) {
+                kaanal_data::apply_params(&mut body, ask.params);
+            }
+            (status, body, None)
+        }
+        PinState::Loading | PinState::Slow | PinState::Success => {
+            let (status, body) = answer(st, route, ask.path, ask.params, login);
+            (status, body, None)
+        }
+    }
 }
 
 /// **Private.** The chaos body of a failure that answers as JSON. Kind `status` keeps the
@@ -331,7 +481,7 @@ fn generated_body(
         return Value::Null;
     };
     // `seed:` (not the chain seed) keys the data: same seed → same data (NFR-10, D14).
-    let seed = stable_hash(&[&st.seed.to_le_bytes(), owner.as_bytes(), path.as_bytes()]);
+    let seed = pins::route_seed(st.seed, owner, path);
     let mut v = kaanal_data::generate(schema, None, seed);
     kaanal_data::apply_params(&mut v, params);
     v
@@ -360,13 +510,14 @@ enum Piece {
 /// (`1.0ms`, never a truncated `0ms`); a `parallel` block is `[a,b|c]` (branches split by
 /// `|`); cache hops are `node.hit` / `node.miss`; `node.wait=T` comes before a hop that
 /// queued; a failure appends `node.error=STATUS`, or `node.error=reset` / `node.error=malformed`
-/// for those kinds (they have no status). Over [`TRACE_CAP`] bytes it stops before a
+/// for those kinds (they have no status); a pinned request ends with `pinned=STATE`. Over [`TRACE_CAP`] bytes it stops before a
 /// hop, closes open brackets and adds `,...+N hops` (ASCII, D13), N being the pieces left out.
 fn trace_header(
     plan: &Plan,
     hops: &[FinishedHop],
     result: &ChainResult,
     topo: &Topology,
+    pin: Option<&str>,
 ) -> String {
     let name = |id: usize| topo.nodes[id].name.as_str();
     let fmt_ms = |d: Duration| format!("{:.1}ms", d.as_secs_f64() * 1000.0);
@@ -426,16 +577,22 @@ fn trace_header(
         },
         ChainResult::Ok => String::new(),
     };
-    let tail = if error.is_empty() { 0 } else { error.len() + 1 };
+    // The error and the pin are always kept, so they are reserved before the hops are cut.
+    let pinned = pin.map_or_else(String::new, |p| format!("pinned={p}"));
+    let tails: Vec<&String> = [&error, &pinned]
+        .into_iter()
+        .filter(|t| !t.is_empty())
+        .collect();
+    let tail: usize = tails.iter().map(|t| t.len() + 1).sum();
     let mut out = render(&pieces, usize::MAX, 0);
     if out.len() + tail > TRACE_CAP {
         out = render(&pieces, TRACE_CAP, tail);
     }
-    if !error.is_empty() {
+    for t in tails {
         if !out.is_empty() {
             out.push(',');
         }
-        out.push_str(&error);
+        out.push_str(t);
     }
     out
 }
@@ -541,6 +698,7 @@ struct Who {
     method: String,
     path: String,
     scope: Option<String>,
+    pin: Option<&'static str>,
 }
 
 /// **Private.** Broadcasts the finished request on the event bus. No subscribers is
@@ -564,6 +722,7 @@ fn send_event(
         method: who.method,
         path: who.path,
         scope: who.scope,
+        pin: who.pin,
         status,
         ms,
         nodes,

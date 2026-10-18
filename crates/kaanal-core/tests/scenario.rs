@@ -7,6 +7,7 @@ fn sc(name: &str, key: ChaosKey, l: ChaosLayer) -> Scenario {
         name: name.into(),
         description: None,
         layers,
+        pins: PinLayer::default(),
     }
 }
 fn rate(r: f64) -> ChaosLayer {
@@ -156,6 +157,7 @@ fn many(name: &str, n: usize) -> Scenario {
         name: name.into(),
         description: None,
         layers,
+        pins: PinLayer::default(),
     }
 }
 

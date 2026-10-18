@@ -79,6 +79,26 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ScenarioCmd,
     },
+    /// Step an endpoint's live pin to the next UI state (loading, empty, error, slow, success),
+    /// or pin one with --state; e.g. `kaanal cycle "GET /orders"`
+    Cycle {
+        /// Endpoint key, e.g. "GET /orders"
+        endpoint: String,
+        /// loading, empty, error, slow or success
+        #[arg(long)]
+        state: Option<String>,
+        /// Response status (400-599 for error, 200-299 for empty)
+        #[arg(long)]
+        status: Option<u16>,
+        /// Extra delay before the answer, e.g. 2s
+        #[arg(long)]
+        delay: Option<String>,
+        /// Remove this endpoint's live pin
+        #[arg(long, conflicts_with_all = ["state", "status", "delay"])]
+        off: bool,
+    },
+    /// Show the live pins and the effective pin of each endpoint with its source
+    Pins,
     /// Clean slate: deactivate scenarios, undefine runtime-defined ones (inline and file ones
     /// stay), clear live chaos, zero route counters, refill rate-limit buckets
     Reset,
@@ -220,6 +240,14 @@ fn run(cli: Cli) -> Result<(), Fail> {
         Cmd::Endpoints { config, write } => endpoints(&config, write),
         Cmd::Status => status(),
         Cmd::Scenario { cmd } => scenario(cmd),
+        Cmd::Cycle {
+            endpoint,
+            state,
+            status,
+            delay,
+            off,
+        } => cycle(&endpoint, state, status, delay, off),
+        Cmd::Pins => pins(),
         Cmd::Reset => {
             call("POST", "/__kaanal/reset", None)?;
             println!("reset");
@@ -282,17 +310,22 @@ fn run(cli: Cli) -> Result<(), Fail> {
         Cmd::Chaos {
             cmd: ChaosCmd::Clear { node, endpoint },
         } => {
-            let path = match (node, endpoint) {
-                (None, None) => "/__kaanal/chaos".to_string(),
-                (Some(n), None) => format!("/__kaanal/chaos/{}", encode_segment(&n)),
-                (n, Some(e)) => {
-                    let node = n.map_or(String::new(), |n| format!("node={}&", encode_segment(&n)));
-                    format!("/__kaanal/chaos?{node}endpoint={}", encode_segment(&e))
-                }
-            };
+            let path = chaos_clear_path(node, endpoint);
             call("DELETE", &path, None)?;
             println!("cleared");
             Ok(())
+        }
+    }
+}
+
+/// **Private.** The `DELETE` path of `chaos clear` for a node, an endpoint or both.
+fn chaos_clear_path(node: Option<String>, endpoint: Option<String>) -> String {
+    match (node, endpoint) {
+        (None, None) => "/__kaanal/chaos".to_string(),
+        (Some(n), None) => format!("/__kaanal/chaos/{}", encode_segment(&n)),
+        (n, Some(e)) => {
+            let node = n.map_or(String::new(), |n| format!("node={}&", encode_segment(&n)));
+            format!("/__kaanal/chaos?{node}endpoint={}", encode_segment(&e))
         }
     }
 }
@@ -434,7 +467,7 @@ fn active_names(v: &Value) -> Vec<&str> {
 
 /// **Private.** The PUT body for a parsed scenario file.
 fn scenario_body(cfg: &ScenarioConfig) -> Value {
-    let mut body = json!({ "chaos": cfg.chaos });
+    let mut body = json!({ "chaos": cfg.chaos, "pins": cfg.pins });
     if let Some(d) = &cfg.description {
         body["description"] = json!(d);
     }
@@ -462,6 +495,31 @@ fn save_from(from: &str) -> Result<Value, Fail> {
     }
 }
 
+/// **Private.** The `scenario show` text of one definition.
+fn print_scenario(v: &Value) {
+    let head = format!(
+        "{} ({}){}",
+        v["name"].as_str().unwrap_or(""),
+        v["source"].as_str().unwrap_or(""),
+        v["description"]
+            .as_str()
+            .map_or(String::new(), |d| format!(": {d}"))
+    );
+    println!("{}", clean(&head));
+    for e in v["chaos"].as_array().into_iter().flatten() {
+        println!("  - {}", clean(&e.to_string()));
+    }
+    for p in v["pins"].as_array().into_iter().flatten() {
+        let extra = pin_extra(&p["status"], p["delay"].as_str().map(str::to_string));
+        let line = format!(
+            "  pin {}: {}{extra}",
+            p["endpoint"].as_str().unwrap_or(""),
+            p["state"].as_str().unwrap_or("")
+        );
+        println!("{}", clean(&line));
+    }
+}
+
 /// **Private.** `kaanal scenario ...`: thin calls to the control API, except `load`, which
 /// parses the file here so a mistake shows as `file:line:col`.
 fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
@@ -486,18 +544,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
         }
         ScenarioCmd::Show { name } => {
             let v = call("GET", &scenario_path(named(&name)?, ""), None)?;
-            let head = format!(
-                "{} ({}){}",
-                v["name"].as_str().unwrap_or(""),
-                v["source"].as_str().unwrap_or(""),
-                v["description"]
-                    .as_str()
-                    .map_or(String::new(), |d| format!(": {d}"))
-            );
-            println!("{}", clean(&head));
-            for e in v["chaos"].as_array().into_iter().flatten() {
-                println!("  - {}", clean(&e.to_string()));
-            }
+            print_scenario(&v);
         }
         ScenarioCmd::Activate { name, ttl } => {
             let body = ttl_body(ttl)?;
@@ -920,6 +967,16 @@ fn status() -> Result<(), Fail> {
         );
         println!("{}", clean(&format!("{n} @ {e}: {}", chaos_text(c))));
     }
+    let pins = call("GET", "/__kaanal/pins", None)?;
+    for (key, p) in pins["effective"].as_object().into_iter().flatten() {
+        let line = format!(
+            "pin {key}: {}{} ({})",
+            p["state"].as_str().unwrap_or(""),
+            pin_extra_ms(p),
+            source_text(&p["source"])
+        );
+        println!("{}", clean(&line));
+    }
     let names = active_names(&active);
     println!(
         "active scenarios: {}",
@@ -929,6 +986,123 @@ fn status() -> Result<(), Fail> {
             clean(&names.join(", "))
         }
     );
+    Ok(())
+}
+
+/// **Private.** The pin states `cycle --state` accepts, in cycle order.
+const PIN_STATES: [&str; 5] = ["loading", "empty", "error", "slow", "success"];
+
+/// **Private.** ` (status 404, delay 2s)` for the parts that are set, else nothing.
+fn pin_extra(status: &Value, delay: Option<String>) -> String {
+    let parts: Vec<String> = status
+        .as_u64()
+        .map(|s| format!("status {s}"))
+        .into_iter()
+        .chain(delay.map(|d| format!("delay {d}")))
+        .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join(", "))
+    }
+}
+
+/// **Private.** [`pin_extra`] for a server pin object, whose delay is `delay_ms`.
+fn pin_extra_ms(p: &Value) -> String {
+    let delay = p["delay_ms"]
+        .as_u64()
+        .map(|ms| humantime::format_duration(Duration::from_millis(ms)).to_string());
+    pin_extra(&p["status"], delay)
+}
+
+/// **Private.** `live` or `scenario:NAME` for a pin's `source`.
+fn source_text(s: &Value) -> String {
+    s["scenario"]
+        .as_str()
+        .map_or_else(|| "live".to_string(), |n| format!("scenario:{n}"))
+}
+
+/// **Private.** `kaanal cycle`: one `POST /cycle`, or `--off` as a `DELETE`. State names and the
+/// delay are checked here so a typo sends nothing; ranges are the server's.
+fn cycle(
+    endpoint: &str,
+    state: Option<String>,
+    status: Option<u16>,
+    delay: Option<String>,
+    off: bool,
+) -> Result<(), Fail> {
+    if off {
+        let path = format!("/__kaanal/pins?endpoint={}", encode_segment(endpoint));
+        // The server answers 204 whether or not a pin existed, so this prints either way.
+        call("DELETE", &path, None)?;
+        println!("{} -> unpinned", clean(endpoint));
+        return Ok(());
+    }
+    let mut body = json!({ "endpoint": endpoint });
+    if let Some(s) = state {
+        if !PIN_STATES.contains(&s.as_str()) {
+            return Err(err(format!(
+                "bad --state '{}': use {}",
+                clean(&s),
+                PIN_STATES.join(", ")
+            )));
+        }
+        body["state"] = json!(s);
+    }
+    if let Some(d) = delay {
+        let d = d.trim();
+        humantime::parse_duration(d)
+            .map_err(|_| err(format!("bad --delay '{}' (use e.g. 2s)", clean(d))))?;
+        body["delay"] = json!(d);
+    }
+    if let Some(s) = status {
+        body["status"] = json!(s);
+    }
+    let v = call("POST", "/__kaanal/cycle", Some(body))?;
+    let line = format!(
+        "{} -> {}{}",
+        v["endpoint"].as_str().unwrap_or(""),
+        v["state"].as_str().unwrap_or(""),
+        pin_extra_ms(&v)
+    );
+    println!("{}", clean(&line));
+    Ok(())
+}
+
+/// **Private.** `kaanal pins`: the live pins, then the effective pin of each endpoint with
+/// its source.
+fn pins() -> Result<(), Fail> {
+    let v = call("GET", "/__kaanal/pins", None)?;
+    let live = v["live"].as_array().map_or(&[][..], Vec::as_slice);
+    let eff = v["effective"].as_object();
+    if live.is_empty() && eff.is_none_or(serde_json::Map::is_empty) {
+        println!("no pins");
+        return Ok(());
+    }
+    if live.is_empty() {
+        println!("no live pins");
+    } else {
+        println!("live pins:");
+    }
+    for p in live {
+        let line = format!(
+            "  {:<24} {}{}",
+            p["endpoint"].as_str().unwrap_or(""),
+            p["state"].as_str().unwrap_or(""),
+            pin_extra_ms(p)
+        );
+        println!("{}", clean(&line));
+    }
+    println!("effective pins:");
+    for (key, p) in eff.into_iter().flatten() {
+        let line = format!(
+            "  {key:<24} {:<8} {}{}",
+            p["state"].as_str().unwrap_or(""),
+            source_text(&p["source"]),
+            pin_extra_ms(p)
+        );
+        println!("{}", clean(&line));
+    }
     Ok(())
 }
 

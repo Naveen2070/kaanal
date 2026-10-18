@@ -761,6 +761,7 @@ fn login_without_the_auth_edge_runs_auth_inline() {
             endpoint: jwks,
             n: 0,
             seed: 1,
+            pin_delay: std::time::Duration::ZERO,
         },
     );
     let hops: Vec<(String, HopKind)> = o

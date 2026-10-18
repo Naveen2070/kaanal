@@ -12,6 +12,8 @@ mod actor;
 mod auth;
 mod control;
 mod mock;
+mod pin_api;
+mod pins;
 mod scenarios;
 mod scope;
 mod state;
@@ -186,6 +188,13 @@ fn router(st: Arc<state::AppState>) -> Router {
             "/__kaanal/scenarios/{name}/deactivate",
             post(control::deactivate),
         )
+        .route(
+            "/__kaanal/pins",
+            get(pin_api::get_pins)
+                .put(pin_api::put_pin)
+                .delete(pin_api::delete_pins),
+        )
+        .route("/__kaanal/cycle", post(pin_api::cycle))
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/events", get(control::events))
         .route("/__kaanal/ui", get(control::ui))

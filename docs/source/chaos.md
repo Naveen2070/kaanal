@@ -124,11 +124,11 @@ The clamp to `MAX_LATENCY_ADD` (5 min) is applied once, at the end of `resolve_e
 
 ## Scenarios
 
-A scenario is a name and a list of chaos entries (chaos only, S1). Each entry is one key (`node`, `endpoint`, or both) plus the patch fields of `PUT /__kaanal/chaos`: `latency_ms`, `error_rate`, `error_kind`, `error_status`, `down`.
+A scenario is a name, a list of chaos entries and, since B2b-2, a list of UI-state pins ([pins](files/kaanal-core/pin.md)); either list may be absent but not both. Each entry is one key (`node`, `endpoint`, or both) plus the patch fields of `PUT /__kaanal/chaos`: `latency_ms`, `error_rate`, `error_kind`, `error_status`, `down`.
 
 - **Where they come from (S2).** Inline under `scenarios:` in `kaanal.yaml`, and as `scenarios/NAME.yaml` next to it (one scenario per file: `description`, `chaos`). The file stem is the name. The same name in both places is a load error naming both. Runtime scenarios come from `PUT /__kaanal/scenarios/{name}` and from `save`.
 - **Names (S15).** `^[a-z0-9][a-z0-9_-]{0,63}$`, lower case only (NTFS is case-insensitive). Reserved: `active`, `save`, `reset`, and the Windows device names `con prn aux nul com1-9 lpt1-9`. The same rule holds for file stems, inline keys, the `PUT` path (after percent-decoding), the `save` body and the CLI `load` stem. An invalid stem in `scenarios/` is a load error, never a silent skip.
-- **Rejected at load (S20).** A `limits:` or `pins:` key ("not supported yet", reserved so shared files do not break later), unknown keys, an empty `chaos:` list, an entry without `node`/`endpoint`, an entry that sets nothing, a duplicate key inside one scenario (the message names the earlier entry), a bad `error_kind`, values outside the chaos limits (R6.9). The core parser checks shape and limits; the **server** checks that nodes and endpoints exist (`AppState::build`, `kaanal validate`), because endpoints exist only after `compile`. A `node` + `endpoint` pair the chain never visits is a **warning**.
+- **Rejected at load (S20).** A `limits:` key ("not supported yet", reserved so shared files do not break later), unknown keys, a scenario with neither `chaos:` nor `pins:`, a pin with a bad state, status or delay, the same endpoint pinned twice, a pin on a `HEAD`, an unknown endpoint, or an `empty` pin with no empty form, an entry without `node`/`endpoint`, an entry that sets nothing, a duplicate key inside one scenario (the message names the earlier entry), a bad `error_kind`, values outside the chaos limits (R6.9). The core parser checks shape and limits; the **server** checks that nodes and endpoints exist (`AppState::build`, `kaanal validate`), because endpoints exist only after `compile`. A `node` + `endpoint` pair the chain never visits is a **warning**.
 - **Bounds (S16).** At most 128 scenarios, 256 entries each (the raw entry count is checked before duplicate keys could collapse a huge list), 1 MiB per file (BOM stripped), `*.yaml` only, no subdirectories. Dotfiles and editor temp files (`*~`, `.#*`) are ignored silently; symlinks, `.yml`/`.YAML` near-misses and non-UTF-8 names are skipped with a warning.
 - **Where `scenarios/` lives.** Next to the config file, canonicalized once at startup, not the current directory. `up -d` / `down` (sub-project C) must not change the cwd before it is resolved.
 
@@ -183,7 +183,7 @@ The SSE bus carries `BusEvent::{Request, Scenario}`. A scenario message is `even
 
 - **Per-request scoping (B2b-3).** An `X-Kaanal-Scenario: a,b` header or cookie resolved to a cached `EffectiveChaos` per combination (the compiled snapshot makes that cheap). Needed before parallel test workers can share one instance; until then run one instance per worker (separate working directory and port, because the instance lock is `.kaanal/lock` in the cwd).
 - **`ttl` on activate (B2b-3).** A crashed test must not leave chaos on. The writer mutex and the event enum leave room for a timer task.
-- Pins and `kaanal cycle` are B2b-2; runtime limit overrides, time schedules, hot reload and the UI scenario panel are later.
+- Runtime limit overrides, time schedules, hot reload and the UI scenario panel are later.
 
 ## B2a semantics that changed for stacked keys
 
@@ -217,6 +217,6 @@ Additive, with one breaking change (Z16, B2a), and the B2b-1 routes on top (full
 - **Failures are instant (E14).** Real 500s often come after the work; a slow error (`fail_after`) is not modelled.
 - **`reset` is "partial response, then abort"**, not reset-before-headers or a refused connection; browsers show a rejected body read.
 - Zombie hops make overload worse than before, by design; a cancellation-aware server (`abandon: cancel`) is a later knob.
-- Out of B2b-1: pins and cycle (B2b-2), per-request scoping and `ttl` (B2b-3), runtime limit overrides, scenario files in the sim run config, time schedules, hot reload and the UI scenario panel.
+- Out of B2b-1 (pins, cycle, scoping and `ttl` have since landed): runtime limit overrides, scenario files in the sim run config, time schedules, hot reload and the UI scenario panel.
 - `save` with `from: effective` refuses a key with two or more failure bands and a node@endpoint pair whose node has chaos; save from live or from a scenario instead.
 - Scenario activation is not reproducible across a test suite unless route counters are also reset (`POST /reset`).

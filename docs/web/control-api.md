@@ -111,9 +111,9 @@ A [scenario](scenarios.md) is a named list of chaos entries. The scenarios you a
 
 **Scoping a mock request.** A request to a mock route may carry `X-Kaanal-Scenario: a,b` (comma separated names, at most 16, at most 256 bytes) and is then answered with exactly that stack, ignoring the global stack and the live layer. The response echoes it as `X-Kaanal-Scope: a,b` (an empty request header echoes an empty value). A bad header answers `400 { "error": "bad scenario scope", "detail": "..." }`. `404` and `405` answers, and the `/__kaanal` namespace, ignore the header. Details and the shared-counter caveat: [scenarios](scenarios.md#parallel-test-workers).
 
-**List.** `GET /__kaanal/scenarios` returns `[{ "name", "source", "description", "entries", "active" }]` in definition order; `source` is `inline` (`kaanal.yaml`), `file` (`scenarios/NAME.yaml`) or `runtime`.
+**List.** `GET /__kaanal/scenarios` returns `[{ "name", "source", "description", "entries", "pins", "active" }]` (`entries` counts chaos entries and pins; `pins` lists them as `{ endpoint, state, status?, delay? }`, `delay` as text like `"2s"`; `GET /scenarios/{name}` carries `chaos` and `pins`) in definition order; `source` is `inline` (`kaanal.yaml`), `file` (`scenarios/NAME.yaml`) or `runtime`.
 
-**Define.** `PUT /__kaanal/scenarios/{name}` takes the same body as a scenario file:
+**Define.** `PUT /__kaanal/scenarios/{name}` takes the same body as a scenario file (`chaos` and `pins` are both optional, one of them is required; pins are `{ endpoint, state, status?, delay? }`, see [pins](pins.md)):
 
 ```json
 {
@@ -128,12 +128,12 @@ A [scenario](scenarios.md) is a named list of chaos entries. The scenarios you a
 
 It is checked exactly like a file: names against your topology, limits, duplicate keys, `mode` is not allowed in entries (scenario entries always stack). `warnings` lists entries that do nothing (an orphan kind or status) or never fire (a node the endpoint does not visit). Replacing an **active** scenario takes effect at once. Only runtime scenarios can be replaced or undefined: a scenario from `kaanal.yaml` or a file answers `409`.
 
-| Status | When                                                                                       |
-| ------ | ------------------------------------------------------------------------------------------ |
-| `400`  | Bad name, bad entry (the message says where: `chaos[2].node: ...`), `limits:`/`pins:` keys |
-| `404`  | Unknown scenario, or an entry naming an unknown node or endpoint                           |
-| `422`  | The body is not a scenario (for example an unknown key such as `mode` in an entry)         |
-| `409`  | Redefining or undefining a scenario that comes from the config or a file                   |
+| Status | When                                                                                                                                                                                        |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | Bad name, bad entry (the message says where: `chaos[2].node: ...` or `pins[0].status: ...`), a `limits:` key, a scenario with neither `chaos` nor `pins`, an `empty` pin with no empty form |
+| `404`  | Unknown scenario, or an entry naming an unknown node or endpoint                                                                                                                            |
+| `422`  | The body is not a scenario (for example an unknown key such as `mode` in an entry)                                                                                                          |
+| `409`  | Redefining or undefining a scenario that comes from the config or a file                                                                                                                    |
 
 **Save.** `POST /__kaanal/scenarios/save` with
 
@@ -147,6 +147,48 @@ It is checked exactly like a file: names against your topology, limits, duplicat
 - `clear_live: true` clears the live chaos after writing, so activating the saved scenario does not count it twice. Saving over an active scenario updates it in place.
 
 **Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats) and refills rate-limit buckets. Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.
+
+### Pins
+
+Live [pins](pins.md) force an endpoint to answer as `loading`, `empty`, `error`, `slow` or `success`. They sit above every scenario's pins. All four routes need the token, and every write is atomic like the scenario routes.
+
+| Method and path                     | Purpose                                                                  | Success                                               |
+| ----------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------- |
+| `GET /__kaanal/pins`                | Live pins and the pin in force per endpoint                              | `200 { "live", "effective" }`                         |
+| `PUT /__kaanal/pins`                | Set the live pin of one endpoint                                         | `200 { "endpoint", "state", "status"?, "delay_ms"? }` |
+| `DELETE /__kaanal/pins?endpoint=EP` | Remove that live pin; with no query, every live pin. Scenario pins stay. | `204` (also when there was nothing to remove)         |
+| `POST /__kaanal/cycle`              | Step the endpoint's live pin to the next state, or pin `state`           | `200`, same shape as `PUT`                            |
+
+**Body** of `PUT /pins` and `POST /cycle`:
+
+```json
+{ "endpoint": "GET /orders", "state": "error", "status": 429, "delay": "500ms" }
+```
+
+- `endpoint` is required (`METHOD /path`, method case-insensitive). `state` is required for `PUT` and optional for `cycle` (none: the next of `loading, empty, error, slow, success` after the endpoint's current live pin, wrapping, skipping `empty` where it has no empty form). `status` and `delay` (text such as `"2s"`) are optional. Unknown keys are `422`.
+- Rules: `success` takes no `status` or `delay`; `status` is 400 to 599 on `error`, 200 to 299 on `empty`, not allowed on `loading` or `slow`; `delay` is above 0 and at most 5 min.
+
+**`GET /pins`**:
+
+```json
+{
+  "live": [ { "endpoint": "GET /orders", "state": "error", "status": 429, "delay_ms": 500 } ],
+  "effective": {
+    "GET /orders": { "state": "error", "status": 429, "delay_ms": 500, "source": "live" },
+    "GET /users": { "state": "empty", "source": { "scenario": "orders-empty" } }
+  }
+}
+```
+
+`effective` is the winning pin per endpoint (a `success` pin is listed, because it masks); `source` is `"live"` or `{ "scenario": NAME }`.
+
+| Status | When                                                                                                                                                                                      |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | Malformed endpoint, a `HEAD` made from its `GET` (pin the `GET`), a route with no entry node, unknown `state`, a `status` or `delay` the state does not allow, `empty` with no empty form |
+| `404`  | Unknown endpoint                                                                                                                                                                          |
+| `422`  | The body is not a pin (unknown key, missing `endpoint`)                                                                                                                                   |
+
+A `400` or `404` changes nothing. `POST /__kaanal/reset` clears live pins; `DELETE /__kaanal/chaos` leaves them.
 
 ### `GET /__kaanal/events`
 
@@ -165,8 +207,9 @@ data: 37
 
 - `ms` is measured wall time; the per-hop _simulated_ breakdown is in the response's `X-Kaanal-Trace` header (parallel branches in `[a|b]`, cache lookups as `hit`/`miss`, long chains ending `,...+N hops`).
 - `kind` is `reset`, `malformed` or `timeout` when the request failed that way (a reset or cut-off body still answers `200`, so the status alone does not show it); `null` otherwise.
+- `request` events carry `pin`: `null`, or the state a pin forced on the request (`"loading"`, `"empty"`, `"error"`, `"slow"`, `"success"`). A pinned request has `failed_node: null` even when the chain failed.
 - `request` events carry `scope`: `null` for a request without `X-Kaanal-Scenario`, otherwise the stack it was answered with (`""` for an empty header).
-- `scenario` events carry the `action` — `activate`, `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, `update` (the definition of an active scenario changed) or `expire` (a `ttl` lease ran out and the scenario was deactivated) — the `name` it concerns (or `null`) and the `active` stack afterwards.
+- `scenario` events carry the `action` — `activate`, `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, `update` (the definition of an active scenario changed) or `expire` (a `ttl` lease ran out and the scenario was deactivated), `pin` (`PUT` or `DELETE /pins`, `name` is the endpoint or `null` for a clear-all) or `cycle` (`POST /cycle`, `name` is the endpoint) — the `name` it concerns (or `null`) and the `active` stack afterwards.
 - `lagged` means the stream fell behind and skipped that many events.
 
 ### `GET /__kaanal/ui`

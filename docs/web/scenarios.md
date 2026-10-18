@@ -1,6 +1,6 @@
 # Scenarios
 
-A scenario is a named bundle of chaos: "payments is down", "the database is slow and flaky", "checkout times out". You write it once, then switch it on and off with one command or one HTTP call, alone or stacked with others. Scenarios hold **chaos only**: latency, error rates and kinds, outages. (Pinned response states and `kaanal cycle` come later.)
+A scenario is a named bundle of chaos: "payments is down", "the database is slow and flaky", "checkout times out". You write it once, then switch it on and off with one command or one HTTP call, alone or stacked with others. A scenario holds **chaos** (latency, error rates and kinds, outages), **[pins](pins.md)** (force an endpoint to answer as loading, empty, error, slow or success), or both.
 
 ## Quick start
 
@@ -43,9 +43,27 @@ Each entry names **where** it applies and sets **at least one** of the fields:
 
 `error_kind` and `error_status` belong to the **same entry's `error_rate`**. An entry that sets a kind or a status without a rate does nothing, and Kaanal tells you: `kaanal validate`, `kaanal scenario load` and the control API print a warning (it is not an error).
 
-An entry with the same node and endpoint twice in one scenario is an error (merge them). Unknown keys, an empty `chaos:` list and values outside the limits are errors, shown as `file:line:col`. Names that do not exist in your topology are errors too, and `kaanal validate` checks them. A `node` + `endpoint` pair the endpoint's chain never visits is only a warning ("this entry never fires").
+An entry with the same node and endpoint twice in one scenario is an error (merge them). Unknown keys, a scenario with neither `chaos:` nor `pins:` (or both empty) and values outside the limits are errors, shown as `file:line:col`. Names that do not exist in your topology are errors too, and `kaanal validate` checks them. A `node` + `endpoint` pair the endpoint's chain never visits is only a warning ("this entry never fires").
 
-`limits:` and `pins:` keys are reserved for later features and rejected with "not supported yet", so a file you share today will not break tomorrow. A `limits:` or `pins:` with no value (`null`) counts as absent; any other value, even `{}`, is rejected.
+## Pins in a scenario
+
+`pins:` sits next to `chaos:`, and `chaos:` is optional, so a scenario can be pins only:
+
+```yaml
+scenarios:
+  orders-empty:
+    pins:
+      - { endpoint: "GET /orders", state: empty }
+  checkout-fails:
+    chaos:
+      - { node: payments, latency_ms: 800 }
+    pins:
+      - { endpoint: "POST /checkout", state: error, status: 402, delay: 1s }
+```
+
+Each pin is `{ endpoint, state, status?, delay? }`. The states, defaults, layering and the `empty` rules are on [the pins page](pins.md). Pins follow the scenario: activating, deactivating, `--ttl`, `reset`, saving and the `X-Kaanal-Scenario` header all treat them like chaos entries. Pins count toward the 256 entries of a scenario. A `pins:` with no value (`null`) counts as absent.
+
+`limits:` is reserved for a later feature and rejected with "not supported yet", so a file you share today will not break tomorrow. A `limits:` with no value (`null`) counts as absent; any other value, even `{}`, is rejected.
 
 ## Scenario files
 
@@ -81,7 +99,7 @@ Several scenarios can be active at once. They form a **stack**, in the order you
 | Command                                                                                       | What it does                                                                                                                                         |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kaanal scenario list`                                                                        | Every scenario with its source (`inline`, `file`, `runtime`), entry count, description, `(active)`.                                                  |
-| `kaanal scenario show NAME`                                                                   | The entries of one scenario.                                                                                                                         |
+| `kaanal scenario show NAME`                                                                   | The chaos entries and pins of one scenario (`pin GET /x: error (status 404, delay 2s)`).                                                             |
 | `kaanal scenario activate NAME [--ttl 30s]`                                                   | Put it on top of the stack. Prints the active scenarios. With `--ttl` it turns itself off later (see "Auto-expiring activations").                   |
 | `kaanal scenario deactivate NAME`                                                             | Take it off the stack (`ok: NAME is not active` if it was not).                                                                                      |
 | `kaanal scenario set A B ...`                                                                 | Set the whole stack at once, bottom to top. With no names: deactivate all.                                                                           |
@@ -214,7 +232,9 @@ cy.intercept('http://127.0.0.1:8080/**', (req) => {
 
 A browser calling Kaanal from another origin sends a preflight; Kaanal answers it with permissive CORS headers on the mock routes, so the custom header is allowed.
 
-Scoping isolates chaos only. Route counters and the engine's rate limits, queues and pools are shared by every request, because they model shared infrastructure. With a `seed:`, a worker's outcomes are reproducible only when it runs alone; two workers running at once draw from the same per-route counters in an interleaved order. For exact replay, run one worker per instance.
+Scoping isolates chaos and pins. A scoped request sees the pins of the scenarios it names and never the live pins (`kaanal cycle`), so workers pin through pins-only scenarios.
+
+Scoping isolates only those two. Route counters and the engine's rate limits, queues and pools are shared by every request, because they model shared infrastructure. With a `seed:`, a worker's outcomes are reproducible only when it runs alone; two workers running at once draw from the same per-route counters in an interleaved order. For exact replay, run one worker per instance.
 
 Cost: a scoped request does one shared read lock and one short-string hash to find its compiled stack. A stack is compiled once, on its first request, then cached. Any change to scenarios or the stack (activate, deactivate, define, delete, save, reset, a live write, an expiry) clears the cache, so the next scoped request recompiles; that costs microseconds. In the 3000 requests/s load check, with half the requests carrying an empty header, there were no errors and the lag over the trace stayed in its bound (p50 10.3 ms, p99 17.4 ms).
 
@@ -240,9 +260,9 @@ curl -X POST -H "$H" -H 'Content-Type: application/json' -d '{"ttl":"30s"}' "$B/
 
 ## Limits worth knowing
 
-- Chaos only: no `limits:` or `pins:` yet.
+- No `limits:` yet (runtime limit overrides).
 - The status page shows and edits only the chaos you set by hand, not scenarios (a scenario panel comes with the M2 UI). Use `kaanal status` or `GET /__kaanal/scenarios/active` to see the effective result.
 - An activation without `--ttl` stays on until you deactivate it or `reset`. Use `--ttl` for tests that might crash, and start every test run with a reset.
-- Scoping covers chaos only (see the shared-counter caveat above), and the header must be on the mock requests themselves; it has no effect on `/__kaanal`.
+- Scoping covers chaos and scenario pins only (see the shared-counter caveat above), and the header must be on the mock requests themselves; it has no effect on `/__kaanal`.
 - Edits to `kaanal.yaml` or `scenarios/` need a restart (no hot reload yet). `kaanal scenario load` defines a scenario at runtime without one.
 - Internals: [source/chaos.md](../source/chaos.md).

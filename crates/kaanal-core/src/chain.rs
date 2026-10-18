@@ -27,6 +27,7 @@ use crate::config::{
 use crate::diagnostics::{Located, PathSeg};
 use crate::dist::Dist;
 use crate::exec::Op;
+use crate::pin::{PinState, StateOverride, StateOverrides, check_entry};
 use crate::topology::{Edge, NodeId, Topology};
 
 /// Most steps in one chain list.
@@ -214,6 +215,9 @@ pub struct Endpoint {
     pub response: Option<Override>,
     /// A `HEAD` copy made from a `GET` (not listed, R6.8).
     pub synthesized: bool,
+    /// The `states:` overrides of this entry (what a pin to `loading`, `empty`, `error` or
+    /// `slow` answers by default).
+    pub states: StateOverrides,
     /// The built-in body producer of an auth node's routes; `None` for spec and static routes.
     pub responder: Option<Responder>,
     /// **Private.** Where the `endpoints:` entry sits (path and file), if there is one.
@@ -643,6 +647,8 @@ impl Compiler<'_> {
                     .key("status")
                     .bad(format!("override: status {s} must be between 200 and 599")));
             }
+            // Every entry, live or stale, so a typo in `states:` is always caught.
+            Self::states(Some(cfg), &place)?;
             let mut error_map = IndexMap::new();
             let mut written_keys: BTreeMap<String, String> = BTreeMap::new();
             for (k, v) in &cfg.error_map {
@@ -1071,6 +1077,45 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// **Private.** The checked `states:` of a job's entry: keys `loading|empty|error|slow`,
+    /// values in range.
+    fn states(cfg: Option<&EndpointConfig>, place: &Place) -> Result<StateOverrides, Located> {
+        let mut out = StateOverrides::default();
+        for (k, v) in cfg.into_iter().flat_map(|c| &c.states) {
+            let at = place.key("states").key(k);
+            let state = match PinState::parse(k) {
+                Some(PinState::Success) => {
+                    return Err(
+                        at.err("states: 'success' is the normal response and cannot be overridden")
+                    );
+                }
+                Some(s) => s,
+                None => {
+                    return Err(at.err(format!(
+                        "states: '{k}' must be one of loading, empty, error, slow"
+                    )));
+                }
+            };
+            if let Err((f, m)) = check_entry(state, v.status, v.delay) {
+                return Err(at.key(f).bad(format!("states: {m}")));
+            }
+            if v.body.is_some() && matches!(state, PinState::Loading | PinState::Slow) {
+                return Err(at
+                    .key("body")
+                    .bad(format!("states: a {} override takes no body", state.name())));
+            }
+            out.set(
+                state,
+                StateOverride {
+                    status: v.status,
+                    body: v.body.clone(),
+                    delay: v.delay,
+                },
+            );
+        }
+        Ok(out)
+    }
+
     fn endpoint(&mut self, j: &Job<'_>) -> Result<(), Located> {
         let op = j.cfg.and_then(|c| c.op).unwrap_or(j.op);
         let custom = j.cfg.and_then(|c| c.chain.as_ref());
@@ -1152,6 +1197,7 @@ impl Compiler<'_> {
             error_map: j.error_map.clone(),
             response: j.cfg.and_then(|c| c.response.clone()),
             synthesized: false,
+            states: Self::states(j.cfg, &j.place)?,
             responder: j.responder,
             entry: j.cfg.map(|_| (j.place.path.clone(), j.place.file.clone())),
         };

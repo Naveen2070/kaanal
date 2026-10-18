@@ -32,6 +32,7 @@ Each key is `"METHOD /path"` as in the spec (`"GET /orders/{id}"`). Every field 
 | `chain`     | The steps that run after the owner's own work. Absent = the default chain                       |
 | `override`  | A fixed response (`status`, default 200, and `body`). On success it replaces the generated body |
 | `error_map` | What a failure becomes for the client (see below)                                               |
+| `states`    | What a [pinned state](pins.md) answers on this endpoint (see below)                             |
 
 A `HEAD` request with no entry of its own follows the `GET` entry.
 
@@ -85,6 +86,27 @@ nodes:
 `error_map` turns a failure into the response you want. The failing node's name is tried first, then the failure kind (`reset`, `malformed` or `timeout`), then the exact status, then its class (`5xx`); with no match a status failure keeps its own status, a deep `reset` or `malformed` becomes a 502 and a `timeout` a 504, and at the gateway or the route's owner a `reset` or `malformed` breaks the connection or the body instead (a node or kind key still wins there). A value is a status number or `{ status, body }`.
 
 An endpoint maps only its own errors: when a step uses `via:`, the `error_map` of the endpoint it points at is not used, and `kaanal validate` warns about it.
+
+## `states:` (what a pin answers)
+
+A [pin](pins.md) forces an endpoint to answer as `loading`, `empty`, `error` or `slow`. `states:` changes what each of those answers on this endpoint:
+
+```yaml
+"GET /orders":
+  states:
+    loading: { delay: 30s }                       # default +10 s
+    slow: { delay: 4s }                           # default +2 s
+    error: { status: 404, body: { error: gone } } # default 500 and {"error":"pinned","state":"error"}
+    empty: { body: { orders: [], total: 0 } }     # default: derived from the response schema
+```
+
+| Field    | Meaning                                                                                |
+| -------- | -------------------------------------------------------------------------------------- |
+| `status` | `error`: 400 to 599. `empty`: 200 to 299. Not allowed on `loading` or `slow`.          |
+| `body`   | Returned as written, with no `{id}` substitution. Allowed on `error` and `empty` only. |
+| `delay`  | Above 0, at most 5 min.                                                                |
+
+Keys are `loading`, `empty`, `error` and `slow`; `success` is the normal response and cannot be overridden. A value on the pin itself (`kaanal cycle --status`, `--delay`) beats `states:`, which beats the defaults. A 204 or 304 status never carries a body, so `empty: { status: 204, body: X }` drops the body. A `states.empty.body` also lets you pin `empty` on a route that has no schema-derived empty form. `states:` is checked on every entry, even a stale one, so a typo is always caught.
 
 ## Static endpoints
 
