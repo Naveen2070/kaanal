@@ -10,9 +10,11 @@ use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use kaanal_core::chain::skeleton;
 use kaanal_core::config::{NodeConfig, parse_endpoints};
 use kaanal_core::diagnostics::Located;
@@ -25,6 +27,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
 
 mod keys;
+mod logview;
 
 /// **Private.** Per-project state directory holding `run.json` and `lock`.
 const STATE_DIR: &str = ".kaanal";
@@ -102,11 +105,49 @@ enum Cmd {
     /// Clean slate: deactivate scenarios, undefine runtime-defined ones (inline and file ones
     /// stay), clear live chaos, zero route counters, refill rate-limit buckets
     Reset,
+    /// Show the last finished requests, one line each (`-f` to follow live)
+    Logs(LogsArgs),
+    /// Show one request as a per-hop waterfall: an id like r04f2-0042, `last`, or the client's X-Request-Id
+    Trace {
+        key: String,
+        /// Print the log entry as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Change chaos on the running instance
     Chaos {
         #[command(subcommand)]
         cmd: ChaosCmd,
     },
+}
+
+/// **Private.** Flags of `kaanal logs`.
+#[derive(Args)]
+struct LogsArgs {
+    /// How many of the latest requests to show (1-1000)
+    #[arg(short = 'n', default_value_t = 50)]
+    n: u32,
+    /// Keep printing new requests as they finish (Ctrl+C to stop)
+    #[arg(short, long)]
+    follow: bool,
+    /// Only requests newer than this, e.g. 5m or an RFC 3339 time
+    #[arg(long)]
+    since: Option<String>,
+    /// Route template as logged, e.g. "GET /users/{id}"
+    #[arg(long)]
+    endpoint: Option<String>,
+    /// Statuses, e.g. 404 or 404,5xx
+    #[arg(long)]
+    status: Option<String>,
+    /// Only requests a node failed
+    #[arg(long)]
+    failed: bool,
+    /// Only requests that ran under this scenario scope
+    #[arg(long)]
+    scope: Option<String>,
+    /// One JSON object per line
+    #[arg(long)]
+    json: bool,
 }
 
 /// **Private.** `chaos` subcommands.
@@ -248,6 +289,8 @@ fn run(cli: Cli) -> Result<(), Fail> {
             off,
         } => cycle(&endpoint, state, status, delay, off),
         Cmd::Pins => pins(),
+        Cmd::Logs(a) => logs_cmd(&a),
+        Cmd::Trace { key, json } => trace(&key, json),
         Cmd::Reset => {
             call("POST", "/__kaanal/reset", None)?;
             println!("reset");
@@ -923,8 +966,11 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status >= 300 {
         let msg = v["error"].as_str().unwrap_or(&text);
+        let detail = v["detail"]
+            .as_str()
+            .map_or(String::new(), |d| format!(" ({d})"));
         return Err(err(clean(&format!(
-            "{method} {path}: HTTP {status}: {msg}"
+            "{method} {path}: HTTP {status}: {msg}{detail}"
         ))));
     }
     Ok(v)
@@ -987,6 +1033,211 @@ fn status() -> Result<(), Fail> {
         }
     );
     Ok(())
+}
+
+/// **Private.** `kaanal logs`: checks the flags and turns them into the server's query pairs.
+fn logs_cmd(a: &LogsArgs) -> Result<(), Fail> {
+    if !(1..=1000).contains(&a.n) {
+        return Err(err("-n must be from 1 to 1000"));
+    }
+    if a.scope.as_deref() == Some("") {
+        // ponytail: the server can filter the empty-header scope, the CLI cannot ask for it yet
+        return Err(err("--scope needs a scope name"));
+    }
+    let params: Vec<(String, String)> = [
+        Some(("limit", a.n.to_string())),
+        a.since.clone().map(|v| ("since", v)),
+        a.endpoint.clone().map(|v| ("endpoint", v)),
+        a.status.clone().map(|v| ("status", v)),
+        a.failed.then(|| ("failed", "true".to_string())),
+        a.scope.clone().map(|v| ("scope", v)),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    logs(&params, a.follow, a.json)
+}
+
+/// **Private.** Prints one line to stdout. A closed pipe (`kaanal logs | head`) ends the process
+/// quietly with exit 0, which is how every well-behaved filter tool treats it.
+fn out_line(text: &str) {
+    use std::io::Write;
+    if let Err(e) = writeln!(std::io::stdout().lock(), "{text}") {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("kaanal: cannot write to stdout: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// **Private.** `kaanal trace`: the waterfall of one request, or its entry as JSON.
+fn trace(key: &str, json: bool) -> Result<(), Fail> {
+    let e = call(
+        "GET",
+        &format!("/__kaanal/trace/{}", encode_segment(key)),
+        None,
+    )
+    // `last` is unknown only while nothing has finished yet
+    .map_err(|f| match f {
+        Fail(1, m) if key == "last" && m.contains("HTTP 404") => err("no requests recorded yet"),
+        f => f,
+    })?;
+    out_line(&if json {
+        e.to_string()
+    } else {
+        logview::waterfall(&e)
+    });
+    Ok(())
+}
+
+/// **Private.** A status notice of `logs -f`. With `--json` stdout carries JSON Lines only, so
+/// notices go to stderr then.
+fn notice(json: bool, text: &str) {
+    if json {
+        eprintln!("{text}");
+    } else {
+        out_line(text);
+    }
+}
+
+/// **Private.** One log line, or the JSON object with `--json`.
+fn show(v: &Value, json: bool) {
+    out_line(&if json {
+        v.to_string()
+    } else {
+        logview::line(v)
+    });
+}
+
+/// **Private.** `/__kaanal/logs?k=v&...` for the filter pairs.
+fn logs_path(params: &[(String, String)]) -> String {
+    let q: Vec<String> = params
+        .iter()
+        .map(|(k, v)| format!("{k}={}", encode_segment(v)))
+        .collect();
+    format!("/__kaanal/logs?{}", q.join("&"))
+}
+
+/// **Private.** `kaanal logs`: the tail, then (`-f`) every request as it finishes.
+fn logs(params: &[(String, String)], follow: bool, json: bool) -> Result<(), Fail> {
+    if follow {
+        return follow_logs(params, json);
+    }
+    let page = call("GET", &logs_path(params), None)?;
+    for e in page["entries"].as_array().into_iter().flatten() {
+        show(e, json);
+    }
+    Ok(())
+}
+
+/// **Private.** Ctrl+C is a normal way to stop following: exit 0.
+fn exit_on_ctrl_c() {
+    std::thread::spawn(|| {
+        if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            let _ = rt.block_on(tokio::signal::ctrl_c());
+            std::process::exit(0);
+        }
+    });
+}
+
+/// **Private.** `logs -f`. Subscribe first and let the reader thread buffer events, then fetch the
+/// tail, then print the tail and everything buffered or live that the tail did not already
+/// contain: a request that finishes between the two is in both and printed once, one that
+/// finishes late (slow) is printed when it finishes. Live events are filtered here, with the
+/// server's own filter grammar.
+fn follow_logs(params: &[(String, String)], json: bool) -> Result<(), Fail> {
+    let (addr, token) =
+        read_run().ok_or_else(|| Fail(2, format!("kaanal is not running (no {RUN_FILE})")))?;
+    let gone = |why: String| Fail(2, format!("kaanal is not running on {addr}: {why}"));
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    let filter = logview::filter_of(params, now_ms).map_err(err)?;
+    exit_on_ctrl_c();
+    // Its own agent: no overall timeout, the stream is meant to stay open.
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .proxy(None)
+        .max_redirects(0)
+        .timeout_connect(Some(Duration::from_secs(2)))
+        .build()
+        .into();
+    let resp = agent
+        .get(&format!("http://{addr}/__kaanal/events"))
+        .header("Host", &format!("localhost:{}", addr.port()))
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| gone(e.to_string()))?;
+    if resp.status().as_u16() != 200 {
+        return Err(err(format!("GET /__kaanal/events: HTTP {}", resp.status())));
+    }
+    // Bounded: a follower that cannot keep up loses events visibly (a `lagged` notice), not memory.
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(String, String)>>(logview::BACKLOG);
+    let dropped_in = Arc::new(AtomicU64::new(0));
+    let dropped = Arc::clone(&dropped_in);
+    std::thread::spawn(move || {
+        let mut r = std::io::BufReader::new(resp.into_body().into_reader());
+        let (mut sse, mut buf) = (logview::Sse::default(), Vec::new());
+        let dropped = Arc::clone(&dropped_in);
+        loop {
+            buf.clear();
+            match logview::read_capped(&mut r, &mut buf, logview::MAX_MSG) {
+                Ok(logview::Line::Eof) | Err(_) => break,
+                Ok(logview::Line::TooLong) => sse.overflow(),
+                Ok(logview::Line::Text) => {
+                    if let Some(m) = sse.push(&logview::lossy_line(&buf))
+                        && !logview::forward(&tx, &dropped, m)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        let _ = tx.send(None);
+    });
+    let mut seen = logview::Seen::new();
+    let page = call("GET", &logs_path(params), None)?;
+    for e in page["entries"].as_array().into_iter().flatten() {
+        seen.insert(e["id"].as_str().unwrap_or(""));
+        show(e, json);
+    }
+    // Ends only when the stream does (or the printer's queue is cut): the server is gone.
+    logview::drain(
+        &rx,
+        &dropped,
+        Duration::from_millis(500),
+        &mut |s| notice(json, s),
+        &mut |event, data| {
+            if event != "request" {
+                return;
+            }
+            let Ok(mut v) = serde_json::from_str::<Value>(data) else {
+                return;
+            };
+            if !seen.insert(v["id"].as_str().unwrap_or("")) || !logview::passes(&filter, &v) {
+                return;
+            }
+            // --json wants the whole entry; the event is only its summary.
+            if json {
+                let id = v["id"].as_str().unwrap_or("");
+                match call(
+                    "GET",
+                    &format!("/__kaanal/trace/{}", encode_segment(id)),
+                    None,
+                ) {
+                    Ok(full) => v = full,
+                    Err(_) => notice(json, &format!("-- could not fetch {} --", clean(id))),
+                }
+            }
+            show(&v, json);
+        },
+    );
+    Err(gone("the event stream closed".into()))
 }
 
 /// **Private.** The pin states `cycle --state` accepts, in cycle order.
@@ -1131,8 +1382,24 @@ fn chaos_text(c: &Value) -> String {
 /// **Private.** Server text may echo user input (e.g. a node name); never let it drive the terminal.
 fn clean(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_control() { '?' } else { c })
+        .map(|c| if c.is_control() || spoofs(c) { '?' } else { c })
         .collect()
+}
+
+/// **Private.** Invisible characters that reorder or hide text without being control characters:
+/// bidi marks and overrides, line/paragraph separators, word joiner and invisible operators,
+/// and the byte order mark. (Zero-width joiners stay: emoji and some scripts need them.)
+fn spoofs(c: char) -> bool {
+    matches!(
+        c,
+        '\u{61c}'
+            | '\u{200e}'..='\u{200f}'
+            | '\u{2028}'..='\u{2029}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{feff}'
+    )
 }
 
 /// **Private.** [`clean`] per line, keeping our own line breaks.
@@ -1256,6 +1523,16 @@ mod tests {
         assert_eq!(clean("unknown node 'db'"), "unknown node 'db'");
         assert_eq!(clean("a\u{1b}[31mb\r\n\t\u{7f}\u{9b}"), "a?[31mb?????");
         assert_eq!(clean("caf\u{e9}"), "caf\u{e9}");
+        // text reordering and invisible characters are neutralised too
+        assert_eq!(
+            clean("a\u{202e}b\u{2066}c\u{200f}d\u{61c}e\u{2028}f\u{feff}"),
+            "a?b?c?d?e?f?"
+        );
+        // joiners (emoji, scripts) and ordinary non-ASCII text stay
+        assert_eq!(
+            clean("\u{1f468}\u{200d}\u{1f469} \u{65e5}\u{672c}"),
+            "\u{1f468}\u{200d}\u{1f469} \u{65e5}\u{672c}"
+        );
     }
 
     #[test]

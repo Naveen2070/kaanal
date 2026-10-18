@@ -527,6 +527,7 @@ async fn events_stream_reports_requests() {
     let data = seen.lines().find(|l| l.starts_with("data:")).unwrap();
     let ev: Value = serde_json::from_str(data.trim_start_matches("data:").trim()).unwrap();
     assert!(ev["ms"].as_u64().unwrap() >= 5, "{ev}");
+    assert_eq!(ev["endpoint"], "GET /users/{id}", "{ev}");
 }
 
 #[tokio::test]

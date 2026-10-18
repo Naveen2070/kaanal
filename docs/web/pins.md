@@ -39,7 +39,7 @@ x-kaanal-trace: nginx.proc=1.0ms,net=1.0ms,app.proc=2.0ms,net=1.0ms,db.error=503
 Two more consequences:
 
 - **The delay sits outside every timeout.** A `loading` pin of 10 s under a gateway `timeout: 5s` still answers after about 10 s, with no timeout in the trace. The pin delay holds no slot or token, and adds no random draw, so a seeded run draws the same numbers with and without a pin. It is a hop of its own: chaos `latency_ms` on the endpoint is a separate `delay` piece after it, and each delay is capped at 5 min on its own (they are not summed or clamped together).
-- **The request events** on the [event stream](control-api.md#get-__kaanalevents) carry `"pin": "error"` (or `null`), and `failed_node` stays `null` for a pinned request even though the trace shows the chain failure.
+- **The request events** on the [event stream](control-api.md#get-__kaanalevents) carry `"pin": "error"` (or `null`), and `failed_node` stays `null` for a pinned request even though the trace shows the chain failure. In the [request log](observability.md) a pinned request has the flag `PN` (a pin delay adds `PD` and `DI`), and its entry keeps the chain's own failure in `chain_error`; `kaanal trace` ends such a request with `pinned=success hid: db.error=503`.
 
 ## `kaanal cycle`: step through the states
 

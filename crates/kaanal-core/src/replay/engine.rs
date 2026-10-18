@@ -35,6 +35,19 @@ impl fmt::Display for EngineError {
 
 impl std::error::Error for EngineError {}
 
+/// Why a replayed request failed; carried on [`Finished::cause`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailCause {
+    /// A planned failure from the chaos plan (a hang included).
+    Chaos,
+    /// The node's rate limit refused it (429).
+    RateLimit,
+    /// The node's queue was full.
+    Overflow,
+    /// A `timeout:` span's deadline fired.
+    Deadline,
+}
+
 /// What a finished request experienced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Finished {
@@ -48,6 +61,8 @@ pub struct Finished {
     pub done: u64,
     /// Ok, or where and how the request failed.
     pub result: ChainResult,
+    /// Why it failed; `None` when `result` is Ok.
+    pub cause: Option<FailCause>,
     /// The hops that ran, in plan order: `start` is the offset from `arrival`; a hop a failure
     /// cancelled while running is cut at the failure instant; one that had not started is absent.
     pub hops: Vec<FinishedHop>,
@@ -136,6 +151,9 @@ struct Failure {
     /// rate limit (`true`) or the queue (`false`). A planned `Fail` that replaces this failure (D17)
     /// takes the count back, so counters match the answers.
     refused: Option<(NodeId, bool)>,
+    /// Why it failed. Not derivable from `refused` or `kind`: a fired deadline and a planned hang
+    /// both have kind `Timeout` and `refused: None`.
+    cause: FailCause,
 }
 
 /// **Private.** One request in flight.
@@ -507,6 +525,7 @@ impl Engine {
                             kind,
                             retry_after: None,
                             refused: None,
+                            cause: FailCause::Chaos,
                         },
                     );
                     return;
@@ -619,6 +638,7 @@ impl Engine {
                         kind: FailKind::Status,
                         retry_after,
                         refused: counted.then_some((node, true)),
+                        cause: FailCause::RateLimit,
                     },
                 );
                 return;
@@ -654,6 +674,7 @@ impl Engine {
                                 kind: FailKind::Status,
                                 retry_after: None,
                                 refused: counted.then_some((node, false)),
+                                cause: FailCause::Overflow,
                             },
                         );
                         return;
@@ -759,6 +780,7 @@ impl Engine {
                 status: 504,
                 retry_after: None,
                 refused: None,
+                cause: FailCause::Deadline,
             },
         );
         self.settle(r);
@@ -899,6 +921,7 @@ fn record(req: &Req) -> Finished {
         arrival: req.arrival,
         done: req.done.expect("answered requests are done"),
         result,
+        cause: req.fail.as_ref().map(|f| f.cause),
         hops,
     }
 }

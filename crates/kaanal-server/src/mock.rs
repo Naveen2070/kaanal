@@ -9,7 +9,6 @@
 //! A `reset` or `malformed` failure at a wire node (the gateway or the route's owner) is not
 //! JSON: it is a body that breaks off or is cut short (B2a Z7); see [`wire_failure`].
 
-use std::fmt::Write as _;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -20,16 +19,18 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
-    ChainRequest, ChainResult, FailKind, FinishedHop, HopKind, Outcome, PinState, Plan, PlanItem,
-    Responder, Topology, resolve, resolve_error, sample_plan,
+    ChainRequest, ChainResult, EffectiveChaos, EffectivePins, Endpoint, FailKind, Finished,
+    FinishedHop, Outcome, PinState, Plan, Responder, Topology, resolve, resolve_error, sample_plan,
 };
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::auth;
+use crate::log::{self, LogEntry};
 use crate::pins;
+use crate::record::{self, Answer, Facts, Run, TraceParts};
 use crate::scope::{self, Scoped};
-use crate::state::{AppState, BusEvent, Event, Route};
+use crate::state::{AppState, BusEvent, Route};
 use crate::wire::Cut;
 
 /// Serves one mock request.
@@ -37,7 +38,13 @@ use crate::wire::Cut;
 /// The plan is sampled in this task (microseconds of pure math); the engine actor then runs
 /// it in real time, so slow virtual paths never block a worker.
 /// The `/__kaanal` namespace never reaches here (control routes win), but even a
-/// hypothetical miss gets no CORS headers (rule R5.4).
+/// hypothetical miss gets no CORS headers (rule R5.4) and no request id.
+///
+/// Every other response, rejected ones included, carries `X-Request-Id` and leaves exactly one
+/// log entry and one event: [`rejected`] covers the paths that never ran a chain, and a client
+/// that goes away mid-request leaves a `client-gone` entry (see [`Flight`]). Only 404, 405 and
+/// a bad scope touch nothing else: `engine-stopped` still counts the route and samples its
+/// plan (that order predates the log).
 pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let path = req.uri().path().to_string();
     // The control namespace never gets CORS (RULES R5.4), not even on a 404 or a preflight.
@@ -47,27 +54,37 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     if req.method() == Method::OPTIONS {
         return cors(StatusCode::NO_CONTENT.into_response());
     }
-    let method = req.method().as_str().to_string();
+    if control {
+        return no_route(&path);
+    }
+    // Preflights take no id; everything below does, so ids count the requests that are logged.
+    let mut flight = Flight::new(&st, &req, path);
+    let (method, path) = (flight.method.as_str(), flight.path.as_str());
 
-    let Ok(matched) = st.paths.at(&path) else {
-        return cors(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "no route", "path": path })),
-            )
-                .into_response(),
-        );
+    let Ok(matched) = st.paths.at(path) else {
+        let (ident, resp) = (flight.ident.take().expect("armed"), no_route(path));
+        return cors(rejected(&st, ident, method, path, None, "unmatched", resp));
     };
     // A HEAD with no spec entry was given its own copy of GET at build time (R6.8); hyper strips the body.
     let Some(route) = matched.value.iter().find(|r| r.method == method) else {
         let body = Json(json!({ "error": "method not allowed", "path": path }));
-        return cors((StatusCode::METHOD_NOT_ALLOWED, body).into_response());
+        let resp = (StatusCode::METHOD_NOT_ALLOWED, body).into_response();
+        let ident = flight.ident.take().expect("armed");
+        return cors(rejected(&st, ident, method, path, None, "unmatched", resp));
     };
+    flight.endpoint = Some(Arc::clone(&route.endpoint));
     // Before the login body read and the counter, so a bad scope costs no draw (B2b-3).
     let scope = match scope_of(&st, req.headers()) {
         Ok(s) => s,
-        Err(detail) => return cors(bad_scope(&detail)),
+        Err(detail) => {
+            let (ident, resp) = (flight.ident.take().expect("armed"), bad_scope(&detail));
+            let key = Some(route.key.as_str());
+            return cors(rejected(&st, ident, method, path, key, "bad-scope", resp));
+        }
     };
+    if let (Some(i), Some(s)) = (flight.ident.as_mut(), &scope) {
+        i.scope = Some(s.0.clone());
+    }
     let params: Vec<(String, String)> = matched
         .params
         .iter()
@@ -75,7 +92,6 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         .map(|(k, v)| (k.to_string(), percent_decode_str(v).decode_utf8_lossy().into_owned()))
         .collect();
 
-    let started = Instant::now();
     let ep = &route.endpoint;
     debug_assert_eq!(route.key, ep.key, "a route answers with its own endpoint");
     // Spec §5: a built-in login reads (and checks) its body before the chain, with no sleep
@@ -86,24 +102,146 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         None
     };
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
-    let (plan, pin) = plan_of(&st, route, n, scope.as_ref().map(|s| &*s.1));
+    // S10: the scoped stack, or else one snapshot of the live one (the `Arc` is cloned once here
+    // and kept until the entry is built, so a swap mid-request never reaches this request). A
+    // scoped request never sees the live pins.
+    let snap;
+    let (chaos, pins) = if let Some(s) = &scope {
+        (&s.1.chaos, &s.1.pins)
+    } else {
+        snap = st.snapshot();
+        (&snap.chaos, &snap.pins)
+    };
+    let (plan, pin) = plan_of(&st, route, n, chaos, pins);
     let plan = Arc::new(plan);
-    // The snapshot is gone before the await: the engine task owns time from here.
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
     let Some(fin) = (match &st.engine {
         Some(e) => e.run(Arc::clone(&plan)).await,
         None => None,
     }) else {
-        return cors(engine_stopped());
+        let (ident, resp) = (flight.ident.take().expect("armed"), engine_stopped());
+        let key = Some(route.key.as_str());
+        return cors(rejected(
+            &st,
+            ident,
+            method,
+            path,
+            key,
+            "engine-stopped",
+            resp,
+        ));
     };
+    let ident = flight.ident.take().expect("armed");
+    let resp = finish(
+        &st,
+        login,
+        Served {
+            route,
+            ident,
+            method,
+            path,
+            params: &params,
+            scope: scope.as_ref().map(|s| s.0.as_str()),
+            chaos,
+            plan: &plan,
+            pin: pin.as_ref(),
+            fin: &fin,
+        },
+    );
+    cors(resp)
+}
 
-    let pinned = pin.as_ref().map(|o| o.state.name());
-    let trace = trace_header(&plan, &fin.hops, &fin.result, &st.topo, pinned);
+/// **Private.** A mock request in flight. If the handler future is dropped (the client went away)
+/// before it finished, the drop publishes a `client-gone` entry (status 499, no hops) and its
+/// event, so every id ends in exactly one entry. Every normal exit takes `ident` first, which
+/// disarms the guard; it never publishes twice.
+struct Flight {
+    st: Arc<AppState>,
+    ident: Option<Ident>,
+    method: String,
+    path: String,
+    endpoint: Option<Arc<Endpoint>>,
+}
+
+impl Flight {
+    /// Takes the request's id and starts its clock.
+    fn new(st: &Arc<AppState>, req: &Request, path: String) -> Self {
+        let (seq, id) = st.ids.next();
+        let client_id = req
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(log::client_id);
+        Flight {
+            st: Arc::clone(st),
+            ident: Some(Ident {
+                id,
+                client_id,
+                seq,
+                started: Instant::now(),
+                scope: None,
+            }),
+            method: req.method().as_str().to_string(),
+            path,
+            endpoint: None,
+        }
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        // A panic unwinding through the handler is not a client abort.
+        if let Some(mut ident) = self.ident.take().filter(|_| !std::thread::panicking()) {
+            let key = self.endpoint.as_ref().map(|e| e.key.as_str());
+            let scope = ident.scope.take();
+            let facts = ident.facts(&self.method, &self.path, key, scope.as_deref());
+            let entry = record::reject_entry(facts, 499, "client-gone");
+            publish(&self.st, entry, Vec::new());
+        }
+    }
+}
+
+/// **Private.** What [`finish`] needs once the engine has answered.
+struct Served<'a> {
+    route: &'a Route,
+    ident: Ident,
+    method: &'a str,
+    path: &'a str,
+    params: &'a [(String, String)],
+    scope: Option<&'a str>,
+    chaos: &'a EffectiveChaos,
+    plan: &'a Plan,
+    pin: Option<&'a Outcome>,
+    fin: &'a Finished,
+}
+
+/// **Private.** Builds the response of a request the chain served, then logs it and tells the bus.
+fn finish(
+    st: &AppState,
+    login: Option<Result<auth::Credentials, auth::Reject>>,
+    s: Served,
+) -> Response {
+    let Served {
+        route,
+        ident,
+        method,
+        path,
+        params,
+        scope,
+        chaos,
+        plan,
+        pin,
+        fin,
+    } = s;
+    let ep = &route.endpoint;
+    let pinned = pin.map(|o| o.state.name());
+    let TraceParts { full, header } =
+        record::trace_parts(plan, &fin.hops, &fin.result, &st.topo, pinned);
     let ask = Ask {
-        method: &method,
-        path: &path,
-        params: &params,
+        method,
+        path,
+        params,
     };
     // P2: a pin wins over whatever the chain did; the chain still ran (its hops and delay are real).
     let Reply {
@@ -112,18 +250,17 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         failed,
         retry,
         wire,
-    } = match &pin {
-        Some(o) => pinned_reply(&st, route, &ask, login, o),
-        None => chaos_reply(&st, route, &fin.result, &ask, login, &trace),
+    } = match pin {
+        Some(o) => pinned_reply(st, route, &ask, login, o),
+        None => chaos_reply(st, route, &fin.result, &ask, login, &header),
     };
 
-    let mut resp = wire.unwrap_or_else(|| response(status, body, &trace, retry));
+    let mut resp = wire.unwrap_or_else(|| response(status, body, &header, retry));
     if ep.responder == Some(Responder::Login) {
         no_store(&mut resp);
     }
-
-    let scope = scope.map(|s| s.0);
-    if let Some(v) = scope.as_deref().and_then(|k| HeaderValue::from_str(k).ok()) {
+    tag(&mut resp, &ident.id);
+    if let Some(v) = scope.and_then(|k| HeaderValue::from_str(k).ok()) {
         resp.headers_mut().insert(scope::SCOPE_ECHO, v);
     }
     // The event lists what the chain touched, its failing node too, even when a pin hid the failure.
@@ -132,14 +269,99 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         ChainResult::Ok => None,
     };
     let nodes = touched_nodes(&fin.hops, chain_failed, &st.topo);
-    let who = Who {
-        method,
-        path,
-        scope,
-        pin: pinned,
+    let facts = ident.facts(method, path, Some(route.key.as_str()), scope);
+    let run = Run {
+        plan,
+        fin,
+        chaos,
+        topo: &st.topo,
+        pin_delay: pin.is_some_and(|o| !o.delay.is_zero()),
     };
-    send_event(&st, who, status, started, nodes, failed);
-    cors(resp)
+    let ans = Answer {
+        status,
+        pin: pinned,
+        failed: failed.as_ref(),
+    };
+    publish(st, record::build_entry(facts, &ans, &run, full), nodes);
+    resp
+}
+
+/// **Private.** The id and clock of one request, taken when it arrives.
+struct Ident {
+    id: String,
+    client_id: Option<String>,
+    seq: u64,
+    started: Instant,
+    /// The scope key once the header resolved, so a rejection or an abort after that keeps it.
+    scope: Option<String>,
+}
+
+impl Ident {
+    /// The request facts for its log entry. `ms` is measured now, not simulated: it shows what a
+    /// client really waited (timer granularity, load). The trace keeps the simulated per-hop times.
+    fn facts<'a>(
+        self,
+        method: &'a str,
+        path: &'a str,
+        endpoint: Option<&'a str>,
+        scope: Option<&'a str>,
+    ) -> Facts<'a> {
+        let ts_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        Facts {
+            ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            id: self.id,
+            client_id: self.client_id,
+            seq: self.seq,
+            ts_ms,
+            method,
+            path,
+            endpoint,
+            scope,
+        }
+    }
+}
+
+/// **Private.** Puts `X-Request-Id` on a response.
+fn tag(resp: &mut Response, id: &str) {
+    if let Ok(v) = HeaderValue::from_str(id) {
+        resp.headers_mut().insert("x-request-id", v);
+    }
+}
+
+/// **Private.** Logs a request refused before any chain ran and tags its response. These paths
+/// touch neither the route counter nor a seeded draw.
+fn rejected(
+    st: &AppState,
+    mut ident: Ident,
+    method: &str,
+    path: &str,
+    endpoint: Option<&str>,
+    why: &'static str,
+    mut resp: Response,
+) -> Response {
+    tag(&mut resp, &ident.id);
+    let status = resp.status().as_u16();
+    let scope = ident.scope.take();
+    let facts = ident.facts(method, path, endpoint, scope.as_deref());
+    publish(st, record::reject_entry(facts, status, why), Vec::new());
+    resp
+}
+
+/// **Private.** Records a finished request, then tells the bus. The ring comes first, so a
+/// subscriber that sees the event can already find the entry. No subscribers is fine: send only
+/// errors when nobody listens.
+fn publish(st: &AppState, entry: LogEntry, nodes: Vec<String>) {
+    let event = record::event_of(&entry, nodes);
+    st.push_log(entry);
+    let _ = st.events.send(BusEvent::Request(event));
+}
+
+/// **Private.** The 404 for a path nothing serves.
+fn no_route(path: &str) -> Response {
+    let body = Json(json!({ "error": "no route", "path": path }));
+    (StatusCode::NOT_FOUND, body).into_response()
 }
 
 /// **Private.** The reply: status and JSON body (none for `null`), the trace header and, for a
@@ -191,23 +413,16 @@ fn bad_scope(detail: &str) -> Response {
     (StatusCode::BAD_REQUEST, body).into_response()
 }
 
-/// **Private.** Samples the request's plan and settles its pin from one view: the scoped stack,
-/// or else one snapshot (S10; the `Arc` is cloned once here and dropped on return, so a swap
-/// mid-request never reaches this request). A scoped request never sees the live pins. A pin's
-/// delay goes into the plan; a synthesized `HEAD` follows its `GET`'s pin.
+/// **Private.** Samples the request's plan and settles its pin from one view (the `chaos` and
+/// `pins` of the scoped stack or of the snapshot). A pin's delay goes into the plan; a
+/// synthesized `HEAD` follows its `GET`'s pin.
 fn plan_of(
     st: &AppState,
     route: &Route,
     n: u64,
-    scoped: Option<&Scoped>,
+    chaos: &EffectiveChaos,
+    pins: &EffectivePins,
 ) -> (Plan, Option<Outcome>) {
-    let snap;
-    let (chaos, pins) = if let Some(s) = scoped {
-        (&s.chaos, &s.pins)
-    } else {
-        snap = st.snapshot();
-        (&snap.chaos, &snap.pins)
-    };
     let ep = &route.endpoint;
     let pin = if pins.is_empty() {
         None
@@ -494,188 +709,6 @@ fn no_store(r: &mut Response) {
     h.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
 }
 
-/// **Private.** Longest `X-Kaanal-Trace` value in bytes (Node's undici rejects headers over
-/// about 16 KiB). The error part is always kept, so a long failing node name can pass it.
-const TRACE_CAP: usize = 4096;
-
-/// **Private.** One piece of the trace: a hop, or the bracket structure of a `parallel`.
-enum Piece {
-    Hop(String),
-    Open,
-    Bar,
-    Close,
-}
-
-/// **Private.** The `X-Kaanal-Trace` value: visible hops in plan order with one decimal
-/// (`1.0ms`, never a truncated `0ms`); a `parallel` block is `[a,b|c]` (branches split by
-/// `|`); cache hops are `node.hit` / `node.miss`; `node.wait=T` comes before a hop that
-/// queued; a failure appends `node.error=STATUS`, or `node.error=reset` / `node.error=malformed`
-/// for those kinds (they have no status); a pinned request ends with `pinned=STATE`. Over [`TRACE_CAP`] bytes it stops before a
-/// hop, closes open brackets and adds `,...+N hops` (ASCII, D13), N being the pieces left out.
-fn trace_header(
-    plan: &Plan,
-    hops: &[FinishedHop],
-    result: &ChainResult,
-    topo: &Topology,
-    pin: Option<&str>,
-) -> String {
-    let name = |id: usize| topo.nodes[id].name.as_str();
-    let fmt_ms = |d: Duration| format!("{:.1}ms", d.as_secs_f64() * 1000.0);
-    let mut pieces = Vec::new();
-    // (end of the fork's items, index of its first branch marker) per open fork.
-    let mut forks: Vec<(usize, usize)> = Vec::new();
-    let mut next = 0; // index into `hops`
-    for (i, item) in plan.items.iter().enumerate() {
-        while forks.last().is_some_and(|&(end, _)| end == i) {
-            forks.pop();
-            pieces.push(Piece::Close);
-        }
-        match item {
-            PlanItem::Fork { size, .. } => {
-                forks.push((i + 1 + size, i + 1));
-                pieces.push(Piece::Open);
-            }
-            PlanItem::Branch { .. } => {
-                if forks.last().is_some_and(|&(_, first)| first != i) {
-                    pieces.push(Piece::Bar);
-                }
-            }
-            PlanItem::Hop(_) if hops.get(next).is_some_and(|h| h.idx == i) => {
-                let fh = &hops[next];
-                let h = &fh.hop;
-                next += 1;
-                if !fh.wait.is_zero() {
-                    pieces.push(Piece::Hop(format!(
-                        "{}.wait={}",
-                        name(h.node),
-                        fmt_ms(fh.wait)
-                    )));
-                }
-                let d = fmt_ms(h.dur);
-                pieces.push(Piece::Hop(match h.kind {
-                    HopKind::Net => format!("net={d}"),
-                    HopKind::Proc => format!("{}.proc={d}", name(h.node)),
-                    HopKind::Op(op) => format!("{}.{}={d}", name(h.node), op.name()),
-                    HopKind::CacheHit => format!("{}.hit={d}", name(h.node)),
-                    HopKind::CacheMiss => format!("{}.miss={d}", name(h.node)),
-                    HopKind::Delay => format!("{}.delay={d}", name(h.node)),
-                }));
-            }
-            PlanItem::Hop(_) | PlanItem::Fail { .. } | PlanItem::Span { .. } => {}
-        }
-    }
-    pieces.extend(forks.iter().map(|_| Piece::Close));
-    let pieces = without_empty_blocks(pieces);
-    let error = match result {
-        ChainResult::Err {
-            node, status, kind, ..
-        } => match kind {
-            FailKind::Reset | FailKind::Malformed => {
-                format!("{}.error={}", name(*node), kind.as_str())
-            }
-            _ => format!("{}.error={status}", name(*node)),
-        },
-        ChainResult::Ok => String::new(),
-    };
-    // The error and the pin are always kept, so they are reserved before the hops are cut.
-    let pinned = pin.map_or_else(String::new, |p| format!("pinned={p}"));
-    let tails: Vec<&String> = [&error, &pinned]
-        .into_iter()
-        .filter(|t| !t.is_empty())
-        .collect();
-    let tail: usize = tails.iter().map(|t| t.len() + 1).sum();
-    let mut out = render(&pieces, usize::MAX, 0);
-    if out.len() + tail > TRACE_CAP {
-        out = render(&pieces, TRACE_CAP, tail);
-    }
-    for t in tails {
-        if !out.is_empty() {
-            out.push(',');
-        }
-        out.push_str(t);
-    }
-    out
-}
-
-/// **Private.** Drops every `[...]` block with no hop inside (a `parallel` that a sibling's
-/// failure cancelled before it started would otherwise print as `[|]`).
-fn without_empty_blocks(pieces: Vec<Piece>) -> Vec<Piece> {
-    // Open positions with the hops seen inside each; a block's range is dropped when it has none.
-    let mut open: Vec<(usize, usize)> = Vec::new();
-    let mut drop: Vec<std::ops::Range<usize>> = Vec::new();
-    for (i, p) in pieces.iter().enumerate() {
-        match p {
-            Piece::Open => open.push((i, 0)),
-            Piece::Hop(_) => {
-                if let Some(top) = open.last_mut() {
-                    top.1 += 1;
-                }
-            }
-            Piece::Close => {
-                if let Some((start, hops)) = open.pop() {
-                    if hops == 0 {
-                        drop.push(start..i + 1);
-                    } else if let Some(parent) = open.last_mut() {
-                        parent.1 += hops;
-                    }
-                }
-            }
-            Piece::Bar => {}
-        }
-    }
-    pieces
-        .into_iter()
-        .enumerate()
-        .filter(|(i, _)| !drop.iter().any(|r| r.contains(i)))
-        .map(|(_, p)| p)
-        .collect()
-}
-
-/// **Private.** Joins `pieces` (commas between elements, none after `[` or `|`). Stops
-/// before the first hop that would not leave room, within `cap`, for the open brackets,
-/// the `,...+N hops` suffix and `tail` more bytes.
-fn render(pieces: &[Piece], cap: usize, tail: usize) -> String {
-    let total = pieces.iter().filter(|p| matches!(p, Piece::Hop(_))).count();
-    let suffix = ",...+".len() + total.to_string().len() + " hops".len();
-    let (mut out, mut first, mut depth, mut shown) = (String::new(), true, 0usize, 0usize);
-    for p in pieces {
-        match p {
-            Piece::Hop(h) => {
-                let sep = usize::from(!first);
-                if out.len() + sep + h.len() + depth + suffix + tail > cap {
-                    out.extend(std::iter::repeat_n(']', depth));
-                    if !out.is_empty() {
-                        out.push(',');
-                    }
-                    let _ = write!(out, "...+{} hops", total - shown);
-                    return out;
-                }
-                if !first {
-                    out.push(',');
-                }
-                out.push_str(h);
-                (first, shown) = (false, shown + 1);
-            }
-            Piece::Open => {
-                if !first {
-                    out.push(',');
-                }
-                out.push('[');
-                (first, depth) = (true, depth + 1);
-            }
-            Piece::Bar => {
-                out.push('|');
-                first = true;
-            }
-            Piece::Close => {
-                out.push(']');
-                (first, depth) = (false, depth.saturating_sub(1));
-            }
-        }
-    }
-    out
-}
-
 /// **Private.** Ordered unique node names the request touched, plus the failing node.
 fn touched_nodes(hops: &[FinishedHop], failed: Option<&str>, topo: &Topology) -> Vec<String> {
     let mut nodes: Vec<String> = Vec::new();
@@ -691,48 +724,6 @@ fn touched_nodes(hops: &[FinishedHop], failed: Option<&str>, topo: &Topology) ->
         nodes.push(f.to_string());
     }
     nodes
-}
-
-/// **Private.** Who asked: the request line and scope an [`Event`] reports.
-struct Who {
-    method: String,
-    path: String,
-    scope: Option<String>,
-    pin: Option<&'static str>,
-}
-
-/// **Private.** Broadcasts the finished request on the event bus. No subscribers is
-/// fine: send only errors when nobody listens.
-fn send_event(
-    st: &AppState,
-    who: Who,
-    status: u16,
-    started: Instant,
-    nodes: Vec<String>,
-    failed: Option<(String, FailKind)>,
-) {
-    let ts_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-    // Measured, not simulated: shows what a client really waited (timer granularity, load).
-    // The trace header keeps the simulated per-hop times.
-    let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let _ = st.events.send(BusEvent::Request(Event {
-        ts_ms,
-        method: who.method,
-        path: who.path,
-        scope: who.scope,
-        pin: who.pin,
-        status,
-        ms,
-        nodes,
-        kind: failed
-            .as_ref()
-            .map(|f| f.1)
-            .filter(|k| *k != FailKind::Status)
-            .map(FailKind::as_str),
-        failed_node: failed.map(|f| f.0),
-    }));
 }
 
 /// **Private.** Adds permissive CORS headers (mock routes only) and exposes
@@ -753,7 +744,418 @@ fn with_cors(mut r: Response) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("x-kaanal-trace, x-kaanal-scope, retry-after"),
+        HeaderValue::from_static("x-kaanal-trace, x-kaanal-scope, x-request-id, retry-after"),
     );
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request as HttpRequest;
+    use kaanal_core::Config;
+    use kaanal_core::replay::Engine;
+
+    const YAML: &str = "version: 1
+seed: 42
+nodes:
+  nginx: { type: gateway, proc: 1ms }
+  app: { type: service, spec: openapi.yaml, proc: 1ms }
+  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }
+  h: { type: external-api, proc: 1ms, timeout: 150ms }
+  c: { type: cache, hit_ratio: 1.0, hit: 1ms, miss: 2ms }
+edges:
+  - { from: nginx, to: app, net: 1ms }
+  - { from: app, to: db, net: 1ms }
+  - { from: app, to: h, net: 1ms }
+  - { from: app, to: c, net: 1ms }
+endpoints:
+  \"GET /users/{id}\": { chain: [ db ] }
+  \"GET /users\": { chain: [ { cache: c } ] }
+  \"POST /orders\": { chain: [ h ] }
+scenarios:
+  hang: { chaos: [ { node: h, error_rate: 1.0, error_kind: hang, latency_ms: 30 } ] }
+  cachelag: { chaos: [ { node: c, latency_ms: 40 } ] }
+  eplag: { chaos: [ { endpoint: \"GET /users/{id}\", latency_ms: 20 } ] }
+  dbhang: { chaos: [ { node: db, error_rate: 1.0, error_kind: hang, latency_ms: 30 } ] }
+  hreset:
+    chaos: [ { node: db, error_rate: 1.0, error_kind: reset } ]
+    pins: [ { endpoint: \"GET /users/{id}\", state: success } ]
+  lag: { chaos: [ { node: db, latency_ms: 300 } ] }
+  down: { chaos: [ { node: db, error_rate: 1.0, error_status: 503 } ] }
+  hidden:
+    chaos: [ { node: db, error_rate: 1.0, error_status: 503 } ]
+    pins: [ { endpoint: \"GET /users/{id}\", state: success } ]
+";
+
+    type Req<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
+    /// The server state of `YAML` with a live engine, driven by calling [`handle`] directly: the
+    /// ring is read through `st.log`, which no route serves yet.
+    fn app() -> Arc<AppState> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let cfg = Config::from_yaml(YAML).unwrap();
+        let mut st = AppState::build(&cfg, &dir, "t".into(), 0).unwrap();
+        st.engine = Some(crate::actor::spawn(Engine::new(&st.topo)));
+        Arc::new(st)
+    }
+
+    async fn call(
+        st: &Arc<AppState>,
+        method: &str,
+        uri: &str,
+        headers: &[(&str, &str)],
+    ) -> Response {
+        let mut b = HttpRequest::builder().method(method).uri(uri);
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        handle(State(Arc::clone(st)), b.body(Body::from("{}")).unwrap()).await
+    }
+
+    fn entries(st: &AppState) -> Vec<LogEntry> {
+        st.log
+            .lock()
+            .unwrap()
+            .query(&log::Filter::default(), 1000)
+            .entries
+    }
+
+    #[tokio::test]
+    async fn each_request_makes_exactly_one_entry_and_one_event() {
+        let st = app();
+        let mut rx = st.events.subscribe();
+        let reqs: [Req; 7] = [
+            ("GET", "/users/1", &[]),
+            ("GET", "/users", &[]),
+            ("GET", "/nope", &[]),
+            ("DELETE", "/users/1", &[]),
+            ("GET", "/users/2", &[("x-kaanal-scenario", "bogus")]),
+            ("GET", "/users/3", &[("x-kaanal-scenario", "down")]),
+            ("OPTIONS", "/users/3", &[]),
+        ];
+        let mut ids = Vec::new();
+        for (m, u, h) in reqs {
+            let r = call(&st, m, u, h).await;
+            if m != "OPTIONS" {
+                ids.push(r.headers()["x-request-id"].to_str().unwrap().to_string());
+            }
+        }
+        let logged = entries(&st);
+        let mut events = Vec::new();
+        while let Ok(BusEvent::Request(e)) = rx.try_recv() {
+            events.push(e);
+        }
+        assert_eq!((logged.len(), events.len(), ids.len()), (6, 6, 6));
+        assert_eq!(
+            logged.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
+            ids,
+            "one entry per response, in order"
+        );
+        assert_eq!(events.iter().map(|e| e.id.clone()).collect::<Vec<_>>(), ids);
+        ids.dedup();
+        assert_eq!(ids.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn unmatched_and_bad_scope_are_logged_with_rejected() {
+        let st = app();
+        let mut rx = st.events.subscribe();
+        call(&st, "GET", "/nope", &[]).await;
+        call(&st, "DELETE", "/users/1", &[]).await;
+        call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "bogus")]).await;
+        let got = entries(&st);
+        let shape: Vec<_> = got
+            .iter()
+            .map(|e| (e.status, e.rejected, e.endpoint.as_deref(), e.hops.len()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (404, Some("unmatched"), None, 0),
+                (405, Some("unmatched"), None, 0),
+                (400, Some("bad-scope"), Some("GET /users/{id}"), 0),
+            ]
+        );
+        assert!(
+            got.iter()
+                .all(|e| e.trace.is_empty() && e.failed_node.is_none())
+        );
+        for want in ["unmatched", "unmatched", "bad-scope"] {
+            let Ok(BusEvent::Request(e)) = rx.try_recv() else {
+                panic!("an event per rejection")
+            };
+            assert_eq!(e.rejected, Some(want));
+            assert_eq!(e.nodes.len(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rejected_request_does_not_touch_the_counter() {
+        let st = app();
+        let count =
+            |st: &AppState| -> u64 { st.counters.iter().map(|c| c.load(Ordering::Relaxed)).sum() };
+        call(&st, "GET", "/users/1", &[]).await;
+        let before = count(&st);
+        call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "bogus")]).await;
+        call(&st, "GET", "/nope", &[]).await;
+        call(&st, "DELETE", "/users/1", &[]).await;
+        assert_eq!(count(&st), before);
+        assert_eq!(entries(&st).len(), 4);
+    }
+
+    #[tokio::test]
+    async fn secrets_are_never_stored() {
+        let st = app();
+        let mut rx = st.events.subscribe();
+        let r = HttpRequest::builder()
+            .method("GET")
+            .uri("/users/1?token=secret-query-789")
+            .header("authorization", "Bearer secret-header-456")
+            .header("x-custom", "secret-header-456")
+            .header("x-request-id", "client-7")
+            .body(Body::from("{\"password\":\"secret-body-123\"}"))
+            .unwrap();
+        handle(State(Arc::clone(&st)), r).await;
+        let mut seen = serde_json::to_string(&entries(&st)).unwrap();
+        while let Ok(BusEvent::Request(e)) = rx.try_recv() {
+            seen.push_str(&serde_json::to_string(&e).unwrap());
+        }
+        for secret in ["secret-body-123", "secret-header-456", "secret-query-789"] {
+            assert!(!seen.contains(secret), "{secret} leaked: {seen}");
+        }
+        assert!(seen.contains("client-7") && seen.contains("\"path\":\"/users/1\""));
+    }
+
+    #[tokio::test]
+    async fn pinned_request_keeps_chain_error() {
+        let st = app();
+        let r = call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "hidden")]).await;
+        assert_eq!(r.status(), 200);
+        let e = &entries(&st)[0];
+        assert_eq!(e.pin, Some("success"));
+        assert_eq!(e.failed_node, None);
+        let c = e.chain_error.as_ref().expect("the pin hid a chain error");
+        assert_eq!(
+            (c.node.as_str(), c.status, c.kind, c.cause),
+            ("db", 503, "status", "chaos")
+        );
+        assert!(
+            e.trace.ends_with("db.error=503,pinned=success"),
+            "{}",
+            e.trace
+        );
+        assert_eq!(e.flags, ["FI", "PN"]);
+        // Unpinned, the same failure is the client's.
+        call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "down")]).await;
+        let e = &entries(&st)[1];
+        assert_eq!((e.status, e.failed_node.as_deref()), (503, Some("db")));
+        assert_eq!(e.chain_error.as_ref().map(|c| c.status), Some(503));
+    }
+
+    #[tokio::test]
+    async fn out_of_order_completion_lands() {
+        let st = app();
+        let slow = tokio::spawn({
+            let st = Arc::clone(&st);
+            async move {
+                call(&st, "GET", "/users/9", &[("x-kaanal-scenario", "lag")])
+                    .await
+                    .status()
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        for _ in 0..3 {
+            call(&st, "GET", "/users/1", &[]).await;
+        }
+        assert_eq!(entries(&st).len(), 3, "the slow request is still in flight");
+        assert_eq!(slow.await.unwrap(), 200);
+        let got = entries(&st);
+        let last = got.last().unwrap();
+        assert_eq!(
+            (last.path.as_str(), last.seq, last.done),
+            ("/users/9", 1, 4)
+        );
+        assert!(got[..3].iter().all(|e| e.seq > 1));
+        // The latency chaos is attributed to the node's own hop, and flagged.
+        assert_eq!(last.flags, ["DI"]);
+        let db = last.hops.iter().find(|h| h.kind == "op").unwrap();
+        assert_eq!(db.why.as_deref(), Some("chaos +300ms"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_requests_all_recorded_once() {
+        let st = app();
+        let tasks: Vec<_> = (0..50)
+            .map(|i| {
+                let st = Arc::clone(&st);
+                tokio::spawn(async move {
+                    let uri = if i % 5 == 0 { "/nope" } else { "/users/1" };
+                    call(&st, "GET", uri, &[]).await.status()
+                })
+            })
+            .collect();
+        for t in tasks {
+            t.await.unwrap();
+        }
+        let got = entries(&st);
+        assert_eq!(got.len(), 50);
+        let mut seqs: Vec<_> = got.iter().map(|e| e.seq).collect();
+        seqs.sort_unstable();
+        assert_eq!(seqs, (1..=50).collect::<Vec<_>>());
+        let mut done: Vec<_> = got.iter().map(|e| e.done).collect();
+        done.sort_unstable();
+        assert_eq!(done, (1..=50).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn reset_empties_the_ring_but_ids_keep_counting() {
+        let st = app();
+        call(&st, "GET", "/users/1", &[]).await;
+        crate::control::reset(State(Arc::clone(&st))).await.unwrap();
+        assert_eq!(entries(&st).len(), 0);
+        let r = call(&st, "GET", "/users/1", &[]).await;
+        assert!(
+            r.headers()["x-request-id"]
+                .to_str()
+                .unwrap()
+                .ends_with("-0002")
+        );
+        assert_eq!(entries(&st).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn engine_stopped_is_logged_with_an_id() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let st = Arc::new(
+            AppState::build(&Config::from_yaml(YAML).unwrap(), &dir, "t".into(), 0).unwrap(),
+        );
+        let mut rx = st.events.subscribe();
+        let r = call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "hang")]).await;
+        assert_eq!(r.status(), 500);
+        let id = r.headers()["x-request-id"].to_str().unwrap().to_string();
+        let got = entries(&st);
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            (got[0].id.as_str(), got[0].rejected),
+            (id.as_str(), Some("engine-stopped"))
+        );
+        assert_eq!(got[0].endpoint.as_deref(), Some("GET /users/{id}"));
+        assert_eq!(got[0].scope.as_deref(), Some("hang"));
+        let Ok(BusEvent::Request(e)) = rx.try_recv() else {
+            panic!("one event")
+        };
+        assert_eq!(e.scope.as_deref(), Some("hang"));
+        assert_eq!(
+            (e.id, e.rejected, e.status),
+            (id, Some("engine-stopped"), 500)
+        );
+        assert!(rx.try_recv().is_err(), "exactly one event");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_request_leaves_one_client_gone_entry() {
+        let st = app();
+        let mut rx = st.events.subscribe();
+        // The hang holds the request for the node's 150 ms timeout; the client gives up at 40 ms.
+        let gone = tokio::time::timeout(
+            Duration::from_millis(40),
+            call(&st, "POST", "/orders", &[("x-kaanal-scenario", "hang")]),
+        )
+        .await;
+        assert!(gone.is_err(), "the request was still running");
+        let got = entries(&st);
+        assert_eq!(got.len(), 1);
+        let e = &got[0];
+        assert_eq!((e.status, e.rejected), (499, Some("client-gone")));
+        assert_eq!(e.endpoint.as_deref(), Some("POST /orders"));
+        assert_eq!(e.scope.as_deref(), Some("hang"));
+        assert_eq!((e.hops.len(), e.trace.as_str()), (0, ""));
+        let Ok(BusEvent::Request(ev)) = rx.try_recv() else {
+            panic!("one event")
+        };
+        assert_eq!(
+            (ev.id.as_str(), ev.rejected),
+            (e.id.as_str(), Some("client-gone"))
+        );
+        // The engine finishes the abandoned plan later; nothing is logged twice.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert_eq!(entries(&st).len(), 1);
+        assert!(rx.try_recv().is_err());
+        // A request that completes is pushed once, not also as client-gone.
+        let r = call(&st, "GET", "/users/1", &[]).await;
+        assert_eq!(r.status(), 200);
+        let got = entries(&st);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1].rejected, None);
+    }
+
+    #[tokio::test]
+    async fn a_hang_is_never_reported_as_injected_delay() {
+        let st = app();
+        let r = call(&st, "POST", "/orders", &[("x-kaanal-scenario", "hang")]).await;
+        assert_eq!(r.status(), 504);
+        let e = &entries(&st)[0];
+        // The node's own `timeout:` ends the hang, so the engine calls it a deadline; either way
+        // the long hop is not injected latency (the FI-only case is in `record.rs`).
+        assert_eq!(e.flags, ["DT"]);
+        assert!(e.hops.iter().all(|h| h.why.is_none()), "{:?}", e.hops);
+        assert_eq!(e.chain_error.as_ref().unwrap().kind, "timeout");
+    }
+
+    #[tokio::test]
+    async fn injected_latency_is_attributed_on_nodes_caches_and_endpoints() {
+        let st = app();
+        call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "eplag")]).await;
+        call(&st, "GET", "/users", &[("x-kaanal-scenario", "cachelag")]).await;
+        let got = entries(&st);
+        let ep = got[0].hops.iter().find(|h| h.kind == "delay").unwrap();
+        assert_eq!(ep.why.as_deref(), Some("chaos +20ms"));
+        assert_eq!(got[0].flags, ["DI"]);
+        let hit = got[1].hops.iter().find(|h| h.kind == "hit").unwrap();
+        assert_eq!(hit.why.as_deref(), Some("chaos +40ms"));
+        assert_eq!(got[1].flags, ["DI"]);
+        let op = got[0].hops.iter().find(|h| h.kind == "op").unwrap();
+        assert_eq!(op.op, Some("read"));
+    }
+
+    #[tokio::test]
+    async fn a_pin_over_a_reset_keeps_the_reset_kind() {
+        let st = app();
+        let r = call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "hreset")]).await;
+        assert_eq!(r.status(), 200);
+        let e = &entries(&st)[0];
+        let c = e.chain_error.as_ref().unwrap();
+        assert_eq!((c.node.as_str(), c.kind, c.cause), ("db", "reset", "chaos"));
+        assert!(e.trace.contains("db.error=reset"), "{}", e.trace);
+    }
+
+    #[tokio::test]
+    async fn long_paths_and_methods_are_capped_in_the_log() {
+        let st = app();
+        let path = format!("/{}é", "x".repeat(3000));
+        call(&st, "GET", &path, &[]).await;
+        call(&st, "PROPFINDPROPFINDPROPFIND", "/users/1", &[]).await;
+        let got = entries(&st);
+        assert!(got[0].path.len() <= 2048 && got[0].path.ends_with('…'));
+        assert!(got[0].path.starts_with("/xxx"));
+        assert_eq!(got[0].status, 404);
+        assert!(got[1].method.len() <= 16 && got[1].method.ends_with('…'));
+        // Short values are kept whole.
+        call(&st, "GET", "/users/1", &[]).await;
+        assert_eq!(entries(&st)[2].path, "/users/1");
+    }
+
+    /// Paused time: the engine's 60 s `HANG_CAP` sleep auto-advances instead of taking a minute.
+    #[tokio::test(start_paused = true)]
+    async fn a_hang_on_a_node_without_a_timeout_is_fault_injection() {
+        let st = app();
+        let r = call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "dbhang")]).await;
+        assert_eq!(r.status(), 504);
+        let e = &entries(&st)[0];
+        assert_eq!(e.flags, ["FI"]);
+        assert!(e.hops.iter().all(|h| h.why.is_none()), "{:?}", e.hops);
+        let c = e.chain_error.as_ref().unwrap();
+        assert_eq!((c.kind, c.cause), ("timeout", "chaos"));
+    }
 }

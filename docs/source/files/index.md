@@ -39,13 +39,16 @@ One page per source file: what the file does and what each function/type in it d
 | `src/actor.rs`     | [kaanal-server/actor.md](kaanal-server/actor.md)         | Live replay-engine actor task and its handle          |
 | `src/auth.rs`      | [kaanal-server/auth.md](kaanal-server/auth.md)           | Signing key, JWKS, RS256 tokens, login                |
 | `src/control.rs`   | [kaanal-server/control.md](kaanal-server/control.md)     | Control API handlers + the auth/Host guard            |
-| `src/mock.rs`      | [kaanal-server/mock.md](kaanal-server/mock.md)           | Mock request handler, trace header, CORS              |
+| `src/mock.rs`      | [kaanal-server/mock.md](kaanal-server/mock.md)           | Mock request handler, request ids, CORS               |
 | `src/scenarios.rs` | [kaanal-server/scenarios.md](kaanal-server/scenarios.md) | Scenario file discovery and atomic save               |
 | `src/state.rs`     | [kaanal-server/state.md](kaanal-server/state.md)         | `AppState::build` load pipeline, route conflicts      |
 | `src/wire.rs`      | [kaanal-server/wire.md](kaanal-server/wire.md)           | `Cut` body stream for the `reset` failure kind        |
 | `src/scope.rs`     | [kaanal-server/scope.md](kaanal-server/scope.md)         | `X-Kaanal-Scenario` scoping and its stack cache       |
 | `src/pins.rs`      | [kaanal-server/pins.md](kaanal-server/pins.md)           | `empty_form`, `empty_ok`: what an `empty` pin answers |
 | `src/pin_api.rs`   | [kaanal-server/pin_api.md](kaanal-server/pin_api.md)     | `/pins` and `/cycle` routes                           |
+| `src/log.rs`       | [kaanal-server/log.md](kaanal-server/log.md)             | Request ids, the 1000-entry log ring, query filters   |
+| `src/record.rs`    | [kaanal-server/record.md](kaanal-server/record.md)       | Trace text, log entry, flags and the bus event        |
+| `src/log_api.rs`   | [kaanal-server/log_api.md](kaanal-server/log_api.md)     | `/logs` and `/trace/{id}` routes                      |
 | `src/ui.html`      | [../../web/web-ui.md](../../web/web-ui.md)               | Embedded status page (documented with the web docs)   |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
@@ -57,7 +60,8 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal](kaanal/) (binary)
 
-| File          | Page                             | Contents                                                              |
-| ------------- | -------------------------------- | --------------------------------------------------------------------- |
-| `src/main.rs` | [kaanal/main.md](kaanal/main.md) | CLI, instance lock, run file, control-API client                      |
-| `src/keys.rs` | [kaanal/keys.md](kaanal/keys.md) | Signing key file: location, identity, race-safe creation, permissions |
+| File             | Page                                   | Contents                                                              |
+| ---------------- | -------------------------------------- | --------------------------------------------------------------------- |
+| `src/main.rs`    | [kaanal/main.md](kaanal/main.md)       | CLI, instance lock, run file, control-API client                      |
+| `src/keys.rs`    | [kaanal/keys.md](kaanal/keys.md)       | Signing key file: location, identity, race-safe creation, permissions |
+| `src/logview.rs` | [kaanal/logview.md](kaanal/logview.md) | Log lines, the waterfall, the `logs -f` follow machinery              |

@@ -56,19 +56,21 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 
 ## CLI
 
-| Command                                                                                                                   | What it does                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C stops.                                                                                                                  |
-| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                                                                                  |
-| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                          |
-| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                    |
-| `kaanal status`                                                                                                           | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                     |
-| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                                                                          |
-| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).                                   |
-| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`           | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md).                               |
-| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                                                            | Pin an endpoint to the next UI state (loading, empty, error, slow, success), or to one with `--state`; `--off` removes it. See [pins.md](pins.md). |
-| `kaanal pins`                                                                                                             | Live pins and the pin in force per endpoint, with its source.                                                                                      |
-| `kaanal reset`                                                                                                            | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset.                                                          |
+| Command                                                                                                                   | What it does                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C stops.                                                                                                                    |
+| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                                                                                    |
+| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                            |
+| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                      |
+| `kaanal status`                                                                                                           | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                       |
+| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                                                                            |
+| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).                                     |
+| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`           | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md).                                 |
+| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                                                            | Pin an endpoint to the next UI state (loading, empty, error, slow, success), or to one with `--state`; `--off` removes it. See [pins.md](pins.md).   |
+| `kaanal pins`                                                                                                             | Live pins and the pin in force per endpoint, with its source.                                                                                        |
+| `kaanal logs [-n N] [-f] [--since D] [--status S] [--failed] [--endpoint "GET /x/{id}"] [--scope NAME] [--json]`          | The last finished requests, one line each; `-f` follows live. See [observability.md](observability.md).                                              |
+| `kaanal trace ID\|last\|CLIENT_ID [--json]`                                                                               | One request as a per-hop waterfall: Kaanal's id (from `X-Request-Id`), `last`, or the id your client sent. See [observability.md](observability.md). |
+| `kaanal reset`                                                                                                            | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset, and the request log emptied (ids carry on).                |
 
 Exit codes: `0` ok, `1` error, `2` no running instance.
 
@@ -81,6 +83,7 @@ curl -i http://localhost:8080/users/42
 ```http
 HTTP/1.1 200 OK
 x-kaanal-trace: nginx.proc=1.0ms,net=1.0ms,app.proc=5.0ms,net=1.0ms,db.read=4.2ms
+x-request-id: r04f2-0042
 access-control-allow-origin: *
 
 { "id": 42, "firstName": "Priya", "email": "priya.iyer42@example.com", ... }
@@ -90,6 +93,7 @@ access-control-allow-origin: *
 - The **timing** is what the trace header adds up to: hops in sequence add; a `parallel` block costs its slowest branch. The client actually waits it.
 - A `parallel` step shows its branches in brackets, split by `|`, and a cache lookup shows `hit` or `miss`: `nginx.proc=1.0ms,net=0.0ms,app.proc=2.0ms,[net=0.0ms,audit.proc=1.0ms|net=0.0ms,pay.proc=4.0ms],net=0.0ms,c.hit=0.2ms`. A failure ends the header with `node.error=STATUS`. Very long chains end with `,...+N hops`, where N is the number of hops left out.
 - When a node is full, a request queues and the trace shows it before the hop it waited for: `...,net=1.0ms,db.wait=98.0ms,db.read=100.0ms`. A node with a `rate_limit` answers `429` with a `Retry-After` header (whole seconds) once its tokens run out.
+- `X-Request-Id` is the request's id. Run `kaanal trace r04f2-0042` to see that request hop by hop, or `kaanal logs` for the latest ones; the 1000 most recent are kept. See [observability.md](observability.md).
 - **CORS** is wide open on mock routes, so any local frontend just works.
 
 ## Chaos, live

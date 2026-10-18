@@ -49,7 +49,7 @@ pub use pin::{
     EffectivePins, EmptyOk, Outcome, PinEntry, PinEntryConfig, PinLayer, PinSource, PinState,
     ResolvedPin, StateOverride, StateOverrideConfig, StateOverrides, resolve, validate_entry,
 };
-pub use replay::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
+pub use replay::{Engine, EngineError, FailCause, Finished, FinishedHop, NodeCounters};
 pub use scenario::{
     ChaosStack, MAX_ENTRIES, MAX_SCENARIOS, Scenario, ScenarioError, ScenarioSet, Source,
     endpoint_key, resolve_scenario, valid_name, validate_scenario_shape,

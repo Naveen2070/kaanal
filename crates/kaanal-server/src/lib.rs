@@ -11,9 +11,12 @@
 mod actor;
 mod auth;
 mod control;
+mod log;
+mod log_api;
 mod mock;
 mod pin_api;
 mod pins;
+mod record;
 mod scenarios;
 mod scope;
 mod state;
@@ -30,6 +33,10 @@ use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, Topology};
 
 pub use auth::AuthKey;
+pub use log::{
+    ChainErrorRec, Filter, HopRec, IdGen, LOG_CAP, LogEntry, LogRing, Lookup, MAX_HOPS, MAX_TRACE,
+    Page, StatusMatch, client_id, format_id, matches, parse_id,
+};
 
 /// Options for [`serve`].
 pub struct ServeOpts {
@@ -195,6 +202,8 @@ fn router(st: Arc<state::AppState>) -> Router {
                 .delete(pin_api::delete_pins),
         )
         .route("/__kaanal/cycle", post(pin_api::cycle))
+        .route("/__kaanal/logs", get(log_api::logs))
+        .route("/__kaanal/trace/{id}", get(log_api::trace))
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/events", get(control::events))
         .route("/__kaanal/ui", get(control::ui))

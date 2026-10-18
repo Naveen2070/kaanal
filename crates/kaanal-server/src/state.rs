@@ -44,12 +44,23 @@ pub struct Route {
 /// One finished request, broadcast to `/__kaanal/events` subscribers.
 #[derive(Debug, Clone, Serialize)]
 pub struct Event {
+    /// Our request id (`r04f2-0042`).
+    pub id: String,
+    /// The client's `X-Request-Id`, when it matched the grammar.
+    pub client_id: Option<String>,
+    /// Arrival order, the id's number.
+    pub seq: u64,
+    /// Why the request was refused before any chain ran (`unmatched`, `bad-scope`, `engine-stopped`),
+    /// or `client-gone` when the client left before the answer.
+    pub rejected: Option<&'static str>,
     /// Unix timestamp in milliseconds.
     pub ts_ms: u64,
     /// Uppercase HTTP method.
     pub method: String,
     /// Request path.
     pub path: String,
+    /// The matched route template (`GET /users/{id}`); `None` when unmatched.
+    pub endpoint: Option<String>,
     /// Response status.
     pub status: u16,
     /// Measured wall-clock milliseconds (not the simulated sum — see the trace header).
@@ -70,6 +81,10 @@ pub struct Event {
 
 /// What the bus carries: a finished request, or a scenario change (S21).
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a per-request value cloned once per subscriber, and the broadcast ring holds up to 1024 clones; Arc<Event> is the upgrade path if load shows a cost"
+)]
 pub enum BusEvent {
     /// A finished mock request (SSE message `request`).
     Request(Event),
@@ -152,6 +167,10 @@ pub struct AppState {
     pub auth: Option<crate::auth::Issuer>,
     /// The live replay engine; `None` after `build`, set by `serve` (no runtime in `check`).
     pub engine: Option<crate::actor::EngineHandle>,
+    /// Hands out request ids; never reset.
+    pub ids: crate::log::IdGen,
+    /// The last finished requests. Push only through [`AppState::push_log`].
+    pub log: Mutex<crate::log::LogRing>,
 }
 
 /// **Private.** Rejects two paths that differ only in parameter names
@@ -325,6 +344,15 @@ impl AppState {
         Arc::clone(&self.chaos.read().expect("chaos lock poisoned"))
     }
 
+    /// Records a finished request and returns its `done`. The lock is short and never held across
+    /// an `.await`; a poisoned lock is used as is (the ring holds plain data).
+    pub fn push_log(&self, e: crate::log::LogEntry) -> u64 {
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(e)
+    }
+
     /// Compiles `c` and swaps the result in; returns what was published. Taking the guard
     /// proves the caller holds the [`Control`] lock, so publishes happen in write order (S11).
     ///
@@ -443,6 +471,8 @@ impl AppState {
             SeedSource::Entropy => Some(rand::random::<u64>()),
         };
         let (events, _) = broadcast::channel(1024);
+        let ids = crate::log::IdGen::new();
+        let log = Mutex::new(crate::log::LogRing::new(ids.boot()));
         Ok(AppState {
             topo,
             paths,
@@ -472,6 +502,8 @@ impl AppState {
             warnings,
             auth: None,
             engine: None,
+            ids,
+            log,
         })
     }
 }

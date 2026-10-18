@@ -25,7 +25,7 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 | `dist`        | `Dist`                                                                                                                                                                                                         |
 | `exec`        | `ChainOutcome`, `ChainRequest`, `ChainResult`, `Hop`, `HopKind`, `Op`, `Plan`, `PlanItem`, `execute`, `sample_plan`                                                                                            |
 | `pin`         | `EffectivePins`, `EmptyOk`, `Outcome`, `PinEntry`, `PinEntryConfig`, `PinLayer`, `PinSource`, `PinState`, `ResolvedPin`, `StateOverride`, `StateOverrideConfig`, `StateOverrides`, `resolve`, `validate_entry` |
-| `replay`      | `Engine`, `EngineError`, `Finished`, `FinishedHop`, `NodeCounters`                                                                                                                                             |
+| `replay`      | `Engine`, `EngineError`, `FailCause`, `Finished`, `FinishedHop`, `NodeCounters`                                                                                                                                |
 | `scenario`    | `ChaosStack`, `MAX_ENTRIES`, `MAX_SCENARIOS`, `Scenario`, `ScenarioError`, `ScenarioSet`, `Source`, `endpoint_key`, `resolve_scenario`, `valid_name`                                                           |
 | `topology`    | `Admission`, `CacheModel`, `Edge`, `Node`, `NodeId`, `RateLimit`, `Topology`, `TopologyError`                                                                                                                  |
 

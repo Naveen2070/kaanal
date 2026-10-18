@@ -68,4 +68,5 @@ Users do this in `kaanal.yaml` under `endpoints:` (`"GET /health": { override: {
 
 - Every mock response carries `X-Kaanal-Trace` with the per-hop waterfall, e.g. `nginx.proc=1.0ms,net=1.0ms,app.proc=1.0ms,net=1.0ms,db.read=1.0ms`.
 - `GET /__kaanal/events` (SSE, needs `?token=`) streams every request as it happens.
+- Every mock response also carries `X-Request-Id`. `kaanal trace <id>` shows that request hop by hop (flags, the cause of a failure, queue waits), `kaanal logs` lists the last 1000; both read the in-memory ring in `server/src/log.rs`. To change what a flag means, edit `record.rs::build_entry`/`hop_recs` and its tests, and the table in `docs/web/observability.md`.
 - On Windows, sleeps under ~15 ms round up to the OS timer tick — measured latency can exceed the simulated sum. That is a known platform limitation, not a bug in your change.

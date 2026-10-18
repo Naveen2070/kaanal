@@ -10,5 +10,5 @@ mod engine;
 mod gate;
 
 pub use bucket::Bucket;
-pub use engine::{Engine, EngineError, Finished, FinishedHop, NodeCounters};
+pub use engine::{Engine, EngineError, FailCause, Finished, FinishedHop, NodeCounters};
 pub use gate::{Admit, Gate, Waiter};

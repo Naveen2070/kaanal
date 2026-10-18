@@ -1081,6 +1081,10 @@ pub async fn reset(State(st): State<Arc<AppState>>) -> Result<StatusCode, Reject
     if let Some(e) = &st.engine {
         e.refill_buckets();
     }
+    st.log
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
     emit(&st, "reset", None, &snap);
     Ok(StatusCode::NO_CONTENT)
 }

@@ -208,7 +208,7 @@ curl -H 'X-Kaanal-Scenario:' http://127.0.0.1:8080/checkout                     
 - **No header**: the request sees the global stack (what `kaanal scenario activate` built), as before.
 - **Empty header** (`X-Kaanal-Scenario:`): an explicit baseline. The request sees no chaos, whatever is active globally.
 - **Names**: comma separated, spaces around a name ignored, the last position wins when a name repeats (`a,b,a` is `b,a`). The stack is in header order, bottom to top.
-- **Bad header**: `400 { "error": "bad scenario scope", "detail": "..." }`, and the request does not run (no counter draw, no chaos draw). That covers an unknown or invalid name, an empty name (`a,,b`), more than one header line, a non-ASCII value, more than 16 names and a value over 256 bytes.
+- **Bad header**: `400 { "error": "bad scenario scope", "detail": "..." }`, and the request does not run (no counter draw, no chaos draw). It still gets an `X-Request-Id` and is logged with `rejected: bad-scope` (see [observability](observability.md)). That covers an unknown or invalid name, an empty name (`a,,b`), more than one header line, a non-ASCII value, more than 16 names and a value over 256 bytes.
 - **Echo**: the response carries `X-Kaanal-Scope` with the deduplicated stack that answered it (`b,a` for `a,b,a`; an empty value for an empty header). Without the request header there is no echo. It is exposed to browsers through CORS, and the request header is allowed by the preflight.
 - A `404` (no such route) or `405` (wrong method) is answered before the header is read, so a bad header never changes them. The `/__kaanal` control API ignores the header.
 - The header is read per request, so a scenario defined, replaced, deleted or saved afterwards is seen by the next request.
