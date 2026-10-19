@@ -171,6 +171,8 @@ pub struct AppState {
     pub ids: crate::log::IdGen,
     /// The last finished requests. Push only through [`AppState::push_log`].
     pub log: Mutex<crate::log::LogRing>,
+    /// The graceful stop: `POST /__kaanal/shutdown` and `BoundServer::shutdown` ask it.
+    pub shutdown: crate::shutdown::Shutdown,
 }
 
 /// **Private.** Rejects two paths that differ only in parameter names
@@ -504,6 +506,7 @@ impl AppState {
             engine: None,
             ids,
             log,
+            shutdown: crate::shutdown::Shutdown::new(),
         })
     }
 }

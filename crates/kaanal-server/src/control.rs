@@ -26,8 +26,8 @@ use kaanal_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::time::Instant;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tokio_stream::{Stream, StreamExt};
 
 use crate::scenarios::{self, WriteError};
@@ -1089,6 +1089,56 @@ pub async fn reset(State(st): State<Arc<AppState>>) -> Result<StatusCode, Reject
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /__kaanal/shutdown` — starts a graceful stop. Body (optional): `{ "timeout": "5s" }`,
+/// 1 ms to 300 s, humantime; no body means 5 s. In-flight requests get that long to finish, then
+/// the connections still open are cut. Answers `202 { shutting_down, timeout_ms }`; a second
+/// call changes nothing and reports the time left. A body of only whitespace counts as no body.
+///
+/// The deadline is fixed before this answer is flushed, so a tiny budget can cut the connection
+/// before the `202` reaches the caller; a client that sees a transport error here, with the server
+/// lock held (`down`), should read it as "the drain is running". Open `/events` streams end at
+/// once with a final `shutdown` message instead of holding the drain.
+///
+/// # Errors
+/// 400 for a body that is not a JSON object, an unknown key, or a bad `timeout`.
+pub async fn shutdown(
+    State(st): State<Arc<AppState>>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<Value>), Reject> {
+    let bad = |m: &str| reject(StatusCode::BAD_REQUEST, m);
+    let timeout = if body.trim_ascii().is_empty() {
+        None
+    } else {
+        match serde_json::from_slice::<Value>(&body) {
+            Ok(Value::Object(mut o)) => {
+                let t = o.remove("timeout");
+                if let Some(k) = o.keys().next() {
+                    return Err(bad(&format!("unknown field '{k}'")));
+                }
+                t
+            }
+            Ok(_) => return Err(bad("body must be a JSON object, e.g. {\"timeout\":\"5s\"}")),
+            Err(e) => return Err(bad(&format!("bad body: {e}"))),
+        }
+    };
+    let budget = match timeout {
+        None => Duration::from_secs(5),
+        Some(Value::String(s)) => humantime::parse_duration(&s)
+            .ok()
+            .filter(|d| (Duration::from_millis(1)..=Duration::from_secs(300)).contains(d))
+            .ok_or_else(|| bad("timeout must be 1ms to 300s, e.g. \"5s\""))?,
+        Some(_) => return Err(bad("timeout must be a duration string, e.g. \"5s\"")),
+    };
+    let left = st.shutdown.request(budget);
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "shutting_down": true,
+            "timeout_ms": u64::try_from(left.as_millis()).unwrap_or(u64::MAX),
+        })),
+    ))
+}
+
 /// Where `save` takes its entries from: `"live"`, `"effective"` or `{ "scenario": "<name>" }`.
 /// (Tagged, so a scenario may itself be called `live` or `effective`.)
 ///
@@ -1312,13 +1362,19 @@ pub async fn save_scenario(
 /// `scenario` messages (`{ action, name, active }`) for stack changes. Actions: `activate`,
 /// `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, and
 /// `update` (an active scenario's definition changed).
+///
+/// When a shutdown is requested the stream sends one last message, `shutdown` with
+/// `{ "timeout_ms": N }` (the time left), and ends, so an open stream never holds the drain.
+/// The events of requests that are cut at the deadline therefore do not reach followers.
+/// With a tiny budget the connection can be cut before that message is written (the same race as
+/// the `202` of `shutdown`), so a follower must treat a plain end of stream as a shutdown too.
 // limitation: no cap on concurrent event streams. Each holds one broadcast receiver, and only a
 // caller with the 256-bit token can open one. Add a connection limit if the token ever leaves the local user.
 pub async fn events(
     State(st): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     let stream = BroadcastStream::new(st.events.subscribe()).map(|msg| {
-        Ok(match msg {
+        Some(Ok(match msg {
             Ok(BusEvent::Request(ev)) => SseEvent::default()
                 .event("request")
                 .json_data(&ev)
@@ -1334,8 +1390,27 @@ pub async fn events(
             Err(BroadcastStreamRecvError::Lagged(n)) => {
                 SseEvent::default().event("lagged").data(n.to_string())
             }
-        })
+        }))
     });
+    // A shutdown request ends the stream (`None` stops `map_while`) after one last message.
+    let stop = WatchStream::new(st.shutdown.watch())
+        .filter(Option::is_some)
+        .map(|_| None);
+    // Stop is the only way the merged stream ends, so a `shutdown` message at its end is
+    // always right; `remaining` is `Some` then.
+    let last = st.shutdown.clone();
+    let stream = stream
+        .merge(stop)
+        .map_while(|item| item)
+        .chain(tokio_stream::iter(std::iter::once_with(move || {
+            let ms = last
+                .remaining()
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+            Ok(SseEvent::default()
+                .event("shutdown")
+                .json_data(json!({ "timeout_ms": ms }))
+                .unwrap_or_default())
+        })));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 

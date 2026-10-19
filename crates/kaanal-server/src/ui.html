@@ -171,6 +171,11 @@ if (token) {
     addRow(ev);
   });
   es.addEventListener('lagged', m => note('Log skipped ' + m.data + ' events (too fast to display).'));
+  es.addEventListener('shutdown', () => {
+    // The server announced its stop and ends the stream: do not reconnect-loop against nothing.
+    es.close();
+    note('Server stopped. Start kaanal again and open the new link it prints.');
+  });
   es.addEventListener('error', () => {
     lost = true;
     // CLOSED means the browser gave up (e.g. 401 after kaanal restarted with a new token).

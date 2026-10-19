@@ -1,5 +1,5 @@
 use sha2::Digest as _;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -282,6 +282,19 @@ fn ok(up: &Up, args: &[&str]) -> String {
     stdout(&out)
 }
 
+/// Runs `args`, asserts exit 64 (usage error) and returns stderr.
+fn usage_fails(up: &Up, args: &[&str]) -> String {
+    let out = up.run(args);
+    assert_eq!(
+        out.status.code(),
+        Some(64),
+        "{args:?}: stdout {} stderr {}",
+        stdout(&out),
+        stderr(&out)
+    );
+    stderr(&out)
+}
+
 /// Runs `args`, asserts exit 1 and returns stderr.
 fn fails(up: &Up, args: &[&str]) -> String {
     let out = up.run(args);
@@ -331,7 +344,7 @@ fn live_scenarios_activate_deactivate_and_errors() {
         "{e}"
     );
     for reserved in ["active", "save", "reset"] {
-        let e = fails(&up, &["scenario", "show", reserved]);
+        let e = usage_fails(&up, &["scenario", "show", reserved]);
         assert!(e.contains("reserved"), "{reserved}: {e}");
     }
     // a name defined in kaanal.yaml cannot be redefined by load
@@ -360,7 +373,7 @@ fn scenario_load_checks_the_file_here() {
     assert!(e.contains("typo.yaml:2:"), "{e}");
 
     let badname = write("Bad Name.yaml", "chaos:\n  - { node: db, down: true }\n");
-    let e = fails(&up, &["scenario", "load", badname.to_str().unwrap()]);
+    let e = usage_fails(&up, &["scenario", "load", badname.to_str().unwrap()]);
     assert!(e.contains("invalid scenario name"), "{e}");
 
     // reserved keys are refused here, like the server would, and nothing is defined
@@ -468,7 +481,7 @@ fn scenario_save_and_reset() {
     ok(&up, &["scenario", "save", "mine", "--force"]);
     let yaml = std::fs::read_to_string(dir.join("scenarios/mine.yaml")).unwrap();
     assert!(yaml.contains("\"latency_ms\":9"), "forced over: {yaml}");
-    let e = fails(&up, &["scenario", "save", "x", "--from", "mine"]);
+    let e = usage_fails(&up, &["scenario", "save", "x", "--from", "mine"]);
     assert!(e.contains("scenario:NAME"), "{e}");
 
     // --clear-live moves the live chaos into the scenario
@@ -558,7 +571,7 @@ fn chaos_set_without_any_setting_is_an_error_not_an_empty_patch() {
         .current_dir(&dir)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(64), "{}", stderr(&out));
     assert!(stderr(&out).contains("nothing to set"), "{}", stderr(&out));
 }
 
@@ -663,11 +676,11 @@ fn cli_reaches_an_instance_bound_to_ipv6_loopback() {
 }
 
 #[test]
-fn bad_arguments_exit_1_not_2() {
+fn bad_arguments_exit_64_not_2() {
     // 2 means "not running" (R6.3); clap's default for usage errors is 2.
     for args in [&["chaos", "set", "db", "--error", "70000"][..], &["nope"]] {
         let out = bin().args(args).output().unwrap();
-        assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
+        assert_eq!(out.status.code(), Some(64), "{args:?}: {}", stderr(&out));
     }
     let out = bin().arg("--help").output().unwrap();
     assert_eq!(out.status.code(), Some(0));
@@ -1394,7 +1407,7 @@ fn activate_with_ttl_lists_and_expires() {
 #[test]
 fn bad_ttl_is_rejected_here() {
     let (up, _dir) = scenario_up("scn-badttl");
-    let e = fails(&up, &["scenario", "activate", "db-down", "--ttl", "5"]);
+    let e = usage_fails(&up, &["scenario", "activate", "db-down", "--ttl", "5"]);
     assert!(e.contains("bad ttl"), "{e}");
     assert!(!ok(&up, &["scenario", "list"]).contains("(active"));
 }
@@ -1478,9 +1491,9 @@ fn cycle_state_flag_and_off() {
 #[test]
 fn cycle_bad_state_rejected_here() {
     let (up, _dir) = scenario_up("cyc-bad");
-    let e = fails(&up, &["cycle", "GET /users", "--state", "broken"]);
+    let e = usage_fails(&up, &["cycle", "GET /users", "--state", "broken"]);
     assert!(e.contains("loading") && e.contains("success"), "{e}");
-    let e = fails(
+    let e = usage_fails(
         &up,
         &["cycle", "GET /users", "--state", "slow", "--delay", "soon"],
     );
@@ -1725,8 +1738,8 @@ fn logs_default_n_and_each_filter() {
     let r = ok(&up, &["logs", "--endpoint", "GET /users/{id}"]);
     assert!(r.lines().count() == 1 && r.contains("503"), "{r}");
     assert_eq!(ok(&up, &["logs", "--scope", "nobody"]), "");
-    assert!(fails(&up, &["logs", "--status", "9xx"]).contains("status"));
-    assert!(fails(&up, &["logs", "--scope", ""]).contains("scope"));
+    assert!(usage_fails(&up, &["logs", "--status", "9xx"]).contains("status"));
+    assert!(usage_fails(&up, &["logs", "--scope", ""]).contains("scope"));
 }
 
 #[test]
@@ -1745,7 +1758,7 @@ fn logs_since_and_json_lines() {
     assert_eq!(ok(&up, &["logs", "--since", "1h"]).lines().count(), 2);
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(ok(&up, &["logs", "--since", "10ms"]), "");
-    assert!(fails(&up, &["logs", "--since", "yesterday"]).contains("since"));
+    assert!(usage_fails(&up, &["logs", "--since", "yesterday"]).contains("since"));
 }
 
 #[test]
@@ -1870,7 +1883,7 @@ fn logs_follow_survives_a_request_finishing_between_tail_and_stream() {
 fn logs_rejects_n_outside_1_to_1000_and_a_closed_pipe_is_quiet() {
     let up = Up::start("logs-n");
     for n in ["0", "1001"] {
-        let e = fails(&up, &["logs", "-n", n]);
+        let e = usage_fails(&up, &["logs", "-n", n]);
         assert!(e.contains("-n") && e.contains("1000"), "{e}");
     }
     ok(&up, &["logs", "-n", "1000"]);
@@ -1959,6 +1972,23 @@ fn logs_follow_exits_2_when_the_server_dies() {
 }
 
 #[test]
+fn logs_follow_exits_2_on_down() {
+    let up = Up::start("follow-down");
+    up.hit("/health", None);
+    let mut f = Follow::start(&up, &["-n", "1"]);
+    f.line();
+    let down = up.run(&["down"]);
+    assert_eq!(down.status.code(), Some(0), "{}", stderr(&down));
+    assert_eq!(f.exit_code(20), Some(2));
+    let errs: Vec<String> = f.err.try_iter().collect();
+    assert!(
+        errs.iter()
+            .any(|l| l.contains("kaanal stopped (the server shut down)")),
+        "{errs:?}"
+    );
+}
+
+#[test]
 fn logs_follow_json_keeps_stdout_pure_json_lines_and_sends_notices_to_stderr() {
     let up = Up::start("follow-json-pure");
     up.hit("/health", None);
@@ -2002,4 +2032,987 @@ fn logs_follow_json_keeps_stdout_pure_json_lines_and_sends_notices_to_stderr() {
         n += 1;
     }
     assert!(n > 0);
+}
+
+/// Runs the CLI in a fresh scratch dir (no instance running) and returns the exit code and stderr.
+static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+use std::sync::atomic::Ordering;
+
+fn exit_of(args: &[&str]) -> (Option<i32>, String) {
+    let out = bin()
+        .args(args)
+        .current_dir(scratch(&format!(
+            "usage-{}",
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        )))
+        .output()
+        .unwrap();
+    (out.status.code(), stderr(&out))
+}
+
+fn assert_64(args: &[&str]) {
+    let (code, err) = exit_of(args);
+    assert_eq!(code, Some(64), "{args:?}: {err}");
+}
+
+#[test]
+fn bad_log_filter_exits_64_without_an_instance_in_both_modes() {
+    for args in [
+        &["logs", "--status", "9xx"][..],
+        &["logs", "-f", "--status", "9xx"],
+        &["logs", "--since", "yesterday"],
+        &["logs", "-f", "--since", "yesterday"],
+        &["logs", "--scope", ""],
+        &["logs", "-f", "--scope", ""],
+    ] {
+        assert_64(args);
+    }
+}
+
+#[test]
+fn bad_names_in_set_and_save_exit_64() {
+    assert_64(&["scenario", "set", "ok", "Bad Name"]);
+    assert_64(&["scenario", "save", "Bad Name"]);
+}
+
+#[test]
+fn unknown_flag_exits_64() {
+    assert_64(&["status", "--bogus"]);
+}
+
+#[test]
+fn unknown_subcommand_exits_64() {
+    assert_64(&["frobnicate"]);
+}
+
+#[test]
+fn missing_required_arg_exits_64() {
+    assert_64(&["trace"]);
+    assert_64(&["chaos", "set"]);
+}
+
+#[test]
+fn conflicting_flags_exit_64() {
+    assert_64(&["cycle", "GET /x", "--off", "--state", "error"]);
+}
+
+#[test]
+fn help_and_version_exit_0() {
+    for args in [
+        &["--help"][..],
+        &["-V"],
+        &["--version"],
+        &["help", "chaos"],
+        &["chaos", "set", "--help"],
+    ] {
+        let out = bin().args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {}", stderr(&out));
+    }
+}
+
+#[test]
+fn bare_command_without_subcommand_exits_64() {
+    assert_64(&["chaos"]);
+    assert_64(&[]);
+}
+
+#[test]
+fn bad_ttl_exits_64() {
+    assert_64(&["scenario", "activate", "db-down", "--ttl", "5"]);
+}
+
+#[test]
+fn bad_scenario_name_exits_64() {
+    assert_64(&["scenario", "show", "active"]);
+    assert_64(&["scenario", "deactivate", "Bad Name"]);
+}
+
+#[test]
+fn bad_state_exits_64() {
+    assert_64(&["cycle", "GET /x", "--state", "broken"]);
+}
+
+#[test]
+fn bad_delay_exits_64() {
+    assert_64(&["cycle", "GET /x", "--delay", "soon"]);
+}
+
+#[test]
+fn bad_from_exits_64() {
+    assert_64(&["scenario", "save", "x", "--from", "mine"]);
+}
+
+#[test]
+fn n_out_of_range_exits_64() {
+    assert_64(&["logs", "-n", "0"]);
+    assert_64(&["logs", "-n", "1001"]);
+}
+
+#[test]
+fn empty_scope_exits_64() {
+    assert_64(&["logs", "--scope", ""]);
+}
+
+#[test]
+fn chaos_set_nothing_exits_64() {
+    assert_64(&["chaos", "set", "db"]);
+}
+
+#[test]
+fn bad_latency_exits_64() {
+    assert_64(&["chaos", "set", "db", "--latency", "15"]);
+}
+
+#[test]
+fn bad_rate_exits_64() {
+    assert_64(&["chaos", "set", "db", "--error-rate", "150%"]);
+}
+
+#[test]
+fn scenario_load_bad_file_name_exits_64() {
+    let d = scratch("usage-load");
+    let f = d.join("Bad Name.yaml");
+    std::fs::write(
+        &f,
+        "chaos: []
+",
+    )
+    .unwrap();
+    assert_64(&["scenario", "load", f.to_str().unwrap()]);
+}
+
+#[test]
+fn a_server_400_is_still_exit_1() {
+    let up = Up::start("usage-400");
+    // parses here, the server refuses the id
+    let e = fails(&up, &["trace", "bad id!"]);
+    assert!(e.contains("HTTP 400"), "{e}");
+}
+
+// ---- lifecycle: stale state, startup window, stop paths (C2a task 3) ----
+
+fn run_json(dir: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(dir.join(".kaanal/run.json")).unwrap()).unwrap()
+}
+
+/// Waits (bounded) for `dir`'s run.json to carry `pid`, failing early if the child exits.
+fn wait_for_pid(dir: &Path, child: &mut Child) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while run_json_pid(dir) != Some(u64::from(child.id())) {
+        if let Some(code) = child.try_wait().unwrap() {
+            panic!("up exited early with {code}");
+        }
+        assert!(Instant::now() < deadline, "up never wrote its run.json");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Waits (bounded) for the child to exit and returns its code.
+fn wait_exit(child: &mut Child, secs: u64) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            return s.code();
+        }
+        assert!(Instant::now() < deadline, "up did not exit in {secs}s");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn up_writes_a_token_free_startup_object_to_run_json() {
+    let up = Up::start("startup");
+    let run = run_json(&up.dir);
+    let token = run["token"].as_str().unwrap();
+    assert_ne!(token, "");
+    let startup = &run["startup"];
+    assert!(startup["warnings"].is_array(), "{run}");
+    assert!(!startup.to_string().contains(token), "{startup}");
+}
+
+#[test]
+fn post_shutdown_stops_a_foreground_up_and_removes_run_json() {
+    let mut up = Up::start("post-shutdown");
+    let run = run_json(&up.dir);
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .proxy(None)
+        .build()
+        .into();
+    let port = run["port"].as_u64().unwrap();
+    let resp = agent
+        .post(&format!("http://127.0.0.1:{port}/__kaanal/shutdown"))
+        .header("Host", &format!("localhost:{port}"))
+        .header(
+            "Authorization",
+            &format!("Bearer {}", run["token"].as_str().unwrap()),
+        )
+        .send_empty()
+        .unwrap();
+    assert!(resp.status().is_success(), "{}", resp.status());
+    assert_eq!(wait_exit(&mut up.child, 20), Some(0));
+    assert!(!up.dir.join(".kaanal/run.json").exists());
+}
+
+#[test]
+fn a_killed_up_leaves_stale_state_that_status_reports_and_removes() {
+    let dir = scratch("killed-stale");
+    let mut child = Helper(spawn_up(&dir));
+    wait_for_pid(&dir, &mut child);
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(
+        dir.join(".kaanal/run.json").exists(),
+        "a kill leaves the file"
+    );
+
+    let out = bin().arg("status").current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(stderr(&out).contains("stale state"), "{}", stderr(&out));
+    assert!(!dir.join(".kaanal/run.json").exists());
+}
+
+#[test]
+fn up_over_stale_state_starts_normally() {
+    let dir = scratch("over-stale");
+    std::fs::create_dir_all(dir.join(".kaanal")).unwrap();
+    std::fs::write(
+        dir.join(".kaanal/run.json"),
+        r#"{"port":9,"token":"stale","pid":1}"#,
+    )
+    .unwrap();
+    let mut child = Helper(spawn_up(&dir));
+    wait_for_pid(&dir, &mut child);
+    assert_ne!(run_json(&dir)["token"], "stale");
+    let out = bin().arg("status").current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    drop(child);
+}
+
+#[test]
+fn detached_flag_prints_ui_url_without_token() {
+    let dir = scratch("detached");
+    let mut child = bin()
+        .args(["up", "--detached", "--port", "0", "-c"])
+        .arg(fixture())
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let ui = BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .map(Result::unwrap)
+        .find(|l| l.starts_with("UI:"));
+    stop(child);
+    let ui = ui.expect("up prints a UI: line");
+    assert!(ui.ends_with("/__kaanal/ui"), "{ui}");
+    assert!(!ui.contains("token"), "{ui}");
+}
+
+#[test]
+fn foreground_up_keeps_the_token_in_the_ui_url() {
+    let dir = scratch("fg-ui");
+    let mut child = bin()
+        .args(["up", "--port", "0", "-c"])
+        .arg(fixture())
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let ui = BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .map(Result::unwrap)
+        .find(|l| l.starts_with("UI:"));
+    stop(child);
+    assert!(ui.unwrap().contains("/__kaanal/ui#token="));
+}
+
+/// A lock held by this test process, standing in for a running (or still starting) `up`.
+fn hold_lock(dir: &Path) -> std::fs::File {
+    std::fs::create_dir_all(dir.join(".kaanal")).unwrap();
+    let f = std::fs::File::create(dir.join(".kaanal/lock")).unwrap();
+    f.try_lock().unwrap();
+    f
+}
+
+#[test]
+fn held_lock_without_run_json_is_starting_exit_1() {
+    let dir = scratch("starting");
+    let _lock = hold_lock(&dir);
+    let out = bin().arg("status").current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("starting or its state file"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+// Stops and joins the listener thread even if an assert below fails first.
+struct StopListener(
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    u16,
+    Option<std::thread::JoinHandle<()>>,
+);
+impl Drop for StopListener {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = std::net::TcpStream::connect(("127.0.0.1", self.1));
+        if let Some(t) = self.2.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+#[test]
+fn held_lock_with_an_unanswering_api_is_exit_1_not_2() {
+    let dir = scratch("wedged");
+    let _lock = hold_lock(&dir);
+    // A server that accepts and drops every connection: alive, never answering, no port to race for.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&done);
+    let server = std::thread::spawn(move || {
+        while let Ok((conn, _)) = listener.accept() {
+            drop(conn);
+            if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+        }
+    });
+    let _stop = StopListener(done, port, Some(server));
+    std::fs::write(
+        dir.join(".kaanal/run.json"),
+        format!(r#"{{"port":{port},"token":"x","pid":4242}}"#),
+    )
+    .unwrap();
+    let out = bin().arg("status").current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains("did not answer"), "{}", stderr(&out));
+    assert!(
+        dir.join(".kaanal/run.json").exists(),
+        "a held lock keeps the file"
+    );
+}
+
+// ---- kaanal down (C2a task 4) ----
+
+/// Kills (and reaps) a helper process on drop, so a failing assert never leaks it.
+struct Helper(Child);
+
+impl std::ops::Deref for Helper {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Helper {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+impl Drop for Helper {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn down_in(dir: &Path, args: &[&str]) -> Output {
+    bin()
+        .arg("down")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+}
+
+/// A TCP port nothing listens on.
+fn closed_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[test]
+fn down_stops_a_running_up_and_status_then_exits_2() {
+    let mut up = Up::start("down-stops");
+    let out = up.run(&["down"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "stopped");
+    assert_eq!(wait_exit(&mut up.child, 20), Some(0));
+    assert!(!up.dir.join(".kaanal/run.json").exists());
+    assert_eq!(up.run(&["status"]).status.code(), Some(2));
+}
+
+#[test]
+fn down_twice_exits_0_both_times() {
+    let up = Up::start("down-twice");
+    for _ in 0..2 {
+        let out = up.run(&["down"]);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    }
+    assert!(stdout(&up.run(&["down"])).contains("not running"));
+}
+
+#[test]
+fn down_with_nothing_running_exits_0() {
+    let dir = scratch("down-nothing");
+    let out = down_in(&dir, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "kaanal is not running");
+}
+
+#[test]
+fn down_removes_stale_state_and_exits_0() {
+    let dir = scratch("down-stale");
+    let mut child = Helper(spawn_up(&dir));
+    wait_for_pid(&dir, &mut child);
+    let pid = child.id();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let out = down_in(&dir, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains(&format!("removed stale state from pid {pid}")),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!dir.join(".kaanal/run.json").exists());
+}
+
+#[test]
+fn down_kills_after_a_wrong_token() {
+    let mut up = Up::start("down-wrong-token");
+    let mut run = run_json(&up.dir);
+    let real = run["token"].as_str().unwrap().to_string();
+    run["token"] = serde_json::json!("not-the-token");
+    std::fs::write(up.dir.join(".kaanal/run.json"), run.to_string()).unwrap();
+    let t = Instant::now();
+    let out = up.run(&["down", "--timeout", "10s"]);
+    // A 401 means the API is up but unusable: straight to the kill, no drain wait (10s + 2s).
+    assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let pid = up.child.id();
+    assert_eq!(
+        stdout(&out).trim(),
+        format!("stopped (killed pid {pid} after 10s)")
+    );
+    assert!(!stdout(&out).contains(&real) && !stderr(&out).contains(&real));
+    up.child.wait().unwrap();
+    assert_eq!(up.run(&["status"]).status.code(), Some(2));
+}
+
+#[test]
+fn down_refuses_to_kill_a_non_kaanal_pid() {
+    let dir = scratch("down-other");
+    let _lock = hold_lock(&dir);
+    #[cfg(windows)]
+    let helper = Command::new("ping")
+        .args(["-n", "30", "127.0.0.1"])
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    #[cfg(not(windows))]
+    let helper = Command::new("sleep").arg("30").spawn().unwrap();
+    let mut helper = Helper(helper);
+    let pid = helper.0.id();
+    std::fs::write(
+        dir.join(".kaanal/run.json"),
+        format!(r#"{{"port":{},"token":"x","pid":{pid}}}"#, closed_port()),
+    )
+    .unwrap();
+    let out = down_in(&dir, &["--timeout", "1s"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    let e = stderr(&out);
+    assert!(
+        e.contains(&format!("pid {pid}")) && e.contains("not a kaanal process"),
+        "{e}"
+    );
+    assert!(
+        helper.0.try_wait().unwrap().is_none(),
+        "the helper must still be alive"
+    );
+}
+
+#[test]
+fn down_cuts_a_hanging_request_at_the_budget() {
+    let up = Up::start("down-hang");
+    for node in ["nginx", "app", "db"] {
+        ok(&up, &["chaos", "set", node, "--latency", "30s"]);
+    }
+    let port = run_json(&up.dir)["port"].as_u64().unwrap();
+    let hang = std::thread::spawn(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build()
+            .into();
+        let _ = agent.get(&format!("http://127.0.0.1:{port}/orders")).call();
+    });
+    std::thread::sleep(Duration::from_millis(400));
+    let t = Instant::now();
+    let out = up.run(&["down", "--timeout", "1s"]);
+    assert!(t.elapsed() < Duration::from_secs(4), "{:?}", t.elapsed());
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out).trim(), "stopped");
+    hang.join().unwrap();
+}
+
+#[test]
+fn concurrent_downs_both_succeed() {
+    let up = Up::start("down-concurrent");
+    let spawn = || {
+        bin()
+            .arg("down")
+            .current_dir(&up.dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let (a, b) = (spawn(), spawn());
+    for out in [a.wait_with_output().unwrap(), b.wait_with_output().unwrap()] {
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert!(!stderr(&out).contains("panicked"), "{}", stderr(&out));
+    }
+}
+
+#[test]
+fn down_during_startup_window_waits_then_fails_clearly() {
+    let dir = scratch("down-starting");
+    let _lock = hold_lock(&dir);
+    let t = Instant::now();
+    let out = down_in(&dir, &[]);
+    assert!(t.elapsed() >= Duration::from_secs(4), "{:?}", t.elapsed());
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(stderr(&out).contains("starting"), "{}", stderr(&out));
+}
+
+#[test]
+fn bad_timeout_is_usage_64() {
+    for t in ["soon", "5", "0s", "301s"] {
+        assert_64(&["down", "--timeout", t]);
+    }
+}
+
+/// Not run on Windows (no SIGTERM there): the Windows stop path is covered by the POST test above.
+#[cfg(unix)]
+#[test]
+fn sigterm_stops_up_gracefully() {
+    // Signal the moment run.json appears: the handlers must already be registered, so every
+    // round drains and exits 0 (a late registration dies from the signal's default action).
+    for round in 0..20 {
+        let dir = scratch("sigterm"); // scratch() wipes and recreates it each round
+        let mut child = Helper(spawn_up(&dir));
+        wait_for_pid(&dir, &mut child);
+        let st = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(st.success());
+        assert_eq!(wait_exit(&mut child, 20), Some(0), "round {round}");
+        assert!(!dir.join(".kaanal/run.json").exists());
+    }
+}
+
+// ---- `kaanal up -d` ----
+
+/// Stops whatever daemon lives in `dir` when dropped, even after a failed assertion: `down`, then
+/// a hard kill of the pid in run.json if one is left.
+struct Daemon(PathBuf);
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        let _ = bin()
+            .args(["down", "--timeout", "2s"])
+            .current_dir(&self.0)
+            .output();
+        if let Some(pid) = run_json_pid(&self.0) {
+            let _ = if cfg!(windows) {
+                Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .output()
+            } else {
+                Command::new("kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .output()
+            };
+        }
+    }
+}
+
+/// `kaanal up -d --port 0 -c <cfg>` in `dir`.
+fn up_d_cmd(dir: &Path, cfg: &Path) -> Command {
+    let mut c = bin();
+    c.args(["up", "-d", "--port", "0", "-c"])
+        .arg(cfg)
+        .current_dir(dir);
+    c
+}
+
+/// Reads both pipes of `child` to EOF on threads; the receiver gets `(0|1, bytes)` per pipe.
+fn drain_pipes(child: &mut Child) -> std::sync::mpsc::Receiver<(usize, Vec<u8>)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let pipes: [Box<dyn Read + Send>; 2] = [
+        Box::new(child.stdout.take().unwrap()),
+        Box::new(child.stderr.take().unwrap()),
+    ];
+    for (i, mut pipe) in pipes.into_iter().enumerate() {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = pipe.read_to_end(&mut b);
+            let _ = tx.send((i, b));
+        });
+    }
+    rx
+}
+
+/// Runs `cmd` with both pipes read to EOF, failing if EOF does not come within 30 s: a daemon that
+/// inherited the pipes would hold them open forever.
+fn piped(mut cmd: Command) -> Output {
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let rx = drain_pipes(&mut child);
+    let mut bufs = [Vec::new(), Vec::new()];
+    for _ in 0..2 {
+        let (i, b) = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("pipes not closed in 30 s: the daemon holds the caller's stdout/stderr");
+        bufs[i] = b;
+    }
+    let [stdout, stderr] = bufs;
+    Output {
+        status: child.wait().unwrap(),
+        stdout,
+        stderr,
+    }
+}
+
+fn mocks_port(out: &Output) -> u16 {
+    stdout(out)
+        .lines()
+        .find_map(|l| l.strip_prefix("Mocks: http://localhost:"))
+        .unwrap_or_else(|| panic!("no Mocks line: {} / {}", stdout(out), stderr(out)))
+        .parse()
+        .unwrap()
+}
+
+fn health(port: u16) -> u16 {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .proxy(None)
+        .build()
+        .into();
+    agent
+        .get(&format!("http://127.0.0.1:{port}/__kaanal/health"))
+        .header("Host", &format!("localhost:{port}"))
+        .call()
+        .unwrap()
+        .status()
+        .as_u16()
+}
+
+fn run_token(dir: &Path) -> String {
+    let s = std::fs::read_to_string(dir.join(".kaanal/run.json")).unwrap();
+    serde_json::from_str::<serde_json::Value>(&s).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn piped_up_d_returns_while_the_daemon_keeps_running() {
+    let dir = scratch("upd-pipe");
+    let _d = Daemon(dir.clone());
+    let mut child = up_d_cmd(&dir, &fixture())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let rx = drain_pipes(&mut child);
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(20))
+            .expect("EOF on stdout/stderr within 20 s: the daemon inherited the caller's pipes");
+    }
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    let st = kaanal(&dir, &["status"]);
+    assert_eq!(st.status.code(), Some(0), "{}", stderr(&st));
+    let down = kaanal(&dir, &["down"]);
+    assert_eq!(down.status.code(), Some(0), "{}", stderr(&down));
+}
+
+#[test]
+fn up_d_returns_after_health_and_run_json_has_a_live_port() {
+    let dir = scratch("upd-live");
+    let _d = Daemon(dir.clone());
+    let out = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let port = mocks_port(&out);
+    let text = stdout(&out);
+    assert!(
+        text.contains(&format!("#token={}", run_token(&dir))),
+        "{text}"
+    );
+    assert!(
+        text.contains("Log: ") && text.contains("Stop: kaanal down"),
+        "{text}"
+    );
+    let run: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(".kaanal/run.json")).unwrap())
+            .unwrap();
+    assert_eq!(run["port"].as_u64(), Some(u64::from(port)));
+    assert_eq!(health(port), 200);
+}
+
+#[test]
+fn up_d_log_exists_and_holds_no_token() {
+    let dir = scratch("upd-log");
+    let _d = Daemon(dir.clone());
+    let out = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let token = run_token(&dir);
+    let log = std::fs::read_to_string(dir.join(".kaanal/kaanal.log")).unwrap();
+    assert!(log.contains("Mocks: "), "{log}");
+    assert!(!log.contains(&token) && !log.contains("token="), "{log}");
+}
+
+#[test]
+fn second_up_d_exits_0_with_already_running_and_the_same_port() {
+    let dir = scratch("upd-twice");
+    let _d = Daemon(dir.clone());
+    let first = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(first.status.code(), Some(0), "{}", stderr(&first));
+    let second = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(second.status.code(), Some(0), "{}", stderr(&second));
+    assert_eq!(mocks_port(&first), mocks_port(&second));
+    let pid = run_json_pid(&dir).unwrap();
+    assert!(
+        stdout(&second).contains(&format!("already running (pid {pid})")),
+        "{}",
+        stdout(&second)
+    );
+}
+
+#[test]
+fn up_d_then_down_then_status_exits_2() {
+    let dir = scratch("upd-down");
+    let _d = Daemon(dir.clone());
+    let out = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(kaanal(&dir, &["down"]).status.code(), Some(0));
+    assert_eq!(kaanal(&dir, &["status"]).status.code(), Some(2));
+}
+
+#[test]
+fn up_d_rotates_the_previous_log() {
+    let dir = scratch("upd-rotate");
+    let _d = Daemon(dir.clone());
+    let out = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let first = std::fs::read_to_string(dir.join(".kaanal/kaanal.log")).unwrap();
+    assert_ne!(first, "");
+    assert_eq!(kaanal(&dir, &["down"]).status.code(), Some(0));
+    let out = piped(up_d_cmd(&dir, &fixture()));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let old = std::fs::read_to_string(dir.join(".kaanal/kaanal.log.1")).unwrap();
+    assert_eq!(old, first);
+}
+
+#[test]
+fn up_d_with_a_bad_config_exits_1_and_spawns_nothing() {
+    let dir = scratch("upd-bad");
+    // Parses, but fails the topology check: only the parent's validation can stop it.
+    std::fs::write(
+        dir.join("kaanal.yaml"),
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  a: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\n  b: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:\n  - { from: a, to: b }\n  - { from: b, to: a }\n",
+    )
+    .unwrap();
+    let _d = Daemon(dir.clone());
+    let out = piped(up_d_cmd(&dir, Path::new("kaanal.yaml")));
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    let e = stderr(&out);
+    assert!(e.contains("kaanal.yaml") && e.contains("cycle"), "{e}");
+    assert!(
+        !dir.join(".kaanal").exists(),
+        "nothing may be created or spawned"
+    );
+}
+
+#[test]
+fn up_d_with_a_missing_config_exits_1() {
+    let dir = scratch("upd-missing");
+    let out = piped(up_d_cmd(&dir, Path::new("nope.yaml")));
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("nope.yaml"), "{}", stderr(&out));
+    assert!(!dir.join(".kaanal").exists());
+}
+
+#[test]
+fn up_d_when_the_port_search_is_exhausted_exits_1_with_log_lines() {
+    // Hold 21 consecutive ports so the +20 search finds none.
+    let (base, _held) = (41_000u16..60_000)
+        .step_by(37)
+        .find_map(|p| {
+            (p..=p + 20)
+                .map(|q| std::net::TcpListener::bind(("127.0.0.1", q)))
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+                .map(|l| (p, l))
+        })
+        .expect("21 free consecutive ports");
+    let dir = scratch("upd-ports");
+    let _d = Daemon(dir.clone());
+    let mut c = bin();
+    c.args(["up", "-d", "--port", &base.to_string(), "-c"])
+        .arg(fixture())
+        .current_dir(&dir);
+    let out = piped(c);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(stderr(&out).contains("no free port"), "{}", stderr(&out));
+}
+
+#[test]
+fn up_d_prints_auth_and_seed_lines() {
+    let (dir, cfg) = auth_project("upd-auth", true);
+    let mut src = std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap();
+    src.push_str("determinism: realistic\n");
+    std::fs::write(dir.join("kaanal.yaml"), src).unwrap();
+    let _d = Daemon(dir.clone());
+    let mut c = up_d_cmd(&dir, Path::new("kaanal.yaml"));
+    c.env("KAANAL_CONFIG_DIR", &cfg);
+    let out = piped(c);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains("Auth:  POST http://localhost:") && text.contains("1 user"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Seed:  ") && text.contains("determinism: realistic"),
+        "{text}"
+    );
+}
+
+#[test]
+fn up_d_works_in_a_path_with_spaces_and_non_ascii() {
+    let dir = project("upd sp\u{e4}ce \u{65e5}\u{672c}", "");
+    let _d = Daemon(dir.clone());
+    let out = piped(up_d_cmd(&dir, Path::new("kaanal.yaml")));
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(health(mocks_port(&out)), 200);
+}
+
+#[test]
+fn simultaneous_up_d_starts_exactly_one_instance() {
+    let dir = scratch("upd-race");
+    let _d = Daemon(dir.clone());
+    let go = |d: PathBuf| std::thread::spawn(move || piped(up_d_cmd(&d, &fixture())));
+    let all: Vec<_> = (0..5).map(|_| go(dir.clone())).collect();
+    let outs: Vec<Output> = all.into_iter().map(|t| t.join().unwrap()).collect();
+    for o in &outs {
+        assert_eq!(o.status.code(), Some(0), "{}", stderr(o));
+    }
+    let port = mocks_port(&outs[0]);
+    assert!(
+        outs.iter().all(|o| mocks_port(o) == port),
+        "one instance, one port"
+    );
+    assert_eq!(
+        outs.iter()
+            .filter(|o| stdout(o).contains("already running"))
+            .count(),
+        4,
+        "exactly one start, four already-running"
+    );
+    assert_eq!(kaanal(&dir, &["status"]).status.code(), Some(0));
+    // The live daemon writes to kaanal.log; nobody rotated it away.
+    let log = std::fs::read_to_string(dir.join(".kaanal/kaanal.log")).unwrap();
+    assert!(
+        log.contains(&format!("Mocks: http://localhost:{port}")),
+        "{log}"
+    );
+    assert!(!dir.join(".kaanal/kaanal.log.1").exists());
+}
+
+#[test]
+fn up_d_that_times_out_leaves_no_process_behind() {
+    let (dir, cfg) = auth_project("upd-timeout", true);
+    let _d = Daemon(dir.clone());
+    let mut c = up_d_cmd(&dir, Path::new("kaanal.yaml"));
+    c.env("KAANAL_CONFIG_DIR", &cfg).args(["--wait", "1ms"]);
+    let out = piped(c);
+    if out.status.code() == Some(0) {
+        // A fast machine was ready within (or just after) the 1ms deadline and is kept, so there
+        // is nothing to end here; the kill path is unit-tested in `settle_unready`.
+        assert_eq!(kaanal(&dir, &["down"]).status.code(), Some(0));
+        return;
+    }
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("no answer within"),
+        "{}",
+        stderr(&out)
+    );
+    // The child was ended, not orphaned: its lock is free again (status says stale or absent).
+    assert!(
+        kaanal_server_lock_free(&dir),
+        "an orphaned kaanal process still holds the lock"
+    );
+    assert_eq!(kaanal(&dir, &["status"]).status.code(), Some(2));
+}
+
+/// Whether nothing holds `.kaanal/lock` (polled for 3 s: the OS frees a killed process's lock a moment later).
+fn kaanal_server_lock_free(dir: &Path) -> bool {
+    let end = Instant::now() + Duration::from_secs(3);
+    loop {
+        let free = match std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(".kaanal/lock"))
+        {
+            Ok(f) => f.try_lock().is_ok(),
+            Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+        };
+        if free || Instant::now() >= end {
+            return free;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn up_d_warns_about_a_non_loopback_host_in_the_parent() {
+    let dir = scratch("upd-host");
+    let _d = Daemon(dir.clone());
+    let mut c = up_d_cmd(&dir, &fixture());
+    c.args(["--host", "0.0.0.0"]);
+    let out = piped(c);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let e = stderr(&out);
+    assert_eq!(e.matches("warning: binding 0.0.0.0").count(), 1, "{e}");
+    assert!(
+        e.contains("reachable from your network; control calls still need the token and Host"),
+        "{e}"
+    );
+}
+
+#[test]
+fn wait_zero_is_usage_64() {
+    let dir = scratch("upd-wait0");
+    let mut c = up_d_cmd(&dir, &fixture());
+    c.args(["--wait", "0s"]);
+    let out = piped(c);
+    assert_eq!(out.status.code(), Some(64), "{}", stderr(&out));
+    assert!(!dir.join(".kaanal").exists());
 }

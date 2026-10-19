@@ -49,6 +49,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/log.rs`       | [kaanal-server/log.md](kaanal-server/log.md)             | Request ids, the 1000-entry log ring, query filters   |
 | `src/record.rs`    | [kaanal-server/record.md](kaanal-server/record.md)       | Trace text, log entry, flags and the bus event        |
 | `src/log_api.rs`   | [kaanal-server/log_api.md](kaanal-server/log_api.md)     | `/logs` and `/trace/{id}` routes                      |
+| `src/shutdown.rs`  | [kaanal-server/shutdown.md](kaanal-server/shutdown.md)   | The graceful stop: deadline handle, cutting listener  |
 | `src/ui.html`      | [../../web/web-ui.md](../../web/web-ui.md)               | Embedded status page (documented with the web docs)   |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
@@ -60,8 +61,15 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal](kaanal/) (binary)
 
-| File             | Page                                   | Contents                                                              |
-| ---------------- | -------------------------------------- | --------------------------------------------------------------------- |
-| `src/main.rs`    | [kaanal/main.md](kaanal/main.md)       | CLI, instance lock, run file, control-API client                      |
-| `src/keys.rs`    | [kaanal/keys.md](kaanal/keys.md)       | Signing key file: location, identity, race-safe creation, permissions |
-| `src/logview.rs` | [kaanal/logview.md](kaanal/logview.md) | Log lines, the waterfall, the `logs -f` follow machinery              |
+| File               | Page                                       | Contents                                                              |
+| ------------------ | ------------------------------------------ | --------------------------------------------------------------------- |
+| `src/main.rs`      | [kaanal/main.md](kaanal/main.md)           | CLI, instance lock, run file, control-API client                      |
+| `src/keys.rs`      | [kaanal/keys.md](kaanal/keys.md)           | Signing key file: location, identity, race-safe creation, permissions |
+| `src/logview.rs`   | [kaanal/logview.md](kaanal/logview.md)     | Log lines, the waterfall, the `logs -f` follow machinery              |
+| `src/lifecycle.rs` | [kaanal/lifecycle.md](kaanal/lifecycle.md) | Liveness by lock, `run.json` reader, stopping, detaching, signals     |
+
+## [kaanal-winhandle](kaanal-winhandle/) (the one `unsafe` crate)
+
+| File         | Page                                               | Contents                                                          |
+| ------------ | -------------------------------------------------- | ----------------------------------------------------------------- |
+| `src/lib.rs` | [kaanal-winhandle/lib.md](kaanal-winhandle/lib.md) | `without_inheritable_stdio`: keeps `up -d` off the caller's pipes |

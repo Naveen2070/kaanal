@@ -19,5 +19,8 @@ serde_json.workspace = true
 dirs.workspace = true
 sha2.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+kaanal-winhandle.workspace = true
+
 [lints]
 workspace = true

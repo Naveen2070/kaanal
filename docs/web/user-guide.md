@@ -17,7 +17,7 @@ UI:    http://localhost:8080/__kaanal/ui#token=<64 hex chars>
 Auth:  POST http://localhost:8080/login, JWKS http://localhost:8080/.well-known/jwks.json, 1 user
 ```
 
-Point your frontend's `API_BASE_URL` at the mocks URL. Open the UI URL to watch requests and flip chaos. Only one instance per project directory; a second `kaanal up` tells you it's already running.
+Point your frontend's `API_BASE_URL` at the mocks URL. Open the UI URL to watch requests and flip chaos. Only one instance per project directory; a second `kaanal up` tells you it's already running. Ctrl+C stops it. For scripts and CI, `kaanal up -d` starts it in the background and `kaanal down` stops it: see [lifecycle.md](lifecycle.md).
 
 **Log in from your frontend.** With an `auth` node, `POST /login` returns a signed JWT. Send `Content-Type: application/json` (a `fetch` with `JSON.stringify` and no header sends `text/plain` and gets 415). See [auth.md](auth.md).
 
@@ -56,23 +56,35 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 
 ## CLI
 
-| Command                                                                                                                   | What it does                                                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C stops.                                                                                                                    |
-| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                                                                                    |
-| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                            |
-| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                      |
-| `kaanal status`                                                                                                           | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                       |
-| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                                                                            |
-| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).                                     |
-| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`           | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md).                                 |
-| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                                                            | Pin an endpoint to the next UI state (loading, empty, error, slow, success), or to one with `--state`; `--off` removes it. See [pins.md](pins.md).   |
-| `kaanal pins`                                                                                                             | Live pins and the pin in force per endpoint, with its source.                                                                                        |
-| `kaanal logs [-n N] [-f] [--since D] [--status S] [--failed] [--endpoint "GET /x/{id}"] [--scope NAME] [--json]`          | The last finished requests, one line each; `-f` follows live. See [observability.md](observability.md).                                              |
-| `kaanal trace ID\|last\|CLIENT_ID [--json]`                                                                               | One request as a per-hop waterfall: Kaanal's id (from `X-Request-Id`), `last`, or the id your client sent. See [observability.md](observability.md). |
-| `kaanal reset`                                                                                                            | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset, and the request log emptied (ids carry on).                |
+| Command                                                                                                                   | What it does                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C or `SIGTERM` stops it (drains for 5 s first).                                                                                             |
+| `kaanal up -d [--wait 15s] [-c f] [--port p] [--host ip]`                                                                 | Start in the background; returns when the server answers, with the URLs. A second `up -d` prints the running instance and exits 0. See [lifecycle.md](lifecycle.md). |
+| `kaanal down [--timeout 5s]`                                                                                              | Stop the running instance: drain, then force-kill only a verified kaanal process. Exits 0 when nothing is running. See [lifecycle.md](lifecycle.md).                 |
+| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                                                                                                    |
+| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                                            |
+| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                                      |
+| `kaanal status`                                                                                                           | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                                       |
+| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                                                                                            |
+| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).                                                     |
+| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`           | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md).                                                 |
+| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                                                            | Pin an endpoint to the next UI state (loading, empty, error, slow, success), or to one with `--state`; `--off` removes it. See [pins.md](pins.md).                   |
+| `kaanal pins`                                                                                                             | Live pins and the pin in force per endpoint, with its source.                                                                                                        |
+| `kaanal logs [-n N] [-f] [--since D] [--status S] [--failed] [--endpoint "GET /x/{id}"] [--scope NAME] [--json]`          | The last finished requests, one line each; `-f` follows live. See [observability.md](observability.md).                                                              |
+| `kaanal trace ID\|last\|CLIENT_ID [--json]`                                                                               | One request as a per-hop waterfall: Kaanal's id (from `X-Request-Id`), `last`, or the id your client sent. See [observability.md](observability.md).                 |
+| `kaanal reset`                                                                                                            | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset, and the request log emptied (ids carry on).                                |
 
-Exit codes: `0` ok, `1` error, `2` no running instance.
+### Exit codes
+
+| Code | Meaning                                                                                                     |
+| ---- | ----------------------------------------------------------------------------------------------------------- |
+| `0`  | Ok (also `down` with nothing running, and `up -d` on a running instance)                                    |
+| `1`  | Error: bad config, startup failure, a value the server refused (HTTP 400), an instance that does not answer |
+| `2`  | No running instance (or only stale state, which is cleaned up)                                              |
+| `3`  | Reserved for assertion failures; no command returns it yet                                                  |
+| `64` | Usage error: a wrong command line, found before anything is sent (unknown flag, bad `--ttl`, `-n 0`, ...)   |
+
+`--help` and `--version` exit 0. The details, and what each case prints, are in [lifecycle.md](lifecycle.md#exit-codes).
 
 ## What a request looks like
 
@@ -124,6 +136,6 @@ Open the UI URL printed by `kaanal up`. It shows a node table with live rps/erro
 ## Safety notes
 
 - Kaanal binds `127.0.0.1`. `--host 0.0.0.0` works but warns; the control API still requires the token and a loopback `Host` header.
-- The token is per-run and lives in `.kaanal/run.json`, readable only by you.
+- The token is per-run and lives in `.kaanal/run.json`, readable only by you. The background process's log (`.kaanal/kaanal.log`) never contains it.
 - `KAANAL_CONFIG_DIR` sets the base folder for the auth signing key (default: your per-user local config folder). See [auth.md](auth.md).
 - All generated data is synthetic. Emails always use `example.com`.

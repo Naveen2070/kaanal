@@ -252,7 +252,8 @@ fn near_miss_extensions_warn() {
     assert!(w.iter().all(|m| m.contains("must end in .yaml")), "{w:?}");
 }
 
-#[cfg(unix)]
+// macOS file systems (APFS/HFS+) reject non-UTF-8 names outright.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn non_utf8_names_warn() {
     use std::os::unix::ffi::OsStrExt as _;

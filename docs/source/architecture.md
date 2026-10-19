@@ -43,13 +43,13 @@ flowchart TD
 
 ### Dependency Rules and Invariants
 
-| Crate               | Primary Role                                                                      | Prohibited Technologies                                              | Invariant                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **`kaanal-core`**   | Topology graph validation, latency distributions, chain execution, FNV-1a hash.   | No `tokio`, no `axum`, no filesystem/network IO, no wall-clock time. | Pure computation only; computes outcomes, never sleeps. (Rule R2.3)                       |
-| **`kaanal-data`**   | OpenAPI 3.0 parsing, `$ref` inlining, deterministic schema-driven data generator. | No dependency on `kaanal-core`, no HTTP, no async.                   | Maintains private FNV-1a hash algorithm pinned by cross-crate unit tests. (Rule R2.4)     |
-| **`kaanal-server`** | Axum router, mock request handler, control API, SSE event bus, shared state.      | No CLI terminal logic, no direct argv parsing.                       | Only crate that speaks HTTP. (Rule R2.4)                                                  |
-| **`kaanal-sim`**    | Discrete-event simulator: Poisson arrivals, per-node FIFO queues, virtual clock.  | No `tokio`, no IO, no timing model of its own.                       | Every service time comes from `kaanal_core::execute()`; depends on core only. (Rule R2.5) |
-| **`kaanal`**        | CLI parsing via clap, directory locking, runfile management, control API client.  | No direct mock engine or database logic.                             | Thin client over control API. (Rule R2.6)                                                 |
+| Crate               | Primary Role                                                                                       | Prohibited Technologies                                              | Invariant                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **`kaanal-core`**   | Topology graph validation, latency distributions, chain execution, FNV-1a hash.                    | No `tokio`, no `axum`, no filesystem/network IO, no wall-clock time. | Pure computation only; computes outcomes, never sleeps. (Rule R2.3)                       |
+| **`kaanal-data`**   | OpenAPI 3.0 parsing, `$ref` inlining, deterministic schema-driven data generator.                  | No dependency on `kaanal-core`, no HTTP, no async.                   | Maintains private FNV-1a hash algorithm pinned by cross-crate unit tests. (Rule R2.4)     |
+| **`kaanal-server`** | Axum router, mock request handler, control API, SSE event bus, shared state.                       | No CLI terminal logic, no direct argv parsing.                       | Only crate that speaks HTTP. (Rule R2.4)                                                  |
+| **`kaanal-sim`**    | Discrete-event simulator: Poisson arrivals, per-node FIFO queues, virtual clock.                   | No `tokio`, no IO, no timing model of its own.                       | Every service time comes from `kaanal_core::execute()`; depends on core only. (Rule R2.5) |
+| **`kaanal`**        | CLI parsing via clap, directory locking, runfile management, `up -d` / `down`, control API client. | No direct mock engine or database logic.                             | Thin client over control API. (Rule R2.6)                                                 |
 
 ---
 
@@ -292,13 +292,14 @@ flowchart TD
     PrivDir --> Lock["Acquire OS File Lock<br/>(.kaanal/lock via File::try_lock)"]
     Lock --> CheckLock{Locked?}
 
-    CheckLock -- No --> ExitBusy["Print 'already running' & Exit 1"]
+    CheckLock -- No --> ExitBusy["Print 'already running' & Exit 1<br/>(up -d: exit 0)"]
     CheckLock -- Yes --> Init["Build AppState & Bind TCP Port"]
     Init --> RunFile["Atomically Write .kaanal/run.json<br/>(temp file + rename)"]
     RunFile --> Serve["Serve Requests on Tokio Multi-thread Pool"]
 
-    Serve --> SigWait{"Wait for Ctrl+C / SIGINT"}
-    SigWait --> TokenCheck{"run.json contains our token?"}
+    Serve --> SigWait{"Wait for a stop signal<br/>or POST /__kaanal/shutdown"}
+    SigWait --> Drain["Drain: refuse new connections,<br/>finish in-flight requests (5 s default),<br/>then cut what is left"]
+    Drain --> TokenCheck{"run.json contains our token?"}
     TokenCheck -- Yes --> Unlink["Delete .kaanal/run.json"]
     TokenCheck -- No --> Keep["Leave run.json intact"]
     Unlink --> KernelUnlock["Process exits -> OS releases .kaanal/lock"]
@@ -306,11 +307,15 @@ flowchart TD
     KernelUnlock --> Terminate(["Exit 0"])
 ```
 
+`kaanal up -d` and `kaanal down` add two things around this: a second lock, `.kaanal/start.lock`, that serialises concurrent `up -d` runs, and a log, `.kaanal/kaanal.log`, for the detached process.
+
 ### Single Instance Enforcement
 
-- **OS File Lock (Rule R6.7)**: `kaanal up` opens `.kaanal/lock` and calls `std::fs::File::try_lock()` (Rust 1.89+). If another instance holds the lock, it immediately exits with code 1.
+- **OS File Lock (Rule R6.7)**: `kaanal up` opens `.kaanal/lock` and calls `std::fs::File::try_lock()` (Rust 1.89+). If another instance holds the lock, it retries for about 200 ms (a status probe holds the lock for an instant) and then exits with code 1.
 - **Crash Safety**: Operating system file locks are released by the kernel upon process termination. Stale lock files never occur after abnormal termination or `kill -9`.
-- **Atomic State Persistence**: Server metadata (`port`, `token`, `pid`) is written to `.kaanal/run.json` via a temporary file and atomic rename.
+- **Atomic State Persistence**: Server metadata (`host`, `port`, `token`, `pid` and a token-free `startup` object) is written to `.kaanal/run.json` via a temporary file and atomic rename.
+- **The lock is the liveness signal**: a `run.json` whose lock is free is stale and is never trusted; every command that needs an instance checks the lock first (exit 2 and the file removed). `kaanal down` and `kaanal up -d` are built on the same check. User-facing description: [../web/lifecycle.md](../web/lifecycle.md); code: [files/kaanal/lifecycle.md](files/kaanal/lifecycle.md).
+- **Graceful stop**: a signal or `POST /__kaanal/shutdown` starts a drain with a fixed deadline ([files/kaanal-server/shutdown.md](files/kaanal-server/shutdown.md)); the listener is wrapped so that connections still open at the deadline fail their I/O, which makes hyper drop the in-flight handlers.
 
 ---
 

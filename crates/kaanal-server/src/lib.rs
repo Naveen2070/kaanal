@@ -19,6 +19,7 @@ mod pins;
 mod record;
 mod scenarios;
 mod scope;
+mod shutdown;
 mod state;
 mod wire;
 
@@ -62,15 +63,40 @@ pub struct BoundServer {
     pub drawn_seed: Option<u64>,
     /// **Private.** The spawned `axum::serve` task.
     handle: tokio::task::JoinHandle<std::io::Result<()>>,
+    /// **Private.** Shared with the server state, so the route and [`BoundServer::shutdown`] are one.
+    shutdown: shutdown::Shutdown,
 }
 
 impl BoundServer {
-    /// Runs until the server stops (Ctrl+C is handled by the caller).
+    /// Runs until the server stops (Ctrl+C is handled by the caller), or until the deadline
+    /// of a shutdown request passes; then the serve task is aborted and this returns `Ok`.
     ///
     /// # Errors
     /// Returns the IO error that stopped the server (e.g. the listener died).
-    pub async fn wait(self) -> std::io::Result<()> {
-        self.handle.await.map_err(std::io::Error::other)?
+    pub async fn wait(mut self) -> std::io::Result<()> {
+        tokio::select! {
+            done = &mut self.handle => done.map_err(std::io::Error::other)?,
+            () = self.shutdown.expired() => {
+                self.handle.abort();
+                Ok(())
+            }
+        }
+    }
+
+    /// Starts a graceful stop, as `POST /__kaanal/shutdown` does: in-flight requests get `budget`
+    /// to finish, then what is left is cut. The first request fixes the deadline; later ones never
+    /// extend it. Returns the time left to it.
+    pub fn shutdown(&self, budget: std::time::Duration) -> std::time::Duration {
+        self.shutdown.request(budget)
+    }
+
+    /// [`BoundServer::shutdown`] as an owned closure, for a caller that has handed `self` to
+    /// [`BoundServer::wait`] (which consumes it) and still wants to start the stop, e.g. on a signal.
+    pub fn stopper(
+        &self,
+    ) -> impl Fn(std::time::Duration) -> std::time::Duration + Send + Sync + use<> {
+        let sd = self.shutdown.clone();
+        move |budget| sd.request(budget)
     }
 }
 
@@ -126,15 +152,30 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
     let st = Arc::new(st);
     let warnings = st.warnings.clone();
     let drawn_seed = st.drawn_seed;
-    // ponytail: detached; it ends with the process. Keep the handle if serve ever needs a clean stop.
-    tokio::spawn(control::lease_task(Arc::clone(&st)));
+    let shutdown = st.shutdown.clone();
+    // Detached; it stops when a shutdown is requested (no lease should fire during the drain).
+    let sd = shutdown.clone();
+    let leases = control::lease_task(Arc::clone(&st));
+    tokio::spawn(async move {
+        tokio::select! {
+            () = leases => {}
+            () = sd.requested() => {}
+        }
+    });
     let app = router(st);
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await });
+    let listener = shutdown::Cut::new(listener, shutdown.clone());
+    let sd = shutdown.clone();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move { sd.requested().await })
+            .await
+    });
     Ok(BoundServer {
         addr,
         warnings,
         drawn_seed,
         handle,
+        shutdown,
     })
 }
 
@@ -205,6 +246,7 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/logs", get(log_api::logs))
         .route("/__kaanal/trace/{id}", get(log_api::trace))
         .route("/__kaanal/reset", post(control::reset))
+        .route("/__kaanal/shutdown", post(control::shutdown))
         .route("/__kaanal/events", get(control::events))
         .route("/__kaanal/ui", get(control::ui))
         // route_layer: wraps only the control routes above, never the mock fallback.

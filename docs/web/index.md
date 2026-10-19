@@ -17,6 +17,7 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | [scenarios.md](scenarios.md)         | Everyone                      | Named chaos scenarios: YAML, stacking, CLI, API, reset, test-runner recipes |
 | [pins.md](pins.md)                   | Frontend developers, testers  | Pinned UI states (loading, empty, error, slow) and `kaanal cycle`           |
 | [observability.md](observability.md) | Everyone                      | Request ids, `kaanal logs`, `kaanal trace`, flags, test-runner recipes      |
+| [lifecycle.md](lifecycle.md)         | CI authors, test authors      | `up -d`, `down`, stale state, signals, the drain, exit codes, CI recipes    |
 
 ## Conventions for these docs
 

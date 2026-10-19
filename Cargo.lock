@@ -1067,6 +1067,7 @@ dependencies = [
  "humantime",
  "kaanal-core",
  "kaanal-server",
+ "kaanal-winhandle",
  "percent-encoding",
  "serde_json",
  "sha2",
@@ -1134,6 +1135,13 @@ dependencies = [
  "kaanal-core",
  "rand 0.9.5",
  "rand_chacha 0.9.0",
+]
+
+[[package]]
+name = "kaanal-winhandle"
+version = "0.0.1"
+dependencies = [
+ "windows-sys",
 ]
 
 [[package]]

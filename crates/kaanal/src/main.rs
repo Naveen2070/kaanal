@@ -5,6 +5,9 @@
 //! instance via `.kaanal/run.json` and call its control API (rule R2.6: every
 //! interface is a thin client, no per-interface logic). `up` loads (or creates) the auth
 //! signing key only when the config has an auth node (`keys`).
+//!
+//! Exit codes (RULES R6.3, amended by R1.45): 0 ok, 1 error, 2 not running, 3 reserved, 64 usage
+//! error (clap's own errors and every bad argument found before a request; `--help` is 0).
 
 use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -27,6 +30,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
 
 mod keys;
+mod lifecycle;
 mod logview;
 
 /// **Private.** Per-project state directory holding `run.json` and `lock`.
@@ -59,6 +63,15 @@ enum Cmd {
         port: Option<u16>,
         #[arg(long, default_value = "127.0.0.1")]
         host: IpAddr,
+        /// Start in the background, print the URLs once it answers, and return
+        #[arg(short, long, conflicts_with = "detached")]
+        detach: bool,
+        /// With -d: how long to wait for it to answer, 1ms to 1h
+        #[arg(long, default_value = "15s", value_parser = start_budget, requires = "detach")]
+        wait: Duration,
+        /// Run as a background child of `up -d`: keep the token out of the output, ignore hangup
+        #[arg(long, hide = true)]
+        detached: bool,
     },
     /// Check config, topology and `OpenAPI` specs without starting
     Validate {
@@ -74,6 +87,12 @@ enum Cmd {
         /// Append them to the endpoints file (creates kaanal.endpoints.yaml when kaanal.yaml has no endpoints:)
         #[arg(long)]
         write: bool,
+    },
+    /// Stop the running instance: drain, then force-kill (a verified kaanal process only) if it won't stop
+    Down {
+        /// How long in-flight requests may take to finish, 1ms to 300s
+        #[arg(long, default_value = "5s", value_parser = drain_budget)]
+        timeout: Duration,
     },
     /// Show nodes and the effective chaos (scenarios plus live) of the running instance
     Status,
@@ -226,8 +245,18 @@ enum ScenarioCmd {
     },
 }
 
-/// **Private.** Exit code (RULES R6.3: 1 error, 2 not running) and message for stderr.
+/// **Private.** Exit code (RULES R6.3 as amended by R1.45: 0 ok, 1 error, 2 not running, 3
+/// reserved, 64 usage error) and message for stderr.
+#[derive(Debug)]
 struct Fail(u8, String);
+
+impl Fail {
+    /// **Private.** A bad argument, found before any request is made: exit 64 (spec M13). A value
+    /// the server refuses (HTTP 400) is a runtime error and stays 1.
+    fn usage(msg: impl Into<String>) -> Fail {
+        Fail(64, msg.into())
+    }
+}
 
 /// **Private.** Shorthand for an exit-1 failure.
 fn err(msg: impl Into<String>) -> Fail {
@@ -236,13 +265,13 @@ fn err(msg: impl Into<String>) -> Fail {
 
 /// **Private.** Entry point: prints the failure message to stderr and returns the code.
 fn main() -> ExitCode {
-    // clap's own exit code for usage errors is 2, which here means "not running" (R6.3).
+    // clap's own exit code for usage errors is 2, which here means "not running" (R6.3); they are 64.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
             let _ = e.print();
             return if e.use_stderr() {
-                ExitCode::from(1)
+                ExitCode::from(64)
             } else {
                 ExitCode::SUCCESS
             };
@@ -277,8 +306,22 @@ fn run(cli: Cli) -> Result<(), Fail> {
             println!("{text}");
             Ok(())
         }
-        Cmd::Up { config, port, host } => up(&config, port, host),
+        Cmd::Up {
+            config,
+            port,
+            host,
+            detach,
+            wait,
+            detached,
+        } => {
+            if detach {
+                up_detached(&config, port, host, wait)
+            } else {
+                up(&config, port, host, detached)
+            }
+        }
         Cmd::Endpoints { config, write } => endpoints(&config, write),
+        Cmd::Down { timeout } => down(timeout),
         Cmd::Status => status(),
         Cmd::Scenario { cmd } => scenario(cmd),
         Cmd::Cycle {
@@ -308,27 +351,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
                     down,
                 },
         } => {
-            let mut patch = Map::new();
-            if let Some(l) = latency {
-                patch.insert("latency_ms".into(), json!(parse_ms(&l).map_err(err)?));
-            }
-            if let Some(r) = error_rate {
-                patch.insert("error_rate".into(), json!(parse_rate(&r).map_err(err)?));
-            }
-            if let Some(s) = error {
-                patch.insert("error_status".into(), json!(s));
-            }
-            if let Some(k) = kind {
-                patch.insert("error_kind".into(), json!(k));
-            }
-            if down {
-                patch.insert("down".into(), json!(true));
-            }
-            if patch.is_empty() {
-                return Err(err(
-                    "nothing to set: use --latency, --error-rate, --error, --kind or --down",
-                ));
-            }
+            let mut patch = chaos_patch(latency, error_rate, error, kind, down)?;
             let label = match (&node, &endpoint) {
                 (Some(n), Some(e)) => format!("{n} @ {e}"),
                 (Some(n), None) => n.clone(),
@@ -359,6 +382,44 @@ fn run(cli: Cli) -> Result<(), Fail> {
             Ok(())
         }
     }
+}
+
+/// **Private.** The body of `chaos set`, checked here so a typo sends nothing.
+fn chaos_patch(
+    latency: Option<String>,
+    error_rate: Option<String>,
+    error: Option<u16>,
+    kind: Option<String>,
+    down: bool,
+) -> Result<Map<String, Value>, Fail> {
+    let mut patch = Map::new();
+    if let Some(l) = latency {
+        patch.insert(
+            "latency_ms".into(),
+            json!(parse_ms(&l).map_err(Fail::usage)?),
+        );
+    }
+    if let Some(r) = error_rate {
+        patch.insert(
+            "error_rate".into(),
+            json!(parse_rate(&r).map_err(Fail::usage)?),
+        );
+    }
+    if let Some(s) = error {
+        patch.insert("error_status".into(), json!(s));
+    }
+    if let Some(k) = kind {
+        patch.insert("error_kind".into(), json!(k));
+    }
+    if down {
+        patch.insert("down".into(), json!(true));
+    }
+    if patch.is_empty() {
+        return Err(Fail::usage(
+            "nothing to set: use --latency, --error-rate, --error, --kind or --down",
+        ));
+    }
+    Ok(patch)
 }
 
 /// **Private.** The `DELETE` path of `chaos clear` for a node, an endpoint or both.
@@ -415,14 +476,19 @@ fn auth_users(cfg: &Config) -> Option<usize> {
 }
 
 /// **Private.** The `up` lifecycle: private state dir → instance lock → signing key (auth
-/// configs only) → token → tokio runtime → serve → run file → wait for Ctrl+C → clean up the
-/// run file (only if it still holds our token).
-fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
+/// configs only) → token → tokio runtime → serve → run file → wait for a stop signal or
+/// `POST /__kaanal/shutdown` → drain → clean up the run file (only if it still holds our token).
+/// `detached` (the hidden `--detached`) is `up -d`'s child: its stdout is a log file, so the UI
+/// URL carries no token (M4), and it ignores SIGHUP (M11).
+fn up(config: &Path, port: Option<u16>, host: IpAddr, detached: bool) -> Result<(), Fail> {
     let (cfg, dir, src) = load(config)?;
     private_dir(Path::new(STATE_DIR))?;
     // Held until this process exits. The OS releases it even if we crash, so there is no stale lock,
     // and two `up` runs started at the same instant cannot both get past this point.
     let _lock = lock_instance()?;
+    // The lock proves no live instance owns run.json, so whatever is there is a dead one's (M9).
+    // Removed now, not overwritten after binding, so nothing reads it as live during startup.
+    let _ = std::fs::remove_file(RUN_FILE);
     // X4: only an auth node needs a key. It is loaded (or created) before binding, so a bad
     // key file stops startup with its name; `validate` and `endpoints` never get here.
     let users = auth_users(&cfg);
@@ -435,15 +501,16 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         }
         None => None,
     };
-    if !host.is_loopback() {
-        eprintln!(
-            "warning: binding {host} makes the mock and control ports reachable from your network; \
-             control calls still need the token and Host localhost/127.0.0.1/[::1]"
-        );
-    }
+    exposure_warning(host);
     let token = kaanal_server::new_token();
     let rt = tokio::runtime::Runtime::new().map_err(|e| err(e.to_string()))?;
     rt.block_on(async {
+        // Handlers first, before anything is published: a signal that arrives while we start up
+        // is queued and drained, not fatal (and `up -d`'s child survives a hangup from the start).
+        let stop_requested = lifecycle::stop_signal();
+        if detached {
+            lifecycle::ignore_hangup();
+        }
         let opts = ServeOpts {
             host,
             port: port.unwrap_or(cfg.port),
@@ -457,33 +524,347 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr) -> Result<(), Fail> {
         for w in &server.warnings {
             eprintln!("warning: {}", clean(w));
         }
-        write_run_file(server.addr, &token)?;
-        println!("Mocks: http://localhost:{port}");
-        println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
-        if let Some(n) = users {
-            println!(
-                "Auth:  POST http://localhost:{port}/login, JWKS http://localhost:{port}/.well-known/jwks.json, {n} {}",
+        let auth = users.map(|n| {
+            format!(
+                "POST http://localhost:{port}/login, JWKS http://localhost:{port}/.well-known/jwks.json, {n} {}",
                 if n == 1 { "user" } else { "users" }
-            );
+            )
+        });
+        write_run_file(
+            server.addr,
+            &token,
+            &json!({ "auth": auth, "seed": server.drawn_seed, "warnings": server.warnings }),
+        )?;
+        println!("Mocks: http://localhost:{port}");
+        if detached {
+            println!("UI:    http://localhost:{port}/__kaanal/ui");
+        } else {
+            println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
+        }
+        if let Some(a) = &auth {
+            println!("Auth:  {a}");
         }
         if let Some(seed) = server.drawn_seed {
-            println!(
-                "Seed:  {seed} (determinism: realistic; replay its timings and failures with determinism: controlled and seed: {seed}; generated data then follows that seed too)"
-            );
+            println!("{}", seed_line(seed));
         }
-        // limitation: only Ctrl+C removes run.json. Closing the window, SIGTERM (docker stop) or a
-        // crash leaves it behind; that is harmless (later commands exit 2, the next `up` overwrites it).
-        // Add a SIGTERM handler under #[cfg(unix)] if containers become a use case.
+        // A stop signal (or POST /__kaanal/shutdown, which ends `wait` by itself) drains for up
+        // to 5s, then cuts what is left; either way the run file goes below.
+        let stop = server.stopper();
+        let wait = server.wait();
+        tokio::pin!(wait);
         let res = tokio::select! {
-            r = server.wait() => r.map_err(|e| err(e.to_string())),
-            _ = tokio::signal::ctrl_c() => Ok(()),
+            r = &mut wait => r,
+            () = stop_requested => {
+                stop(Duration::from_secs(5));
+                wait.await
+            }
         };
         // Only remove the file if it is still ours; a newer instance may have replaced it.
-        if read_run().is_some_and(|(_, t)| t == token) {
+        if lifecycle::read_run(Path::new(STATE_DIR)).is_some_and(|r| r.token == token) {
             let _ = std::fs::remove_file(RUN_FILE);
         }
-        res
+        res.map_err(|e| err(e.to_string()))
     })
+}
+
+/// **Private.** The network-exposure warning for a non-loopback `--host`.
+fn exposure_text(host: IpAddr) -> String {
+    format!(
+        "warning: binding {host} makes the mock and control ports reachable from your network; control calls still need the token and Host localhost/127.0.0.1/[::1]"
+    )
+}
+
+/// **Private.** Prints [`exposure_text`] to stderr for a non-loopback `--host`.
+fn exposure_warning(host: IpAddr) {
+    if !host.is_loopback() {
+        eprintln!("{}", exposure_text(host));
+    }
+}
+
+/// **Private.** The `Seed:` line `up` prints under `determinism: realistic`.
+fn seed_line(seed: u64) -> String {
+    format!(
+        "Seed:  {seed} (determinism: realistic; replay its timings and failures with determinism: controlled and seed: {seed}; generated data then follows that seed too)"
+    )
+}
+
+/// **Private.** `--wait` of `up -d`. A bad value is a clap error, which `main` turns into exit 64.
+fn start_budget(s: &str) -> Result<Duration, String> {
+    humantime::parse_duration(s.trim())
+        .ok()
+        .filter(|d| (Duration::from_millis(1)..=Duration::from_secs(3600)).contains(d))
+        .ok_or_else(|| format!("bad wait '{s}' (1ms to 1h, e.g. 15s)"))
+}
+
+/// **Private.** An HTTP agent for the control API: no proxy (it could forward the token), no
+/// redirects, short timeouts.
+fn control_agent(total: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .proxy(None)
+        .max_redirects(0)
+        .timeout_connect(Some(Duration::from_secs(2)))
+        .timeout_global(Some(total))
+        .build()
+        .into()
+}
+
+/// **Private.** The answer to `POST /__kaanal/shutdown`.
+struct ShutdownReply {
+    status: u16,
+    /// The drain time left, from the 202 body (a drain that was already running reports its own).
+    left: Option<Duration>,
+}
+
+/// **Private.** `POST /__kaanal/shutdown` with a drain budget such as `5s`: the answer, or `None`
+/// when there was no answer at all.
+fn post_shutdown(run: &lifecycle::Run, budget: &str) -> Option<ShutdownReply> {
+    let mut r = control_agent(Duration::from_secs(5))
+        .post(&format!("http://{}/__kaanal/shutdown", run.addr))
+        .header("Host", &format!("localhost:{}", run.addr.port()))
+        .header("Authorization", &format!("Bearer {}", run.token))
+        .send_json(json!({ "timeout": budget }))
+        .ok()?;
+    let status = r.status().as_u16();
+    let left = r
+        .body_mut()
+        .read_json::<Value>()
+        .ok()
+        .and_then(|v| v["timeout_ms"].as_u64())
+        .map(|ms| lifecycle::server_wait(Some(ms), 0));
+    Some(ShutdownReply { status, left })
+}
+
+/// **Private.** How long `down` waits for the lock after asking: its own budget, or the time left
+/// of an earlier, longer drain if that is more (a second `down` must not cut it short), plus 2 s.
+fn drain_wait(timeout: Duration, reply: Option<&ShutdownReply>) -> Duration {
+    timeout.max(reply.and_then(|r| r.left).unwrap_or_default()) + Duration::from_secs(2)
+}
+
+/// **Private.** The lines `up` prints once the server is up, rebuilt from `run.json`'s `startup`.
+/// The UI URL carries the token: the caller's terminal is the one place it may go.
+fn print_started(run: &lifecycle::Run) {
+    let port = run.addr.port();
+    println!("Mocks: http://localhost:{port}");
+    println!(
+        "UI:    http://localhost:{port}/__kaanal/ui#token={}",
+        run.token
+    );
+    if let Some(a) = &run.startup.auth {
+        println!("Auth:  {}", clean(a));
+    }
+    if let Some(seed) = run.startup.seed {
+        println!("{}", seed_line(seed));
+    }
+    for w in &run.startup.warnings {
+        eprintln!("warning: {}", clean(w));
+    }
+}
+
+/// **Private.** An instance that is already up: print its lines and `already running (pid N)`.
+fn print_running(run: &lifecycle::Run) {
+    print_started(run);
+    println!(
+        "already running (pid {})",
+        run.pid.map_or("unknown".to_string(), |p| p.to_string())
+    );
+}
+
+/// **Private.** Looks at the directory once: free (stale state cleaned), a healthy instance, or
+/// busy (the lock is held but nothing answers yet: starting, or draining).
+fn look(state: &Path) -> Result<lifecycle::Look, Fail> {
+    if lifecycle::clear_stale(state)?.is_some() {
+        return Ok(lifecycle::Look::Free);
+    }
+    Ok(lifecycle::read_run(state)
+        .filter(|r| lifecycle::healthy(r.addr))
+        .map_or(lifecycle::Look::Busy, lifecycle::Look::Healthy))
+}
+
+/// **Private.** `kaanal up -d` (spec M3): validate here, then start `up --detached` in the
+/// background with its output in `.kaanal/kaanal.log`, wait until it answers, print its lines.
+fn up_detached(config: &Path, port: Option<u16>, host: IpAddr, wait: Duration) -> Result<(), Fail> {
+    let (cfg, dir, src) = load(config)?;
+    // The same checks `serve` makes, before anything is spawned or created: a bad config is
+    // an error here, with its file:line:col, not a log tail of a child that died.
+    kaanal_server::check(&cfg, &dir).map_err(|e| located_err(config, &src, &e))?;
+    let state = Path::new(STATE_DIR);
+    if !state.exists() {
+        private_dir(state)?;
+    }
+    // One `up -d` at a time per directory, from here until the child answers: a second one blocks
+    // (for up to the winner's --wait plus its checks, not its own --wait; the two can add up),
+    // then finds the instance running and prints it (exit 0) instead of rotating the live log away.
+    // The child's instance lock stays the final arbiter. Not inherited by the child.
+    let _start = lock_start(state)?;
+    // A healthy instance is the answer; one that is starting or draining is waited for (within
+    // --wait); a free directory (stale state cleaned) means start fresh.
+    if let lifecycle::Existing::Running(run) =
+        lifecycle::existing_instance(wait, Duration::from_millis(100), || look(state))?
+    {
+        print_running(&run);
+        return Ok(());
+    }
+    exposure_warning(host);
+    let log_path = lifecycle::rotate_log(state)?;
+    let log = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| err(format!("{}: {e}", log_path.display())))?;
+    let exe =
+        std::env::current_exe().map_err(|e| err(format!("cannot find kaanal itself: {e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| err(e.to_string()))?;
+    let args: Vec<std::ffi::OsString> = vec![
+        "up".into(),
+        "-c".into(),
+        config.into(),
+        "--port".into(),
+        port.unwrap_or(cfg.port).to_string().into(),
+        "--host".into(),
+        host.to_string().into(),
+        "--detached".into(),
+    ];
+    let mut child = lifecycle::spawn_detached(&exe, &args, log, &cwd)?;
+    let log_shown = std::path::absolute(&log_path).unwrap_or(log_path.clone());
+    let began = std::time::Instant::now();
+    let ready = lifecycle::wait_ready(state, &mut child, wait, Duration::from_millis(100));
+    let why = match ready {
+        Ok(run) => {
+            print_started(&run);
+            println!("Log: {}", clean(&log_shown.display().to_string()));
+            println!("Stop: kaanal down");
+            return Ok(());
+        }
+        Err(lifecycle::ReadyError::ChildExited) => {
+            // Lost a race with a simultaneous `up -d`: the instance that won is the answer.
+            let left = wait.saturating_sub(began.elapsed());
+            if let Some(run) =
+                lifecycle::after_child_exit(left, Duration::from_millis(100), || look(state))?
+            {
+                print_running(&run);
+                return Ok(());
+            }
+            "the background process exited".to_string()
+        }
+        Err(lifecycle::ReadyError::TimedOut) => {
+            let pid = child.id();
+            let healthy = || {
+                lifecycle::run_of(state, pid)
+                    .filter(|r| lifecycle::healthy(r.addr))
+                    .filter(|_| {
+                        matches!(
+                            lifecycle::lock_probe(state),
+                            Ok(lifecycle::Liveness::Running)
+                        )
+                    })
+            };
+            let settled = lifecycle::settle_unready(
+                healthy,
+                || lifecycle::run_of(state, pid),
+                |run| {
+                    post_shutdown(run, "5s");
+                },
+                || {
+                    lifecycle::wait_lock_free(state, Duration::from_secs(7));
+                },
+                || {
+                    let _ = child.kill();
+                },
+            );
+            if let lifecycle::Settled::Healthy(run) = settled {
+                eprintln!(
+                    "note: kaanal answered just after the {} wait; leaving it running",
+                    humantime::format_duration(wait)
+                );
+                print_started(&run);
+                println!("Log: {}", clean(&log_shown.display().to_string()));
+                println!("Stop: kaanal down");
+                return Ok(());
+            }
+            let _ = child.wait();
+            format!("no answer within {}", humantime::format_duration(wait))
+        }
+    };
+    Err(err(format!(
+        "kaanal did not start: {why}; last lines of {}:\n{}",
+        log_shown.display(),
+        Some(lifecycle::tail_log(&log_path, 20))
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "(log is empty)".to_string())
+    )))
+}
+
+/// **Private.** Takes `.kaanal/start.lock`, waiting for any other `up -d` in this directory.
+fn lock_start(state: &Path) -> Result<std::fs::File, Fail> {
+    let path = state.join("start.lock");
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|e| err(format!("{}: {e}", path.display())))?;
+    f.lock()
+        .map_err(|e| err(format!("{}: {e}", path.display())))?;
+    Ok(f)
+}
+
+/// **Private.** `--timeout` of `down`: a duration the server's shutdown endpoint accepts. A bad
+/// value is a clap error, which `main` turns into exit 64.
+fn drain_budget(s: &str) -> Result<Duration, String> {
+    humantime::parse_duration(s.trim())
+        .ok()
+        .filter(|d| (Duration::from_millis(1)..=Duration::from_secs(300)).contains(d))
+        .ok_or_else(|| format!("bad timeout '{s}' (1ms to 300s, e.g. 5s)"))
+}
+
+/// **Private.** `kaanal down` (spec M7): ask the instance to drain, wait for its lock to go, and
+/// only if that fails kill it, and only after checking the pid really is a kaanal process.
+fn down(timeout: Duration) -> Result<(), Fail> {
+    let state = Path::new(STATE_DIR);
+    if let Some(msg) = lifecycle::clear_stale(state)? {
+        println!("{}", clean(&msg));
+        return Ok(());
+    }
+    // Lock held: an instance, possibly still starting. Never touch its files; if it vanishes
+    // meanwhile, that is a stop, not a failure.
+    let run = match lifecycle::run_or_gone(state, lifecycle::STARTUP_WAIT)? {
+        lifecycle::Found::Gone(msg) => {
+            println!("{}", clean(&msg));
+            return Ok(());
+        }
+        lifecycle::Found::Run(r) => r,
+    };
+    let budget = humantime::format_duration(timeout).to_string();
+    // 202, or no answer at all (refused, or cut by a tiny budget before the 202 left): the drain
+    // is running or the process is going, so wait for the lock. Any other answer (401, 5xx) means
+    // the API is up but unusable and no drain started: go straight to the kill.
+    let reply = post_shutdown(&run, &budget);
+    let draining = reply.as_ref().is_none_or(|r| r.status == 202);
+    if draining && lifecycle::wait_lock_free(state, drain_wait(timeout, reply.as_ref())) {
+        println!("stopped");
+        return Ok(());
+    }
+    let Some(pid) = run.pid else {
+        if matches!(lifecycle::lock_probe(state), Ok(lifecycle::Liveness::Free)) {
+            println!("stopped");
+            return Ok(());
+        }
+        return Err(err(
+            "kaanal did not stop and run.json has no pid; not killing anything",
+        ));
+    };
+    match lifecycle::force_stop(
+        state,
+        &run.token,
+        pid,
+        std::process::id(),
+        lifecycle::verify_pid,
+        lifecycle::kill_pid,
+    )? {
+        lifecycle::Forced::Stopped => println!("stopped"),
+        lifecycle::Forced::Killed => println!("stopped (killed pid {pid} after {budget})"),
+    }
+    Ok(())
 }
 
 /// **Private.** Prints a response's `warnings` to stderr.
@@ -520,7 +901,7 @@ fn scenario_body(cfg: &ScenarioConfig) -> Value {
 /// **Private.** A scenario name checked here, so a reserved one (`active`, `save`, `reset`) is
 /// refused with a message instead of hitting another route.
 fn named(name: &str) -> Result<&str, Fail> {
-    valid_name(name).map_err(err)?;
+    valid_name(name).map_err(Fail::usage)?;
     Ok(name)
 }
 
@@ -530,7 +911,7 @@ fn save_from(from: &str) -> Result<Value, Fail> {
         "live" | "effective" => Ok(json!(from)),
         f => match f.strip_prefix("scenario:") {
             Some(n) if !n.is_empty() => Ok(json!({ "scenario": n })),
-            _ => Err(err(format!(
+            _ => Err(Fail::usage(format!(
                 "bad --from '{}': use live, effective or scenario:NAME",
                 clean(f)
             ))),
@@ -607,6 +988,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             }
         }
         ScenarioCmd::Set { names } => {
+            names.iter().try_for_each(|n| named(n).map(drop))?;
             let v = call("PUT", "/__kaanal/scenarios/active", Some(json!(names)))?;
             println!("active scenarios: {}", active_names(&v).join(", "));
         }
@@ -624,8 +1006,8 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             let name = file
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .ok_or_else(|| err(format!("{}: no usable file name", file.display())))?;
-            valid_name(name).map_err(|m| err(format!("{}: {m}", file.display())))?;
+                .ok_or_else(|| Fail::usage(format!("{}: no usable file name", file.display())))?;
+            valid_name(name).map_err(|m| Fail::usage(format!("{}: {m}", file.display())))?;
             let src = std::fs::read_to_string(&file)
                 .map_err(|e| err(format!("{}: {e}", file.display())))?;
             let cfg = parse_scenario(&src).map_err(|e| config_err(&file, &e))?;
@@ -648,6 +1030,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             force,
             clear_live,
         } => {
+            named(&name)?;
             let from = save_from(&from)?;
             let body =
                 json!({ "name": name, "from": from, "force": force, "clear_live": clear_live });
@@ -800,10 +1183,9 @@ fn private_dir(dir: &Path) -> Result<(), Fail> {
 /// full path (a planted earlier-PATH exe is never run).
 #[cfg(windows)]
 fn restrict_to_current_user(dir: &Path) -> Result<(), String> {
-    use std::process::Command;
     let root = std::env::var("SystemRoot").map_err(|_| "SystemRoot is not set")?;
     // Full paths, so an icacls.exe or whoami.exe planted earlier on PATH is never run.
-    let who = Command::new(format!(r"{root}\System32\whoami.exe"))
+    let who = lifecycle::os_command(format!(r"{root}\System32\whoami.exe"))
         .args(["/user", "/fo", "csv", "/nh"])
         .output()
         .map_err(|e| format!("whoami: {e}"))?;
@@ -817,7 +1199,7 @@ fn restrict_to_current_user(dir: &Path) -> Result<(), String> {
         .filter(|s| s.starts_with("S-1-"))
         .ok_or("could not read the current user's SID")?;
     let icacls = format!(r"{root}\System32\icacls.exe");
-    let out = Command::new(&icacls)
+    let out = lifecycle::os_command(&icacls)
         .arg(dir)
         .args(["/inheritance:r", "/grant:r", &format!("*{sid}:(OI)(CI)F")])
         .output()
@@ -828,7 +1210,7 @@ fn restrict_to_current_user(dir: &Path) -> Result<(), String> {
     // `/inheritance:r` drops inherited entries only. Remove explicit grants to the wide
     // well-known groups (Everyone, Users, Authenticated Users) too, on the folder and the
     // files already in it. Not `/reset`: it would briefly widen a running instance's files.
-    let out = Command::new(&icacls)
+    let out = lifecycle::os_command(&icacls)
         .arg(dir)
         .args([
             "/remove:g",
@@ -850,37 +1232,54 @@ fn restrict_to_current_user(dir: &Path) -> Result<(), String> {
 
 /// **Private.** Exclusive advisory lock on `.kaanal/lock` (std `File::try_lock`, Rust 1.89+).
 fn lock_instance() -> Result<std::fs::File, Fail> {
+    lock_at(Path::new(LOCK_FILE), 10, Duration::from_millis(20))
+}
+
+/// **Private.** [`lock_instance`] on `path`. A status probe holds a shared lock for an instant, so
+/// `WouldBlock` is retried `tries` times, `gap` apart, before it is called "already running"; a live
+/// instance holds the lock forever, so a true "already running" costs about `tries * gap`.
+fn lock_at(path: &Path, tries: u32, gap: Duration) -> Result<std::fs::File, Fail> {
     let f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(LOCK_FILE)
-        .map_err(|e| err(format!("{LOCK_FILE}: {e}")))?;
-    match f.try_lock() {
-        Ok(()) => Ok(f),
-        Err(std::fs::TryLockError::WouldBlock) => {
-            let port = read_run().map_or(String::new(), |(a, _)| format!(" on port {}", a.port()));
-            Err(err(format!(
-                "kaanal is already running{port} (this directory's {LOCK_FILE} is held)"
-            )))
+        .open(path)
+        .map_err(|e| err(format!("{}: {e}", path.display())))?;
+    debug_assert!(tries > 0, "at least one attempt");
+    for left in (0..tries.max(1)).rev() {
+        match f.try_lock() {
+            Ok(()) => return Ok(f),
+            Err(std::fs::TryLockError::WouldBlock) if left > 0 => std::thread::sleep(gap),
+            Err(std::fs::TryLockError::WouldBlock) => break,
+            Err(std::fs::TryLockError::Error(e)) => {
+                return Err(err(format!("{}: {e}", path.display())));
+            }
         }
-        Err(std::fs::TryLockError::Error(e)) => Err(err(format!("{LOCK_FILE}: {e}"))),
     }
+    let port = path
+        .parent()
+        .and_then(lifecycle::read_run)
+        .map_or(String::new(), |r| format!(" on port {}", r.addr.port()));
+    Err(err(format!(
+        "kaanal is already running{port} (this directory's {LOCK_FILE} is held)"
+    )))
 }
 
-/// **Private.** Writes `{host, port, token, pid}` via temp file + rename, so a concurrent
+/// **Private.** Writes `{host, port, token, pid, startup}` via temp file + rename, so a concurrent
 /// `status` never reads half a file. `host` is where the CLI connects: the bound address,
 /// or loopback when bound to all interfaces.
-fn write_run_file(bound: SocketAddr, token: &str) -> Result<(), Fail> {
+fn write_run_file(bound: SocketAddr, token: &str, startup: &Value) -> Result<(), Fail> {
     use std::io::Write;
     let host = match bound.ip() {
         IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
         ip => ip,
     };
-    let body =
-        json!({ "host": host, "port": bound.port(), "token": token, "pid": std::process::id() })
-            .to_string();
+    let body = json!({
+        "host": host, "port": bound.port(), "token": token, "pid": std::process::id(),
+        "startup": startup,
+    })
+    .to_string();
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -896,27 +1295,12 @@ fn write_run_file(bound: SocketAddr, token: &str) -> Result<(), Fail> {
         .map_err(|e| err(format!("{RUN_FILE}: {e}")))
 }
 
-/// **Private.** Reads `(address, token)` from the run file; any malformed piece → `None`.
-/// A file without `host` (older versions) means `127.0.0.1`.
-fn read_run() -> Option<(SocketAddr, String)> {
-    let run: Value = serde_json::from_str(&std::fs::read_to_string(RUN_FILE).ok()?).ok()?;
-    let port = u16::try_from(run["port"].as_u64()?).ok()?;
-    let host = match run.get("host") {
-        Some(h) => h.as_str()?.parse().ok()?,
-        None => IpAddr::V4(Ipv4Addr::LOCALHOST),
-    };
-    Some((
-        SocketAddr::new(host, port),
-        run["token"].as_str()?.to_string(),
-    ))
-}
-
 /// **Private.** Calls the running instance found via `.kaanal/run.json`. Exit 2 if
-/// it isn't running. The client never follows redirects and never uses a proxy —
+/// it isn't running or its state is stale, exit 1 if it is alive but silent (spec M9, M16). The client never follows redirects and never uses a proxy —
 /// either could forward the token.
 fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
-    let (addr, token) =
-        read_run().ok_or_else(|| Fail(2, format!("kaanal is not running (no {RUN_FILE})")))?;
+    let state = Path::new(STATE_DIR);
+    let lifecycle::Run { addr, token, .. } = lifecycle::require_instance(state)?;
     let port = addr.port();
     let auth = format!("Bearer {token}");
     let url = format!("http://{addr}{path}");
@@ -960,7 +1344,7 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
             .header("Authorization", &auth)
             .call(),
     };
-    let mut resp = res.map_err(|e| Fail(2, format!("kaanal is not running on {addr}: {e}")))?;
+    let mut resp = res.map_err(|e| lifecycle::transport_failure(state, addr, &e.to_string()))?;
     let status = resp.status().as_u16();
     let text = resp.body_mut().read_to_string().unwrap_or_default();
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -1038,11 +1422,11 @@ fn status() -> Result<(), Fail> {
 /// **Private.** `kaanal logs`: checks the flags and turns them into the server's query pairs.
 fn logs_cmd(a: &LogsArgs) -> Result<(), Fail> {
     if !(1..=1000).contains(&a.n) {
-        return Err(err("-n must be from 1 to 1000"));
+        return Err(Fail::usage("-n must be from 1 to 1000"));
     }
     if a.scope.as_deref() == Some("") {
         // ponytail: the server can filter the empty-header scope, the CLI cannot ask for it yet
-        return Err(err("--scope needs a scope name"));
+        return Err(Fail::usage("--scope needs a scope name"));
     }
     let params: Vec<(String, String)> = [
         Some(("limit", a.n.to_string())),
@@ -1056,7 +1440,15 @@ fn logs_cmd(a: &LogsArgs) -> Result<(), Fail> {
     .flatten()
     .map(|(k, v)| (k.to_string(), v))
     .collect();
-    logs(&params, a.follow, a.json)
+    // A bad filter is a usage error in both modes, before any request or run-file read.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    let filter = logview::filter_of(&params, now_ms).map_err(Fail::usage)?;
+    if a.follow {
+        return follow_logs(&params, &filter, a.json);
+    }
+    logs(&params, a.json)
 }
 
 /// **Private.** Prints one line to stdout. A closed pipe (`kaanal logs | head`) ends the process
@@ -1121,10 +1513,7 @@ fn logs_path(params: &[(String, String)]) -> String {
 }
 
 /// **Private.** `kaanal logs`: the tail, then (`-f`) every request as it finishes.
-fn logs(params: &[(String, String)], follow: bool, json: bool) -> Result<(), Fail> {
-    if follow {
-        return follow_logs(params, json);
-    }
+fn logs(params: &[(String, String)], json: bool) -> Result<(), Fail> {
     let page = call("GET", &logs_path(params), None)?;
     for e in page["entries"].as_array().into_iter().flatten() {
         show(e, json);
@@ -1150,14 +1539,14 @@ fn exit_on_ctrl_c() {
 /// contain: a request that finishes between the two is in both and printed once, one that
 /// finishes late (slow) is printed when it finishes. Live events are filtered here, with the
 /// server's own filter grammar.
-fn follow_logs(params: &[(String, String)], json: bool) -> Result<(), Fail> {
-    let (addr, token) =
-        read_run().ok_or_else(|| Fail(2, format!("kaanal is not running (no {RUN_FILE})")))?;
-    let gone = |why: String| Fail(2, format!("kaanal is not running on {addr}: {why}"));
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-    let filter = logview::filter_of(params, now_ms).map_err(err)?;
+fn follow_logs(
+    params: &[(String, String)],
+    filter: &kaanal_server::Filter,
+    json: bool,
+) -> Result<(), Fail> {
+    let state = Path::new(STATE_DIR);
+    let lifecycle::Run { addr, token, .. } = lifecycle::require_instance(state)?;
+    let gone = |why: String| lifecycle::transport_failure(state, addr, &why);
     exit_on_ctrl_c();
     // Its own agent: no overall timeout, the stream is meant to stay open.
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -1207,19 +1596,29 @@ fn follow_logs(params: &[(String, String)], json: bool) -> Result<(), Fail> {
         show(e, json);
     }
     // Ends only when the stream does (or the printer's queue is cut): the server is gone.
+    let mut shutdown_ms: Option<Option<u64>> = None;
     logview::drain(
         &rx,
         &dropped,
         Duration::from_millis(500),
         &mut |s| notice(json, s),
         &mut |event, data| {
+            if event == "shutdown" {
+                // The server announces its drain; the time left says how long to wait for the exit.
+                shutdown_ms = Some(
+                    serde_json::from_str::<Value>(data)
+                        .ok()
+                        .and_then(|v| v["timeout_ms"].as_u64()),
+                );
+                return;
+            }
             if event != "request" {
                 return;
             }
             let Ok(mut v) = serde_json::from_str::<Value>(data) else {
                 return;
             };
-            if !seen.insert(v["id"].as_str().unwrap_or("")) || !logview::passes(&filter, &v) {
+            if !seen.insert(v["id"].as_str().unwrap_or("")) || !logview::passes(filter, &v) {
                 return;
             }
             // --json wants the whole entry; the event is only its summary.
@@ -1237,6 +1636,15 @@ fn follow_logs(params: &[(String, String)], json: bool) -> Result<(), Fail> {
             show(&v, json);
         },
     );
+    if let Some(ms) = shutdown_ms {
+        let ms = lifecycle::server_wait(ms, 5000);
+        // A `down` (or signal) drain: the process is still finishing its exit. That is a stop.
+        lifecycle::wait_lock_free(state, ms + Duration::from_secs(2));
+        return Err(Fail(2, "kaanal stopped (the server shut down)".into()));
+    }
+    // No shutdown message: killed, or cut by a tiny drain budget before it was written. Give the
+    // exit a moment; a lock that is still held is then honestly "running but not answering".
+    lifecycle::wait_lock_free(state, Duration::from_secs(2));
     Err(gone("the event stream closed".into()))
 }
 
@@ -1292,7 +1700,7 @@ fn cycle(
     let mut body = json!({ "endpoint": endpoint });
     if let Some(s) = state {
         if !PIN_STATES.contains(&s.as_str()) {
-            return Err(err(format!(
+            return Err(Fail::usage(format!(
                 "bad --state '{}': use {}",
                 clean(&s),
                 PIN_STATES.join(", ")
@@ -1303,7 +1711,7 @@ fn cycle(
     if let Some(d) = delay {
         let d = d.trim();
         humantime::parse_duration(d)
-            .map_err(|_| err(format!("bad --delay '{}' (use e.g. 2s)", clean(d))))?;
+            .map_err(|_| Fail::usage(format!("bad --delay '{}' (use e.g. 2s)", clean(d))))?;
         body["delay"] = json!(d);
     }
     if let Some(s) = status {
@@ -1423,7 +1831,8 @@ fn encode_segment(s: &str) -> String {
 fn ttl_body(ttl: Option<String>) -> Result<Option<Value>, Fail> {
     ttl.map(|t| {
         let t = t.trim();
-        humantime::parse_duration(t).map_err(|_| err(format!("bad ttl '{t}' (use e.g. 30s)")))?;
+        humantime::parse_duration(t)
+            .map_err(|_| Fail::usage(format!("bad ttl '{t}' (use e.g. 30s)")))?;
         Ok(json!({ "ttl": t }))
     })
     .transpose()
@@ -1472,7 +1881,74 @@ fn parse_rate(s: &str) -> Result<f64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean, encode_segment, parse_ms, parse_rate, remaining, ttl_body};
+    #[test]
+    fn down_waits_for_the_longer_of_its_budget_and_an_earlier_drains_time_left() {
+        use super::{ShutdownReply, drain_wait};
+        use std::time::Duration;
+        let s = Duration::from_secs;
+        let reply = |left| ShutdownReply { status: 202, left };
+        assert_eq!(drain_wait(s(5), None), s(7));
+        assert_eq!(drain_wait(s(5), Some(&reply(None))), s(7));
+        assert_eq!(drain_wait(s(5), Some(&reply(Some(s(60))))), s(62));
+        assert_eq!(drain_wait(s(30), Some(&reply(Some(s(2))))), s(32));
+    }
+
+    #[test]
+    fn exposure_text_is_the_exact_single_spaced_message() {
+        assert_eq!(
+            super::exposure_text("0.0.0.0".parse().unwrap()),
+            "warning: binding 0.0.0.0 makes the mock and control ports reachable from your network; control calls still need the token and Host localhost/127.0.0.1/[::1]"
+        );
+    }
+
+    use super::{clean, encode_segment, lock_at, parse_ms, parse_rate, remaining, ttl_body};
+    use std::time::Duration;
+
+    /// A scratch dir removed on drop, so a failing assert leaves nothing behind.
+    struct Tmp(std::path::PathBuf);
+
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn lock_dir(name: &str) -> Tmp {
+        let d = std::env::temp_dir().join(format!("kaanal-lockat-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        Tmp(d)
+    }
+
+    #[test]
+    fn lock_at_waits_out_a_brief_probe() {
+        let d = lock_dir("probe");
+        let path = d.0.join("lock");
+        let probe = std::fs::File::create(&path).unwrap();
+        probe.try_lock_shared().unwrap();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(80));
+            probe.unlock().unwrap();
+        });
+        assert!(lock_at(&path, 50, Duration::from_millis(20)).is_ok());
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn lock_at_reports_a_held_lock_as_already_running() {
+        let d = lock_dir("held");
+        let path = d.0.join("lock");
+        let holder = std::fs::File::create(&path).unwrap();
+        holder.try_lock().unwrap();
+        let start = std::time::Instant::now();
+        let e = lock_at(&path, 5, Duration::from_millis(20)).unwrap_err();
+        assert!(e.1.contains("already running"), "{}", e.1);
+        assert!(
+            start.elapsed() >= Duration::from_millis(80),
+            "it must retry first"
+        );
+        drop(holder);
+    }
 
     #[test]
     fn remaining_rounds_up_to_whole_seconds() {

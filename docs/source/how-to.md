@@ -16,7 +16,7 @@ A ready-made playground config lives in `crates/kaanal-server/tests/fixtures/` (
 ## Add a CLI subcommand
 
 1. Add a variant to `Cmd` in `crates/kaanal/src/main.rs` (clap derive does the parsing).
-2. Handle it in `run()`. If it talks to the running instance, use `call(method, path, body)` — it finds the host/port/token from `.kaanal/run.json` and maps failures to exit code 2.
+2. Handle it in `run()`. If it talks to the running instance, use `call(method, path, body)` — it finds the host/port/token from `.kaanal/run.json` (checking the instance lock first) and maps a missing or stale instance to exit 2, and a running one that does not answer to exit 1. Arguments you can check yourself are rejected before the request with `Fail::usage` (exit 64); a value only the server can refuse stays exit 1.
 3. Remember: the CLI is a **thin client** of the control API (rule R2.6). No logic in the bin that the server could own.
 4. Add an integration test in `crates/kaanal/tests/cli.rs` using the `Up` helper (spawns a real `kaanal up` on an OS-chosen port).
 
