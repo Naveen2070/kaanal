@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use kaanal_core::chain::skeleton;
 use kaanal_core::config::{NodeConfig, parse_endpoints};
 use kaanal_core::diagnostics::Located;
@@ -32,6 +32,8 @@ use serde_json::{Map, Value, json};
 mod keys;
 mod lifecycle;
 mod logview;
+mod output;
+mod target;
 
 /// **Private.** Per-project state directory holding `run.json` and `lock`.
 const STATE_DIR: &str = ".kaanal";
@@ -48,6 +50,17 @@ const LOCK_FILE: &str = ".kaanal/lock";
     about = "A mirage of your backend: mock APIs, chaos and simulation"
 )]
 struct Cli {
+    /// Print read commands' results as JSON (also `KAANAL_JSON=1`); errors stay text on stderr
+    #[arg(long, global = true)]
+    json: bool,
+    /// Talk to the instance at http://HOST:PORT instead of the one in .kaanal/ (also
+    /// `KAANAL_ENDPOINT`); goes before the subcommand, whose own --endpoint is a route key
+    #[arg(long, value_name = "URL")]
+    endpoint: Option<String>,
+    /// Token for --endpoint. Prefer `KAANAL_TOKEN`: a value given here is visible in process
+    /// lists and shell history
+    #[arg(long, global = true, value_name = "TOKEN")]
+    token: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -72,6 +85,11 @@ enum Cmd {
         /// Run as a background child of `up -d`: keep the token out of the output, ignore hangup
         #[arg(long, hide = true)]
         detached: bool,
+    },
+    /// Print a shell completion script (bash, zsh, fish, powershell, elvish) to stdout
+    Completions {
+        /// The shell to generate the script for
+        shell: clap_complete::Shell,
     },
     /// Check config, topology and `OpenAPI` specs without starting
     Validate {
@@ -127,12 +145,7 @@ enum Cmd {
     /// Show the last finished requests, one line each (`-f` to follow live)
     Logs(LogsArgs),
     /// Show one request as a per-hop waterfall: an id like r04f2-0042, `last`, or the client's X-Request-Id
-    Trace {
-        key: String,
-        /// Print the log entry as JSON
-        #[arg(long)]
-        json: bool,
-    },
+    Trace { key: String },
     /// Change chaos on the running instance
     Chaos {
         #[command(subcommand)]
@@ -164,9 +177,6 @@ struct LogsArgs {
     /// Only requests that ran under this scenario scope
     #[arg(long)]
     scope: Option<String>,
-    /// One JSON object per line
-    #[arg(long)]
-    json: bool,
 }
 
 /// **Private.** `chaos` subcommands.
@@ -277,7 +287,9 @@ fn main() -> ExitCode {
             };
         }
     };
-    match run(cli) {
+    output::set_json(cli.json || output::env_on());
+    target::set_overrides(cli.endpoint.clone(), cli.token.clone());
+    match target::check_flags().and_then(|()| run(cli)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Fail(code, msg)) => {
             // Messages can quote config and spec contents; never let them drive the terminal.
@@ -285,6 +297,36 @@ fn main() -> ExitCode {
             ExitCode::from(code)
         }
     }
+}
+
+/// **Private.** Usage error (64) `why, but SOURCE is set` when an endpoint comes from the flag or env.
+fn no_endpoint(why: &str) -> Result<(), Fail> {
+    match target::endpoint_source() {
+        Some(src) => Err(Fail::usage(format!("{why}, but {src} is set"))),
+        None => Ok(()),
+    }
+}
+
+/// **Private.** `kaanal schema`: the JSON Schema of `kaanal.yaml`.
+fn schema() -> Result<(), Fail> {
+    let text = serde_json::to_string_pretty(&kaanal_core::config_schema())
+        .map_err(|e| err(e.to_string()))?;
+    out_bytes(
+        format!(
+            "{text}
+"
+        )
+        .as_bytes(),
+    );
+    Ok(())
+}
+
+/// **Private.** `kaanal completions SHELL`: the script on stdout; no instance, ignores `--json`.
+/// Generated in memory: `clap_complete` panics on a closed pipe, `out_bytes` does not.
+fn completions(shell: clap_complete::Shell) {
+    let mut buf = Vec::new();
+    clap_complete::generate(shell, &mut Cli::command(), "kaanal", &mut buf);
+    out_bytes(&buf);
 }
 
 /// **Private.** Subcommand dispatch.
@@ -300,12 +342,11 @@ fn run(cli: Cli) -> Result<(), Fail> {
             println!("ok: {}", config.display());
             Ok(())
         }
-        Cmd::Schema => {
-            let text = serde_json::to_string_pretty(&kaanal_core::config_schema())
-                .map_err(|e| err(e.to_string()))?;
-            println!("{text}");
+        Cmd::Completions { shell } => {
+            completions(shell);
             Ok(())
         }
+        Cmd::Schema => schema(),
         Cmd::Up {
             config,
             port,
@@ -314,6 +355,8 @@ fn run(cli: Cli) -> Result<(), Fail> {
             wait,
             detached,
         } => {
+            // A process-bound command: an endpoint (even an exported one) is refused loudly (E6).
+            no_endpoint("up starts a local instance and takes no endpoint")?;
             if detach {
                 up_detached(&config, port, host, wait)
             } else {
@@ -321,7 +364,13 @@ fn run(cli: Cli) -> Result<(), Fail> {
             }
         }
         Cmd::Endpoints { config, write } => endpoints(&config, write),
-        Cmd::Down { timeout } => down(timeout),
+        Cmd::Down { timeout } => {
+            if target::endpoint_source().is_some() {
+                down_remote(&target::resolve()?, timeout)
+            } else {
+                down(timeout)
+            }
+        }
         Cmd::Status => status(),
         Cmd::Scenario { cmd } => scenario(cmd),
         Cmd::Cycle {
@@ -333,10 +382,10 @@ fn run(cli: Cli) -> Result<(), Fail> {
         } => cycle(&endpoint, state, status, delay, off),
         Cmd::Pins => pins(),
         Cmd::Logs(a) => logs_cmd(&a),
-        Cmd::Trace { key, json } => trace(&key, json),
+        Cmd::Trace { key } => trace(&key),
         Cmd::Reset => {
-            call("POST", "/__kaanal/reset", None)?;
-            println!("reset");
+            let v = call("POST", "/__kaanal/reset", None)?;
+            output::emit(&v, || println!("reset"));
             Ok(())
         }
         Cmd::Chaos {
@@ -369,7 +418,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
                 );
                 call("PUT", &path, Some(Value::Object(patch)))?
             };
-            println!("{}", clean(&format!("{label}: {v}")));
+            output::emit(&v, || println!("{}", clean(&format!("{label}: {v}"))));
             warn_all(&v);
             Ok(())
         }
@@ -377,8 +426,8 @@ fn run(cli: Cli) -> Result<(), Fail> {
             cmd: ChaosCmd::Clear { node, endpoint },
         } => {
             let path = chaos_clear_path(node, endpoint);
-            call("DELETE", &path, None)?;
-            println!("cleared");
+            let v = call("DELETE", &path, None)?;
+            output::emit(&v, || println!("cleared"));
             Ok(())
         }
     }
@@ -867,6 +916,71 @@ fn down(timeout: Duration) -> Result<(), Fail> {
     Ok(())
 }
 
+/// **Private.** `kaanal down --endpoint` (E6): the same `POST /__kaanal/shutdown`, then poll health
+/// until nothing answers, for the budget plus 2 s. No run.json, lock or pid, and never a kill: a
+/// remote instance that keeps answering is reported, not forced.
+fn down_remote(t: &target::Target, timeout: Duration) -> Result<(), Fail> {
+    let budget = humantime::format_duration(timeout).to_string();
+    let agent = control_agent(Duration::from_secs(5));
+    let mut r = agent
+        .post(&t.url("/__kaanal/shutdown"))
+        .header("Host", &t.host_header())
+        .header("Authorization", &t.auth())
+        .send_json(json!({ "timeout": budget }))
+        .map_err(|e| t.unreachable(&clean(&e.to_string())))?;
+    let status = r.status().as_u16();
+    let text = r.body_mut().read_to_string().unwrap_or_default();
+    let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if status != 202 {
+        let msg = v["error"].as_str().unwrap_or(&text);
+        return Err(t.refused(status, msg).unwrap_or_else(|| {
+            err(clean(&format!(
+                "POST /__kaanal/shutdown: HTTP {status}: {msg}"
+            )))
+        }));
+    }
+    // As local `down`: a drain already running with more time left is waited for.
+    let left = v["timeout_ms"]
+        .as_u64()
+        .map(|ms| lifecycle::server_wait(Some(ms), 0));
+    let wait = drain_wait(timeout, Some(&ShutdownReply { status, left }));
+    let deadline = Instant::now() + wait;
+    loop {
+        // Only a refused or dropped connection means gone; a slow or odd answer means still up.
+        let left = deadline.saturating_duration_since(Instant::now());
+        // At least 2.5 s: with less left, ureq reports the global timeout before the 2 s connect
+        // timeout, and a closed port on Windows would look like a live instance.
+        let res = control_agent(left.clamp(Duration::from_millis(2500), Duration::from_secs(5)))
+            .get(&t.url("/__kaanal/health"))
+            .header("Host", &t.host_header())
+            .header("Authorization", &t.auth())
+            .call();
+        // Windows reports a closed port as a connect timeout (its refusal takes longer than ours).
+        let gone = match res {
+            Err(ureq::Error::Io(e)) => matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+            ),
+            Err(ureq::Error::Timeout(ureq::Timeout::Connect)) => true,
+            _ => false,
+        };
+        if gone {
+            println!("stopped");
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(err(format!(
+                "{} is still answering after {}; not killing a remote instance",
+                t.base(),
+                humantime::format_duration(wait)
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// **Private.** Prints a response's `warnings` to stderr.
 fn warn_all(v: &Value) {
     for w in v["warnings"].as_array().into_iter().flatten() {
@@ -944,63 +1058,76 @@ fn print_scenario(v: &Value) {
     }
 }
 
+/// **Private.** `prefix` + `active scenarios: a, b` (or the stack answer under `--json`).
+fn say_active(v: &Value, prefix: &str) {
+    output::emit(v, || {
+        println!("{prefix}active scenarios: {}", active_names(v).join(", "));
+    });
+}
+
 /// **Private.** `kaanal scenario ...`: thin calls to the control API, except `load`, which
 /// parses the file here so a mistake shows as `file:line:col`.
 fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
     match cmd {
         ScenarioCmd::List => {
             let v = call("GET", "/__kaanal/scenarios", None)?;
-            println!(
-                "{:<24} {:<8} {:<7} DESCRIPTION",
-                "NAME", "SOURCE", "ENTRIES"
-            );
-            for s in v.as_array().into_iter().flatten() {
-                let line = format!(
-                    "{:<24} {:<8} {:<7} {}{}",
-                    s["name"].as_str().unwrap_or(""),
-                    s["source"].as_str().unwrap_or(""),
-                    s["entries"],
-                    s["description"].as_str().unwrap_or(""),
-                    active_suffix(s)
+            output::emit(&v, || {
+                println!(
+                    "{:<24} {:<8} {:<7} DESCRIPTION",
+                    "NAME", "SOURCE", "ENTRIES"
                 );
-                println!("{}", clean(&line));
-            }
+                for s in v.as_array().into_iter().flatten() {
+                    let line = format!(
+                        "{:<24} {:<8} {:<7} {}{}",
+                        s["name"].as_str().unwrap_or(""),
+                        s["source"].as_str().unwrap_or(""),
+                        s["entries"],
+                        s["description"].as_str().unwrap_or(""),
+                        active_suffix(s)
+                    );
+                    println!("{}", clean(&line));
+                }
+            });
         }
         ScenarioCmd::Show { name } => {
             let v = call("GET", &scenario_path(named(&name)?, ""), None)?;
-            print_scenario(&v);
+            output::emit(&v, || print_scenario(&v));
         }
         ScenarioCmd::Activate { name, ttl } => {
             let body = ttl_body(ttl)?;
             let v = call("POST", &scenario_path(named(&name)?, "/activate"), body)?;
-            println!("active scenarios: {}", active_names(&v).join(", "));
+            say_active(&v, "");
         }
         ScenarioCmd::Deactivate { name } => {
             let name = named(&name)?;
             // ponytail: the answer is a bare 204, so "was it active" is read just before; a
             // concurrent change in between can make this line wrong, never the state.
             let was = call("GET", "/__kaanal/scenarios/active", None)?;
-            call("POST", &scenario_path(name, "/deactivate"), None)?;
-            if active_names(&was).contains(&name) {
-                println!("deactivated {name}");
-            } else {
-                println!("ok: {name} is not active");
-            }
+            let v = call("POST", &scenario_path(name, "/deactivate"), None)?;
+            output::emit(&v, || {
+                if active_names(&was).contains(&name) {
+                    println!("deactivated {name}");
+                } else {
+                    println!("ok: {name} is not active");
+                }
+            });
         }
         ScenarioCmd::Set { names } => {
             names.iter().try_for_each(|n| named(n).map(drop))?;
             let v = call("PUT", "/__kaanal/scenarios/active", Some(json!(names)))?;
-            println!("active scenarios: {}", active_names(&v).join(", "));
+            say_active(&v, "");
         }
         ScenarioCmd::Clear => {
-            call("DELETE", "/__kaanal/scenarios", None)?;
-            println!("cleared");
+            let v = call("DELETE", "/__kaanal/scenarios", None)?;
+            output::emit(&v, || println!("cleared"));
         }
         ScenarioCmd::Active => {
             let v = call("GET", "/__kaanal/scenarios/active", None)?;
-            for n in active_names(&v) {
-                println!("{}", clean(n));
-            }
+            output::emit(&v, || {
+                for n in active_names(&v) {
+                    println!("{}", clean(n));
+                }
+            });
         }
         ScenarioCmd::Load { file } => {
             let name = file
@@ -1019,10 +1146,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             let v = call("PUT", &scenario_path(name, ""), Some(body))?;
             warn_all(&v);
             let v = call("POST", &scenario_path(name, "/activate"), None)?;
-            println!(
-                "loaded {name}; active scenarios: {}",
-                active_names(&v).join(", ")
-            );
+            say_active(&v, &format!("loaded {name}; "));
         }
         ScenarioCmd::Save {
             name,
@@ -1035,7 +1159,9 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             let body =
                 json!({ "name": name, "from": from, "force": force, "clear_live": clear_live });
             let v = call("POST", "/__kaanal/scenarios/save", Some(body))?;
-            println!("saved {}", clean(v["path"].as_str().unwrap_or("")));
+            output::emit(&v, || {
+                println!("saved {}", clean(v["path"].as_str().unwrap_or("")));
+            });
         }
     }
     Ok(())
@@ -1295,18 +1421,17 @@ fn write_run_file(bound: SocketAddr, token: &str, startup: &Value) -> Result<(),
         .map_err(|e| err(format!("{RUN_FILE}: {e}")))
 }
 
-/// **Private.** Calls the running instance found via `.kaanal/run.json`. Exit 2 if
-/// it isn't running or its state is stale, exit 1 if it is alive but silent (spec M9, M16). The client never follows redirects and never uses a proxy —
-/// either could forward the token.
+/// **Private.** Calls the instance [`target::resolve`] picks: `--endpoint` / `KAANAL_ENDPOINT`, else
+/// the one found via `.kaanal/run.json`. Locally exit 2 if it isn't running or its state is stale,
+/// exit 1 if it is alive but silent (spec M9, M16); remotely no answer is exit 1 (E5). The client
+/// never follows redirects and never uses a proxy — either could forward the token.
 fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
-    let state = Path::new(STATE_DIR);
-    let lifecycle::Run { addr, token, .. } = lifecycle::require_instance(state)?;
-    let port = addr.port();
-    let auth = format!("Bearer {token}");
-    let url = format!("http://{addr}{path}");
+    let target = target::resolve()?;
+    let auth = target.auth();
+    let url = target.url(path);
     // The control API only accepts a loopback Host with the bound port (R5.3), even when
-    // we connect to a non-loopback bind address.
-    let host = format!("localhost:{port}");
+    // we connect to a non-loopback or remote address.
+    let host = target.host_header();
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         // Never send the token through an HTTP(S)_PROXY from the environment.
@@ -1344,12 +1469,15 @@ fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
             .header("Authorization", &auth)
             .call(),
     };
-    let mut resp = res.map_err(|e| lifecycle::transport_failure(state, addr, &e.to_string()))?;
+    let mut resp = res.map_err(|e| target.unreachable(&e.to_string()))?;
     let status = resp.status().as_u16();
     let text = resp.body_mut().read_to_string().unwrap_or_default();
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if status >= 300 {
         let msg = v["error"].as_str().unwrap_or(&text);
+        if let Some(f) = target.refused(status, msg) {
+            return Err(f);
+        }
         let detail = v["detail"]
             .as_str()
             .map_or(String::new(), |d| format!(" ({d})"));
@@ -1367,55 +1495,70 @@ fn status() -> Result<(), Fail> {
     // One call, so the stack and the chaos compiled from it come from the same snapshot.
     let active = call("GET", "/__kaanal/scenarios/active", None)?;
     let eff = &active["effective"];
-    println!("{:<12} {:<12} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
-    for n in topo["nodes"].as_array().into_iter().flatten() {
-        let name = n["name"].as_str().unwrap_or("");
-        let c = &eff["nodes"][name];
-        let text = if c.is_null() {
-            "-".to_string()
-        } else {
-            chaos_text(c)
-        };
-        let flavor = n["flavor"].as_str().unwrap_or("-");
-        let line = format!(
-            "{:<12} {:<12} {:<10} {}",
-            name,
-            n["type"].as_str().unwrap_or(""),
-            flavor,
-            text
-        );
-        println!("{}", clean(&line));
-    }
-    // Endpoint-wide and node-at-endpoint chaos belong to no single row.
-    for (key, c) in eff["endpoints"].as_object().into_iter().flatten() {
-        println!("{}", clean(&format!("endpoint {key}: {}", chaos_text(c))));
-    }
-    for c in eff["node_at"].as_array().into_iter().flatten() {
-        let (n, e) = (
-            c["node"].as_str().unwrap_or(""),
-            c["endpoint"].as_str().unwrap_or(""),
-        );
-        println!("{}", clean(&format!("{n} @ {e}: {}", chaos_text(c))));
-    }
-    let pins = call("GET", "/__kaanal/pins", None)?;
-    for (key, p) in pins["effective"].as_object().into_iter().flatten() {
-        let line = format!(
-            "pin {key}: {}{} ({})",
-            p["state"].as_str().unwrap_or(""),
-            pin_extra_ms(p),
-            source_text(&p["source"])
-        );
-        println!("{}", clean(&line));
-    }
-    let names = active_names(&active);
-    println!(
-        "active scenarios: {}",
-        if names.is_empty() {
-            "-".to_string()
-        } else {
-            clean(&names.join(", "))
+    // Only the text table shows pins; fetched before any output so a failure prints nothing.
+    let pins = if output::json_on() {
+        Value::Null
+    } else {
+        call("GET", "/__kaanal/pins", None)?
+    };
+    let nodes: Vec<&Value> = topo["nodes"].as_array().into_iter().flatten().collect();
+    let rows: Vec<Value> = nodes
+        .iter()
+        .map(|n| {
+            let c = &eff["nodes"][n["name"].as_str().unwrap_or("")];
+            json!({ "node": n["name"], "type": n["type"], "flavor": n["flavor"], "chaos": c })
+        })
+        .collect();
+    output::emit(&Value::Array(rows), || {
+        println!("{:<12} {:<12} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
+        for n in &nodes {
+            let name = n["name"].as_str().unwrap_or("");
+            let c = &eff["nodes"][name];
+            let text = if c.is_null() {
+                "-".to_string()
+            } else {
+                chaos_text(c)
+            };
+            let flavor = n["flavor"].as_str().unwrap_or("-");
+            let line = format!(
+                "{:<12} {:<12} {:<10} {}",
+                name,
+                n["type"].as_str().unwrap_or(""),
+                flavor,
+                text
+            );
+            println!("{}", clean(&line));
         }
-    );
+        // Endpoint-wide and node-at-endpoint chaos belong to no single row.
+        for (key, c) in eff["endpoints"].as_object().into_iter().flatten() {
+            println!("{}", clean(&format!("endpoint {key}: {}", chaos_text(c))));
+        }
+        for c in eff["node_at"].as_array().into_iter().flatten() {
+            let (n, e) = (
+                c["node"].as_str().unwrap_or(""),
+                c["endpoint"].as_str().unwrap_or(""),
+            );
+            println!("{}", clean(&format!("{n} @ {e}: {}", chaos_text(c))));
+        }
+        for (key, p) in pins["effective"].as_object().into_iter().flatten() {
+            let line = format!(
+                "pin {key}: {}{} ({})",
+                p["state"].as_str().unwrap_or(""),
+                pin_extra_ms(p),
+                source_text(&p["source"])
+            );
+            println!("{}", clean(&line));
+        }
+        let names = active_names(&active);
+        println!(
+            "active scenarios: {}",
+            if names.is_empty() {
+                "-".to_string()
+            } else {
+                clean(&names.join(", "))
+            }
+        );
+    });
     Ok(())
 }
 
@@ -1446,16 +1589,28 @@ fn logs_cmd(a: &LogsArgs) -> Result<(), Fail> {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     let filter = logview::filter_of(&params, now_ms).map_err(Fail::usage)?;
     if a.follow {
-        return follow_logs(&params, &filter, a.json);
+        return follow_logs(&params, &filter, output::json_on());
     }
-    logs(&params, a.json)
+    logs(&params, output::json_on())
 }
 
 /// **Private.** Prints one line to stdout. A closed pipe (`kaanal logs | head`) ends the process
 /// quietly with exit 0, which is how every well-behaved filter tool treats it.
 fn out_line(text: &str) {
+    out_bytes(
+        format!(
+            "{text}
+"
+        )
+        .as_bytes(),
+    );
+}
+
+/// **Private.** Writes raw bytes to stdout with the same closed-pipe rule as [`out_line`].
+fn out_bytes(bytes: &[u8]) {
     use std::io::Write;
-    if let Err(e) = writeln!(std::io::stdout().lock(), "{text}") {
+    let mut out = std::io::stdout().lock();
+    if let Err(e) = out.write_all(bytes).and_then(|()| out.flush()) {
         if e.kind() == std::io::ErrorKind::BrokenPipe {
             std::process::exit(0);
         }
@@ -1465,7 +1620,7 @@ fn out_line(text: &str) {
 }
 
 /// **Private.** `kaanal trace`: the waterfall of one request, or its entry as JSON.
-fn trace(key: &str, json: bool) -> Result<(), Fail> {
+fn trace(key: &str) -> Result<(), Fail> {
     let e = call(
         "GET",
         &format!("/__kaanal/trace/{}", encode_segment(key)),
@@ -1476,7 +1631,7 @@ fn trace(key: &str, json: bool) -> Result<(), Fail> {
         Fail(1, m) if key == "last" && m.contains("HTTP 404") => err("no requests recorded yet"),
         f => f,
     })?;
-    out_line(&if json {
+    out_line(&if output::json_on() {
         e.to_string()
     } else {
         logview::waterfall(&e)
@@ -1544,9 +1699,8 @@ fn follow_logs(
     filter: &kaanal_server::Filter,
     json: bool,
 ) -> Result<(), Fail> {
-    let state = Path::new(STATE_DIR);
-    let lifecycle::Run { addr, token, .. } = lifecycle::require_instance(state)?;
-    let gone = |why: String| lifecycle::transport_failure(state, addr, &why);
+    let target = target::resolve()?;
+    let gone = |why: String| target.unreachable(&why);
     exit_on_ctrl_c();
     // Its own agent: no overall timeout, the stream is meant to stay open.
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -1556,14 +1710,19 @@ fn follow_logs(
         .timeout_connect(Some(Duration::from_secs(2)))
         .build()
         .into();
-    let resp = agent
-        .get(&format!("http://{addr}/__kaanal/events"))
-        .header("Host", &format!("localhost:{}", addr.port()))
-        .header("Authorization", &format!("Bearer {token}"))
+    let mut resp = agent
+        .get(&target.url("/__kaanal/events"))
+        .header("Host", &target.host_header())
+        .header("Authorization", &target.auth())
         .call()
         .map_err(|e| gone(e.to_string()))?;
-    if resp.status().as_u16() != 200 {
-        return Err(err(format!("GET /__kaanal/events: HTTP {}", resp.status())));
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let text = resp.body_mut().read_to_string().unwrap_or_default();
+        let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        return Err(target
+            .refused(status, v["error"].as_str().unwrap_or(""))
+            .unwrap_or_else(|| err(format!("GET /__kaanal/events: HTTP {status}"))));
     }
     // Bounded: a follower that cannot keep up loses events visibly (a `lagged` notice), not memory.
     let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(String, String)>>(logview::BACKLOG);
@@ -1636,16 +1795,30 @@ fn follow_logs(
             show(&v, json);
         },
     );
-    if let Some(ms) = shutdown_ms {
-        let ms = lifecycle::server_wait(ms, 5000);
+    let drain = shutdown_ms.map(|ms| lifecycle::server_wait(ms, 5000));
+    Err(stream_ended(&target, drain))
+}
+
+/// **Private.** Why `logs -f` stopped, once the event stream ended; `drain` is the shutdown the
+/// server announced, if it did.
+fn stream_ended(target: &target::Target, drain: Option<Duration>) -> Fail {
+    // Remote: no lock to wait on, and exit 2 ("no local instance") is local-only (E5).
+    if target.remote {
+        return match drain {
+            Some(_) => err(format!("{}: stopped (the server shut down)", target.base())),
+            None => target.unreachable("the event stream closed"),
+        };
+    }
+    let state = Path::new(STATE_DIR);
+    if let Some(ms) = drain {
         // A `down` (or signal) drain: the process is still finishing its exit. That is a stop.
         lifecycle::wait_lock_free(state, ms + Duration::from_secs(2));
-        return Err(Fail(2, "kaanal stopped (the server shut down)".into()));
+        return Fail(2, "kaanal stopped (the server shut down)".into());
     }
     // No shutdown message: killed, or cut by a tiny drain budget before it was written. Give the
     // exit a moment; a lock that is still held is then honestly "running but not answering".
     lifecycle::wait_lock_free(state, Duration::from_secs(2));
-    Err(gone("the event stream closed".into()))
+    target.unreachable("the event stream closed")
 }
 
 /// **Private.** The pin states `cycle --state` accepts, in cycle order.
@@ -1693,8 +1866,8 @@ fn cycle(
     if off {
         let path = format!("/__kaanal/pins?endpoint={}", encode_segment(endpoint));
         // The server answers 204 whether or not a pin existed, so this prints either way.
-        call("DELETE", &path, None)?;
-        println!("{} -> unpinned", clean(endpoint));
+        let v = call("DELETE", &path, None)?;
+        output::emit(&v, || println!("{} -> unpinned", clean(endpoint)));
         return Ok(());
     }
     let mut body = json!({ "endpoint": endpoint });
@@ -1718,13 +1891,15 @@ fn cycle(
         body["status"] = json!(s);
     }
     let v = call("POST", "/__kaanal/cycle", Some(body))?;
-    let line = format!(
-        "{} -> {}{}",
-        v["endpoint"].as_str().unwrap_or(""),
-        v["state"].as_str().unwrap_or(""),
-        pin_extra_ms(&v)
-    );
-    println!("{}", clean(&line));
+    output::emit(&v, || {
+        let line = format!(
+            "{} -> {}{}",
+            v["endpoint"].as_str().unwrap_or(""),
+            v["state"].as_str().unwrap_or(""),
+            pin_extra_ms(&v)
+        );
+        println!("{}", clean(&line));
+    });
     Ok(())
 }
 
@@ -1732,11 +1907,17 @@ fn cycle(
 /// its source.
 fn pins() -> Result<(), Fail> {
     let v = call("GET", "/__kaanal/pins", None)?;
+    output::emit(&v, || pins_text(&v));
+    Ok(())
+}
+
+/// **Private.** The text of `kaanal pins`.
+fn pins_text(v: &Value) {
     let live = v["live"].as_array().map_or(&[][..], Vec::as_slice);
     let eff = v["effective"].as_object();
     if live.is_empty() && eff.is_none_or(serde_json::Map::is_empty) {
         println!("no pins");
-        return Ok(());
+        return;
     }
     if live.is_empty() {
         println!("no live pins");
@@ -1762,7 +1943,6 @@ fn pins() -> Result<(), Fail> {
         );
         println!("{}", clean(&line));
     }
-    Ok(())
 }
 
 /// **Private.** One effective chaos entry as text: latency, each failure band (kinds other

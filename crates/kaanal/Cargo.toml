@@ -12,6 +12,7 @@ kaanal-core.workspace = true
 kaanal-server.workspace = true
 tokio.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
 humantime.workspace = true
 percent-encoding.workspace = true
 ureq.workspace = true

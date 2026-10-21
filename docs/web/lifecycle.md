@@ -110,6 +110,19 @@ The refusals are exit 1 with the reason, and nothing is killed: `kaanal did not 
 
 **Exit codes of `down`:** 0 stopped or not running, 1 it could not stop it (or would not kill), 64 a bad `--timeout`. It never exits 2.
 
+### Remote down
+
+With an endpoint (`kaanal --endpoint http://host:8080 down`, token from `KAANAL_TOKEN`), `down` stops an instance that is not in this folder, for example one in a container or on another machine. It does only what it can do over HTTP:
+
+1. `POST /__kaanal/shutdown` with your `--timeout` as the budget.
+2. Polls `/__kaanal/health` until the connection is refused, reset or times out while connecting, for the budget plus 2 s. Then it prints `stopped`, exit 0.
+
+It never reads `.kaanal/run.json`, the lock or a pid, and it never kills anything: an instance that still answers when the time is up is exit 1 (`http://host:8080 is still answering after 7s; not killing a remote instance`). No answer to the shutdown request is exit 1 as well (`cannot reach ...`), including when nothing is running there, so unlike the local `down` it is not idempotent.
+
+`stopped` here means "stopped answering", not "the process exited". If a firewall silently drops packets after the shutdown was accepted, the connect timeout looks the same as a gone instance and `down` can print `stopped` while the process is still draining. Use a local `down` on that host when you need the certainty.
+
+`up` and `up -d` refuse an endpoint (exit 64). The flags are described in the [user guide](user-guide.md#global-flags).
+
 ## Stale state
 
 A crash, `kill -9`, a power cut or `taskkill /F` leaves `.kaanal/run.json` behind. Kaanal never trusts that file by itself. Whether an instance is alive is decided by the **instance lock**, `.kaanal/lock`: the running process holds it for as long as it lives and the operating system drops it the moment the process ends, however it ends. A `run.json` whose lock is free is stale.
@@ -176,15 +189,17 @@ Limits: only those three handles are covered. If your own program has passed an 
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                                         |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Success. Also: `down` when it stopped the instance or nothing was running, `up -d` when it was already running, `--help` and `--version`.                                                       |
-| 1    | Error: a bad config, a startup failure, a value the server refused (HTTP 400), an instance that is running but does not answer or is still starting, a `down` that could not or would not kill. |
-| 2    | Not running: a command that needs an instance found none, or only stale state. `down` and `up -d` never return it.                                                                              |
-| 3    | Reserved for assertion failures. No command returns it yet.                                                                                                                                     |
-| 64   | Usage error: the command line is wrong, found before any request was sent.                                                                                                                      |
+| Code | Meaning                                                                                                                                                                                                                                                                              |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0    | Success. Also: `down` when it stopped the instance or nothing was running, `up -d` when it was already running, `--help` and `--version`.                                                                                                                                            |
+| 1    | Error: a bad config, a startup failure, a value the server refused (HTTP 400), an instance that is running but does not answer or is still starting, a `down` that could not or would not kill. In remote mode (`--endpoint`): cannot reach the instance, or the token was rejected. |
+| 2    | Not running: a command that needs a local instance found none, or only stale state. `down` and `up -d` never return it, and neither does any command in remote mode.                                                                                                                 |
+| 3    | Reserved for assertion failures. No command returns it yet.                                                                                                                                                                                                                          |
+| 64   | Usage error: the command line is wrong, found before any request was sent. In remote mode: a bad `--endpoint`, a missing token, `--token` without an endpoint, `up` with an endpoint.                                                                                                |
 
 **What is a 64.** Everything clap rejects (an unknown flag or subcommand, a missing argument, flags that exclude each other, a bad `--timeout`, `--wait` without `-d`) and every other bad argument the CLI can see for itself before it sends anything: a bad latency or rate, `--ttl`, `--state`, `--delay`, `--from`, a `-n` outside 1 to 1000, an empty `--scope`, a bad `--since` or `--status` (with or without `-f`), `chaos set` with nothing to set, a bad scenario name or file name. 64 is `EX_USAGE` from `sysexits.h`. (Before this release these exited 1, and clap's own errors would have exited 2, which means "not running" here.)
+
+**Remote mode is never a 2.** Exit 2 means "no instance in this folder", which a remote command cannot know. With `--endpoint`, a refused, reset or timed-out connection is exit 1 (`cannot reach http://host:8080: ...`) and a rejected token is exit 1 (`token rejected`). Misusing the flags is a 64: a URL that is not `http://HOST:PORT` (https, a path, a user or password, no port), `--endpoint` without a token (`set KAANAL_TOKEN`), the `--token` flag without an endpoint, or `up` / `up -d` while an endpoint is set (flag or `KAANAL_ENDPOINT`).
 
 **What stays a 1.** A value that parses on your side and that the server then refuses. `kaanal trace "bad id!"` is an HTTP 400 from the server, so exit 1.
 

@@ -38,6 +38,7 @@ matchit = "0.8"
 percent-encoding = "2"
 tokio-stream = { version = "0.1", features = ["sync"] }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "=4.6.11"
 ureq = { version = "3", default-features = false, features = ["json"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 jsonschema = { version = "0.58", default-features = false }

@@ -77,7 +77,7 @@ kaanal logs --failed              # only requests a node failed
 kaanal logs --endpoint "GET /users/{id}"
 kaanal logs --since 5m            # a duration, or an RFC 3339 time
 kaanal logs --scope payments-down # requests that ran under that scenario scope
-kaanal logs --json                # one JSON object per line (the full entry)
+kaanal logs --json                # one JSON object per line (the full entry); --json is global
 kaanal logs -f                    # follow live
 ```
 
@@ -111,7 +111,7 @@ Filters combine (all must match). Things to know:
 - Lines come in the order the events are published, which is the order requests **finish** give or take a few that finish at nearly the same moment (the log and the event stream are two steps). A slow request started early is printed when it ends, not before the fast ones that overtook it. `done` and `logs?after=` are exact.
 - If the screen cannot keep up (the follower buffers 4096 events), it says so instead of falling silent: `-- missed 17 requests (follow slower than the server) --`. The server sends the same notice when it drops events itself. Use `kaanal logs --since` to read what was missed.
 - The event stream is opened with an `Authorization` header, so the token never appears in a URL.
-- With `--json`, stdout carries JSON Lines only: each live line is the full entry, fetched when the event arrives. If the entry left the ring in between, the line is the shorter event object instead (it has the same `id`, `status`, `path`, `endpoint` and so on, but no `hops`), and `-- could not fetch ID --` goes to stderr. The `-- missed N requests ... --` notice goes to stderr too, so a pipe into `jq` stays clean.
+- `--json` is the [global flag](user-guide.md#global-flags) (`kaanal --json logs` works too, and so does `KAANAL_JSON=1`); the output is the same as before. With it, stdout carries JSON Lines only: each live line is the full entry, fetched when the event arrives. If the entry left the ring in between, the line is the shorter event object instead (it has the same `id`, `status`, `path`, `endpoint` and so on, but no `hops`), and `-- could not fetch ID --` goes to stderr. The `-- missed N requests ... --` notice goes to stderr too, so a pipe into `jq` stays clean.
 - If the server stops, `logs -f` ends, because the event stream does, and it exits with code 2. A `kaanal down` (or a signal) makes the server send a `shutdown` event first; `logs -f` then waits for the process to finish its exit and prints `kaanal stopped (the server shut down)`. A server that was killed has no such event: the follower waits up to 2 s for the lock, then reports `kaanal is not running on ...: the event stream closed`. Only a server that is still alive (the lock stays held) gives exit 1, `kaanal is running (pid N) but its control API did not answer`. See [lifecycle](lifecycle.md#stale-state). The events of requests cut at the end of a shutdown do not reach a follower.
 
 ## `kaanal trace`
@@ -120,7 +120,7 @@ Filters combine (all must match). Things to know:
 kaanal trace last                # the latest request to finish
 kaanal trace rcb02-0005          # by Kaanal's id
 kaanal trace checkout-17         # by the X-Request-Id you sent (the newest match)
-kaanal trace rcb02-0005 --json   # the whole entry as JSON
+kaanal trace rcb02-0005 --json   # the whole entry as JSON (--json is the global flag)
 ```
 
 A request that took 40 ms of chaos on the database:

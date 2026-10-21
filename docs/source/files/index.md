@@ -67,6 +67,8 @@ One page per source file: what the file does and what each function/type in it d
 | `src/keys.rs`      | [kaanal/keys.md](kaanal/keys.md)           | Signing key file: location, identity, race-safe creation, permissions |
 | `src/logview.rs`   | [kaanal/logview.md](kaanal/logview.md)     | Log lines, the waterfall, the `logs -f` follow machinery              |
 | `src/lifecycle.rs` | [kaanal/lifecycle.md](kaanal/lifecycle.md) | Liveness by lock, `run.json` reader, stopping, detaching, signals     |
+| `src/output.rs`    | [kaanal/output.md](kaanal/output.md)       | The global `--json` switch and `emit`                                 |
+| `src/target.rs`    | [kaanal/target.md](kaanal/target.md)       | `--endpoint` / `--token`: local or remote target, errors, warning     |
 
 ## [kaanal-winhandle](kaanal-winhandle/) (the one `unsafe` crate)
 
