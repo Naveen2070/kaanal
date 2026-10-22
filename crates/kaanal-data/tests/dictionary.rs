@@ -186,9 +186,7 @@ fn money_clamps_to_schema_bounds() {
 
 #[test]
 fn text_trims_to_max_length_in_characters() {
-    let opts = with_project(
-        "fields:\n  note: { gen: text, kind: paragraph }\n  motto: { gen: static, value: \"日本語のテキスト\" }\n",
-    );
+    let opts = with_project("fields:\n  note: { gen: text, kind: paragraph }\n");
     for seed in 0..20 {
         let v = gen_field(
             &json!({ "type": "string", "maxLength": 10 }),
@@ -200,13 +198,113 @@ fn text_trims_to_max_length_in_characters() {
         let v = gen_field(&json!({ "type": "string" }), "note", seed, &opts);
         assert!(v.as_str().unwrap().chars().count() > 40, "paragraph: {v}");
     }
-    let v = gen_field(
-        &json!({ "type": "string", "maxLength": 3 }),
-        "motto",
-        1,
-        &opts,
+}
+
+/// One-endpoint model around an object schema, for `dictionary_warnings`.
+fn model_of(s: Value) -> ApiModel {
+    ApiModel {
+        endpoints: vec![Endpoint {
+            method: "GET".into(),
+            path: "/u".into(),
+            status: 200,
+            schema: Some(s),
+        }],
+    }
+}
+
+#[test]
+fn user_strings_out_of_length_bounds_are_emitted_whole_and_warned() {
+    let opts = with_project(
+        "fields:\n\
+         \x20 motto: { gen: static, value: \"日本語のテキスト\" }\n\
+         \x20 tier: { gen: pick, from: [gold, platinum] }\n\
+         \x20 code: { gen: template, value: \"SKU-{digits:6}\" }\n\
+         \x20 pad: { gen: static, value: ab }\n\
+         \x20 fine: { gen: template, value: \"{letters:3}\" }\n",
     );
-    assert_eq!(v, "日本語");
+    let s = json!({ "type": "object", "properties": {
+        "motto": { "type": "string", "maxLength": 3 },
+        "tier": { "type": "string", "maxLength": 4 },
+        "code": { "type": "string", "maxLength": 4 },
+        "pad": { "type": "string", "minLength": 5 },
+        "fine": { "type": "string", "minLength": 3, "maxLength": 3 }
+    }});
+    let mut tiers = std::collections::BTreeSet::new();
+    for seed in 0..40 {
+        let v = generate(&s, None, seed, &opts);
+        assert_eq!(v["motto"], "日本語のテキスト");
+        assert_eq!(v["pad"], "ab");
+        assert_eq!(v["code"].as_str().unwrap().len(), 10, "{v}");
+        tiers.insert(v["tier"].as_str().unwrap().to_string());
+    }
+    assert_eq!(tiers.len(), 2, "{tiers:?}");
+    let w = dictionary_warnings(&model_of(s), &opts);
+    assert_eq!(w.len(), 4, "{w:?}");
+    for f in ["motto", "tier", "code", "pad"] {
+        assert!(
+            w.iter()
+                .any(|m| m.contains("GET /u") && m.contains(&format!("`{f}`"))),
+            "{f}: {w:?}"
+        );
+    }
+}
+
+#[test]
+fn generated_and_built_in_strings_still_fit_their_lengths() {
+    let s = json!({ "type": "object", "properties": {
+        "firstName": { "type": "string", "maxLength": 2 },
+        "sku": { "type": "string", "maxLength": 5 },
+        "role": { "type": "string", "minLength": 9 },
+        "phone": { "type": "string", "maxLength": 3 },
+        "email": { "type": "string", "maxLength": 3 }
+    }});
+    for seed in 0..40 {
+        let v = generate(&s, None, seed, &Options::default());
+        assert!(v["firstName"].as_str().unwrap().chars().count() <= 2, "{v}");
+        // a built-in entry that cannot meet the bounds is skipped, never cut or padded
+        let sku = v["sku"].as_str().unwrap();
+        assert!(sku.chars().count() <= 5 && !sku.starts_with("SKU-"), "{v}");
+        let role = v["role"].as_str().unwrap();
+        assert!(role.chars().count() >= 9, "{v}");
+        assert!(
+            !role.starts_with("admin") && !role.starts_with("editor"),
+            "{v}"
+        );
+        // well-formed values ignore lengths (R4.5)
+        assert!(v["phone"].as_str().unwrap().len() > 3, "{v}");
+        assert!(
+            v["email"].as_str().unwrap().ends_with("@example.com"),
+            "{v}"
+        );
+    }
+    // built-ins never warn
+    assert_eq!(
+        dictionary_warnings(&model_of(s), &Options::default()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn bare_total_is_a_count_and_star_total_is_money() {
+    let o = Options::default();
+    let mut seen_money = false;
+    for seed in 0..60 {
+        let t = gen_field(&json!({ "type": "integer" }), "total", seed, &o);
+        assert!((0..=1000).contains(&t.as_i64().unwrap()), "{t}");
+        let t = gen_field(&json!({ "type": "number" }), "total", seed, &o);
+        assert!(
+            t.is_i64() && (0..=1000).contains(&t.as_i64().unwrap()),
+            "{t}"
+        );
+        for f in ["orderTotal", "grandTotal", "subtotal", "cartSubtotal"] {
+            let v = gen_field(&json!({ "type": "number" }), f, seed, &o)
+                .as_f64()
+                .unwrap();
+            assert!((99.0..=4999.0).contains(&v), "{f}: {v}");
+            seen_money |= v.fract() != 0.0;
+        }
+    }
+    assert!(seen_money, "money has cents");
 }
 
 #[test]

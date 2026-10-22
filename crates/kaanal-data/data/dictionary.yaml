@@ -101,7 +101,8 @@ fields:
   # --- money ------------------------------------------------------------------
   price: { gen: money }
   "*price": { gen: money }
-  total: { gen: money }
+  # a bare `total` is a count (pagination); `orderTotal`, `grandTotal` stay money
+  total: { gen: integer, min: 0, max: 1000 }
   "*total": { gen: money }
   amount: { gen: money }
   "*amount": { gen: money }

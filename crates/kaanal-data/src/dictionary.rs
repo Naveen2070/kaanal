@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::ApiModel;
 use crate::dataset::Options;
-use crate::generate::{MAX_DEPTH, merge_all_of, scalar_type};
+use crate::generate::{MAX_DEPTH, count, merge_all_of, scalar_type};
 use crate::pack::{DataError, digit_count, fill, non_empty, serde_error};
 
 /// A field dictionary: exact keys and `*suffix` keys, both normalised.
@@ -107,6 +107,31 @@ impl Gen {
             Gen::Pick { from } => from.iter().any(|v| value_fits(v, s, ty)),
             Gen::Static { value } => value_fits(value, s, ty),
             _ => ty == "string",
+        }
+    }
+
+    /// **Private.** Whether every string a `pick`, `static` or `template` can emit for a
+    /// field of type `ty` meets its `minLength`/`maxLength` in characters. Those values are
+    /// emitted as written, never cut or padded; other generators are fitted or well-formed
+    /// (R4.5), so they always pass.
+    pub(crate) fn length_fits(&self, s: &Value, ty: &str) -> bool {
+        let max = count(s, "maxLength", false);
+        let min = count(s, "minLength", true);
+        let ok = |n: usize| {
+            let n = u64::try_from(n).unwrap_or(u64::MAX);
+            max.is_none_or(|m| n <= m) && min.is_none_or(|m| n >= m)
+        };
+        match self {
+            Gen::Pick { from } => from
+                .iter()
+                .filter(|v| value_fits(v, s, ty))
+                .filter_map(Value::as_str)
+                .all(|t| ok(t.chars().count())),
+            Gen::Static { value } => value.as_str().is_none_or(|t| ok(t.chars().count())),
+            // placeholders have fixed widths, so a template has exactly one output length
+            Gen::Template { value } => fill(value, |k| template_key(k).map(|(_, n)| "0".repeat(n)))
+                .is_none_or(|t| ok(t.chars().count())),
+            _ => true,
         }
     }
 }
@@ -529,16 +554,20 @@ fn walk(
             }
         }
         ty => {
-            if let Some(f) = field
-                && let Some(gens) = d.lookup(f)
-                && !gens.iter().any(|g| g.fits(s, ty))
-            {
-                let msg = format!(
+            let Some(f) = field else { return };
+            let Some(gens) = d.lookup(f) else { return };
+            // as the generator: the first entry that fits the type applies
+            let msg = match gens.iter().find(|g| g.fits(s, ty)) {
+                None => format!(
                     "{at}: project dictionary entry for `{f}` does not fit type `{ty}` or its bounds; skipped"
-                );
-                if !out.contains(&msg) {
-                    out.push(msg);
-                }
+                ),
+                Some(chosen) if !chosen.length_fits(s, ty) => format!(
+                    "{at}: project dictionary value for `{f}` can fall outside its minLength/maxLength; it is sent as written"
+                ),
+                Some(_) => return,
+            };
+            if !out.contains(&msg) {
+                out.push(msg);
             }
         }
     }

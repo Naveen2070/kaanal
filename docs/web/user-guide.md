@@ -215,7 +215,7 @@ Precedence, first match wins:
 6. the built-in dictionary;
 7. type and bounds defaults.
 
-The schema's type and bounds always win over a dictionary entry: numbers are clamped to `minimum`/`maximum`, strings fitted to `maxLength` (in characters). An entry that cannot fit its field is skipped. A misfit in your `data.yaml` is a warning from `kaanal validate` and `kaanal up` that names the endpoint and field; a misfit built-in entry is skipped silently.
+The schema's type and bounds always win over a dictionary entry: numbers are clamped to `minimum`/`maximum`, generated strings fitted to `maxLength` and `minLength` (in characters). An entry that cannot fit its field is skipped. A misfit in your `data.yaml` is a warning from `kaanal validate` and `kaanal up` that names the endpoint and field; a misfit built-in entry is skipped silently. Your own `pick`, `static` and `template` strings are never trimmed or padded: they are sent as written, and one that can fall outside the field's `minLength`/`maxLength` is a warning naming the field.
 
 ### Schema keywords
 
@@ -255,7 +255,7 @@ Kaanal is pre-1.0, and the same version, config, files and seed give the same da
 - Suffix matching is by whole word. An all-lower-case compound such as `unitprice` no longer matches the money suffixes (`unitPrice` and `unit_price` do), and `valid`, `paid` or `android` never match `*id`.
 - New keywords change how much of a body's value budget a schema uses (`const`, `additionalProperties`, `oneOf`), so a very large nested schema may reach its cap at a different place.
 - `discriminator` is no longer reported as an ignored keyword.
-- Any field named `total` or ending in `Total`/`_total` is money now, number and integer alike: an integer pagination `total` is 99 to 4999 where it was 0 to 1000. Give it a `maximum`, an `example`, or a `data.yaml` entry (`total: { gen: integer, min: 0, max: 1000 }`) to keep a count.
+- A field ending in `Total`/`_total` (`orderTotal`, `grandTotal`) or `subtotal` is money now, number and integer alike. A bare `total` stays a count from 0 to 1000, and is a whole number on a `number` field too.
 - `street` and the street inside `address` are now the same street for one object.
 - Built-in packs carry coordinate bounds (`geo:`): `latitude`/`longitude` stay inside India for `en-IN` (unchanged) and inside the continental US for `en-US` (they were India's for every locale); a pack without `geo:` uses the whole globe.
 - `empty` pin bodies use the owning node's locale and your `data.yaml` (they always used `en-IN` and the built-ins), and each field draws from its own seed, so the values change.

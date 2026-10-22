@@ -260,7 +260,7 @@ fn scalar_for(
 ) -> Value {
     let pack = &*opts.pack;
     let project = opts.dictionary_project.as_deref();
-    if let Some(v) = from_dictionary(project, s, field, ty, rng, group, pack) {
+    if let Some(v) = from_dictionary(project, false, s, field, ty, rng, group, pack) {
         return v;
     }
     if ty == "string"
@@ -269,7 +269,7 @@ fn scalar_for(
         // formats beat lengths (R4.5): never truncated or padded
         return json!(v);
     }
-    if let Some(v) = from_dictionary(Some(&opts.dictionary), s, field, ty, rng, group, pack) {
+    if let Some(v) = from_dictionary(Some(&opts.dictionary), true, s, field, ty, rng, group, pack) {
         return v;
     }
     match ty {
@@ -543,8 +543,15 @@ fn format_value(s: &Value, rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> Opt
 
 /// **Private.** The first generator of `field`'s entry in `d` that fits `ty` and the
 /// schema's bounds, run; `None` when there is no entry or none fits (design 11a rule 2).
+/// A `builtin` entry must also meet the string lengths (its values are never cut or
+/// padded); a project one is sent as written and warned at startup instead.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "private helper, one call site per layer"
+)]
 fn from_dictionary(
     d: Option<&Dictionary>,
+    builtin: bool,
     s: &Value,
     field: Option<&str>,
     ty: &str,
@@ -553,7 +560,10 @@ fn from_dictionary(
     pack: &Pack,
 ) -> Option<Value> {
     let f = field?;
-    let g = d?.lookup(f)?.iter().find(|g| g.fits(s, ty))?;
+    let g = d?
+        .lookup(f)?
+        .iter()
+        .find(|g| g.fits(s, ty) && (!builtin || g.length_fits(s, ty)))?;
     Some(run(g, s, f, ty, rng, group, pack))
 }
 
@@ -631,12 +641,13 @@ fn run(
             let range = geo_range(pack, matches!(g, Gen::Latitude { .. }));
             return numeric(s, ty, rng, entry_range(*min, *max, range, up, down), 6);
         }
+        // user-written values are sent as written, never cut or padded (R5.7); a project
+        // value outside the lengths is warned at startup, a built-in one never chosen
         Gen::Pick { from } => {
             let fit: Vec<&Value> = from.iter().filter(|v| value_fits(v, s, ty)).collect();
-            let v = (*fit.choose(rng).expect("`fits` found one")).clone();
-            return user_value(v, s);
+            return (*fit.choose(rng).expect("`fits` found one")).clone();
         }
-        Gen::Static { value } => return user_value(value.clone(), s),
+        Gen::Static { value } => return value.clone(),
         // well-formed: no length fitting (R4.5)
         Gen::Email {} => return json!(email(rng, group, pack)),
         Gen::Phone {} => return json!(phone(rng, pack)),
@@ -672,17 +683,21 @@ fn run(
                 (0..n).map(|_| sentence(rng)).collect::<Vec<_>>().join(" ")
             }
         },
-        Gen::Template { value } => fill(value, |k| {
-            let (letters, n) = template_key(k)?;
-            Some(if letters {
-                (0..n)
-                    .map(|_| char::from(b'A' + rng.random_range(0..26u8)))
-                    .collect()
-            } else {
-                digits(rng, n)
-            })
-        })
-        .expect("templates are checked when the dictionary loads"),
+        Gen::Template { value } => {
+            return json!(
+                fill(value, |k| {
+                    let (letters, n) = template_key(k)?;
+                    Some(if letters {
+                        (0..n)
+                            .map(|_| char::from(b'A' + rng.random_range(0..26u8)))
+                            .collect()
+                    } else {
+                        digits(rng, n)
+                    })
+                })
+                .expect("templates are checked when the dictionary loads")
+            );
+        }
     };
     json!(fit_length(v, s))
 }
@@ -697,14 +712,6 @@ fn geo_range(pack: &Pack, lat: bool) -> (f64, f64) {
         (None, false) => [-180.0, 180.0],
     };
     (lo, hi)
-}
-
-/// **Private.** A user `pick`/`static` value as-is (R5.7), a string fitted to its lengths.
-fn user_value(v: Value, s: &Value) -> Value {
-    match v {
-        Value::String(t) => json!(fit_length(t, s)),
-        other => other,
-    }
 }
 
 /// **Private.** `https://example.com/<stem>/<n>`, the stem being the field name without a

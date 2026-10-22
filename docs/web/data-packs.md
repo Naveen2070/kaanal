@@ -170,12 +170,14 @@ Specific beats general: a `format: email` field beats a built-in guess by name, 
 The schema's type and bounds always beat a dictionary entry. An entry applies only if its output can fit the field:
 
 - `money`, `integer`, `latitude` and `longitude` are clamped to `minimum`/`maximum`;
-- `text` and other plain strings are trimmed to `maxLength` (in characters) and padded to `minLength`;
-- string `pick`, `static` and `template` values are trimmed to `maxLength` and padded to `minLength` like other strings (the values are yours, the length is the schema's);
-- `pick` and `static` values that do not fit the type or the bounds are not used;
+- `text`, names, places and other generated strings are trimmed to `maxLength` (in characters) and padded to `minLength`;
+- string `pick`, `static` and `template` values are **never** trimmed or padded: they are sent exactly as written;
+- `pick` and `static` values that do not fit the type or the numeric bounds are not used;
 - a string generator on an integer field (or the reverse) does not fit.
 
 When an entry does not fit, it is skipped and the next layer decides. A misfit in **your** `data.yaml` is reported by `kaanal validate` and `kaanal up` as a warning naming the endpoint and field (`GET /users .age: project dictionary entry for age does not fit...`). A misfit in the **built-in** dictionary is skipped silently, because it was only a guess from the field's name.
+
+Lengths are different for your own strings. A `static` value, any string a `pick` can choose, or a `template` (whose placeholders have fixed widths, so its length is known) that falls outside the field's `minLength`/`maxLength` is still used, unchanged, and `kaanal validate` and `kaanal up` warn (`GET /items .sku: project dictionary value for sku can fall outside its minLength/maxLength; it is sent as written`). A built-in `pick` or `template` that cannot meet the lengths is skipped silently instead, so the field gets a fitted generated string.
 
 `pick`, `static` and `template` values are your own data and are not checked for being synthetic; the built-in packs and dictionary are, and so should anything you contribute (below).
 
