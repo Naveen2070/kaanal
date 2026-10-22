@@ -30,6 +30,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tokio_stream::{Stream, StreamExt};
 
+use crate::chaos_lease::{self, Leases};
 use crate::scenarios::{self, WriteError};
 use crate::state::{AppState, BusEvent, Control, Effective};
 
@@ -146,6 +147,17 @@ impl From<&ChaosLayer> for ChaosView {
     }
 }
 
+/// **Private.** One live entry's JSON: its [`ChaosView`] plus `expires_in_ms` (`{unit: ms}`)
+/// when some of its units are leased.
+fn live_entry_json(l: &ChaosLayer, leases: &Leases, key: &ChaosKey, now: Instant) -> Value {
+    let mut v = json!(ChaosView::from(l));
+    let exp = chaos_lease::remaining(leases, key, now);
+    if !exp.is_empty() {
+        v["expires_in_ms"] = Value::Object(exp);
+    }
+    v
+}
+
 /// **Private.** `merge` / `override` to the layer's `replace` flag. Absent leaves the stored
 /// value alone when patched in (`ChaosLayer::apply` skips `None`); `merge` stores `Some(false)`,
 /// which clears an earlier override.
@@ -167,6 +179,10 @@ fn parse_mode(mode: Option<&str>) -> Result<Option<bool>, Reject> {
 /// unknown keys are rejected. `mode: "override"` makes the entry replace everything lower
 /// layers (scenarios) contribute to that key; `"merge"` goes back to stacking. A PUT without
 /// `mode` leaves the stored mode as it was.
+///
+/// `ttl` (`"30s"`, 100 ms to 24 h) leases every unit the patch sets (`latency`, `error`, `down`,
+/// `mode`, see `chaos_lease::Unit`); without it, the units it sets are permanent. Units it does
+/// not set keep their lease.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChaosPatch {
@@ -176,6 +192,7 @@ pub struct ChaosPatch {
     error_status: Option<u16>,
     down: Option<bool>,
     mode: Option<String>,
+    ttl: Option<String>,
 }
 
 impl ChaosPatch {
@@ -206,7 +223,8 @@ impl ChaosPatch {
 /// step with [`ChaosPatch`]: a new chaos field must be added to both.
 ///
 /// A `node` + `endpoint` pair is not checked against the endpoint's chain (a node it never visits just
-/// never fires), and a `HEAD` route is a different key from its `GET`.
+/// never fires), and a `HEAD` route is a different key from its `GET`. `ttl` works as in
+/// [`ChaosPatch`]: it leases the units the patch sets; units it does not set keep their lease.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KeyedPatch {
@@ -218,6 +236,7 @@ pub struct KeyedPatch {
     error_status: Option<u16>,
     down: Option<bool>,
     mode: Option<String>,
+    ttl: Option<String>,
 }
 
 /// The query of `DELETE /__kaanal/chaos`. A misspelt key must be a 400, never "no filter" (which wipes all).
@@ -253,9 +272,10 @@ pub(crate) fn commit(
 ) -> Result<Arc<Effective>, Reject> {
     let backup = (**c).clone();
     let done = f(c).and_then(|()| {
-        // A lease outlives neither its activation nor its scenario.
+        // A lease outlives neither its activation nor its scenario, nor its live chaos field.
         let ctl = &mut **c;
         ctl.leases.retain(|n, _| ctl.stack.active().contains(n));
+        chaos_lease::prune(&mut ctl.chaos_leases, ctl.stack.live());
         st.publish(c)
             .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))
     });
@@ -270,6 +290,7 @@ pub(crate) fn emit(st: &AppState, action: &'static str, name: Option<&str>, snap
     let _ = st.events.send(BusEvent::Scenario {
         action,
         name: name.map(str::to_string),
+        chaos_key: None,
         active: snap.stack.active().to_vec(),
     });
 }
@@ -346,7 +367,7 @@ fn active_json(st: &AppState, snap: &Effective) -> Value {
 }
 
 /// **Private.** Milliseconds from `now` to `deadline`, rounded up (0 once past).
-fn remaining_ms(deadline: Instant, now: Instant) -> u64 {
+pub(crate) fn remaining_ms(deadline: Instant, now: Instant) -> u64 {
     let ns = deadline.saturating_duration_since(now).as_nanos();
     u64::try_from(ns.div_ceil(1_000_000)).unwrap_or(u64::MAX)
 }
@@ -356,12 +377,16 @@ fn remaining_ms(deadline: Instant, now: Instant) -> u64 {
 /// plus `"effective"`, the compiled result of the scenarios and the live layer.
 pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
     let snap = st.snapshot();
+    let now = Instant::now();
     let items = snap
         .stack
         .live()
         .entries()
         .into_iter()
-        .map(|(k, l)| (k, json!(ChaosView::from(l))))
+        .map(|(k, l)| {
+            let v = live_entry_json(l, &snap.chaos_leases, &k, now);
+            (k, v)
+        })
         .collect();
     let mut out = keyed_json(&st, items);
     out.insert("effective".into(), effective_json(&st, &snap.chaos));
@@ -375,14 +400,28 @@ pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
 /// A patch with only `mode` stores a layer with no fields: `mode: override` alone calms the key
 /// (it drops everything lower layers add and adds nothing). `mode: merge` on a key with no live
 /// entry stores nothing.
+///
+/// The `ttl` is checked before anything changes. The patch's units are leased (or made permanent)
+/// first; `commit` then prunes the leases of fields the write left unset (`down: false`).
 fn apply_patch(st: &AppState, key: &ChaosKey, patch: &ChaosPatch) -> Result<Json<Value>, Reject> {
+    let ttl = patch.ttl.as_deref().map(parse_ttl).transpose()?;
     let patch = patch.layer()?;
+    let units = chaos_lease::units_set(&patch);
     let mut c = lock(st);
     let snap = commit(st, &mut c, |c| {
+        chaos_lease::apply(&mut c.chaos_leases, key, &units, ttl, Instant::now());
         let mut cur = c.stack.live().layer(key).cloned().unwrap_or_default();
         cur.apply(&patch);
         cur.validate()
             .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
+        // `down: false` in the live layer means "unset": drop it, and drop an entry it leaves empty.
+        if cur.down == Some(false) {
+            cur.down = None;
+        }
+        if cur == ChaosLayer::default() {
+            c.stack.live_mut().remove(key);
+            return Ok(());
+        }
         let bare_merge = cur.replace == Some(false)
             && ChaosLayer {
                 replace: None,
@@ -394,8 +433,16 @@ fn apply_patch(st: &AppState, key: &ChaosKey, patch: &ChaosPatch) -> Result<Json
         Ok(())
     })?;
     drop(c);
+    if ttl.is_some() {
+        st.lease_wake.notify_one();
+    }
     let stored = snap.stack.live().layer(key);
-    let mut view = json!(ChaosView::from(&stored.cloned().unwrap_or_default()));
+    let mut view = live_entry_json(
+        &stored.cloned().unwrap_or_default(),
+        &snap.chaos_leases,
+        key,
+        Instant::now(),
+    );
     let warnings: Vec<String> = stored
         .filter(|l| l.has_orphan_fault_fields())
         .map(|_| {
@@ -506,6 +553,7 @@ pub async fn set_chaos_keyed(
         error_status: p.error_status,
         down: p.down,
         mode: p.mode,
+        ttl: p.ttl,
     };
     apply_patch(&st, &key, &patch)
 }
@@ -937,8 +985,11 @@ fn parse_ttl(s: &str) -> Result<Duration, Reject> {
 }
 
 /// Deactivates every scenario whose lease deadline has passed, one `expire` event each, earliest
-/// first. Returns how many. The deadline is compared under the lock, so a lease replaced between
-/// the task's wake-up and here is not expired early.
+/// first; then clears the due live chaos units (see [`expire_chaos`]). Returns how many expiries
+/// it published: one per scenario, one per chaos key. Every deadline is compared under the lock,
+/// so a lease replaced between the task's wake-up and here is not expired early.
+///
+/// No past-due lease is left behind, whatever happens (the task would spin on it).
 pub fn expire_due(st: &AppState) -> usize {
     let mut c = lock(st);
     let now = Instant::now();
@@ -967,14 +1018,99 @@ pub fn expire_due(st: &AppState) -> usize {
             c.leases.remove(&name);
         }
     }
+    n + expire_chaos(st, &mut c)
+}
+
+/// **Private.** The chaos half of [`expire_due`] (spec L3): the due units are grouped by key, and
+/// each key gets one `commit` that clears them from its live entry (an entry left empty is
+/// removed), so one publish and one `expire` event (`chaos_key` set, no `name`) per key. A failed
+/// commit leaves the chaos in place and drops the leases. A lease with no unit behind it (only
+/// possible if a write skipped `commit`) is dropped without an event.
+fn expire_chaos(st: &AppState, c: &mut MutexGuard<'_, Control>) -> usize {
+    let now = Instant::now();
+    let mut due: Vec<(Instant, ChaosKey, chaos_lease::Unit)> = c
+        .chaos_leases
+        .iter()
+        .filter(|(_, d)| **d <= now)
+        .map(|((k, u), d)| (*d, k.clone(), *u))
+        .collect();
+    due.sort_by_key(|(d, _, u)| (*d, *u));
+    let mut keys: Vec<(ChaosKey, Vec<chaos_lease::Unit>)> = Vec::new();
+    for (_, k, u) in due {
+        match keys.iter_mut().find(|(have, _)| *have == k) {
+            Some((_, us)) => us.push(u),
+            None => keys.push((k, vec![u])),
+        }
+    }
+    let mut n = 0;
+    for (key, units) in keys {
+        let set = c
+            .stack
+            .live()
+            .layer(&key)
+            .map(chaos_lease::units_set)
+            .unwrap_or_default();
+        if !units.iter().any(|u| set.contains(u)) {
+            for u in &units {
+                c.chaos_leases.remove(&(key.clone(), *u));
+            }
+            continue;
+        }
+        // `commit` drops the leases with their fields.
+        let done = commit(st, c, |c| {
+            let mut l = c.stack.live().layer(&key).cloned().unwrap_or_default();
+            for u in &units {
+                chaos_lease::clear_units(&mut l, *u);
+                c.chaos_leases.remove(&(key.clone(), *u));
+            }
+            if l == ChaosLayer::default() {
+                c.stack.live_mut().remove(&key);
+            } else {
+                c.stack.live_mut().set(key.clone(), l);
+            }
+            Ok(())
+        });
+        if let Ok(snap) = done {
+            let mut k = Map::new();
+            key_fields(st, &key, &mut k);
+            let _ = st.events.send(BusEvent::Scenario {
+                action: "expire",
+                name: None,
+                chaos_key: Some(Value::Object(k)),
+                active: snap.stack.active().to_vec(),
+            });
+            n += 1;
+        } else {
+            // As for scenarios: the restore put the past-due leases back; drop only them.
+            let label = key_label(st, &key);
+            eprintln!(
+                "kaanal: could not expire chaos on {label}; left it in place and dropped its lease"
+            );
+            for u in &units {
+                c.chaos_leases.remove(&(key.clone(), *u));
+            }
+        }
+    }
     n
 }
 
+/// **Private.** The earliest deadline over scenario and chaos leases (spec L4: one timer).
+fn next_deadline(c: &Control) -> Option<Instant> {
+    c.leases
+        .values()
+        .chain(c.chaos_leases.values())
+        .min()
+        .copied()
+}
+
 /// Expires leases as their deadlines pass; spawned once by `serve`. Sleeps to the earliest
-/// deadline, or until a write adds or replaces a lease.
+/// deadline of both tables, or until a write adds or replaces a lease.
+///
+/// No wake-up is lost: `notify_one` stores a permit when nobody waits, so a lease added between
+/// reading the deadline and polling `notified()` makes that `notified()` return at once.
 pub async fn lease_task(st: Arc<AppState>) {
     loop {
-        let next = lock(&st).leases.values().min().copied();
+        let next = next_deadline(&lock(&st));
         match next {
             None => st.lease_wake.notified().await,
             Some(d) => tokio::select! {
@@ -1264,7 +1400,8 @@ fn save_source(
 
 /// `POST /__kaanal/scenarios/save` — writes `scenarios/NAME.yaml` (S17) from the live layer
 /// (default), the compiled `effective` result, or another scenario, and registers it as a file
-/// scenario. Sparse: only the fields that were set. Answers `{ name, path }`.
+/// scenario. Sparse: only the fields that were set. Answers `{ name, path, warnings }`; from
+/// live, `warnings` counts the leased fields the file makes permanent.
 ///
 /// Limits: a live override cannot be saved (files are merge-only; use `from: effective`), and
 /// `from: effective` refuses a key with two or more failure bands or a node@endpoint pair that
@@ -1312,11 +1449,23 @@ pub async fn save_scenario(
         }
         _ => {}
     }
+    let from = b.from.unwrap_or(SaveFrom::Live);
+    // A file has no ttl: the leased live fields it writes are permanent once loaded (L5).
+    let leased = if matches!(from, SaveFrom::Live) {
+        chaos_lease::leased_fields(&c.chaos_leases, c.stack.live())
+    } else {
+        0
+    };
+    let warnings: Vec<String> = match leased {
+        0 => vec![],
+        1 => vec!["1 field has a ttl; the file has none".into()],
+        n => vec![format!("{n} fields have a ttl; the file has none")],
+    };
     let SaveSource {
         chaos: entries,
         pins,
         description,
-    } = save_source(&st, &c, b.from.unwrap_or(SaveFrom::Live))?;
+    } = save_source(&st, &c, from)?;
     if entries.is_empty() && pins.is_empty() {
         return Err(reject(StatusCode::BAD_REQUEST, "nothing to save"));
     }
@@ -1354,14 +1503,31 @@ pub async fn save_scenario(
         emit(&st, "update", Some(&b.name), &snap);
     }
     Ok(Json(
-        json!({ "name": b.name, "path": path.display().to_string() }),
+        json!({ "name": b.name, "path": path.display().to_string(), "warnings": warnings }),
     ))
+}
+
+/// **Private.** The data of a `scenario` SSE message: `{ action, name, active }`, plus
+/// `chaos_key` only when set (a live chaos expiry).
+fn scenario_data(
+    action: &str,
+    name: Option<&str>,
+    chaos_key: Option<&Value>,
+    active: &[String],
+) -> Value {
+    let mut v = json!({ "action": action, "name": name, "active": active });
+    if let Some(k) = chaos_key {
+        v["chaos_key"] = k.clone();
+    }
+    v
 }
 
 /// `GET /__kaanal/events` — the SSE stream: `request` messages for finished requests and
 /// `scenario` messages (`{ action, name, active }`) for stack changes. Actions: `activate`,
-/// `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`, and
-/// `update` (an active scenario's definition changed).
+/// `deactivate`, `set` (`PUT /scenarios/active`), `clear` (`DELETE /scenarios`), `reset`,
+/// `update` (an active scenario's definition changed) and `expire` (a `ttl` ran out). A live
+/// chaos expiry is an `expire` with `name: null` and `chaos_key`, the key as an object with the
+/// parts it has (`{"node":"db"}`, `{"endpoint":"GET /x"}` or both); only it carries `chaos_key`.
 ///
 /// When a shutdown is requested the stream sends one last message, `shutdown` with
 /// `{ "timeout_ms": N }` (the time left), and ends, so an open stream never holds the drain.
@@ -1382,10 +1548,16 @@ pub async fn events(
             Ok(BusEvent::Scenario {
                 action,
                 name,
+                chaos_key,
                 active,
             }) => SseEvent::default()
                 .event("scenario")
-                .json_data(json!({ "action": action, "name": name, "active": active }))
+                .json_data(scenario_data(
+                    action,
+                    name.as_deref(),
+                    chaos_key.as_ref(),
+                    &active,
+                ))
                 .unwrap_or_default(),
             Err(BroadcastStreamRecvError::Lagged(n)) => {
                 SseEvent::default().event("lagged").data(n.to_string())
@@ -1434,11 +1606,17 @@ pub async fn ui() -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{activate, ct_eq, expire_due, host_allowed, lease_task, lock, query_token};
+    use super::{
+        ChaosPatch, activate, clear_node, ct_eq, expire_due, host_allowed, lease_task, lock,
+        next_deadline, query_token, scenario_data, set_chaos,
+    };
+    use crate::chaos_lease::Unit;
     use crate::state::{AppState, BusEvent};
+    use axum::Json;
     use axum::body::Bytes;
     use axum::extract::{Path, State};
-    use kaanal_core::Config;
+    use kaanal_core::{ChaosKey, ChaosLayer, Config};
+    use serde_json::json;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1469,11 +1647,11 @@ mod tests {
         while let Ok(ev) = rx.try_recv() {
             if let BusEvent::Scenario {
                 action: "expire",
-                name,
+                name: Some(n),
                 ..
             } = ev
             {
-                out.push(name.unwrap());
+                out.push(n);
             }
         }
         out
@@ -1540,6 +1718,266 @@ mod tests {
         assert_eq!(expire_due(&st), 2);
         assert_eq!(st.snapshot().stack.active(), [] as [String; 0]);
         assert_eq!(expiries(&mut rx), ["a", "b"]);
+    }
+
+    async fn put(st: &Arc<AppState>, node: &str, body: serde_json::Value) {
+        let p: ChaosPatch = serde_json::from_value(body).unwrap();
+        let _ = set_chaos(State(Arc::clone(st)), Path(node.into()), Ok(Json(p)))
+            .await
+            .unwrap();
+    }
+
+    fn node(st: &AppState, name: &str) -> ChaosKey {
+        ChaosKey::Node(st.topo.id(name).unwrap())
+    }
+
+    /// The live entry of `db` in Control and in the published snapshot; they must agree.
+    fn db_live(st: &AppState) -> Option<ChaosLayer> {
+        let k = node(st, "db");
+        let snap = st.snapshot().stack.live().layer(&k).cloned();
+        assert_eq!(lock(st).stack.live().layer(&k).cloned(), snap);
+        snap
+    }
+
+    fn chaos_expiries(
+        rx: &mut tokio::sync::broadcast::Receiver<BusEvent>,
+    ) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let BusEvent::Scenario {
+                action: "expire",
+                name,
+                chaos_key: Some(k),
+                ..
+            } = ev
+            {
+                assert_eq!(name, None);
+                out.push(k);
+            }
+        }
+        out
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn chaos_ttl_expires_and_clears_only_its_unit() {
+        let st = state();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        put(&st, "db", json!({ "latency_ms": 200 })).await;
+        put(&st, "db", json!({ "down": true, "ttl": "30s" })).await;
+        tokio::time::advance(Duration::from_secs(29)).await;
+        settle().await;
+        assert_eq!(db_live(&st).unwrap().down, Some(true));
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        let l = db_live(&st).unwrap();
+        assert_eq!(l.down, None);
+        assert_eq!(l.latency_add, Some(Duration::from_millis(200)));
+        let snap = st.snapshot();
+        let r = snap
+            .chaos
+            .visit(st.topo.id("db").unwrap(), "GET /x")
+            .unwrap();
+        assert!(!r.down);
+        assert_eq!(r.latency_add, Duration::from_millis(200));
+        assert_eq!(snap.chaos_leases.len(), 0);
+        assert_eq!(next_deadline(&lock(&st)), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expiry_removes_an_entry_left_empty() {
+        let st = state();
+        put(
+            &st,
+            "db",
+            json!({ "down": true, "mode": "override", "ttl": "1s" }),
+        )
+        .await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(expire_due(&st), 1);
+        assert_eq!(db_live(&st), None);
+        assert!(st.snapshot().chaos.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_24h_scenario_lease_does_not_delay_a_1s_chaos_lease() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        lease(&st, "a", "24h").await;
+        settle().await; // the task now sleeps toward the 24 h deadline
+        put(&st, "db", json!({ "down": true, "ttl": "1s" })).await;
+        settle().await;
+        tokio::time::advance(Duration::from_millis(1001)).await;
+        settle().await;
+        assert_eq!(db_live(&st).and_then(|l| l.down), None);
+        assert_eq!(chaos_expiries(&mut rx), [json!({ "node": "db" })]);
+        assert_eq!(st.snapshot().stack.active(), ["a"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reput_just_before_the_deadline_wins() {
+        let st = state();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        put(&st, "db", json!({ "down": true, "ttl": "30s" })).await;
+        tokio::time::advance(Duration::from_secs(29)).await;
+        settle().await;
+        put(&st, "db", json!({ "down": true, "ttl": "30s" })).await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(db_live(&st).unwrap().down, Some(true));
+        // Compared under the lock: a due wake-up finds the replaced deadline and does nothing.
+        assert_eq!(expire_due(&st), 0);
+        tokio::time::advance(Duration::from_secs(27)).await;
+        settle().await;
+        assert_eq!(db_live(&st).unwrap().down, Some(true));
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(db_live(&st), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn plain_put_just_before_the_deadline_makes_it_permanent() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        put(&st, "db", json!({ "down": true, "ttl": "30s" })).await;
+        tokio::time::advance(Duration::from_secs(29)).await;
+        settle().await;
+        put(&st, "db", json!({ "down": true })).await;
+        tokio::time::advance(Duration::from_secs(60)).await;
+        settle().await;
+        assert_eq!(db_live(&st).unwrap().down, Some(true));
+        assert_eq!(next_deadline(&lock(&st)), None);
+        assert_eq!(chaos_expiries(&mut rx), [] as [serde_json::Value; 0]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expiry_after_the_entry_was_deleted_emits_nothing_and_does_not_spin() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        tokio::spawn(lease_task(Arc::clone(&st)));
+        put(&st, "db", json!({ "down": true, "ttl": "1s" })).await;
+        let _ = clear_node(State(Arc::clone(&st)), Path("db".into()))
+            .await
+            .unwrap();
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(next_deadline(&lock(&st)), None);
+        assert_eq!(expire_due(&st), 0);
+        assert_eq!(chaos_expiries(&mut rx), [] as [serde_json::Value; 0]);
+        // Even a stale lease (no entry behind it) is dropped, silently.
+        lock(&st).chaos_leases.insert(
+            (node(&st, "db"), Unit::Down),
+            tokio::time::Instant::now() - Duration::from_secs(1),
+        );
+        assert_eq!(expire_due(&st), 0);
+        assert_eq!(next_deadline(&lock(&st)), None);
+        assert_eq!(chaos_expiries(&mut rx), [] as [serde_json::Value; 0]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expire_event_names_the_chaos_key() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        put(&st, "db", json!({ "latency_ms": 5, "ttl": "1s" })).await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(expire_due(&st), 1);
+        let Ok(BusEvent::Scenario {
+            action,
+            name,
+            chaos_key,
+            active,
+        }) = rx.try_recv()
+        else {
+            panic!("no scenario event");
+        };
+        assert_eq!((action, name.as_deref()), ("expire", None));
+        assert_eq!(chaos_key, Some(json!({ "node": "db" })));
+        assert_eq!(
+            scenario_data(action, name.as_deref(), chaos_key.as_ref(), &active),
+            json!({ "action": "expire", "name": null, "chaos_key": { "node": "db" }, "active": [] })
+        );
+        // An endpoint and a node@endpoint key name their parts the way `PUT /chaos` does.
+        // (Stored directly: the test topology has no routes for a keyed PUT.)
+        let id = st.topo.id("db").unwrap();
+        let past = tokio::time::Instant::now() - Duration::from_secs(1);
+        {
+            let mut c = lock(&st);
+            for (i, k) in [
+                ChaosKey::Endpoint("GET /x".into()),
+                ChaosKey::NodeAt(id, "GET /x".into()),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let down = ChaosLayer {
+                    down: Some(true),
+                    ..ChaosLayer::default()
+                };
+                c.stack.live_mut().set(k.clone(), down);
+                let d = past + Duration::from_millis(u64::try_from(i).unwrap());
+                c.chaos_leases.insert((k, Unit::Down), d);
+            }
+        }
+        assert_eq!(expire_due(&st), 2);
+        assert_eq!(
+            chaos_expiries(&mut rx),
+            [
+                json!({ "endpoint": "GET /x" }),
+                json!({ "node": "db", "endpoint": "GET /x" })
+            ]
+        );
+        // A scenario event carries no `chaos_key` at all.
+        assert_eq!(
+            scenario_data("activate", Some("a"), None, &["a".into()]),
+            json!({ "action": "activate", "name": "a", "active": ["a"] })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_units_of_one_key_expiring_together_publish_once_and_emit_once() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        put(
+            &st,
+            "db",
+            json!({ "latency_ms": 5, "down": true, "ttl": "1s" }),
+        )
+        .await;
+        put(&st, "app", json!({ "down": true, "ttl": "1s" })).await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        // One commit (one publish) per key.
+        assert_eq!(expire_due(&st), 2);
+        let mut keys = chaos_expiries(&mut rx);
+        keys.sort_by_key(ToString::to_string);
+        assert_eq!(keys, [json!({ "node": "app" }), json!({ "node": "db" })]);
+        assert_eq!(db_live(&st), None);
+        assert_eq!(next_deadline(&lock(&st)), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_expiry_drops_the_lease_and_keeps_the_chaos() {
+        let st = state();
+        let mut rx = st.events.subscribe();
+        put(&st, "db", json!({ "down": true, "ttl": "1s" })).await;
+        // Inject a failure: an out-of-range entry stored without a publish makes every
+        // recompile fail, as a broken invariant would.
+        lock(&st).stack.live_mut().set(
+            node(&st, "app"),
+            ChaosLayer {
+                error_rate: Some(2.0),
+                ..ChaosLayer::default()
+            },
+        );
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(expire_due(&st), 0);
+        assert_eq!(db_live(&st).unwrap().down, Some(true));
+        assert_eq!(
+            next_deadline(&lock(&st)),
+            None,
+            "a kept past-due lease would spin"
+        );
+        assert_eq!(chaos_expiries(&mut rx), [] as [serde_json::Value; 0]);
     }
 
     #[test]

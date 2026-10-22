@@ -56,24 +56,27 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 
 ## CLI
 
-| Command                                                                                                                   | What it does                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kaanal up [-c f] [--port p] [--host ip]`                                                                                 | Start (foreground). Ctrl+C or `SIGTERM` stops it (drains for 5 s first).                                                                                                                                          |
-| `kaanal up -d [--wait 15s] [-c f] [--port p] [--host ip]`                                                                 | Start in the background; returns when the server answers, with the URLs. A second `up -d` prints the running instance and exits 0. See [lifecycle.md](lifecycle.md).                                              |
-| `kaanal down [--timeout 5s]`                                                                                              | Stop the running instance: drain, then force-kill only a verified kaanal process. Exits 0 when nothing is running. With `--endpoint` it stops a remote instance instead: [remote down](lifecycle.md#remote-down). |
-| `kaanal validate [-c f]`                                                                                                  | Check config, topology and specs.                                                                                                                                                                                 |
-| `kaanal schema`                                                                                                           | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                                                                                         |
-| `kaanal endpoints [-c f] [--write]`                                                                                       | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                                                                                   |
-| `kaanal status`                                                                                                           | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                                                                                    |
-| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down]` | Change chaos live. Fields merge — set only what you name.                                                                                                                                                         |
-| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                         | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).                                                                                                  |
-| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`           | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md).                                                                                              |
-| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                                                            | Pin an endpoint to the next UI state (loading, empty, error, slow, success), or to one with `--state`; `--off` removes it. See [pins.md](pins.md).                                                                |
-| `kaanal pins`                                                                                                             | Live pins and the pin in force per endpoint, with its source.                                                                                                                                                     |
-| `kaanal logs [-n N] [-f] [--since D] [--status S] [--failed] [--endpoint "GET /x/{id}"] [--scope NAME]`                   | The last finished requests, one line each; `-f` follows live. See [observability.md](observability.md).                                                                                                           |
-| `kaanal trace ID\|last\|CLIENT_ID`                                                                                        | One request as a per-hop waterfall: Kaanal's id (from `X-Request-Id`), `last`, or the id your client sent. See [observability.md](observability.md).                                                              |
-| `kaanal completions bash\|zsh\|fish\|powershell\|elvish`                                                                  | Print a shell completion script to stdout; needs no instance. See [Shell completions](#shell-completions).                                                                                                        |
-| `kaanal reset`                                                                                                            | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset, and the request log emptied (ids carry on).                                                                             |
+| Command                                                                                                                               | What it does                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c f] [--port p] [--host ip]`                                                                                             | Start (foreground). Ctrl+C or `SIGTERM` stops it (drains for 5 s first).                                                                                                                                          |
+| `kaanal up -d [--wait 15s] [-c f] [--port p] [--host ip]`                                                                             | Start in the background; returns when the server answers, with the URLs. A second `up -d` prints the running instance and exits 0. See [lifecycle.md](lifecycle.md).                                              |
+| `kaanal down [--timeout 5s]`                                                                                                          | Stop the running instance: drain, then force-kill only a verified kaanal process. Exits 0 when nothing is running. With `--endpoint` it stops a remote instance instead: [remote down](lifecycle.md#remote-down). |
+| `kaanal validate [-c f]`                                                                                                              | Check config, topology and specs.                                                                                                                                                                                 |
+| `kaanal schema`                                                                                                                       | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                                                                                         |
+| `kaanal endpoints [-c f] [--write]`                                                                                                   | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                                                                                   |
+| `kaanal status`                                                                                                                       | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                                                                                    |
+| `kaanal chaos set [node] [--endpoint "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down] [--for 30s]` | Change chaos live. Fields merge — set only what you name. `--for` reverts what this command sets after that long.                                                                                                 |
+| `kaanal node down NODE [--for 30s]`                                                                                                   | Take a node down (503 for everything through it). With `--for` the server puts it back by itself. See [Timed chaos](#timed-chaos).                                                                                |
+| `kaanal node up NODE`                                                                                                                 | Clear the node's live down flag; other live chaos stays. Exits 1 if a scenario or override still holds it down.                                                                                                   |
+| `kaanal node list`                                                                                                                    | The node table `status` prints (name, type, flavor, `up`/`down`, chaos), with `(reverts in 27s)` on timed chaos.                                                                                                  |
+| `kaanal chaos clear [node] [--endpoint "GET /x"]`                                                                                     | Clear one node, one endpoint or one node-at-endpoint entry, or all live chaos with no argument (scenarios stay).                                                                                                  |
+| `kaanal scenario list\|show NAME\|activate NAME\|deactivate NAME\|set A B\|clear\|active\|load FILE\|save NAME`                       | Named chaos scenarios: switch on and off, stack, load a file, save what you built. See [scenarios.md](scenarios.md).                                                                                              |
+| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                                                                        | Pin an endpoint to the next UI state (loading, empty, error, slow, success), or to one with `--state`; `--off` removes it. See [pins.md](pins.md).                                                                |
+| `kaanal pins`                                                                                                                         | Live pins and the pin in force per endpoint, with its source.                                                                                                                                                     |
+| `kaanal logs [-n N] [-f] [--since D] [--status S] [--failed] [--endpoint "GET /x/{id}"] [--scope NAME]`                               | The last finished requests, one line each; `-f` follows live. See [observability.md](observability.md).                                                                                                           |
+| `kaanal trace ID\|last\|CLIENT_ID`                                                                                                    | One request as a per-hop waterfall: Kaanal's id (from `X-Request-Id`), `last`, or the id your client sent. See [observability.md](observability.md).                                                              |
+| `kaanal completions bash\|zsh\|fish\|powershell\|elvish`                                                                              | Print a shell completion script to stdout; needs no instance. See [Shell completions](#shell-completions).                                                                                                        |
+| `kaanal reset`                                                                                                                        | Clean slate for tests: scenarios off, live chaos cleared, counters and rate limits reset, and the request log emptied (ids carry on).                                                                             |
 
 ### Global flags
 
@@ -106,6 +109,16 @@ kaanal status --json | jq '.[] | select(.type == "database")'   # one JSON line 
 export KAANAL_ENDPOINT=http://10.0.0.5:8080                      # an instance elsewhere
 export KAANAL_TOKEN=...                                          # its token (from its run.json)
 kaanal chaos set db --down && kaanal --json pins
+```
+
+A CI step that breaks the database for a while and then checks the app, with nothing to clean up if the job dies:
+
+```bash
+kaanal up -d
+kaanal node down db --for 2m           # reverts on the server, even if this job is killed
+npx playwright test checkout-degraded
+kaanal node up db                      # optional: end it early (exit 1 if a scenario holds db down)
+kaanal down
 ```
 
 - Read commands print the server's JSON as one line; write commands print the server's answer when there is one and nothing when the server sends none. `logs` prints one JSON object per line.
@@ -167,6 +180,24 @@ kaanal chaos set app --down                # hard outage: 503 for everything thr
 kaanal status                              # see what's active
 kaanal chaos clear db                      # back to normal
 ```
+
+### Timed chaos
+
+Add `--for` and the server undoes it for you, even if your script or terminal is gone:
+
+```bash
+kaanal node down db --for 30s              # db: down (reverts in 30s)
+kaanal node list                           # db shows "down ... (reverts in 27s)"
+kaanal chaos set db --latency 500ms --for 5m
+kaanal node up db                          # bring it back early
+```
+
+- `--for` takes 100 ms to 24 h (`500ms`, `30s`, `5m`, `2h`); anything else is a usage error (exit 64) before anything is sent. It exists on `chaos set` and `node down` only.
+- It leases what the command sets, field group by field group: latency, errors (rate, kind and status together), down and mode. `kaanal chaos set db --latency 200ms` (permanent) followed by `kaanal node down db --for 30s` expires only the outage; the latency stays.
+- A command without `--for` makes the fields it sets permanent again: a plain `kaanal node down db` after a timed one keeps db down until you bring it up. Setting a field again with a new `--for` restarts its clock.
+- When time is up the fields are **cleared**, not restored to an earlier value. `clear`, `reset` and `node up` end the lease too. Leases live in memory and are gone after a restart.
+- `node up` only removes the live down flag. If an active scenario holds the node down, it prints `db is still down: held by an active scenario or override (see kaanal scenario active)` and exits 1, so `kaanal node up db && run-tests` does not run against a database that is still down.
+- A timed chaos is not a [timed scenario](scenarios.md#timed-chaos-and-timed-scenarios): `--for` leases hand-set chaos, `scenario activate --ttl` leases an activation.
 
 For a whole situation at once, define a [scenario](scenarios.md) and switch it on:
 

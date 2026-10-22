@@ -151,6 +151,27 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ChaosCmd,
     },
+    /// Take a node down or bring it back
+    Node {
+        #[command(subcommand)]
+        cmd: NodeCmd,
+    },
+}
+
+/// **Private.** `node` subcommands.
+#[derive(Subcommand)]
+enum NodeCmd {
+    /// Take a node down (503 for every request), e.g. `kaanal node down db --for 30s`
+    Down {
+        node: String,
+        /// Bring it back after this long (100ms to 24h, e.g. 30s)
+        #[arg(long = "for", value_name = "DURATION")]
+        for_: Option<String>,
+    },
+    /// List nodes with their up/down state and chaos
+    List,
+    /// Clear a node's down flag (other chaos stays); fails if a scenario or override still holds it down
+    Up { node: String },
 }
 
 /// **Private.** Flags of `kaanal logs`.
@@ -206,6 +227,9 @@ enum ChaosCmd {
         /// Take the node down (503 for every request)
         #[arg(long)]
         down: bool,
+        /// Revert what this sets after this long (100ms to 24h, e.g. 30s)
+        #[arg(long = "for", value_name = "DURATION")]
+        for_: Option<String>,
     },
     /// Clear chaos on one node, one endpoint (`--endpoint`), or both together; none means everything
     Clear {
@@ -388,19 +412,26 @@ fn run(cli: Cli) -> Result<(), Fail> {
             output::emit(&v, || println!("reset"));
             Ok(())
         }
-        Cmd::Chaos {
-            cmd:
-                ChaosCmd::Set {
-                    node,
-                    endpoint,
-                    kind,
-                    latency,
-                    error_rate,
-                    error,
-                    down,
-                },
+        Cmd::Chaos { cmd } => chaos(cmd),
+        Cmd::Node { cmd } => node(cmd),
+    }
+}
+
+/// **Private.** `kaanal chaos set|clear`.
+fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
+    match cmd {
+        ChaosCmd::Set {
+            node,
+            endpoint,
+            kind,
+            latency,
+            error_rate,
+            error,
+            down,
+            for_,
         } => {
             let mut patch = chaos_patch(latency, error_rate, error, kind, down)?;
+            let revert = for_set(&mut patch, for_)?;
             let label = match (&node, &endpoint) {
                 (Some(n), Some(e)) => format!("{n} @ {e}"),
                 (Some(n), None) => n.clone(),
@@ -418,13 +449,13 @@ fn run(cli: Cli) -> Result<(), Fail> {
                 );
                 call("PUT", &path, Some(Value::Object(patch)))?
             };
-            output::emit(&v, || println!("{}", clean(&format!("{label}: {v}"))));
+            output::emit(&v, || {
+                println!("{}", clean(&format!("{label}: {v}{revert}")));
+            });
             warn_all(&v);
             Ok(())
         }
-        Cmd::Chaos {
-            cmd: ChaosCmd::Clear { node, endpoint },
-        } => {
+        ChaosCmd::Clear { node, endpoint } => {
             let path = chaos_clear_path(node, endpoint);
             let v = call("DELETE", &path, None)?;
             output::emit(&v, || println!("cleared"));
@@ -469,6 +500,55 @@ fn chaos_patch(
         ));
     }
     Ok(patch)
+}
+
+/// **Private.** Adds a validated `--for` to the patch as `ttl`; returns ` (reverts in D)` for the
+/// text output, or nothing.
+fn for_set(patch: &mut Map<String, Value>, d: Option<String>) -> Result<String, Fail> {
+    let Some(Value::Object(b)) = ttl_body("--for", d)? else {
+        return Ok(String::new());
+    };
+    let text = format!(" (reverts in {})", b["ttl"].as_str().unwrap_or_default());
+    patch.extend(b);
+    Ok(text)
+}
+
+/// **Private.** `kaanal node down|up`: `PUT /chaos/NODE` with only the down flag.
+fn node(cmd: NodeCmd) -> Result<(), Fail> {
+    match cmd {
+        NodeCmd::Down { node, for_ } => {
+            let mut patch = Map::from_iter([("down".to_string(), json!(true))]);
+            let revert = for_set(&mut patch, for_)?;
+            let v = call("PUT", &node_path(&node), Some(Value::Object(patch)))?;
+            output::emit(&v, || println!("{}: down{revert}", clean(&node)));
+        }
+        NodeCmd::List => {
+            let topo = call("GET", "/__kaanal/topology", None)?;
+            let active = call("GET", "/__kaanal/scenarios/active", None)?;
+            let live = call("GET", "/__kaanal/chaos", None)?;
+            let rows = output::node_rows(&topo, &active, &live);
+            output::emit(&Value::Array(rows.clone()), || {
+                output::print_node_table(&rows);
+            });
+        }
+        NodeCmd::Up { node } => {
+            let v = call("PUT", &node_path(&node), Some(json!({ "down": false })))?;
+            // The server leaves calm keys out of `effective`, so a missing entry means "not down";
+            // a present entry always carries a bool `down` (resolved_json).
+            if v["effective"]["nodes"][&node]["down"] == true {
+                return Err(err(format!(
+                    "{node} is still down: held by an active scenario or override (see kaanal scenario active)"
+                )));
+            }
+            output::emit(&v, || println!("{}: up", clean(&node)));
+        }
+    }
+    Ok(())
+}
+
+/// **Private.** `/__kaanal/chaos/NODE`.
+fn node_path(node: &str) -> String {
+    format!("/__kaanal/chaos/{}", encode_segment(node))
 }
 
 /// **Private.** The `DELETE` path of `chaos clear` for a node, an endpoint or both.
@@ -1094,7 +1174,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             output::emit(&v, || print_scenario(&v));
         }
         ScenarioCmd::Activate { name, ttl } => {
-            let body = ttl_body(ttl)?;
+            let body = ttl_body("ttl", ttl)?;
             let v = call("POST", &scenario_path(named(&name)?, "/activate"), body)?;
             say_active(&v, "");
         }
@@ -1162,6 +1242,7 @@ fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
             output::emit(&v, || {
                 println!("saved {}", clean(v["path"].as_str().unwrap_or("")));
             });
+            warn_all(&v);
         }
     }
     Ok(())
@@ -1501,34 +1582,10 @@ fn status() -> Result<(), Fail> {
     } else {
         call("GET", "/__kaanal/pins", None)?
     };
-    let nodes: Vec<&Value> = topo["nodes"].as_array().into_iter().flatten().collect();
-    let rows: Vec<Value> = nodes
-        .iter()
-        .map(|n| {
-            let c = &eff["nodes"][n["name"].as_str().unwrap_or("")];
-            json!({ "node": n["name"], "type": n["type"], "flavor": n["flavor"], "chaos": c })
-        })
-        .collect();
-    output::emit(&Value::Array(rows), || {
-        println!("{:<12} {:<12} {:<10} CHAOS", "NODE", "TYPE", "FLAVOR");
-        for n in &nodes {
-            let name = n["name"].as_str().unwrap_or("");
-            let c = &eff["nodes"][name];
-            let text = if c.is_null() {
-                "-".to_string()
-            } else {
-                chaos_text(c)
-            };
-            let flavor = n["flavor"].as_str().unwrap_or("-");
-            let line = format!(
-                "{:<12} {:<12} {:<10} {}",
-                name,
-                n["type"].as_str().unwrap_or(""),
-                flavor,
-                text
-            );
-            println!("{}", clean(&line));
-        }
+    let live = call("GET", "/__kaanal/chaos", None)?;
+    let rows = output::node_rows(&topo, &active, &live);
+    output::emit(&Value::Array(rows.clone()), || {
+        output::print_node_table(&rows);
         // Endpoint-wide and node-at-endpoint chaos belong to no single row.
         for (key, c) in eff["endpoints"].as_object().into_iter().flatten() {
             println!("{}", clean(&format!("endpoint {key}: {}", chaos_text(c))));
@@ -2007,12 +2064,15 @@ fn encode_segment(s: &str) -> String {
     utf8_percent_encode(s, SEGMENT).to_string()
 }
 
-/// **Private.** The activate body for `--ttl`, validated here so a typo sends nothing.
-fn ttl_body(ttl: Option<String>) -> Result<Option<Value>, Fail> {
+/// **Private.** The activate body for `--ttl` or `--for`, validated here so a typo sends nothing;
+/// `what` names the flag in the error.
+fn ttl_body(what: &str, ttl: Option<String>) -> Result<Option<Value>, Fail> {
     ttl.map(|t| {
         let t = t.trim();
         humantime::parse_duration(t)
-            .map_err(|_| Fail::usage(format!("bad ttl '{t}' (use e.g. 30s)")))?;
+            .ok()
+            .filter(|d| (Duration::from_millis(100)..=Duration::from_hours(24)).contains(d))
+            .ok_or_else(|| Fail::usage(format!("bad {what} '{t}' (100ms to 24h, e.g. 30s)")))?;
         Ok(json!({ "ttl": t }))
     })
     .transpose()
@@ -2021,18 +2081,9 @@ fn ttl_body(ttl: Option<String>) -> Result<Option<Value>, Fail> {
 /// **Private.** ` (active)` or ` (active, expires in X)` for one list row, else nothing.
 fn active_suffix(s: &Value) -> String {
     match (s["active"] == true, s["expires_in_ms"].as_u64()) {
-        (true, Some(ms)) => format!(" (active, expires in {})", remaining(ms)),
+        (true, Some(ms)) => format!(" (active, expires in {})", output::remaining(ms)),
         (true, None) => " (active)".to_string(),
         _ => String::new(),
-    }
-}
-
-/// **Private.** Time left on a lease: whole seconds rounded up, or `Nms` under a second.
-fn remaining(ms: u64) -> String {
-    if ms >= 1000 {
-        format!("{}s", ms.div_ceil(1000))
-    } else {
-        format!("{ms}ms")
     }
 }
 
@@ -2081,7 +2132,7 @@ mod tests {
         );
     }
 
-    use super::{clean, encode_segment, lock_at, parse_ms, parse_rate, remaining, ttl_body};
+    use super::{clean, encode_segment, lock_at, parse_ms, parse_rate, ttl_body};
     use std::time::Duration;
 
     /// A scratch dir removed on drop, so a failing assert leaves nothing behind.
@@ -2131,19 +2182,14 @@ mod tests {
     }
 
     #[test]
-    fn remaining_rounds_up_to_whole_seconds() {
-        assert_eq!(remaining(999), "999ms");
-        assert_eq!(remaining(1000), "1s");
-        assert_eq!(remaining(1001), "2s");
-        assert_eq!(remaining(59_001), "60s");
-    }
-
-    #[test]
     fn ttl_body_sends_the_trimmed_value() {
-        let b = ttl_body(Some(" 30s ".into())).ok().flatten().unwrap();
+        let b = ttl_body("ttl", Some(" 30s ".into()))
+            .ok()
+            .flatten()
+            .unwrap();
         assert_eq!(b["ttl"], "30s");
-        assert!(ttl_body(Some("soon".into())).is_err());
-        assert!(matches!(ttl_body(None), Ok(None)));
+        assert!(ttl_body("ttl", Some("soon".into())).is_err());
+        assert!(matches!(ttl_body("ttl", None), Ok(None)));
     }
 
     #[test]

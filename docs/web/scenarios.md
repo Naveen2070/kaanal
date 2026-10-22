@@ -255,8 +255,24 @@ curl -X POST -H "$H" -H 'Content-Type: application/json' -d '{"ttl":"30s"}' "$B/
 - Activating the same scenario again **replaces** the lease: with a new `--ttl` the clock restarts, with a plain `activate` (no body) the lease is removed and the scenario stays until you deactivate it.
 - A lease lives only as long as the activation. Deactivating, `scenario set`, `scenario clear`, `reset` and deleting the scenario all drop it, so a stale lease can never switch off a scenario you activated later.
 - `kaanal scenario list` shows the time left: `(active, expires in 28s)`, rounded up to whole seconds (`Nms` under one second). `scenario active` stays names-only.
-- The CLI checks only that `--ttl` is a valid duration (e.g. `30s`) before sending; the server enforces the 100 ms to 24 h range (400 otherwise) and rejects a body with other keys. Leases are in memory: they do not survive a restart, and neither does the activation.
+- The CLI checks that `--ttl` is a duration from 100 ms to 24 h (exit 64 otherwise) before sending; the server enforces the same range (400) and rejects a body with other keys. Leases are in memory: they do not survive a restart, and neither does the activation.
 - Several leases expire in deadline order, one `expire` event each.
+
+## Timed chaos and timed scenarios
+
+Two leases exist and they are independent:
+
+|               | Leased scenario                                                           | Leased chaos                                                                                               |
+| ------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Set with      | `scenario activate NAME --ttl 30s`                                        | `chaos set ... --for 30s`, `node down NODE --for 30s` (or `ttl` on `PUT /chaos`)                           |
+| What runs out | The whole activation: the scenario is deactivated                         | The fields the command set (latency, errors, down, mode), cleared from the live entry                      |
+| Granularity   | One lease per active scenario                                             | One lease per key and field group, so a permanent latency and a timed outage on one node expire separately |
+| Event         | `expire` with the scenario `name`                                         | `expire` with `name: null` and a `chaos_key` such as `{"node":"db"}`                                       |
+| Shown in      | `scenario list` (`expires in 28s`), `expires_in_ms` of `scenarios/active` | `node list` / `status` (`reverts in 27s`), `expires_in_ms` of `GET /chaos`                                 |
+
+Neither touches the other: a chaos lease running out leaves every active scenario in place, and a scenario expiring leaves your hand-set chaos. Both are timed by the same server clock, so a 24 h scenario lease never delays a 1 s chaos lease.
+
+Saving does not carry a lease. `scenario save NAME --from live` writes leased live fields as permanent (a file has no `ttl`) and the answer's `warnings` says how many (`"N fields have a ttl; the file has none"`; the CLI prints it on stderr); the live chaos itself keeps its timers unless you also `clear_live`. Activating the saved scenario therefore holds those fields until you deactivate it. Details: [control API](control-api.md#put-__kaanalchaosnode).
 
 ## Limits worth knowing
 

@@ -80,20 +80,23 @@ pub struct Event {
 }
 
 /// What the bus carries: a finished request, or a scenario change (S21).
+// limitation: `Request` is the large variant (cloned once per subscriber, up to 1024 in the ring);
+// `Arc<Event>` is the upgrade path if load shows a cost. Since `Scenario` gained `chaos_key` the
+// size gap is under clippy's `large_enum_variant` threshold.
 #[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "a per-request value cloned once per subscriber, and the broadcast ring holds up to 1024 clones; Arc<Event> is the upgrade path if load shows a cost"
-)]
 pub enum BusEvent {
     /// A finished mock request (SSE message `request`).
     Request(Event),
-    /// A scenario stack change (SSE message `scenario`).
+    /// A scenario stack change (SSE message `scenario`), or a live chaos lease that ran out.
     Scenario {
         /// `activate`, `deactivate`, `set`, `clear`, `reset`, `expire` (a `ttl` ran out) or `update` (an active scenario's definition changed).
         action: &'static str,
         /// The scenario concerned, when one.
         name: Option<String>,
+        /// For a live chaos expiry only: the key whose leased units were cleared, as an object
+        /// with the parts it has (`{"node":"db"}`, `{"endpoint":"GET /x"}` or both, the names
+        /// of the `PUT /chaos` body); `name` is `None`.
+        chaos_key: Option<Value>,
         /// The active stack after the change, bottom to top.
         active: Vec<String>,
     },
@@ -110,6 +113,8 @@ pub struct Effective {
     pub pins: EffectivePins,
     /// When each leased activation expires (a copy of [`Control::leases`]).
     pub leases: HashMap<String, tokio::time::Instant>,
+    /// When each leased live chaos unit expires (a copy of [`Control::chaos_leases`]).
+    pub chaos_leases: crate::chaos_lease::Leases,
 }
 
 /// The mutable side of chaos. Behind [`AppState::control`]: the only writer path (S11).
@@ -122,6 +127,9 @@ pub struct Control {
     /// Activations with a `ttl`: scenario name to deadline. Only active names keep one
     /// (`commit` drops the rest).
     pub leases: HashMap<String, tokio::time::Instant>,
+    /// Live chaos set with a `ttl`: (key, unit) to deadline. Only units the live layer still
+    /// sets keep one (`commit` drops the rest).
+    pub chaos_leases: crate::chaos_lease::Leases,
 }
 
 /// Shared server state; one `Arc` clones into every handler.
@@ -141,7 +149,8 @@ pub struct AppState {
     /// The scenarios and the stack. Every control write locks it, mutates, and calls
     /// [`AppState::publish`] before unlocking. Never held across an `.await`.
     pub control: Mutex<Control>,
-    /// Woken when a lease is added or replaced, so the lease task re-reads the earliest deadline.
+    /// Woken when a scenario or chaos lease is added or replaced, so the lease task re-reads the
+    /// earliest deadline of both tables.
     pub lease_wake: tokio::sync::Notify,
     /// Compiled scoped stacks by key (see [`AppState::scoped`]). Lock order: `control`, then this.
     /// [`AppState::publish`] clears it on every publish.
@@ -380,6 +389,7 @@ impl AppState {
             chaos,
             pins: c.stack.compile_pins(&c.scenarios),
             leases: c.leases.clone(),
+            chaos_leases: c.chaos_leases.clone(),
         });
         *self.chaos.write().expect("chaos lock poisoned") = Arc::clone(&next);
         // Any definition or stack change may alter a scoped stack; the caller holds `control`.
@@ -486,11 +496,13 @@ impl AppState {
                 chaos: EffectiveChaos::default(),
                 pins: EffectivePins::default(),
                 leases: HashMap::new(),
+                chaos_leases: HashMap::new(),
             })),
             control: Mutex::new(Control {
                 scenarios,
                 stack: ChaosStack::default(),
                 leases: HashMap::new(),
+                chaos_leases: HashMap::new(),
             }),
             lease_wake: tokio::sync::Notify::new(),
             scoped: RwLock::new(HashMap::new()),

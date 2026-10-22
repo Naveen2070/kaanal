@@ -16,7 +16,14 @@ The global `--json` switch: one process-wide bit, set once in `main`, read by ev
 | `env_on()`       | `KAANAL_JSON` counts as the flag when it is `1` or `true`; empty or anything else is off.                                                                        |
 | `emit(v, human)` | Text mode: runs `human`. JSON mode: prints `v` as one line through `out_line` (so a closed pipe exits 0 quietly), or nothing when `v` is `Null`.                 |
 
-Callers: `status`, `pins`, `scenario ...`, `chaos set|clear`, `cycle` and `reset` call `emit`; `logs` and `trace` read `json_on()` directly (in [main.md](main.md)). `completions` and `validate` ignore the switch.
+The shared node table lives here too:
+
+| Item                            | What it does                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node_rows(topo, active, live)` | One row per topology node: `{node, type, flavor, state, chaos, expires_in_ms}`. `state` is `down` when the node's effective chaos (`active.effective.nodes[name]`) has `down: true`, else `up`; `expires_in_ms` is the soonest lease across the node's units in `live.nodes[name].expires_in_ms`, or null. |
+| `print_node_table(rows)`        | `NODE TYPE FLAVOR STATE CHAOS`, with `(reverts in 27s)` after the chaos text of a leased node. `status` and `node list` both call it, so they print the same table; under `--json` both print `rows`.                                                                                                      |
+
+Callers: `node` (down, up, list), `status`, `pins`, `scenario ...`, `chaos set|clear`, `cycle` and `reset` call `emit`; `logs` and `trace` read `json_on()` directly (in [main.md](main.md)). `completions` and `validate` ignore the switch.
 
 ## Tests
 

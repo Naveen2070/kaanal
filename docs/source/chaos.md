@@ -169,15 +169,16 @@ The counters and buckets are touched after the publish succeeded, so a failed re
 
 The SSE bus carries `BusEvent::{Request, Scenario}`. A scenario message is `event: scenario`, `data: { "action", "name", "active" }` with `active` the stack after the change. Actions:
 
-| Action       | When                                                                                     |
-| ------------ | ---------------------------------------------------------------------------------------- |
-| `activate`   | `POST /scenarios/{name}/activate`                                                        |
-| `deactivate` | `POST /scenarios/{name}/deactivate` (only if it was active), or undefining an active one |
-| `update`     | An active scenario's definition changed (`PUT` over it, `save` with `force` over it)     |
-| `set`        | `PUT /scenarios/active`                                                                  |
-| `clear`      | `DELETE /scenarios`                                                                      |
-| `reset`      | `POST /reset`                                                                            |
-| _(event)_    | `ui.html` ignores unknown event names, so the page needs no change.                      |
+| Action       | When                                                                                                                                                        |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `activate`   | `POST /scenarios/{name}/activate`                                                                                                                           |
+| `deactivate` | `POST /scenarios/{name}/deactivate` (only if it was active), or undefining an active one                                                                    |
+| `update`     | An active scenario's definition changed (`PUT` over it, `save` with `force` over it)                                                                        |
+| `set`        | `PUT /scenarios/active`                                                                                                                                     |
+| `clear`      | `DELETE /scenarios`                                                                                                                                         |
+| `reset`      | `POST /reset`                                                                                                                                               |
+| `expire`     | A `ttl` ran out: a leased scenario was deactivated (`name`), or leased live chaos units were cleared (`name: null`, plus `chaos_key`, e.g. `{"node":"db"}`) |
+| _(event)_    | `ui.html` ignores unknown event names, so the page needs no change.                                                                                         |
 
 ## Designed for, not built
 
