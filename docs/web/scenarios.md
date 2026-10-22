@@ -272,7 +272,7 @@ Two leases exist and they are independent:
 
 Neither touches the other: a chaos lease running out leaves every active scenario in place, and a scenario expiring leaves your hand-set chaos. Both are timed by the same server clock, so a 24 h scenario lease never delays a 1 s chaos lease.
 
-Saving does not carry a lease. `scenario save NAME --from live` writes leased live fields as permanent (a file has no `ttl`) and the answer's `warnings` says how many (`"N fields have a ttl; the file has none"`; the CLI prints it on stderr); the live chaos itself keeps its timers unless you also `clear_live`. Activating the saved scenario therefore holds those fields until you deactivate it. Details: [control API](control-api.md#put-__kaanalchaosnode).
+Saving does not carry a lease. `scenario save NAME --from live` (or `--from effective`) writes leased live fields as permanent (a file has no `ttl`) and the answer's `warnings` says how many (`"N fields have a ttl; the file has none"`; the CLI prints it on stderr); the live chaos itself keeps its timers unless you also `clear_live`. Activating the saved scenario therefore holds those fields until you deactivate it. Details: [control API](control-api.md#put-__kaanalchaosnode).
 
 ## Limits worth knowing
 

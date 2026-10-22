@@ -54,8 +54,8 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
     /// Talk to the instance at http://HOST:PORT instead of the one in .kaanal/ (also
-    /// `KAANAL_ENDPOINT`); goes before the subcommand, whose own --endpoint is a route key
-    #[arg(long, value_name = "URL")]
+    /// `KAANAL_ENDPOINT`); may go before or after the subcommand
+    #[arg(long, global = true, value_name = "URL")]
     endpoint: Option<String>,
     /// Token for --endpoint. Prefer `KAANAL_TOKEN`: a value given here is visible in process
     /// lists and shell history
@@ -123,7 +123,7 @@ enum Cmd {
     /// or pin one with --state; e.g. `kaanal cycle "GET /orders"`
     Cycle {
         /// Endpoint key, e.g. "GET /orders"
-        endpoint: String,
+        route: String,
         /// loading, empty, error, slow or success
         #[arg(long)]
         state: Option<String>,
@@ -188,7 +188,7 @@ struct LogsArgs {
     since: Option<String>,
     /// Route template as logged, e.g. "GET /users/{id}"
     #[arg(long)]
-    endpoint: Option<String>,
+    route: Option<String>,
     /// Statuses, e.g. 404 or 404,5xx
     #[arg(long)]
     status: Option<String>,
@@ -204,14 +204,13 @@ struct LogsArgs {
 #[derive(Subcommand)]
 enum ChaosCmd {
     /// Set chaos on a node, an endpoint, or a node only when reached through an endpoint,
-    /// e.g. `kaanal chaos set db --error-rate 100% --error 503` or `--endpoint "GET /orders" --down`
+    /// e.g. `kaanal chaos set db --error-rate 100% --error 503` or `--route "GET /orders" --down`
     Set {
-        /// The node (omit it to set chaos on the whole `--endpoint`)
-        #[arg(required_unless_present = "endpoint")]
+        /// The node (omit it to set chaos on the whole `--route`)
         node: Option<String>,
         /// Endpoint key, e.g. "GET /orders"; with a node: that node, only through this endpoint
         #[arg(long)]
-        endpoint: Option<String>,
+        route: Option<String>,
         /// How failures show up: status, reset, hang or malformed
         #[arg(long)]
         kind: Option<String>,
@@ -231,12 +230,12 @@ enum ChaosCmd {
         #[arg(long = "for", value_name = "DURATION")]
         for_: Option<String>,
     },
-    /// Clear chaos on one node, one endpoint (`--endpoint`), or both together; none means everything
+    /// Clear chaos on one node, one endpoint (`--route`), or both together; none means everything
     Clear {
         node: Option<String>,
         /// Endpoint key, e.g. "GET /orders"
         #[arg(long)]
-        endpoint: Option<String>,
+        route: Option<String>,
     },
 }
 
@@ -297,10 +296,48 @@ fn err(msg: impl Into<String>) -> Fail {
     Fail(1, msg.into())
 }
 
+impl Cli {
+    /// **Private.** clap cannot hold a hidden `--endpoint` alias of `--route` next to the global
+    /// `--endpoint URL`, so the old route-key spelling (`logs|chaos set|chaos clear --endpoint
+    /// "GET /x"`) arrives as the global flag. A route key is `METHOD /path` and has a space; an
+    /// instance address never does. Such a value moves to the route slot of those subcommands
+    /// (R1.48). Also enforces that `chaos set` has a node or a route.
+    fn fix_route(mut self) -> Result<Self, clap::Error> {
+        let slot = match &mut self.cmd {
+            Cmd::Logs(a) => Some(&mut a.route),
+            Cmd::Chaos {
+                cmd: ChaosCmd::Set { route, .. } | ChaosCmd::Clear { route, .. },
+            } => Some(route),
+            _ => None,
+        };
+        if let Some(slot) = slot
+            && slot.is_none()
+            && self.endpoint.as_deref().is_some_and(|v| v.contains(' '))
+        {
+            *slot = self.endpoint.take();
+        }
+        if let Cmd::Chaos {
+            cmd:
+                ChaosCmd::Set {
+                    node: None,
+                    route: None,
+                    ..
+                },
+        } = &self.cmd
+        {
+            return Err(Cli::command().error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "chaos set needs a node or --route",
+            ));
+        }
+        Ok(self)
+    }
+}
+
 /// **Private.** Entry point: prints the failure message to stderr and returns the code.
 fn main() -> ExitCode {
     // clap's own exit code for usage errors is 2, which here means "not running" (R6.3); they are 64.
-    let cli = match Cli::try_parse() {
+    let cli = match Cli::try_parse().and_then(Cli::fix_route) {
         Ok(cli) => cli,
         Err(e) => {
             let _ = e.print();
@@ -398,12 +435,12 @@ fn run(cli: Cli) -> Result<(), Fail> {
         Cmd::Status => status(),
         Cmd::Scenario { cmd } => scenario(cmd),
         Cmd::Cycle {
-            endpoint,
+            route,
             state,
             status,
             delay,
             off,
-        } => cycle(&endpoint, state, status, delay, off),
+        } => cycle(&route, state, status, delay, off),
         Cmd::Pins => pins(),
         Cmd::Logs(a) => logs_cmd(&a),
         Cmd::Trace { key } => trace(&key),
@@ -422,7 +459,7 @@ fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
     match cmd {
         ChaosCmd::Set {
             node,
-            endpoint,
+            route,
             kind,
             latency,
             error_rate,
@@ -432,14 +469,14 @@ fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
         } => {
             let mut patch = chaos_patch(latency, error_rate, error, kind, down)?;
             let revert = for_set(&mut patch, for_)?;
-            let label = match (&node, &endpoint) {
+            let label = match (&node, &route) {
                 (Some(n), Some(e)) => format!("{n} @ {e}"),
                 (Some(n), None) => n.clone(),
                 (None, e) => e.clone().unwrap_or_default(),
             };
-            let v = if endpoint.is_some() {
+            let v = if route.is_some() {
                 patch.extend(node.map(|n| ("node".to_string(), json!(n))));
-                patch.extend(endpoint.map(|e| ("endpoint".to_string(), json!(e))));
+                patch.extend(route.map(|e| ("endpoint".to_string(), json!(e))));
                 call("PUT", "/__kaanal/chaos", Some(Value::Object(patch)))?
             } else {
                 // clap guarantees a node when there is no endpoint
@@ -455,8 +492,8 @@ fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
             warn_all(&v);
             Ok(())
         }
-        ChaosCmd::Clear { node, endpoint } => {
-            let path = chaos_clear_path(node, endpoint);
+        ChaosCmd::Clear { node, route } => {
+            let path = chaos_clear_path(node, route);
             let v = call("DELETE", &path, None)?;
             output::emit(&v, || println!("cleared"));
             Ok(())
@@ -1631,7 +1668,7 @@ fn logs_cmd(a: &LogsArgs) -> Result<(), Fail> {
     let params: Vec<(String, String)> = [
         Some(("limit", a.n.to_string())),
         a.since.clone().map(|v| ("since", v)),
-        a.endpoint.clone().map(|v| ("endpoint", v)),
+        a.route.clone().map(|v| ("endpoint", v)),
         a.status.clone().map(|v| ("status", v)),
         a.failed.then(|| ("failed", "true".to_string())),
         a.scope.clone().map(|v| ("scope", v)),

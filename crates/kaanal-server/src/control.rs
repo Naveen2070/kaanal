@@ -182,7 +182,7 @@ fn parse_mode(mode: Option<&str>) -> Result<Option<bool>, Reject> {
 ///
 /// `ttl` (`"30s"`, 100 ms to 24 h) leases every unit the patch sets (`latency`, `error`, `down`,
 /// `mode`, see `chaos_lease::Unit`); without it, the units it sets are permanent. Units it does
-/// not set keep their lease.
+/// not set keep their lease. A `ttl` with nothing to lease (`mode: merge` alone leases nothing) is a 400.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChaosPatch {
@@ -407,6 +407,16 @@ fn apply_patch(st: &AppState, key: &ChaosKey, patch: &ChaosPatch) -> Result<Json
     let ttl = patch.ttl.as_deref().map(parse_ttl).transpose()?;
     let patch = patch.layer()?;
     let units = chaos_lease::units_set(&patch);
+    // `mode: merge` counts as a unit but has nothing worth leasing (its expiry is a no-op).
+    if ttl.is_some()
+        && units.iter().all(|u| *u == chaos_lease::Unit::Mode)
+        && patch.replace != Some(true)
+    {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            "ttl needs a field to lease",
+        ));
+    }
     let mut c = lock(st);
     let snap = commit(st, &mut c, |c| {
         chaos_lease::apply(&mut c.chaos_leases, key, &units, ttl, Instant::now());
@@ -1401,7 +1411,7 @@ fn save_source(
 /// `POST /__kaanal/scenarios/save` — writes `scenarios/NAME.yaml` (S17) from the live layer
 /// (default), the compiled `effective` result, or another scenario, and registers it as a file
 /// scenario. Sparse: only the fields that were set. Answers `{ name, path, warnings }`; from
-/// live, `warnings` counts the leased fields the file makes permanent.
+/// live or effective, `warnings` counts the leased fields the file makes permanent.
 ///
 /// Limits: a live override cannot be saved (files are merge-only; use `from: effective`), and
 /// `from: effective` refuses a key with two or more failure bands or a node@endpoint pair that
@@ -1451,7 +1461,8 @@ pub async fn save_scenario(
     }
     let from = b.from.unwrap_or(SaveFrom::Live);
     // A file has no ttl: the leased live fields it writes are permanent once loaded (L5).
-    let leased = if matches!(from, SaveFrom::Live) {
+    // `effective` includes the live layer, so it carries the same leased fields.
+    let leased = if matches!(from, SaveFrom::Live | SaveFrom::Effective) {
         chaos_lease::leased_fields(&c.chaos_leases, c.stack.live())
     } else {
         0

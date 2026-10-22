@@ -61,15 +61,15 @@ The **live layer**: chaos set through `PUT /__kaanal/chaos...`, in three groups 
 { "latency_ms": 300, "error_rate": 0.1, "error_kind": "status", "error_status": 504, "down": true, "mode": "merge" }
 ```
 
-| Field          | Rules                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `latency_ms`   | integer, 0 – 300 000                                                                                                   |
-| `error_rate`   | number, 0.0 – 1.0                                                                                                      |
-| `error_kind`   | `status` (default), `reset`, `hang` or `malformed`; anything else is 400                                               |
-| `error_status` | integer, 500 – 504 (checked for every kind)                                                                            |
-| `down`         | boolean — when true, everything through the node fails 503                                                             |
-| `mode`         | `merge` (default) or `override`; anything else is 400. `override` replaces what scenarios add to this key (see below). |
-| `ttl`          | optional duration string, 100 ms – 24 h (`"30s"`, `"5m"`); leases the fields this PUT sets (see below)                 |
+| Field          | Rules                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `latency_ms`   | integer, 0 – 300 000                                                                                                                                                                                                      |
+| `error_rate`   | number, 0.0 – 1.0                                                                                                                                                                                                         |
+| `error_kind`   | `status` (default), `reset`, `hang` or `malformed`; anything else is 400                                                                                                                                                  |
+| `error_status` | integer, 500 – 504 (checked for every kind)                                                                                                                                                                               |
+| `down`         | boolean — when true, everything through the node fails 503                                                                                                                                                                |
+| `mode`         | `merge` (default) or `override`; anything else is 400. `override` replaces what scenarios add to this key (see below).                                                                                                    |
+| `ttl`          | optional duration string, 100 ms – 24 h (`"30s"`, `"5m"`); leases the fields this PUT sets (see below); a `ttl` with nothing to lease (no latency, error, down or `mode: override`) is a 400 `ttl needs a field to lease` |
 
 Unknown node → `404 "unknown node '<name>'"`. Out-of-range values → `400`. Unknown JSON keys → rejected.
 
@@ -150,7 +150,7 @@ It is checked exactly like a file: names against your topology, limits, duplicat
 - `name` is required. `from` is `"live"` (default), `"effective"` or `{ "scenario": "other" }`; any other shape, including a bare scenario name, is `422`.
 - Writes `scenarios/NAME.yaml` next to `kaanal.yaml` (created if missing), with only the fields that were set, and defines the scenario at once. `path` in the response is the file.
 - `400`: bad name; the name is defined inline in `kaanal.yaml` (even with `force`); nothing to save; a live `mode: override` with `from: "live"`; `from: "effective"` with a key that has two or more failure kinds stacked, or a node-at-endpoint entry whose node also has chaos (the message names the key). `404`: the `from` scenario does not exist. `409`: the scenario or file exists and `force` is not true. `500`: the file could not be written.
-- `warnings` is an array of strings: with `from: "live"`, live fields set with a `ttl` are written as permanent (a file has no `ttl`), and the response says how many: `"N fields have a ttl; the file has none"`.
+- `warnings` is an array of strings: with `from: "live"` or `"effective"`, live fields set with a `ttl` are written as permanent (a file has no `ttl`), and the response says how many: `"N fields have a ttl; the file has none"`.
 - `clear_live: true` clears the live chaos after writing, so activating the saved scenario does not count it twice. Saving over an active scenario updates it in place.
 
 **Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats), refills rate-limit buckets and empties the [request log](observability.md) (request ids keep counting). Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.

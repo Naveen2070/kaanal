@@ -1450,3 +1450,63 @@ async fn save_from_live_warns_that_leased_fields_become_permanent() {
     let text = std::fs::read_to_string(s.dir.join("scenarios/timed.yaml")).unwrap();
     assert!(text.contains("down") && !text.contains("ttl"), "{text}");
 }
+
+#[tokio::test]
+async fn save_from_effective_warns_only_when_it_includes_leased_chaos() {
+    let s = start_with_scenarios("").await;
+    s.put_chaos("db", json!({ "latency_ms": 100 })).await;
+    let r: Value = s
+        .post_json(
+            "/__kaanal/scenarios/save",
+            json!({ "name": "eff-plain", "from": "effective" }),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r["warnings"], json!([]), "{r}");
+    s.put_chaos("db", json!({ "down": true, "ttl": "1h" }))
+        .await;
+    let r: Value = s
+        .post_json(
+            "/__kaanal/scenarios/save",
+            json!({ "name": "eff-timed", "from": "effective" }),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        r["warnings"],
+        json!(["1 field has a ttl; the file has none"]),
+        "{r}"
+    );
+}
+
+#[tokio::test]
+async fn ttl_without_a_field_to_lease_is_400() {
+    let s = start_with_scenarios("").await;
+    s.put_chaos("db", json!({ "latency_ms": 10 })).await;
+    let before = s.live().await;
+    for body in [
+        json!({ "ttl": "1m" }),
+        json!({ "mode": "merge", "ttl": "1m" }),
+    ] {
+        let r = s.put_chaos("db", body.clone()).await;
+        assert_eq!(r.status(), 400, "{body}");
+        let b: Value = r.json().await.unwrap();
+        assert_eq!(b["error"], "ttl needs a field to lease", "{b}");
+        let mut keyed = body.clone();
+        keyed["node"] = json!("db");
+        let r = s.put("/__kaanal/chaos", keyed).await;
+        assert_eq!(r.status(), 400, "{body}");
+    }
+    assert_eq!(s.live().await, before);
+    // A leased field (or an override mode) alongside the ttl is fine.
+    for body in [
+        json!({ "latency_ms": 5, "ttl": "1m" }),
+        json!({ "mode": "override", "ttl": "1m" }),
+    ] {
+        assert_eq!(s.put_chaos("db", body).await.status(), 200);
+    }
+}

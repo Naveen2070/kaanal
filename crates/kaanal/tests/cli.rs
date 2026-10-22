@@ -232,7 +232,7 @@ fn live_status_chaos_and_errors() {
     assert!(text.contains("100% errors (hang)"), "{text}");
     let out = up.run(&["chaos", "clear", "db"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
-    let out = up.run(&["chaos", "set", "--endpoint", "get /users/{id}", "--down"]);
+    let out = up.run(&["chaos", "set", "--route", "get /users/{id}", "--down"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(up.get_status("/users/42"), 503, "the endpoint is down");
     let text = String::from_utf8_lossy(&up.run(&["status"]).stdout).into_owned();
@@ -240,7 +240,7 @@ fn live_status_chaos_and_errors() {
         text.contains("endpoint GET /users/{id}:") && text.contains("DOWN"),
         "{text}"
     );
-    let out = up.run(&["chaos", "clear", "--endpoint", "GET /users/{id}"]);
+    let out = up.run(&["chaos", "clear", "--route", "GET /users/{id}"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert_eq!(up.get_status("/users/42"), 200, "cleared");
 
@@ -601,10 +601,10 @@ fn status_shows_endpoint_rows_and_chaos_warns() {
     ok(&up, &["chaos", "clear"]);
 
     let ep = "GET /users/{id}";
-    ok(&up, &["chaos", "set", "--endpoint", ep, "--latency", "9ms"]);
+    ok(&up, &["chaos", "set", "--route", ep, "--latency", "9ms"]);
     ok(
         &up,
-        &["chaos", "set", "db", "--endpoint", ep, "--latency", "11ms"],
+        &["chaos", "set", "db", "--route", ep, "--latency", "11ms"],
     );
     let st = ok(&up, &["status"]);
     assert!(st.contains("endpoint GET /users/{id}: +9ms"), "{st}");
@@ -1759,7 +1759,7 @@ fn logs_default_n_and_each_filter() {
         &[
             "chaos",
             "set",
-            "--endpoint",
+            "--route",
             "GET /users/{id}",
             "--error-rate",
             "100%",
@@ -1783,7 +1783,7 @@ fn logs_default_n_and_each_filter() {
         r.lines().count() == 1 && r.contains("/users/1") && r.contains("failed="),
         "{r}"
     );
-    let r = ok(&up, &["logs", "--endpoint", "GET /users/{id}"]);
+    let r = ok(&up, &["logs", "--route", "GET /users/{id}"]);
     assert!(r.lines().count() == 1 && r.contains("503"), "{r}");
     assert_eq!(ok(&up, &["logs", "--scope", "nobody"]), "");
     assert!(usage_fails(&up, &["logs", "--status", "9xx"]).contains("status"));
@@ -1870,7 +1870,7 @@ fn logs_follow_prints_tail_then_new_requests_without_duplicates() {
         &[
             "chaos",
             "set",
-            "--endpoint",
+            "--route",
             "GET /users/{id}",
             "--latency",
             "800ms",
@@ -1963,7 +1963,7 @@ fn logs_follow_filters_endpoint_failed_and_json_live() {
         &[
             "chaos",
             "set",
-            "--endpoint",
+            "--route",
             "GET /users/{id}",
             "--error-rate",
             "100%",
@@ -1973,7 +1973,7 @@ fn logs_follow_filters_endpoint_failed_and_json_live() {
     );
     up.hit("/users/2", Some("pre-f"));
     // The tail is printed after the subscription, so a tail line means the follower is live.
-    let by_endpoint = Follow::start(&up, &["--endpoint", "GET /users/{id}"]);
+    let by_endpoint = Follow::start(&up, &["--route", "GET /users/{id}"]);
     assert!(by_endpoint.line().contains("client=pre-1"));
     assert!(by_endpoint.line().contains("client=pre-f"));
     let failed_json = Follow::start(&up, &["--failed", "--json"]);
@@ -3582,7 +3582,7 @@ fn completions_survive_a_closed_pipe() {
 }
 
 #[test]
-fn a_url_after_the_subcommand_gets_a_hint_and_no_password() {
+fn a_url_after_the_subcommand_never_echoes_its_password() {
     let up = Up::start("endpoint-hint");
     for args in [
         &[
@@ -3597,7 +3597,6 @@ fn a_url_after_the_subcommand_gets_a_hint_and_no_password() {
         let out = up.run(args);
         assert_ne!(out.status.code(), Some(0), "{args:?}");
         let e = stderr(&out);
-        assert!(e.contains("before the subcommand"), "{args:?}: {e}");
         assert!(!e.contains("hunter2"), "{args:?}: {e}");
     }
 }
@@ -3717,4 +3716,43 @@ fn node_list_json_is_an_array_with_state() {
         db["expires_in_ms"].as_u64().is_some_and(|ms| ms > 0),
         "{db}"
     );
+}
+
+#[test]
+fn endpoint_flag_may_follow_the_subcommand() {
+    let up = Up::start("endpoint-after");
+    let (port, token) = port_and_token(&up);
+    let elsewhere = scratch("endpoint-after-elsewhere");
+    let url = format!("http://127.0.0.1:{port}");
+    let envs = [("KAANAL_TOKEN", token.as_str())];
+    // Where no subcommand flag collides.
+    let out = remote(&elsewhere, &["status", "--endpoint", &url], &envs);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(stdout(&out).contains("postgres"), "{}", stdout(&out));
+    // Where the old route-key spelling `--endpoint` also exists, a URL still means the instance (`Cli::fix_route`).
+    let out = remote(
+        &elsewhere,
+        &["chaos", "set", "db", "--down", "--endpoint", &url],
+        &envs,
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let out = remote(&elsewhere, &["logs", "--endpoint", &url], &envs);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let out = remote(&elsewhere, &["chaos", "clear", "--endpoint", &url], &envs);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+#[test]
+fn old_endpoint_spelling_still_names_a_route() {
+    let up = Up::start("route-alias");
+    ok(
+        &up,
+        &["chaos", "set", "--endpoint", "GET /users/{id}", "--down"],
+    );
+    assert_eq!(up.get_status("/users/42"), 503, "the old spelling works");
+    ok(&up, &["chaos", "clear", "--endpoint", "GET /users/{id}"]);
+    assert_eq!(up.get_status("/users/42"), 200);
+    let out = up.run(&["chaos", "set", "--help"]);
+    let help = stdout(&out);
+    assert!(help.contains("--route"), "{help}");
 }

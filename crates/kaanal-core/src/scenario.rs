@@ -68,7 +68,7 @@ pub fn endpoint_key(raw: &str) -> Result<String, String> {
         }
         // A URL here is a misplaced `--endpoint URL`; it may carry a password, so it is never echoed.
         _ if raw.contains("://") => Err(
-            "invalid endpoint: expected 'METHOD /path' (put --endpoint URL before the subcommand)"
+            "invalid endpoint: expected 'METHOD /path' (an instance URL goes in the global --endpoint, not a route)"
                 .to_string(),
         ),
         _ => Err(format!("invalid endpoint '{raw}': expected 'METHOD /path'")),

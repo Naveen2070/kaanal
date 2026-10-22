@@ -20,7 +20,7 @@ Timed live chaos (spec L1-L6): the lease table behind the optional `ttl` of `PUT
 - **One PUT, one key.** A PUT with `ttl` leases every unit it sets; without `ttl` it removes the leases of the units it sets; units it does not mention keep theirs. A plain `{down: true}` after a timed one makes the outage permanent.
 - **The `ttl` is checked first** (`control::parse_ttl`, 100 ms to 24 h), before the lock: a bad one is a 400 naming `ttl` and nothing changes.
 - **A lease dies with its field.** `prune` runs inside `commit` next to the scenario-lease `retain`, so `DELETE` of an entry, `reset`, `save` with `clear_live` and `down: false` (which unsets `down`) all drop the matching leases without each handler doing it. A failed `commit` restores the table with the rest of `Control`.
-- **Save.** `scenarios/save` from live writes leased fields as permanent and answers `"N fields have a ttl; the file has none"`, counting fields with `leased_fields` (`mode` is not counted: a file holds no mode).
+- **Save.** `scenarios/save` from live or effective writes leased fields as permanent and answers `"N fields have a ttl; the file has none"`, counting fields with `leased_fields` (`mode` is not counted: a file holds no mode).
 - Leases are in memory only, gone on restart. A PUT with a `ttl` wakes the lease task (`lease_wake`).
 - **Expiry clears, it does not restore.** The one lease timer (`control::lease_task`, `next_deadline` over scenario and chaos leases) calls `control::expire_chaos`: per key, one `commit` that runs `clear_units` for each due unit and removes an entry left empty, then one `expire` event with `chaos_key`. A failed commit keeps the chaos and drops the leases, so no past-due lease is left to spin on.
 

@@ -74,7 +74,7 @@ kaanal logs                       # the last 50 requests
 kaanal logs -n 200                # the last 200 (1 to 1000)
 kaanal logs --status 5xx          # 404, 404,5xx, 5xx ...
 kaanal logs --failed              # only requests a node failed
-kaanal logs --endpoint "GET /users/{id}"
+kaanal logs --route "GET /users/{id}"
 kaanal logs --since 5m            # a duration, or an RFC 3339 time
 kaanal logs --scope payments-down # requests that ran under that scenario scope
 kaanal logs --json                # one JSON object per line (the full entry); --json is global
@@ -96,7 +96,7 @@ The columns are the UTC time, the id, the request, the status and the measured t
 
 Filters combine (all must match). Things to know:
 
-- `--endpoint` takes the **route template as logged**, `GET /users/{id}`, not a concrete URL. The method's case and the spacing are normalised (`get /users/{id}` works). `GET /users/1` is a valid text that names no route, so it matches nothing, silently: use the template. A `404` has no endpoint, so find those with `--status 404`.
+- `--route` (formerly `--endpoint`, still accepted for one release) takes the **route template as logged**, `GET /users/{id}`, not a concrete URL. The method's case and the spacing are normalised (`get /users/{id}` works). `GET /users/1` is a valid text that names no route, so it matches nothing, silently: use the template. A `404` has no endpoint, so find those with `--status 404`.
 - `--status` takes exact codes and classes, comma separated: `404`, `5xx`, `404,5xx`.
 - `--failed` keeps requests with a `failed_node`. A pinned request never counts, because the client did not see the failure.
 - `--since 5m` keeps requests that finished in the last five minutes; an RFC 3339 time such as `2026-10-18T09:00:00Z` works too.
