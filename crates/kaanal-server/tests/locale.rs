@@ -68,6 +68,42 @@ async fn a_node_locale_changes_the_currency_of_its_routes() {
     assert_eq!(get("/us").await["currency"], "USD");
 }
 
+#[tokio::test]
+async fn an_empty_pin_body_uses_the_node_locale_and_data_yaml() {
+    let (dir, src) = project(
+        "empty-pin",
+        "scenarios:
+  e: { pins: [ { endpoint: \"GET /us\", state: empty } ] }
+",
+    );
+    std::fs::write(
+        dir.join("data.yaml"),
+        "fields:
+  price: { gen: static, value: 7 }
+",
+    )
+    .unwrap();
+    let opts = ServeOpts {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        token: kaanal_server::new_token(),
+        auth_key: None,
+    };
+    let s = kaanal_server::serve(&Config::from_yaml(&src).unwrap(), &dir, opts)
+        .await
+        .unwrap();
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://{}/us", s.addr))
+        .header("x-kaanal-scenario", "e")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body, serde_json::json!({ "currency": "USD", "price": 7 }));
+}
+
 #[test]
 fn unknown_node_locale_is_a_positioned_config_error() {
     let (dir, src) = project("unknown-node", "");

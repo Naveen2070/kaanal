@@ -382,17 +382,6 @@ impl Dictionary {
             .clone()
     }
 
-    /// This dictionary with `project`'s keys added; a project key replaces the same key.
-    /// Note the generator consults [`Options::dictionary_project`] *before* `format` and
-    /// [`Options::dictionary`] after (D1.8), so keep the two apart when that matters.
-    #[must_use]
-    pub fn overlaid(&self, project: Dictionary) -> Dictionary {
-        let mut d = self.clone();
-        d.exact.extend(project.exact);
-        d.suffix.extend(project.suffix);
-        d
-    }
-
     /// Load-time warnings, e.g. two keys that normalise alike (the later one wins).
     pub fn warnings(&self) -> &[String] {
         &self.warnings
@@ -494,21 +483,30 @@ fn walk(
         return walk(&merge_all_of(s).0, field, at, d, out, depth);
     }
     let Value::Object(m) = s else { return };
-    // as the generator: examples and enums win, writeOnly properties are never returned
+    // as the generator: examples, const and enums win, writeOnly properties are never returned
+    let non_empty = |k| {
+        m.get(k)
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+    };
+    let examples = non_empty("examples")
+        || m.get("examples")
+            .and_then(Value::as_object)
+            .is_some_and(|o| o.values().any(|e| e.get("value").is_some()));
     if m.contains_key("example")
-        || m.contains_key("enum")
+        || examples
         || m.contains_key("const")
+        || non_empty("enum")
         || m.get("writeOnly").and_then(Value::as_bool) == Some(true)
     {
         return;
     }
-    let parts: Vec<&Value> = ["oneOf", "anyOf"]
-        .iter()
-        .filter_map(|k| m.get(*k).and_then(Value::as_array))
-        .flatten()
-        .collect();
-    if !parts.is_empty() {
-        // the generator takes a branch, never the schema around it
+    // the generator takes a branch of the first non-empty `oneOf`/`anyOf`, never the schema around it
+    if let Some(parts) = ["oneOf", "anyOf"].iter().find_map(|k| {
+        m.get(*k)
+            .and_then(Value::as_array)
+            .filter(|a| !a.is_empty())
+    }) {
         for part in parts {
             walk(part, field, at, d, out, depth + 1);
         }

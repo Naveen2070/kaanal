@@ -503,3 +503,83 @@ fn builtin_files_are_marked_synthetic() {
         );
     }
 }
+
+/// `latitude` and `longitude` over 200 seeds with `pack`: (min lat, max lat, min lon, max lon).
+fn coordinate_span(pack: Arc<Pack>) -> (f64, f64, f64, f64) {
+    let opts = Options {
+        pack,
+        ..Options::default()
+    };
+    let s = json!({ "type": "object", "properties": {
+        "latitude": { "type": "number" }, "longitude": { "type": "number" } } });
+    let mut span = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+    for seed in 0..200 {
+        let v = generate(&s, None, seed, &opts);
+        let (lat, lon) = (
+            v["latitude"].as_f64().unwrap(),
+            v["longitude"].as_f64().unwrap(),
+        );
+        span = (
+            span.0.min(lat),
+            span.1.max(lat),
+            span.2.min(lon),
+            span.3.max(lon),
+        );
+    }
+    span
+}
+
+#[test]
+fn coordinates_follow_the_pack_geo_block_or_the_whole_globe() {
+    let (lat0, lat1, lon0, lon1) = coordinate_span(Pack::builtin("en-IN").unwrap());
+    let span = format!("{lat0} {lat1} {lon0} {lon1}");
+    assert!(
+        lat0 >= 8.0 && lat1 <= 35.0 && lon0 >= 68.0 && lon1 <= 97.0,
+        "{span}"
+    );
+    let (lat0, lat1, lon0, lon1) = coordinate_span(Pack::builtin("en-US").unwrap());
+    let span = format!("{lat0} {lat1} {lon0} {lon1}");
+    assert!(
+        lat0 >= 24.0 && lat1 <= 50.0 && lon0 >= -125.0 && lon1 <= -66.0,
+        "{span}"
+    );
+    // no `geo:`: the whole globe, both hemispheres
+    let p = Arc::new(Pack::parse(&de_pack(GOOD_ADDRESS, STREETS)).unwrap());
+    assert!(p.geo.is_none());
+    let (lat0, lat1, lon0, lon1) = coordinate_span(p);
+    let span = format!("{lat0} {lat1} {lon0} {lon1}");
+    assert!(
+        lat0 < -45.0 && lat1 > 45.0 && lon0 < -90.0 && lon1 > 90.0,
+        "{span}"
+    );
+    assert!(
+        lat0 >= -90.0 && lat1 <= 90.0 && lon0 >= -180.0 && lon1 <= 180.0,
+        "{span}"
+    );
+}
+
+#[test]
+fn geo_bounds_are_checked_at_the_value() {
+    let with = |geo: &str| {
+        Pack::parse(&format!(
+            "{}geo: {geo}
+",
+            de_pack(GOOD_ADDRESS, STREETS)
+        ))
+    };
+    let p = with("{ lat: [47, 55], lon: [5.5, 15] }").unwrap();
+    let g = p.geo.unwrap();
+    assert_eq!((g.lat, g.lon), ([47.0, 55.0], [5.5, 15.0]));
+    for (geo, at, what) in [
+        ("{ lat: [55, 47], lon: [5, 15] }", "lat", "above"),
+        ("{ lat: [47, 91], lon: [5, 15] }", "lat", "-90 to 90"),
+        ("{ lat: [47, 55], lon: [-181, 15] }", "lon", "-180 to 180"),
+        ("{ lat: [47, 55], lon: [.nan, 15] }", "lon", "-180 to 180"),
+    ] {
+        let e = with(geo).unwrap_err();
+        assert_eq!(e.at, ["geo", at], "{geo}: {e}");
+        assert!(e.value && e.message.contains(what), "{geo}: {e}");
+    }
+    let e = with("{ lat: [47, 55] }").unwrap_err();
+    assert!(e.message.contains("lon") && e.line.is_some(), "{e}");
+}

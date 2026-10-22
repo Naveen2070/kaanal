@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use kaanal_core::{Endpoint, stable_hash};
+use kaanal_data::Options;
 use serde_json::Value;
 
 use crate::state::AppState;
@@ -17,23 +18,30 @@ pub fn route_seed(seed: u64, owner: &str, path: &str) -> u64 {
 
 /// The body an `empty` pin answers with, or `None` when the endpoint has no empty form.
 /// In order: `states.empty.body`; none for a built-in responder without `override:`; the emptied
-/// `override:` body; the emptied response schema.
-pub fn empty_form(ep: &Endpoint, schema: Option<&Value>, seed: u64) -> Option<Value> {
+/// `override:` body; the emptied response schema, its scalars generated with `opts` (the
+/// owning node's locale and dictionaries).
+pub fn empty_form(
+    ep: &Endpoint,
+    schema: Option<&Value>,
+    seed: u64,
+    opts: &Options,
+) -> Option<Value> {
     if let Some(b) = ep.states.empty.as_ref().and_then(|o| o.body.as_ref()) {
         return Some(b.clone());
     }
     match &ep.response {
         Some(ov) => kaanal_data::empty_of_value(&ov.body),
         None if ep.responder.is_some() => None,
-        None => schema.and_then(|s| kaanal_data::empty(s, seed)),
+        None => schema.and_then(|s| kaanal_data::empty(s, seed, opts)),
     }
 }
 
 /// **Private.** A route that normally answers 204 or 304 has no body, so it always has an empty
-/// form ("no body", status unchanged); otherwise [`empty_form`] decides.
+/// form ("no body", status unchanged); otherwise [`empty_form`] decides. Whether a form exists
+/// does not depend on the locale, so the default options do.
 fn has_form(ep: &Endpoint, normal_status: u16, schema: Option<&Value>, seed: u64) -> bool {
     ((ep.responder.is_none() || ep.response.is_some()) && matches!(normal_status, 204 | 304))
-        || empty_form(ep, schema, seed).is_some()
+        || empty_form(ep, schema, seed, &Options::default()).is_some()
 }
 
 /// The load-time `empty_ok`: reads the spec table (`key` to status and schema) because the

@@ -24,7 +24,7 @@ pub(crate) const MAX_DEPTH: usize = 16;
 const MAX_RANDOM_ITEMS: u64 = 20;
 /// **Private.** Most values one body may hold. Nested arrays multiply (`20^5` = 3.2M) and
 /// `minItems` is honoured, so a per-array cap alone cannot bound a body; past this, values are `null`.
-const MAX_VALUES: usize = 10_000;
+pub(crate) const MAX_VALUES: usize = 10_000;
 /// **Private.** Longest string a `minLength` can ask for; a larger value is capped here and
 /// warned at startup (R6.10d). ponytail: 10 000 is the default of an open question in RULES.md.
 pub(crate) const MAX_MIN_LENGTH: u64 = 10_000;
@@ -38,6 +38,27 @@ const BASE_EPOCH: i64 = 1_767_225_600;
 pub fn generate(schema: &Value, field: Option<&str>, seed: u64, opts: &Options) -> Value {
     let mut budget = MAX_VALUES;
     value_for(schema, field, seed, seed, 0, &mut budget, opts)
+}
+
+/// **Private.** Property `name` (schema `ps`) of an object generated with `seed`: the value
+/// [`generate`] gives that property, so an empty form's scalars match the full body (R4.4).
+pub(crate) fn property(
+    ps: &Value,
+    name: &str,
+    seed: u64,
+    depth: usize,
+    budget: &mut usize,
+    opts: &Options,
+) -> Value {
+    value_for(
+        ps,
+        Some(name),
+        child_seed(seed, name, 0),
+        seed,
+        depth,
+        budget,
+        opts,
+    )
 }
 
 /// **Private.** FNV-1a 64 with a separator byte between parts. Same algorithm as
@@ -59,7 +80,7 @@ fn stable_hash(parts: &[&[u8]]) -> u64 {
 
 /// **Private.** Each child value gets its own seed from (parent seed, name, index),
 /// so adding or reordering schema properties never changes the values of the others.
-fn child_seed(parent: u64, name: &str, index: usize) -> u64 {
+pub(crate) fn child_seed(parent: u64, name: &str, index: usize) -> u64 {
     stable_hash(&[
         &parent.to_le_bytes(),
         name.as_bytes(),
@@ -606,23 +627,9 @@ fn run(
                 2,
             );
         }
-        Gen::Latitude { min, max } => {
-            return numeric(
-                s,
-                ty,
-                rng,
-                entry_range(*min, *max, (8.0, 35.0), up, down),
-                6,
-            );
-        }
-        Gen::Longitude { min, max } => {
-            return numeric(
-                s,
-                ty,
-                rng,
-                entry_range(*min, *max, (68.0, 97.0), up, down),
-                6,
-            );
+        Gen::Latitude { min, max } | Gen::Longitude { min, max } => {
+            let range = geo_range(pack, matches!(g, Gen::Latitude { .. }));
+            return numeric(s, ty, rng, entry_range(*min, *max, range, up, down), 6);
         }
         Gen::Pick { from } => {
             let fit: Vec<&Value> = from.iter().filter(|v| value_fits(v, s, ty)).collect();
@@ -655,7 +662,7 @@ fn run(
         }
         Gen::Postcode {} => postcode(group, pack),
         Gen::Country {} => pack.country.clone(),
-        Gen::Street {} => pack.streets.choose(rng).expect("non-empty").clone(),
+        Gen::Street {} => street(group, pack).to_string(),
         Gen::Address {} => address(rng, group, pack),
         Gen::Currency {} => pack.currency.code.clone(),
         Gen::Text { kind } => match kind {
@@ -678,6 +685,18 @@ fn run(
         .expect("templates are checked when the dictionary loads"),
     };
     json!(fit_length(v, s))
+}
+
+/// **Private.** The default `(min, max)` of a `latitude` (`lat`) or `longitude` field: the
+/// pack's `geo` block, else the whole globe.
+fn geo_range(pack: &Pack, lat: bool) -> (f64, f64) {
+    let [lo, hi] = match (pack.geo, lat) {
+        (Some(g), true) => g.lat,
+        (Some(g), false) => g.lon,
+        (None, true) => [-90.0, 90.0],
+        (None, false) => [-180.0, 180.0],
+    };
+    (lo, hi)
 }
 
 /// **Private.** A user `pick`/`static` value as-is (R5.7), a string fitted to its lengths.
@@ -715,7 +734,7 @@ fn address(rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> String {
     fill(&pack.address, |k| {
         Some(match k {
             "number" => rng.random_range(1..=999).to_string(),
-            "street" => pack.streets.choose(rng).expect("non-empty").clone(),
+            "street" => street(group, pack).to_string(),
             "city" => p.city.clone(),
             "state" => p.state.clone().unwrap_or_default(),
             "postcode" => postcode(group, pack),
@@ -729,6 +748,11 @@ fn address(rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> String {
 fn group_index(group: u64, tag: &[u8], len: usize) -> usize {
     let i = stable_hash(&[&group.to_le_bytes(), tag]) % len as u64;
     usize::try_from(i).expect("i < len")
+}
+
+/// **Private.** The object's street: `street` and the address's `{street}` agree.
+fn street(group: u64, pack: &Pack) -> &str {
+    &pack.streets[group_index(group, b"street", pack.streets.len())]
 }
 
 /// **Private.** The place row of the object a field belongs to: same object, same place.

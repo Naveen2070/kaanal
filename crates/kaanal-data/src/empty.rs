@@ -6,7 +6,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::dataset::Options;
-use crate::generate::generate;
+use crate::generate::{MAX_VALUES, child_seed, property};
 
 /// **Private.** The fixed value for a pagination-style property name, matched
 /// case-insensitively and exactly. ponytail: a name table, not a model; extend it when a real API misses.
@@ -27,9 +27,10 @@ fn rule(name: &str, num: bool, boolean: bool) -> Option<Value> {
 
 /// The empty form of a response body described by `schema` (`$ref`s already inlined), or
 /// `None` when it has none (a bare scalar, or a top-level `oneOf`/`anyOf`/`allOf`).
-/// Scalars without a name rule come from [`generate`] with `seed`.
+/// Scalars without a name rule are what [`crate::generate`] gives them with `seed` and `opts`
+/// (the route's locale pack and dictionaries), each from its own child seed (R4.4).
 #[must_use]
-pub fn empty(schema: &Value, seed: u64) -> Option<Value> {
+pub fn empty(schema: &Value, seed: u64, opts: &Options) -> Option<Value> {
     if ["oneOf", "anyOf", "allOf"]
         .iter()
         .any(|k| schema.get(k).is_some())
@@ -41,14 +42,22 @@ pub fn empty(schema: &Value, seed: u64) -> Option<Value> {
     } else if is_type(schema, "object")
         || schema.get("type").is_none() && schema.get("properties").is_some()
     {
-        Some(object_of_schema(schema, seed))
+        let mut budget = MAX_VALUES;
+        Some(object_of_schema(schema, seed, 0, &mut budget, opts))
     } else {
         None
     }
 }
 
-/// **Private.** The object rule over a schema's `properties`.
-fn object_of_schema(schema: &Value, seed: u64) -> Value {
+/// **Private.** The object rule over a schema's `properties`; seeds, depth and the value
+/// budget follow `generate`, so a kept scalar equals the full body's.
+fn object_of_schema(
+    schema: &Value,
+    seed: u64,
+    depth: usize,
+    budget: &mut usize,
+    opts: &Options,
+) -> Value {
     let mut out = Map::new();
     for (name, ps) in schema
         .get("properties")
@@ -60,12 +69,11 @@ fn object_of_schema(schema: &Value, seed: u64) -> Value {
         let v = if is("array") {
             json!([])
         } else if is("object") {
-            object_of_schema(ps, seed)
+            object_of_schema(ps, child_seed(seed, name, 0), depth + 1, budget, opts)
         } else {
             let (num, boolean) = (is("integer") || is("number"), is("boolean"));
-            // ponytail: default (en-IN) pack; pass `Options` through `empty` when pins need a node's locale
             rule(name, num, boolean)
-                .unwrap_or_else(|| generate(ps, Some(name), seed, &Options::default()))
+                .unwrap_or_else(|| property(ps, name, seed, depth + 1, budget, opts))
         };
         out.insert(name.clone(), v);
     }

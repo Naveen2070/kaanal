@@ -179,13 +179,13 @@ Generated bodies follow your OpenAPI response schemas. Three things shape what t
 
 ```yaml
 version: 1
-locale: en-US              # the project default; en-IN if omitted
+locale: en-IN              # the project default; en-IN if omitted
 nodes:
   app:    { type: service, spec: openapi.yaml }
-  eu-api: { type: service, spec: eu.yaml, locale: de-DE }   # this node's routes use de-DE
+  us-api: { type: service, spec: us.yaml, locale: en-US }   # this node's routes use en-US
 ```
 
-- `locale:` is a tag such as `en-IN` or `de-DE`. A node's own `locale:` beats the project default; the locale comes from the node that owns the route.
+- `locale:` is a tag such as `en-IN` or `en-US`. A node's own `locale:` beats the project default; the locale comes from the node that owns the route.
 - `en-IN` (names, `+91`, `INR`, `India`) and `en-US` (`+1`, `USD`, `United States`) are built in.
 - Any other tag needs a pack: drop `locales/<tag>.yaml` next to `kaanal.yaml`. A pack with a built-in's tag replaces it. [Data packs](data-packs.md) shows how to write one and where Kaanal looks.
 - An unknown locale is a startup error that lists the available tags (and says `did you mean` when only the case differs). `kaanal validate` and `kaanal up` check every pack in `locales/`, used or not.
@@ -255,6 +255,11 @@ Kaanal is pre-1.0, and the same version, config, files and seed give the same da
 - Suffix matching is by whole word. An all-lower-case compound such as `unitprice` no longer matches the money suffixes (`unitPrice` and `unit_price` do), and `valid`, `paid` or `android` never match `*id`.
 - New keywords change how much of a body's value budget a schema uses (`const`, `additionalProperties`, `oneOf`), so a very large nested schema may reach its cap at a different place.
 - `discriminator` is no longer reported as an ignored keyword.
+- Any field named `total` or ending in `Total`/`_total` is money now, number and integer alike: an integer pagination `total` is 99 to 4999 where it was 0 to 1000. Give it a `maximum`, an `example`, or a `data.yaml` entry (`total: { gen: integer, min: 0, max: 1000 }`) to keep a count.
+- `street` and the street inside `address` are now the same street for one object.
+- Built-in packs carry coordinate bounds (`geo:`): `latitude`/`longitude` stay inside India for `en-IN` (unchanged) and inside the continental US for `en-US` (they were India's for every locale); a pack without `geo:` uses the whole globe.
+- `empty` pin bodies use the owning node's locale and your `data.yaml` (they always used `en-IN` and the built-ins), and each field draws from its own seed, so the values change.
+- `en-IN` phone numbers are `+91 9` and nine digits, which can look like a real Indian mobile number. Use them as test data only; never send messages to them.
 
 ## Chaos, live
 

@@ -99,6 +99,19 @@ pub struct Pack {
     #[serde(deserialize_with = "non_empty")]
     #[schemars(length(min = 1))]
     pub places: Vec<Place>,
+    /// Coordinate bounds for `latitude`/`longitude` fields; without it, the whole globe.
+    #[serde(default)]
+    pub geo: Option<Geo>,
+}
+
+/// Coordinate bounds of a pack's country or region, `[min, max]` in degrees.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Geo {
+    /// Latitude `[min, max]`, within -90 to 90.
+    pub lat: [f64; 2],
+    /// Longitude `[min, max]`, within -180 to 180.
+    pub lon: [f64; 2],
 }
 
 /// The JSON Schema (draft 2020-12) of a locale pack file, for `kaanal schema pack`.
@@ -340,6 +353,19 @@ impl Pack {
                 &["places", &i.to_string(), "postcode"],
                 "places.postcode",
             )?;
+        }
+        if let Some(g) = &p.geo {
+            for (key, [lo, hi], limit) in [("lat", g.lat, 90.0), ("lon", g.lon, 180.0)] {
+                let inside = |x: f64| (-limit..=limit).contains(&x);
+                let message = if !inside(lo) || !inside(hi) {
+                    format!("geo.{key}: [{lo}, {hi}] must be within -{limit} to {limit}")
+                } else if lo > hi {
+                    format!("geo.{key}: min {lo} is above max {hi}")
+                } else {
+                    continue;
+                };
+                return Err(DataError::at_value(&["geo", key], message));
+            }
         }
         if p.address.contains("{state}")
             && let Some((i, pl)) = p

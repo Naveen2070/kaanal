@@ -9,6 +9,7 @@ country: India
 currency: { code: INR, symbol: "₹" }
 phone: { prefix: "+91", formats: ["9{9}"] }
 address: "{number} {street}, {city}"
+geo: { lat: [8, 35], lon: [68, 97] }
 first_names: [
   Aarav, Priya, Arjun, Kavya, Rohan, Ananya, Vikram, Meera, Karthik, Divya,
   Rahul, Sneha, Aditya, Lakshmi, Siddharth, Pooja, Naveen, Deepa, Varun, Nithya,

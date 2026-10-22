@@ -132,6 +132,41 @@ fn misfit_entry_is_skipped_with_a_warning_naming_the_field() {
 }
 
 #[test]
+fn misfit_warnings_follow_what_the_generator_visits() {
+    let opts = with_project(
+        "fields:
+  level: { gen: pick, from: [low, high] }
+",
+    );
+    let int = json!({ "type": "integer" });
+    let warned = |level: Value| {
+        let s = json!({ "type": "object", "properties": { "level": level } });
+        let model = ApiModel {
+            endpoints: vec![Endpoint {
+                method: "GET".into(),
+                path: "/x".into(),
+                status: 200,
+                schema: Some(s),
+            }],
+        };
+        !dictionary_warnings(&model, &opts).is_empty()
+    };
+    // `examples` wins in the generator, so the entry is never tried; an empty one does not
+    assert!(!warned(json!({ "type": "integer", "examples": [2] })));
+    assert!(!warned(
+        json!({ "type": "integer", "examples": { "a": { "value": 2 } } })
+    ));
+    assert!(warned(json!({ "type": "integer", "examples": [] })));
+    assert!(warned(json!({ "type": "integer", "enum": [] })));
+    // only the first non-empty of `oneOf`/`anyOf` is a branch source
+    assert!(!warned(
+        json!({ "oneOf": [{ "type": "string" }], "anyOf": [int] })
+    ));
+    assert!(warned(json!({ "oneOf": [], "anyOf": [int] })));
+    assert!(warned(json!({ "oneOf": [{ "type": "string" }, int] })));
+}
+
+#[test]
 fn money_clamps_to_schema_bounds() {
     let opts = with_project("fields:\n  fee: { gen: money, min: 1000, max: 5000 }\n");
     let s = json!({ "type": "number", "minimum": 10, "maximum": 20 });
@@ -290,19 +325,6 @@ fn adding_a_sibling_property_leaves_other_values_identical() {
             }
         }
     }
-}
-
-#[test]
-fn overlaid_project_keys_win() {
-    let base = Dictionary::parse("fields:\n  a: { gen: email }\n  b: { gen: uuid }\n").unwrap();
-    let proj = Dictionary::parse("fields:\n  b: { gen: static, value: P }\n").unwrap();
-    let merged = base.overlaid(proj);
-    assert_eq!(merged.len(), 2);
-    let opts = Options {
-        dictionary: Arc::new(merged),
-        ..Options::default()
-    };
-    assert_eq!(gen_field(&json!({ "type": "string" }), "b", 1, &opts), "P");
 }
 
 #[test]

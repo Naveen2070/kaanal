@@ -545,7 +545,8 @@ fn city_state_pincode_and_address_describe_the_same_place() {
     ];
     let s = json!({ "type": "object", "properties": {
         "city": { "type": "string" }, "state": { "type": "string" },
-        "pincode": { "type": "string" }, "address": { "type": "string" }
+        "pincode": { "type": "string" }, "address": { "type": "string" },
+        "street": { "type": "string" }
     }});
     let mut by_city = std::collections::HashMap::new();
     for seed in 0..2000 {
@@ -566,6 +567,14 @@ fn city_state_pincode_and_address_describe_the_same_place() {
             "{v}"
         );
         assert!(v["address"].as_str().unwrap().ends_with(&city), "{v}");
+        // `street` and the address's `{street}` are one choice of the object
+        assert!(
+            v["address"]
+                .as_str()
+                .unwrap()
+                .contains(v["street"].as_str().unwrap()),
+            "{v}"
+        );
     }
     assert!(
         by_city.len() > 60,
@@ -912,6 +921,14 @@ fn adding_a_sibling_property_next_to_one_of_changes_nothing_else() {
         (
             "aaa",
             json!({ "type": "object", "properties": { "pet": pet } }),
+        ),
+        (
+            "samples",
+            json!({ "type": "string", "examples": ["s1", "s2", "s3"] }),
+        ),
+        (
+            "labels",
+            json!({ "type": "object", "additionalProperties": { "type": "string" } }),
         ),
     ] {
         after["properties"][k] = v;

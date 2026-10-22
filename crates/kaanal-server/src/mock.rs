@@ -576,7 +576,9 @@ fn pinned_response(
             let ep = &route.endpoint;
             let owner = ep.owner.map_or("", |id| st.topo.nodes[id].name.as_str());
             let seed = pins::route_seed(st.seed, owner, ask.path);
-            let mut body = pins::empty_form(ep, route.schema.as_ref(), seed).unwrap_or(Value::Null);
+            let opts = st.options_for_owner(ep.owner);
+            let mut body =
+                pins::empty_form(ep, route.schema.as_ref(), seed, opts).unwrap_or(Value::Null);
             // P9: a `states.empty.body` is returned verbatim; only a derived body gets the params.
             if ep.states.empty.as_ref().is_none_or(|o| o.body.is_none()) {
                 kaanal_data::apply_params(&mut body, ask.params);

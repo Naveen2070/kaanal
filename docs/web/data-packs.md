@@ -46,24 +46,25 @@ Then `locale: de-DE` in `kaanal.yaml` (or on a single node) switches to it. Rest
 
 ### Fields
 
-| Key                         | Required | What it is                                                                                                              |
-| --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `version`                   | no       | Pack format version; only `1` exists (default `1`).                                                                     |
-| `tag`                       | yes      | The locale tag. Must equal the file name without `.yaml`, exactly (case-sensitive).                                     |
-| `name_order`                | yes      | `given-family` (`Anna Schmidt`) or `family-given` (`Schmidt Anna`), for full names.                                     |
-| `country`                   | yes      | The name `country` fields get.                                                                                          |
-| `currency`                  | yes      | `{ code, symbol }`; `code` is what `currency` fields get.                                                               |
-| `phone`                     | yes      | `prefix` plus a non-empty list of `formats`. A number is the prefix, a space, then one format.                          |
-| `address`                   | yes      | Template over `{number}`, `{street}`, `{city}`, `{state}`, `{postcode}`. Any other placeholder is an error.             |
-| `first_names`, `last_names` | yes      | Non-empty lists. Each entry is a plain string or `{ name, latin }`.                                                     |
-| `streets`                   | yes      | Non-empty list of street names for `{street}`.                                                                          |
-| `places`                    | yes      | Non-empty list of `{ city, state?, postcode }` rows. A city, state and postcode of one object always come from one row. |
+| Key                         | Required | What it is                                                                                                                                                                                                                                            |
+| --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`                   | no       | Pack format version; only `1` exists (default `1`).                                                                                                                                                                                                   |
+| `tag`                       | yes      | The locale tag. Must equal the file name without `.yaml`, exactly (case-sensitive).                                                                                                                                                                   |
+| `name_order`                | yes      | `given-family` (`Anna Schmidt`) or `family-given` (`Schmidt Anna`), for full names.                                                                                                                                                                   |
+| `country`                   | yes      | The name `country` fields get.                                                                                                                                                                                                                        |
+| `currency`                  | yes      | `{ code, symbol }`; `code` is what `currency` fields get.                                                                                                                                                                                             |
+| `phone`                     | yes      | `prefix` plus a non-empty list of `formats`. A number is the prefix, a space, then one format.                                                                                                                                                        |
+| `address`                   | yes      | Template over `{number}`, `{street}`, `{city}`, `{state}`, `{postcode}`. Any other placeholder is an error.                                                                                                                                           |
+| `first_names`, `last_names` | yes      | Non-empty lists. Each entry is a plain string or `{ name, latin }`.                                                                                                                                                                                   |
+| `streets`                   | yes      | Non-empty list of street names for `{street}`.                                                                                                                                                                                                        |
+| `places`                    | yes      | Non-empty list of `{ city, state?, postcode }` rows. A city, state and postcode of one object always come from one row.                                                                                                                               |
+| `geo`                       | no       | `{ lat: [min, max], lon: [min, max] }` in degrees, the range `latitude`/`longitude` fields draw from. Without it, the whole globe (-90 to 90, -180 to 180). Each min must not exceed its max; `lat` stays within -90 to 90, `lon` within -180 to 180. |
 
 Unknown keys are errors, so a typo shows up at once with its line and column.
 
 ### Patterns
 
-In `phone.formats` and in each place's `postcode`, `{n}` means n seeded digits (n from 1 to 20): `"10{3}"` is `10` followed by three digits. Nothing else in braces is allowed there. `{number}` in the address template is a seeded number from 1 to 999. `{street}` is drawn from `streets`.
+In `phone.formats` and in each place's `postcode`, `{n}` means n seeded digits (n from 1 to 20): `"10{3}"` is `10` followed by three digits. Nothing else in braces is allowed there. `{number}` in the address template is a seeded number from 1 to 999. `{street}` is drawn from `streets`, and is the same street a `street` field of the object gets.
 
 ### Names, scripts and emails
 
@@ -98,7 +99,9 @@ A tag is never turned into a path: `locale:` must match `^[A-Za-z]{2,3}(-[A-Za-z
 
 ## Writing a dictionary
 
-`data.yaml` next to `kaanal.yaml` (or whatever `data:` names; it must be a file) is merged over the built-in dictionary by key. A project key replaces the built-in key of the same name; everything else stays.
+`data.yaml` next to `kaanal.yaml` (or whatever `data:` names; it must be a file) is a second dictionary layer, not a merge into the built-in one. Your file is consulted **before** a schema `format` and the built-in dictionary **after** it (see [Precedence and fit](#precedence-and-fit)). So a matching key of yours wins over the built-in entry, even a broader one (your `"*id"` beats a built-in exact `orderId`); when your entry does not fit the field, the `format` decides, then the built-in dictionary, then the defaults. Names your file does not match keep their built-in behaviour.
+
+Unlike packs in `locales/`, a `data.yaml` (or `data:` file) that is a symlink is followed.
 
 ```yaml
 version: 1
@@ -134,7 +137,7 @@ An entry is `{ gen: <name>, ...parameters }`. The set is closed: a dictionary ca
 | `url`, `uuid`                          | `https://example.com/...`, a v4 UUID                                                             |                                           |
 | `timestamp`, `date`                    | RFC 3339 timestamp or date within the 365 days before 2026-01-01                                 |                                           |
 | `integer`                              | A whole number                                                                                   | `min`, `max`                              |
-| `money`, `latitude`, `longitude`       | A number with 2 (money) or 6 decimals                                                            | `min`, `max`                              |
+| `money`, `latitude`, `longitude`       | A number with 2 (money) or 6 decimals; coordinates default to the pack's `geo` range             | `min`, `max`                              |
 | `text`                                 | Lorem text                                                                                       | `kind: sentence` (default) or `paragraph` |
 | `pick`                                 | One of your values, by seed                                                                      | `from` (non-empty list)                   |
 | `template`                             | A string with `{digits:n}` and `{letters:n}` (n from 1 to 20) filled by seed: `"SKU-{digits:6}"` | `value`                                   |
@@ -168,6 +171,7 @@ The schema's type and bounds always beat a dictionary entry. An entry applies on
 
 - `money`, `integer`, `latitude` and `longitude` are clamped to `minimum`/`maximum`;
 - `text` and other plain strings are trimmed to `maxLength` (in characters) and padded to `minLength`;
+- string `pick`, `static` and `template` values are trimmed to `maxLength` and padded to `minLength` like other strings (the values are yours, the length is the schema's);
 - `pick` and `static` values that do not fit the type or the bounds are not used;
 - a string generator on an integer field (or the reverse) does not fit.
 

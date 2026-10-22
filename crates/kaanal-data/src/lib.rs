@@ -23,5 +23,5 @@ pub use dictionary::{Dictionary, dictionary_schema, dictionary_warnings};
 pub use empty::{empty, empty_of_value};
 pub use generate::{apply_params, generate};
 pub use pack::{
-    Currency, DataError, Name, NameOrder, Pack, Phone, Place, builtin_tags, pack_schema,
+    Currency, DataError, Geo, Name, NameOrder, Pack, Phone, Place, builtin_tags, pack_schema,
 };
