@@ -96,8 +96,12 @@ enum Cmd {
         #[arg(short, long, default_value = "kaanal.yaml")]
         config: PathBuf,
     },
-    /// Print the JSON Schema for kaanal.yaml (point your editor's YAML plugin at it)
-    Schema,
+    /// Print a JSON Schema (point your editor's YAML plugin at it): kaanal.yaml by default,
+    /// or a data.yaml dictionary or a locales/<tag>.yaml pack
+    Schema {
+        #[arg(value_enum, default_value_t = SchemaKind::Config)]
+        kind: SchemaKind,
+    },
     /// Print skeleton endpoint entries for spec routes that have none (add-only)
     Endpoints {
         #[arg(short, long, default_value = "kaanal.yaml")]
@@ -368,10 +372,25 @@ fn no_endpoint(why: &str) -> Result<(), Fail> {
     }
 }
 
-/// **Private.** `kaanal schema`: the JSON Schema of `kaanal.yaml`.
-fn schema() -> Result<(), Fail> {
-    let text = serde_json::to_string_pretty(&kaanal_core::config_schema())
-        .map_err(|e| err(e.to_string()))?;
+/// **Private.** Which file `kaanal schema` describes.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SchemaKind {
+    /// kaanal.yaml
+    Config,
+    /// data.yaml, the field dictionary
+    Dictionary,
+    /// locales/<tag>.yaml, a locale pack
+    Pack,
+}
+
+/// **Private.** `kaanal schema [config|dictionary|pack]`: that file's JSON Schema.
+fn schema(kind: SchemaKind) -> Result<(), Fail> {
+    let value = match kind {
+        SchemaKind::Config => kaanal_core::config_schema(),
+        SchemaKind::Dictionary => kaanal_server::dictionary_schema(),
+        SchemaKind::Pack => kaanal_server::pack_schema(),
+    };
+    let text = serde_json::to_string_pretty(&value).map_err(|e| err(e.to_string()))?;
     out_bytes(
         format!(
             "{text}
@@ -407,7 +426,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
             completions(shell);
             Ok(())
         }
-        Cmd::Schema => schema(),
+        Cmd::Schema { kind } => schema(kind),
         Cmd::Up {
             config,
             port,
@@ -612,10 +631,31 @@ fn config_err(path: &Path, e: &ConfigError) -> Fail {
 fn located_err(config: &Path, src: &str, e: &Located) -> Fail {
     match &e.file {
         Some(f) => {
-            let text = std::fs::read_to_string(f).unwrap_or_default();
+            // Only re-read when there is a key path to find, and never more than the 1 MiB
+            // the loaders accept (an oversized file's error has no path).
+            let text = if e.pos.is_none() && !e.path.is_empty() {
+                read_capped(f)
+            } else {
+                String::new()
+            };
             config_err(f, &e.in_source(&text))
         }
         None => config_err(config, &e.in_source(src)),
+    }
+}
+
+/// **Private.** At most 1 MiB of `f` as text; empty when unreadable, larger or not UTF-8 (the
+/// error then prints without a position).
+fn read_capped(f: &Path) -> String {
+    use std::io::Read as _;
+    let mut buf = Vec::new();
+    let ok = std::fs::File::open(f)
+        .and_then(|file| file.take((1 << 20) + 1).read_to_end(&mut buf))
+        .is_ok_and(|n| n <= 1 << 20);
+    if ok {
+        String::from_utf8(buf).unwrap_or_default()
+    } else {
+        String::new()
     }
 }
 

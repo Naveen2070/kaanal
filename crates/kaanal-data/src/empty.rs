@@ -5,6 +5,7 @@
 
 use serde_json::{Map, Value, json};
 
+use crate::dataset::Options;
 use crate::generate::generate;
 
 /// **Private.** The fixed value for a pagination-style property name, matched
@@ -62,7 +63,9 @@ fn object_of_schema(schema: &Value, seed: u64) -> Value {
             object_of_schema(ps, seed)
         } else {
             let (num, boolean) = (is("integer") || is("number"), is("boolean"));
-            rule(name, num, boolean).unwrap_or_else(|| generate(ps, Some(name), seed))
+            // ponytail: default (en-IN) pack; pass `Options` through `empty` when pins need a node's locale
+            rule(name, num, boolean)
+                .unwrap_or_else(|| generate(ps, Some(name), seed, &Options::default()))
         };
         out.insert(name.clone(), v);
     }

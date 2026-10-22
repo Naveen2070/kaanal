@@ -1,10 +1,12 @@
 //! `OpenAPI` 3.0.x → [`ApiModel`]: the list of endpoints the server will mock.
 //!
 //! One [`Endpoint`] per `path × method`, with the success response's JSON schema
-//! fully `$ref`-inlined so downstream code never resolves references. Phase one
-//! supports 3.0.x only; 3.1 is rejected with a clear message.
+//! fully `$ref`-inlined so downstream code never resolves references. A `oneOf`/`anyOf`
+//! branch named by a `discriminator.mapping` is rewritten to `allOf: [branch, tag enum]`,
+//! since inlining erases the refs the mapping names. Phase one supports 3.0.x only; 3.1 is
+//! rejected with a clear message.
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 /// One mockable endpoint.
 #[derive(Debug, Clone, PartialEq)]
@@ -104,14 +106,47 @@ fn pick_response(op: &Value, doc: &Value, ptr: &str) -> Result<(u16, Option<Valu
         return Ok((200, None));
     };
     let resp = deref(resp, doc, ptr)?;
-    let schema = match resp.pointer("/content/application~1json/schema") {
+    let media = resp.pointer("/content/application~1json");
+    let schema = match media.and_then(|m| m.get("schema")) {
         Some(s) => {
             let mut budget = MAX_REF_EXPANSIONS;
-            Some(inline(s, doc, ptr, &mut Vec::new(), &mut budget)?)
+            let mut s = inline(s, doc, ptr, &mut Vec::new(), &mut budget)?;
+            if let (Some(media), Value::Object(o)) = (media, &mut s) {
+                carry_examples(media, o, doc, ptr)?;
+            }
+            Some(s)
         }
         None => None,
     };
     Ok((status, schema))
+}
+
+/// **Private.** Media-type `example`/`examples` win over the schema's own: they replace the
+/// schema's `example`/`examples`, which the generator then reads first (D1.8). An `examples`
+/// map (`name: { value }`) becomes the array of its values.
+fn carry_examples(
+    media: &Value,
+    schema: &mut Map<String, Value>,
+    doc: &Value,
+    ptr: &str,
+) -> Result<(), String> {
+    if let Some(e) = media.get("example") {
+        schema.insert("example".into(), e.clone());
+    }
+    if let Some(Value::Object(map)) = media.get("examples") {
+        let mut vals = Vec::new();
+        for v in map.values() {
+            let v = deref(v, doc, ptr)?;
+            vals.extend(v.get("value").cloned());
+        }
+        if !vals.is_empty() {
+            if media.get("example").is_none() {
+                schema.remove("example");
+            }
+            schema.insert("examples".into(), Value::Array(vals));
+        }
+    }
+    Ok(())
 }
 
 /// **Private.** Inline every local `$ref`. `stack` holds the refs being expanded on
@@ -145,6 +180,7 @@ fn inline<'d>(
             for (k, x) in map {
                 out.insert(k.clone(), inline(x, doc, ptr, stack, budget)?);
             }
+            tag_branches(map, &mut out);
             Ok(Value::Object(out))
         }
         Value::Array(items) => Ok(Value::Array(
@@ -154,6 +190,51 @@ fn inline<'d>(
                 .collect::<Result<_, _>>()?,
         )),
         other => Ok(other.clone()),
+    }
+}
+
+/// **Private.** A `discriminator.mapping` names its branches by `$ref`, which inlining
+/// erases. So each inlined `oneOf`/`anyOf` branch the mapping names (by full ref or bare
+/// component name) becomes `allOf: [branch, { properties: { <tag>: { enum: [keys] } } }]`:
+/// the tag part merges last and wins, and the generator's `enum` sets the tag. Branches it
+/// does not name are left as they are; a mapping value naming no branch is warned by `warn`.
+/// This amends spec 11a item 3 ("no change to `$ref` inlining"): ruling D1.11, T7 amendment.
+/// An object-level `example` on a branch still beats the tag `enum` (D1.8), so it is served as-is.
+fn tag_branches(src: &Map<String, Value>, out: &mut Map<String, Value>) {
+    let Some(d) = src.get("discriminator") else {
+        return;
+    };
+    let (Some(prop), Some(mapping)) = (
+        d.get("propertyName").and_then(Value::as_str),
+        d.get("mapping").and_then(Value::as_object),
+    ) else {
+        return;
+    };
+    for k in ["oneOf", "anyOf"] {
+        let (Some(Value::Array(from)), Some(Value::Array(to))) = (src.get(k), out.get_mut(k))
+        else {
+            continue;
+        };
+        for (b, slot) in from.iter().zip(to.iter_mut()) {
+            let Some(r) = b.get("$ref").and_then(Value::as_str) else {
+                continue;
+            };
+            let tags: Vec<Value> = mapping
+                .iter()
+                .filter(|(_, v)| {
+                    v.as_str().is_some_and(|v| {
+                        v == r || r.strip_prefix("#/components/schemas/") == Some(v)
+                    })
+                })
+                .map(|(t, _)| Value::String(t.clone()))
+                .collect();
+            if !tags.is_empty() {
+                *slot = json!({ "allOf": [
+                    slot.take(),
+                    { "properties": { prop: { "type": "string", "enum": tags } } }
+                ] });
+            }
+        }
     }
 }
 

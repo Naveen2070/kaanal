@@ -13,14 +13,14 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
 use kaanal_core::config::{EndpointsConfig, NodeConfig, SeedSource, parse_endpoints};
-use kaanal_core::diagnostics::{Located, keys};
+use kaanal_core::diagnostics::{Located, PathSeg, keys};
 use kaanal_core::{
     ChaosStack, Config, EffectiveChaos, EffectivePins, Endpoint, Endpoints, NodeId, ScenarioSet,
     Source, Topology, resolve_scenario, valid_name,
 };
 
 use crate::scenarios;
-use kaanal_data::ApiModel;
+use kaanal_data::{ApiModel, DEFAULT_LOCALE, DataError, DataSet, Options};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -182,6 +182,11 @@ pub struct AppState {
     pub log: Mutex<crate::log::LogRing>,
     /// The graceful stop: `POST /__kaanal/shutdown` and `BoundServer::shutdown` ask it.
     pub shutdown: crate::shutdown::Shutdown,
+    /// **Private.** Generation options per node, by [`NodeId`]: the node's `locale`, else the
+    /// project's (see [`AppState::options_for_owner`]).
+    options: Vec<Options>,
+    /// **Private.** The project's options (top-level `locale`, else `en-IN`).
+    project_options: Options,
 }
 
 /// **Private.** Rejects two paths that differ only in parameter names
@@ -230,17 +235,19 @@ pub(crate) fn spec_routes(
     base_dir: &Path,
 ) -> Result<(Topology, Vec<RouteSpec>), Located> {
     let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
-    let specs = load_specs(&topo, base_dir, &mut HashMap::new(), &mut Vec::new())?;
+    let specs = load_specs(&topo, base_dir, &mut HashMap::new(), &mut Vec::new(), None)?;
     Ok((topo, specs.routes))
 }
 
 /// **Private.** Reads every node's spec: path shapes, conflicts between services, ignored
-/// keywords as warnings. Same checks and messages as Phase One.
+/// keywords as warnings. Same checks and messages as Phase One. With `options` (one per node),
+/// project dictionary entries that cannot fit a response field are warnings too.
 fn load_specs(
     topo: &Topology,
     base_dir: &Path,
     shapes: &mut HashMap<String, String>,
     warnings: &mut Vec<String>,
+    options: Option<&[Options]>,
 ) -> Result<Specs, Located> {
     let mut specs = Specs {
         routes: Vec::new(),
@@ -260,6 +267,13 @@ fn load_specs(
                 .into_iter()
                 .map(|w| format!("{}: {w}", file.display())),
         );
+        if let Some(opts) = options {
+            warnings.extend(
+                kaanal_data::dictionary_warnings(&api, &opts[id])
+                    .into_iter()
+                    .map(|w| format!("{}: {w}", file.display())),
+            );
+        }
         for ep in api.endpoints {
             check_shape(shapes, &ep.path).map_err(|m| Located::new(at.clone(), m))?;
             let key = format!("{} {}", ep.method, ep.path);
@@ -279,6 +293,62 @@ fn load_specs(
         }
     }
     Ok(specs)
+}
+
+/// **Private.** A data-file error as a [`Located`]: in its file (parse position, else the
+/// key path), or at the config value it names (`data:`) when it has no file.
+fn data_located(e: DataError) -> Located {
+    let path: Vec<PathSeg> =
+        e.at.iter()
+            .map(|s| {
+                s.parse()
+                    .map_or_else(|_| PathSeg::Key(s.clone()), PathSeg::Index)
+            })
+            .collect();
+    match e.file {
+        Some(f) if e.line.is_some() => Located::parsed(
+            f,
+            kaanal_core::ConfigError {
+                line: e.line,
+                col: e.col,
+                msg: e.message,
+            },
+        ),
+        Some(f) if e.value => Located::at_value(path, e.message).in_file(f),
+        Some(f) => Located::new(path, e.message).in_file(f),
+        // no file: the config's own `data:` value
+        None => Located::at_value(path, e.message),
+    }
+}
+
+/// **Private.** The data files (`locales/`, `data.yaml` or `data:`) and the options of every
+/// node (its `locale`, else the project's, else `en-IN`), plus the project's own. An unknown
+/// locale is placed at the `locale:` that names it (R6.1).
+fn load_data(
+    cfg: &Config,
+    base_dir: &Path,
+    topo: &Topology,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<Options>, Options), Located> {
+    let data = DataSet::load(base_dir, cfg.data.as_deref()).map_err(data_located)?;
+    warnings.extend(data.warnings().iter().cloned());
+    let project = data
+        .options_for(cfg.locale.as_deref().unwrap_or(DEFAULT_LOCALE))
+        .map_err(|e| Located::at_value(keys(&["locale"]), format!("locale: {}", e.message)))?;
+    let nodes = topo
+        .nodes
+        .iter()
+        .map(|n| match &n.locale {
+            None => Ok(project.clone()),
+            Some(tag) => data.options_for(tag).map_err(|e| {
+                Located::at_value(
+                    keys(&["nodes", n.name.as_str(), "locale"]),
+                    format!("node '{}': {}", n.name, e.message),
+                )
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((nodes, project))
 }
 
 /// **Private.** Compiles the spec routes with `endpoints:`: the inline map, or the file it
@@ -430,7 +500,8 @@ impl AppState {
             }
         }
 
-        let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings)?;
+        let (options, project_options) = load_data(cfg, base_dir, &topo, &mut warnings)?;
+        let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings, Some(&options))?;
         let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
         warnings.extend(endpoints.warnings.iter().cloned());
         // The seed only changes generated values, not whether an empty form exists.
@@ -519,6 +590,14 @@ impl AppState {
             ids,
             log,
             shutdown: crate::shutdown::Shutdown::new(),
+            options,
+            project_options,
         })
+    }
+
+    /// The generation options of a route owned by `owner`; the project's for a route without
+    /// an owner (static routes have no schema, so this is a fallback).
+    pub fn options_for_owner(&self, owner: Option<NodeId>) -> &Options {
+        owner.map_or(&self.project_options, |id| &self.options[id])
     }
 }

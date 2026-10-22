@@ -205,3 +205,69 @@ paths:
     let err = ApiModel::from_openapi(spec).unwrap_err();
     assert!(err.contains("must start with '/'"), "{err}");
 }
+
+#[test]
+fn response_example_beats_schema_examples() {
+    let spec = r#"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /a:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              example: { n: 1 }
+              schema: { type: object, example: { n: 9 }, examples: [{ n: 8 }] }
+  /b:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              examples: { one: { value: { n: 2 } } }
+              schema: { type: object, example: { n: 9 }, examples: [{ n: 8 }] }
+  /c:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { type: object, examples: [{ n: 8 }] }
+"#;
+    let m = ApiModel::from_openapi(spec).unwrap();
+    let g1 = |p: &str| {
+        let s = find(&m, "GET", p).schema.clone().unwrap();
+        kaanal_data::generate(&s, None, 1, &kaanal_data::Options::default())
+    };
+    assert_eq!(g1("/a"), serde_json::json!({ "n": 1 }));
+    assert_eq!(g1("/b"), serde_json::json!({ "n": 2 }));
+    assert_eq!(g1("/c"), serde_json::json!({ "n": 8 }));
+}
+
+#[test]
+fn a_dangling_ref_in_media_examples_fails_the_load_with_a_position() {
+    let spec = r##"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /a:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              examples: { one: { $ref: "#/components/examples/nope" } }
+              schema: { type: object }
+"##;
+    let err = ApiModel::from_openapi(spec).unwrap_err();
+    assert!(
+        err.starts_with("/paths/~1a/get") && err.contains("not found"),
+        "{err}"
+    );
+}

@@ -1,0 +1,143 @@
+# synthetic data, authored for Kaanal
+# Built-in en-IN locale pack. Synthetic data only (rule R5.7, FR-09): generic given names and
+# surnames listed separately, real city names, postcode prefixes of the right shape.
+# `{n}` in phone formats and postcodes is n seeded digits.
+version: 1
+tag: en-IN
+name_order: given-family
+country: India
+currency: { code: INR, symbol: "₹" }
+phone: { prefix: "+91", formats: ["9{9}"] }
+address: "{number} {street}, {city}"
+first_names: [
+  Aarav, Priya, Arjun, Kavya, Rohan, Ananya, Vikram, Meera, Karthik, Divya,
+  Rahul, Sneha, Aditya, Lakshmi, Siddharth, Pooja, Naveen, Deepa, Varun, Nithya,
+  Aadhav, Abhay, Abhishek, Ajay, Akash, Amit, Anand, Anil, Anirudh, Ankit,
+  Arvind, Ashok, Ashwin, Bharat, Chandan, Dev, Dhruv, Dinesh, Ganesh, Gaurav,
+  Girish, Gopal, Harish, Hemant, Imran, Ishaan, Jayant, Kabir, Kamal, Kiran,
+  Krishna, Kunal, Lokesh, Madhav, Mahesh, Manoj, Mohan, Mukesh, Murali, Nikhil,
+  Nitin, Omkar, Pranav, Prakash, Pradeep, Raghav, Rajesh, Rajiv, Ramesh, Ranjit,
+  Ravi, Sachin, Sandeep, Sanjay, Santosh, Saurabh, Shankar, Shiv, Srinivas, Suresh,
+  Sunil, Tarun, Tushar, Uday, Vijay, Vinay, Vishal, Yash, Yogesh, Zaid,
+  Farhan, Irfan, Salman, Rameez, Harpreet, Gurpreet, Jaspreet, Manpreet, Balwinder, Sukhdev,
+  Biswajit, Debashish, Soumya, Subhash, Sudhir, Venkat, Mohit, Naresh, Pavan, Jagan, Hari,
+  Aditi, Aishwarya, Akshara, Amrita, Anjali, Anita, Archana, Asha, Bhavana, Chitra,
+  Deepika, Devi, Disha, Gauri, Geeta, Gayatri, Harini, Indira, Isha, Jaya,
+  Jyoti, Kalpana, Kamala, Komal, Lavanya, Leela, Madhuri, Mala, Malini, Manisha,
+  Mansi, Meenakshi, Mythili, Namrata, Neha, Nisha, Nandini, Padma, Parvati, Pallavi,
+  Poonam, Prabha, Pratibha, Preeti, Radha, Rajeshwari, Rekha, Renuka, Ritu, Roshni,
+  Rukmini, Saanvi, Sakshi, Sangeeta, Sarita, Savitri, Seema, Shalini, Shanthi, Sharmila,
+  Shreya, Shruti, Sita, Smita, Sonal, Sunita, Sushma, Swati, Tanvi, Tara,
+  Trisha, Uma, Usha, Vaishnavi, Vandana, Vani, Vidya, Vimala, Yamini, Zoya,
+  Fatima, Ayesha, Nazia, Simran, Harleen, Amandeep, Rashmi, Sudha, Janaki, Revathi,
+  Saranya, Bhuvana,
+]
+last_names: [
+  Sharma, Iyer, Reddy, Nair, Patel, Gupta, Rao, Menon, Singh, Krishnan,
+  Das, Joshi, Kumar, Pillai, Mehta, Subramanian, Bose, Chatterjee, Shetty, Verma,
+  Agarwal, Agrawal, Ahluwalia, Ahmed, Akhtar, Ansari, Arora, Bajaj, Bansal, Banerjee,
+  Basu, Bhat, Bhatia, Bhatt, Biswas, Chakraborty, Chauhan, Chawla, Chopra, Choudhury,
+  Dalal, Dang, Dasgupta, Desai, Deshmukh, Dhillon, Dixit, Dubey, Dutta, Ganguly,
+  Garg, Gill, Goel, Gowda, Grewal, Hegde, Husain, Jain, Jha, Kapoor,
+  Kamath, Kaur, Khan, Khanna, Kulkarni, Kohli, Lal, Malhotra, Malik, Mandal,
+  Mishra, Mukherjee, Murthy, Naidu, Narayan, Nambiar, Pandey, Pandit, Parekh, Patil,
+  Prasad, Raghavan, Rajan, Rastogi, Rathore, Saha, Sahu, Saini, Sen, Seth,
+  Shah, Shaikh, Shukla, Sinha, Srinivasan, Sethi, Tiwari, Thakur, Trivedi, Varma,
+  Venkatesh, Wadhwa, Yadav, Zaveri, Naik, Pai, Kini, Acharya, Amin, Anand,
+  Bhagat, Bhardwaj, Bhattacharya, Borah, Chandra, Chaudhary, Datta, Dave, Gandhi, Ghosh,
+  Goswami, Gokhale, Handa, Iqbal, Jadhav, Jaiswal, Kale, Karnik, Khatri, Kothari,
+  Lodha, Mahajan, Majumdar, Mallick, Mathur, Mirza, Modi, Mondal, Nayak, Oberoi,
+  Pathak, Pawar, Puri, Qureshi, Raman, Rana, Ranganathan, Roy, Sabharwal, Sandhu,
+  Sarkar, Saxena, Sheikh, Shenoy, Siddiqui, Sood, Soni, Sundaram, Suri, Swamy,
+  Tandon, Tripathi, Upadhyay, Vaidya, Vyas, Walia, Bhargava, Chandran, Gopalan, Govindan,
+  Hariharan, Kannan, Kurup, Lakshmanan, Mani, Muthu, Natarajan, Narasimhan, Padmanabhan, Raju,
+  Sekar, Selvam, Sivakumar, Sridhar, Thomas, Varghese, Mathew, Joseph, Abraham, George,
+  Fernandes, Dsouza, Pinto, Rodrigues, Gomes, Menezes, Almeida, Pereira, Lobo,
+  Bhalla, Chhabra, Tyagi, Rawat, Negi,
+]
+streets: [
+  MG Road, Anna Salai, Gandhi Nagar, Nehru Street, Park Avenue, Lake View Road,
+  Temple Street, Station Road, Church Street, Residency Road, Brigade Road,
+  Cunningham Road, Race Course Road, Mall Road, Link Road, Ring Road,
+  Main Bazaar Road, Industrial Estate Road, Gandhi Road, Nehru Road,
+  Tank Bund Road, Beach Road, Market Road, Hill Road, Palace Road, College Road,
+  Subhash Nagar, Rajaji Salai, Raja Street, Bazaar Street,
+]
+places:
+  - { city: Chennai, state: Tamil Nadu, postcode: "600001" }
+  - { city: Coimbatore, state: Tamil Nadu, postcode: "641001" }
+  - { city: Madurai, state: Tamil Nadu, postcode: "625001" }
+  - { city: Bengaluru, state: Karnataka, postcode: "560001" }
+  - { city: Mumbai, state: Maharashtra, postcode: "400001" }
+  - { city: Pune, state: Maharashtra, postcode: "411001" }
+  - { city: Hyderabad, state: Telangana, postcode: "500001" }
+  - { city: Kochi, state: Kerala, postcode: "682001" }
+  - { city: Delhi, state: Delhi, postcode: "110001" }
+  - { city: Kolkata, state: West Bengal, postcode: "700001" }
+  - { city: Ahmedabad, state: Gujarat, postcode: "380{3}" }
+  - { city: Surat, state: Gujarat, postcode: "395{3}" }
+  - { city: Vadodara, state: Gujarat, postcode: "390{3}" }
+  - { city: Rajkot, state: Gujarat, postcode: "360{3}" }
+  - { city: Jaipur, state: Rajasthan, postcode: "302{3}" }
+  - { city: Jodhpur, state: Rajasthan, postcode: "342{3}" }
+  - { city: Udaipur, state: Rajasthan, postcode: "313{3}" }
+  - { city: Kota, state: Rajasthan, postcode: "324{3}" }
+  - { city: Lucknow, state: Uttar Pradesh, postcode: "226{3}" }
+  - { city: Kanpur, state: Uttar Pradesh, postcode: "208{3}" }
+  - { city: Agra, state: Uttar Pradesh, postcode: "282{3}" }
+  - { city: Varanasi, state: Uttar Pradesh, postcode: "221{3}" }
+  - { city: Noida, state: Uttar Pradesh, postcode: "201{3}" }
+  - { city: Prayagraj, state: Uttar Pradesh, postcode: "211{3}" }
+  - { city: Meerut, state: Uttar Pradesh, postcode: "250{3}" }
+  - { city: Bhopal, state: Madhya Pradesh, postcode: "462{3}" }
+  - { city: Indore, state: Madhya Pradesh, postcode: "452{3}" }
+  - { city: Gwalior, state: Madhya Pradesh, postcode: "474{3}" }
+  - { city: Jabalpur, state: Madhya Pradesh, postcode: "482{3}" }
+  - { city: Nagpur, state: Maharashtra, postcode: "440{3}" }
+  - { city: Nashik, state: Maharashtra, postcode: "422{3}" }
+  - { city: Aurangabad, state: Maharashtra, postcode: "431{3}" }
+  - { city: Thane, state: Maharashtra, postcode: "400{3}" }
+  - { city: Kolhapur, state: Maharashtra, postcode: "416{3}" }
+  - { city: Visakhapatnam, state: Andhra Pradesh, postcode: "530{3}" }
+  - { city: Vijayawada, state: Andhra Pradesh, postcode: "520{3}" }
+  - { city: Guntur, state: Andhra Pradesh, postcode: "522{3}" }
+  - { city: Tirupati, state: Andhra Pradesh, postcode: "517{3}" }
+  - { city: Warangal, state: Telangana, postcode: "506{3}" }
+  - { city: Mysuru, state: Karnataka, postcode: "570{3}" }
+  - { city: Mangaluru, state: Karnataka, postcode: "575{3}" }
+  - { city: Hubballi, state: Karnataka, postcode: "580{3}" }
+  - { city: Belagavi, state: Karnataka, postcode: "590{3}" }
+  - { city: Thiruvananthapuram, state: Kerala, postcode: "695{3}" }
+  - { city: Kozhikode, state: Kerala, postcode: "673{3}" }
+  - { city: Thrissur, state: Kerala, postcode: "680{3}" }
+  - { city: Salem, state: Tamil Nadu, postcode: "636{3}" }
+  - { city: Tiruchirappalli, state: Tamil Nadu, postcode: "620{3}" }
+  - { city: Tirunelveli, state: Tamil Nadu, postcode: "627{3}" }
+  - { city: Erode, state: Tamil Nadu, postcode: "638{3}" }
+  - { city: Vellore, state: Tamil Nadu, postcode: "632{3}" }
+  - { city: Bhubaneswar, state: Odisha, postcode: "751{3}" }
+  - { city: Cuttack, state: Odisha, postcode: "753{3}" }
+  - { city: Patna, state: Bihar, postcode: "800{3}" }
+  - { city: Gaya, state: Bihar, postcode: "823{3}" }
+  - { city: Ranchi, state: Jharkhand, postcode: "834{3}" }
+  - { city: Jamshedpur, state: Jharkhand, postcode: "831{3}" }
+  - { city: Guwahati, state: Assam, postcode: "781{3}" }
+  - { city: Siliguri, state: West Bengal, postcode: "734{3}" }
+  - { city: Howrah, state: West Bengal, postcode: "711{3}" }
+  - { city: Durgapur, state: West Bengal, postcode: "713{3}" }
+  - { city: Chandigarh, state: Chandigarh, postcode: "160{3}" }
+  - { city: Ludhiana, state: Punjab, postcode: "141{3}" }
+  - { city: Amritsar, state: Punjab, postcode: "143{3}" }
+  - { city: Jalandhar, state: Punjab, postcode: "144{3}" }
+  - { city: Dehradun, state: Uttarakhand, postcode: "248{3}" }
+  - { city: Shimla, state: Himachal Pradesh, postcode: "171{3}" }
+  - { city: Jammu, state: Jammu and Kashmir, postcode: "180{3}" }
+  - { city: Srinagar, state: Jammu and Kashmir, postcode: "190{3}" }
+  - { city: Raipur, state: Chhattisgarh, postcode: "492{3}" }
+  - { city: Panaji, state: Goa, postcode: "403{3}" }
+  - { city: Faridabad, state: Haryana, postcode: "121{3}" }
+  - { city: Gurugram, state: Haryana, postcode: "122{3}" }
+  - { city: Ambala, state: Haryana, postcode: "134{3}" }
+  - { city: Puducherry, state: Puducherry, postcode: "605{3}" }
+  - { city: Imphal, state: Manipur, postcode: "795{3}" }
+  - { city: Shillong, state: Meghalaya, postcode: "793{3}" }

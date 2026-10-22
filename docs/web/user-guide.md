@@ -62,7 +62,7 @@ Warnings flag schema keywords the data generator ignores (like `pattern` or `uni
 | `kaanal up -d [--wait 15s] [-c f] [--port p] [--host ip]`                                                                          | Start in the background; returns when the server answers, with the URLs. A second `up -d` prints the running instance and exits 0. See [lifecycle.md](lifecycle.md).                                              |
 | `kaanal down [--timeout 5s]`                                                                                                       | Stop the running instance: drain, then force-kill only a verified kaanal process. Exits 0 when nothing is running. With `--endpoint` it stops a remote instance instead: [remote down](lifecycle.md#remote-down). |
 | `kaanal validate [-c f]`                                                                                                           | Check config, topology and specs.                                                                                                                                                                                 |
-| `kaanal schema`                                                                                                                    | Print the JSON Schema; save it and point your editor's YAML plugin at it.                                                                                                                                         |
+| `kaanal schema [config\|dictionary\|pack]`                                                                                         | Print the JSON Schema of `kaanal.yaml` (default), `data.yaml` or a `locales/<tag>.yaml` pack; save it and point your editor's YAML plugin at it.                                                                  |
 | `kaanal endpoints [-c f] [--write]`                                                                                                | Print skeleton entries for spec routes with none; `--write` appends them to the endpoints file.                                                                                                                   |
 | `kaanal status`                                                                                                                    | Table of nodes with their effective chaos (scenarios plus live) and the active scenario names.                                                                                                                    |
 | `kaanal chaos set [node] [--route "GET /x"] [--latency 300ms] [--error-rate 10%] [--error 503] [--kind hang] [--down] [--for 30s]` | Change chaos live. Fields merge — set only what you name. `--for` reverts what this command sets after that long.                                                                                                 |
@@ -170,6 +170,91 @@ access-control-allow-origin: *
 - When a node is full, a request queues and the trace shows it before the hop it waited for: `...,net=1.0ms,db.wait=98.0ms,db.read=100.0ms`. A node with a `rate_limit` answers `429` with a `Retry-After` header (whole seconds) once its tokens run out.
 - `X-Request-Id` is the request's id. Run `kaanal trace r04f2-0042` to see that request hop by hop, or `kaanal logs` for the latest ones; the 1000 most recent are kept. See [observability.md](observability.md).
 - **CORS** is wide open on mock routes, so any local frontend just works.
+
+## Data and locales
+
+Generated bodies follow your OpenAPI response schemas. Three things shape what the values look like: the **locale** (whose names, places, phones and currency), the **dictionary** (which generator fills which field name) and the schema keywords themselves. Same Kaanal version, config, data files and `seed:` give the same bytes every time.
+
+### Locale
+
+```yaml
+version: 1
+locale: en-US              # the project default; en-IN if omitted
+nodes:
+  app:    { type: service, spec: openapi.yaml }
+  eu-api: { type: service, spec: eu.yaml, locale: de-DE }   # this node's routes use de-DE
+```
+
+- `locale:` is a tag such as `en-IN` or `de-DE`. A node's own `locale:` beats the project default; the locale comes from the node that owns the route.
+- `en-IN` (names, `+91`, `INR`, `India`) and `en-US` (`+1`, `USD`, `United States`) are built in.
+- Any other tag needs a pack: drop `locales/<tag>.yaml` next to `kaanal.yaml`. A pack with a built-in's tag replaces it. [Data packs](data-packs.md) shows how to write one and where Kaanal looks.
+- An unknown locale is a startup error that lists the available tags (and says `did you mean` when only the case differs). `kaanal validate` and `kaanal up` check every pack in `locales/`, used or not.
+
+### Dictionary
+
+`data.yaml` next to `kaanal.yaml` (or `data: path/to/file.yaml` at the top level) overrides the built-in field dictionary of about 150 names:
+
+```yaml
+version: 1
+fields:
+  price:  { gen: money, min: 99, max: 4999 }
+  status: { gen: pick, from: [paid, refunded, pending] }
+  sku:    { gen: template, value: "SKU-{digits:6}" }
+  "*id":  [{ gen: uuid }, { gen: integer, min: 1, max: 99999 }]
+```
+
+Field names match whatever their style (`userEmail`, `user_email`); a `*suffix` key matches whole trailing words only (`*id` matches `userId`, not `paid`); an entry can be a list, the first generator that fits the field's type applying. All of it, the generator list and the error messages are in [Data packs](data-packs.md#writing-a-dictionary).
+
+Precedence, first match wins:
+
+1. schema `example`, then `examples` (a response-level `example`/`examples` beats the schema's own);
+2. `const`, then `enum`;
+3. `oneOf`/`anyOf`: the seed picks a branch;
+4. your `data.yaml`;
+5. `format`;
+6. the built-in dictionary;
+7. type and bounds defaults.
+
+The schema's type and bounds always win over a dictionary entry: numbers are clamped to `minimum`/`maximum`, strings fitted to `maxLength` (in characters). An entry that cannot fit its field is skipped. A misfit in your `data.yaml` is a warning from `kaanal validate` and `kaanal up` that names the endpoint and field; a misfit built-in entry is skipped silently.
+
+### Schema keywords
+
+| Keyword                           | What Kaanal does                                                                                                                                                                                                      |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `example`, `examples`             | Used verbatim; `examples` (a list, or an OpenAPI map of `{ value }`) is picked from by seed.                                                                                                                          |
+| `const`                           | The constant.                                                                                                                                                                                                         |
+| `format`                          | Adds `hostname`, `ipv4`/`ipv6` (documentation ranges only: `198.51.100.x`, `203.0.113.x`, `2001:db8::`), `byte`, `password`, `duration` and `int32`/`int64` bounds to `email`, `uuid`, `date-time`, `date` and `uri`. |
+| `oneOf`, `anyOf`                  | The seed picks one branch, uniformly. Adding or reordering other properties never changes the pick.                                                                                                                   |
+| `nullable`, `type: [x, "null"]`   | Read; a real value is always generated, never `null`.                                                                                                                                                                 |
+| `additionalProperties` (a schema) | 0 to 3 extra seeded keys (`key1234`); none for `false`, `true` or an absent keyword.                                                                                                                                  |
+| `discriminator`                   | The chosen branch gets its tag value; see below.                                                                                                                                                                      |
+
+#### Discriminators
+
+With `oneOf`/`anyOf` and a `discriminator`, the picked branch's tag property is set so the body matches exactly one branch:
+
+- With a `mapping`, the tag is a mapping key that names that branch (by `#/components/schemas/Dog` or just `Dog`). A branch named by several keys gets one of them, by seed.
+- Without a `mapping`, the tag is a single-value `enum` or a `const` on the discriminator property of the branch. Any non-empty `enum` counts.
+- There is **no implicit tag** from the component name: with neither a mapping nor an `enum`/`const`, the tag is generated like any other field.
+- An object-level `example` on a branch beats the tag.
+
+`kaanal validate` and `kaanal up` warn about the cases that cannot work:
+
+- `discriminator 'petType' has no mapping, enum or const for oneOf branch 1; its tag is generated normally`
+- `discriminator mapping 'cat' names no oneOf/anyOf branch; it is never generated`
+- `discriminator has no propertyName and is ignored`
+
+### Behaviour changes in this release
+
+Kaanal is pre-1.0, and the same version, config, files and seed give the same data, but data may change between `v0.0.x` releases. If you diff generated bodies or commit them as fixtures, expect these differences:
+
+- All built-in output is new: `en-IN` names, places, phones and addresses come from a larger pack, and other values may draw differently. Fixtures that must never change belong in an `override:` body or a schema `example`.
+- `oneOf` and `anyOf` used to always generate the first branch; they now pick a branch by seed.
+- `ipv4` values moved to documentation ranges, `ipv6` and `hostname` are new (`2001:db8::...`, `*.example.com`).
+- `street` is a street name (it used to be the full address), `status` picks from `active`, `inactive` and `pending` (it was always `active`), and any field ending in `At` or `_at` (`shippedAt`, `expires_at`) is a timestamp.
+- Suffix matching is by whole word. An all-lower-case compound such as `unitprice` no longer matches the money suffixes (`unitPrice` and `unit_price` do), and `valid`, `paid` or `android` never match `*id`.
+- New keywords change how much of a body's value budget a schema uses (`const`, `additionalProperties`, `oneOf`), so a very large nested schema may reach its cap at a different place.
+- `discriminator` is no longer reported as an ignored keyword.
 
 ## Chaos, live
 

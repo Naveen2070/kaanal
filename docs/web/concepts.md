@@ -66,7 +66,7 @@ By default (`determinism: controlled`) this holds on every run. With `determinis
 
 Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. An `override:` in `endpoints:` beats generation entirely.
 
-All data is synthetic; emails use `example.com`.
+All data is synthetic; emails use `example.com`. Names, places, phones and currency come from the node's locale pack and field names map to generators through an editable dictionary: see [Data and locales](user-guide.md#data-and-locales) and [data-packs.md](data-packs.md).
 
 ## What Kaanal is not (yet)
 

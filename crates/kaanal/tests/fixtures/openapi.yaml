@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info: { title: Locale fixture, version: "1.0" }
+paths:
+  /people:
+    get:
+      responses:
+        "200":
+          description: People
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 5
+                maxItems: 5
+                items:
+                  type: object
+                  properties:
+                    lastName: { type: string, maxLength: 1 }
+                    firstName: { type: string }
+                    email: { type: string }
+                    city: { type: string }
+                    currency: { type: string }

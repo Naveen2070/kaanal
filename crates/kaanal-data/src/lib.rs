@@ -9,11 +9,19 @@
 #![warn(missing_docs)]
 
 mod api;
+mod dataset;
+mod dictionary;
 mod empty;
 mod generate;
+mod pack;
 mod warn;
 mod words;
 
 pub use api::{ApiModel, Endpoint};
+pub use dataset::{DEFAULT_LOCALE, DataSet, Options, valid_locale_tag};
+pub use dictionary::{Dictionary, dictionary_schema, dictionary_warnings};
 pub use empty::{empty, empty_of_value};
 pub use generate::{apply_params, generate};
+pub use pack::{
+    Currency, DataError, Name, NameOrder, Pack, Phone, Place, builtin_tags, pack_schema,
+};

@@ -68,7 +68,7 @@ When developing frontends, mobile apps, or microservices:
 
 Kaanal solves this with a **single YAML topology file** and an **OpenAPI 3.0 specification**:
 
-- Serves realistic, coherent synthetic JSON (names, emails, phones, addresses, dates).
+- Serves realistic, coherent synthetic JSON (names, emails, phones, addresses, dates) in your locale (built-in `en-IN` and `en-US`, or your own pack), with an editable field dictionary: see [data packs](docs/web/data-packs.md).
 - Simulates multi-hop latency (`gateway.proc` + `network` + `service.proc` + `database.op`).
 - Injects live chaos (latency, error rates, node down) via CLI, HTTP API, or an embedded Web UI.
 - Remains **100% deterministic** for a given seed — tests run reproducibly on CI and local workstations.
@@ -210,7 +210,7 @@ All CLI commands run from the project directory where `kaanal up` was executed:
 | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `kaanal up [-c config] [--port port] [--host host]`                                | Start the mock server in foreground.                                                                                                   |
 | `kaanal validate [-c config]`                                                      | Validate topology, YAML syntax, and OpenAPI specs.                                                                                     |
-| `kaanal schema`                                                                    | Print the JSON Schema for editor autocomplete.                                                                                         |
+| `kaanal schema [config\|dictionary\|pack]`                                         | Print the JSON Schema for editor autocomplete: `kaanal.yaml`, a `data.yaml` dictionary or a `locales/<tag>.yaml` pack.                 |
 | `kaanal endpoints [--write]`                                                       | Add skeleton entries for spec routes to the endpoints file (append-only).                                                              |
 | `kaanal status`                                                                    | Show running nodes, the effective chaos and the active scenarios.                                                                      |
 | `kaanal chaos set [node] [flags]`                                                  | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--route "GET /x"`, `--down`).                     |
@@ -244,6 +244,7 @@ Full documentation is located in the [`docs/`](docs/) directory:
 - [User Guide](docs/web/user-guide.md) — End-user operational guide and configuration reference.
 - [Control API Reference](docs/web/control-api.md) — HTTP reference for `/__kaanal/*`.
 - [Scenarios](docs/web/scenarios.md) — Named chaos bundles: YAML, stacking, CLI, API, and a Playwright `beforeEach` recipe.
+- [Data Packs](docs/web/data-packs.md) — Locale packs, the field dictionary, `kaanal schema`, and how to contribute a pack.
 - [Pins](docs/web/pins.md) — Force an endpoint to answer as loading, empty, error or slow; `kaanal cycle`.
 - [Core Concepts](docs/web/concepts.md) — Topology DAGs, cost models, and chaos propagation explained.
 - [Web UI Guide](docs/web/web-ui.md) — Live status page features, telemetry counters, and security rules.

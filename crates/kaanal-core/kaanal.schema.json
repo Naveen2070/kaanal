@@ -348,6 +348,15 @@
                 "null"
               ]
             },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "proc": {
               "anyOf": [
                 {
@@ -411,6 +420,15 @@
                 }
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
+            },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "proc": {
               "anyOf": [
@@ -494,6 +512,15 @@
               ],
               "description": "Preset that fills inline ops the user left out (estimates)."
             },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "ops": {
               "anyOf": [
                 {
@@ -576,6 +603,15 @@
                 }
               ],
               "description": "Preset that fills ops the user left out (estimates)."
+            },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "ops": {
               "anyOf": [
@@ -675,6 +711,15 @@
                 "null"
               ]
             },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "miss": {
               "anyOf": [
                 {
@@ -743,6 +788,15 @@
               "minimum": 0,
               "type": [
                 "number",
+                "null"
+              ]
+            },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -832,6 +886,15 @@
                 }
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
+            },
+            "locale": {
+              "default": null,
+              "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "proc": {
               "anyOf": [
@@ -1293,6 +1356,14 @@
   "additionalProperties": false,
   "description": "The parsed `kaanal.yaml` file.",
   "properties": {
+    "data": {
+      "default": null,
+      "description": "Field dictionary for generated data, relative to this file. Default: `data.yaml` next\nto this file, when it exists.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "determinism": {
       "$ref": "#/$defs/Determinism",
       "description": "`controlled` (default): timings and failures follow `seed`, so a run can be replayed.\n`realistic`: a seed is picked at startup (and printed), so runs differ like a real system."
@@ -1314,6 +1385,15 @@
         }
       ],
       "description": "Per-endpoint chains, overrides and error maps: a path to a YAML file (relative to this\nfile, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `\"METHOD /path\"`."
+    },
+    "locale": {
+      "default": null,
+      "description": "Locale pack for generated data (names, places, phone, currency), e.g. `en-US`. A node's\nown `locale` wins. Default `en-IN`. A built-in tag, or a pack you add as\n`locales/<tag>.yaml` next to this file; `kaanal validate` lists the available tags.",
+      "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "nodes": {
       "additionalProperties": {

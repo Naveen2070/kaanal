@@ -1,0 +1,214 @@
+# Built-in field dictionary, authored for Kaanal (design D1.2).
+#
+# Keys are normalised (lower-case, `_` and `-` removed), so `firstName`, `first_name` and
+# `first-name` share one key. A key starting `*` matches the last whole words of a field
+# name (`*id` matches `userId` and `order_id`, not `paid`). An exact key beats a suffix
+# key; a longer suffix beats a shorter one.
+#
+# An entry is one generator or a list tried in order: the first whose output fits the
+# field's schema type applies, else the field falls back to constraint defaults.
+# A project `data.yaml` with the same shape is consulted before `format`; this file after.
+version: 1
+fields:
+  # --- identity ---------------------------------------------------------------
+  first_name: { gen: first_name }
+  given_name: { gen: first_name }
+  forename: { gen: first_name }
+  middle_name: { gen: first_name }
+  last_name: { gen: last_name }
+  surname: { gen: last_name }
+  family_name: { gen: last_name }
+  name: { gen: full_name }
+  full_name: { gen: full_name }
+  display_name: { gen: full_name }
+  "*full_name": { gen: full_name }
+  contact_name: { gen: full_name }
+  customer_name: { gen: full_name }
+  author: { gen: full_name }
+  author_name: { gen: full_name }
+  owner_name: { gen: full_name }
+  username: { gen: username }
+  login: { gen: username }
+  handle: { gen: username }
+  nickname: { gen: username }
+  screen_name: { gen: username }
+  age: { gen: integer, min: 18, max: 80 }
+  gender: { gen: pick, from: [female, male, non-binary] }
+  date_of_birth: { gen: date }
+  dob: { gen: date }
+  birth_date: { gen: date }
+  birthday: { gen: date }
+  role: { gen: pick, from: [admin, editor, viewer] }
+  job_title: { gen: pick, from: [Engineer, Designer, Analyst, Manager, Consultant] }
+  department: { gen: pick, from: [Sales, Engineering, Support, Finance, Operations] }
+
+  # --- contact ----------------------------------------------------------------
+  email: { gen: email }
+  "*email": { gen: email }
+  email_address: { gen: email }
+  "*email_address": { gen: email }
+  phone: { gen: phone }
+  "*phone": { gen: phone }
+  phone_number: { gen: phone }
+  "*phone_number": { gen: phone }
+  mobile: { gen: phone }
+  mobile_number: { gen: phone }
+  telephone: { gen: phone }
+  tel: { gen: phone }
+  fax: { gen: phone }
+  contact_number: { gen: phone }
+  website: { gen: url }
+  homepage: { gen: url }
+
+  # --- location ---------------------------------------------------------------
+  address: { gen: address }
+  # postal only: no `*address`, so ipAddress, macAddress, walletAddress stay out
+  billing_address: { gen: address }
+  shipping_address: { gen: address }
+  delivery_address: { gen: address }
+  home_address: { gen: address }
+  mailing_address: { gen: address }
+  postal_address: { gen: address }
+  street_address: { gen: address }
+  address_line1: { gen: address }
+  street: { gen: street }
+  "*street": { gen: street }
+  street_name: { gen: street }
+  city: { gen: city }
+  "*city": { gen: city }
+  town: { gen: city }
+  state: { gen: state }
+  province: { gen: state }
+  region: { gen: state }
+  pincode: { gen: postcode }
+  zip: { gen: postcode }
+  zipcode: { gen: postcode }
+  "*zip_code": { gen: postcode }
+  postal_code: { gen: postcode }
+  "*postal_code": { gen: postcode }
+  postcode: { gen: postcode }
+  country: { gen: country }
+  "*country": { gen: country }
+  country_name: { gen: country }
+  lat: { gen: latitude }
+  latitude: { gen: latitude }
+  "*latitude": { gen: latitude }
+  lng: { gen: longitude }
+  lon: { gen: longitude }
+  longitude: { gen: longitude }
+  "*longitude": { gen: longitude }
+
+  # --- money ------------------------------------------------------------------
+  price: { gen: money }
+  "*price": { gen: money }
+  total: { gen: money }
+  "*total": { gen: money }
+  amount: { gen: money }
+  "*amount": { gen: money }
+  cost: { gen: money }
+  "*cost": { gen: money }
+  subtotal: { gen: money }
+  "*subtotal": { gen: money }
+  tax: { gen: money, min: 0, max: 500 }
+  discount: { gen: money, min: 0, max: 500 }
+  shipping: { gen: money, min: 0, max: 200 }
+  fee: { gen: money, min: 0, max: 200 }
+  "*fee": { gen: money, min: 0, max: 200 }
+  balance: { gen: money, min: 0, max: 100000 }
+  salary: { gen: money, min: 20000, max: 200000 }
+  currency: { gen: currency }
+  "*currency": { gen: currency }
+  currency_code: { gen: currency }
+
+  # --- time -------------------------------------------------------------------
+  created_at: { gen: timestamp }
+  updated_at: { gen: timestamp }
+  deleted_at: { gen: timestamp }
+  modified_at: { gen: timestamp }
+  "*at": { gen: timestamp }
+  created_on: { gen: timestamp }
+  updated_on: { gen: timestamp }
+  timestamp: { gen: timestamp }
+  "*timestamp": { gen: timestamp }
+  "*time": { gen: timestamp }
+  date: { gen: date }
+  "*date": { gen: date }
+  year: { gen: integer, min: 1990, max: 2025 }
+  month: { gen: integer, min: 1, max: 12 }
+  day: { gen: integer, min: 1, max: 28 }
+  duration_minutes: { gen: integer, min: 5, max: 240 }
+
+  # --- commerce ---------------------------------------------------------------
+  quantity: { gen: integer, min: 1, max: 10 }
+  qty: { gen: integer, min: 1, max: 10 }
+  count: { gen: integer, min: 1, max: 10 }
+  "*count": { gen: integer, min: 0, max: 500 }
+  "*quantity": { gen: integer, min: 1, max: 10 }
+  stock: { gen: integer, min: 0, max: 500 }
+  inventory: { gen: integer, min: 0, max: 500 }
+  rating: { gen: integer, min: 1, max: 5 }
+  stars: { gen: integer, min: 1, max: 5 }
+  sku: { gen: template, value: "SKU-{digits:6}" }
+  order_number: { gen: template, value: "ORD-{digits:8}" }
+  invoice_number: { gen: template, value: "INV-{digits:6}" }
+  tracking_number: { gen: template, value: "TRK{letters:2}{digits:10}" }
+  coupon_code: { gen: template, value: "{letters:4}{digits:2}" }
+  status: { gen: pick, from: [active, inactive, pending] }
+  order_status: { gen: pick, from: [placed, shipped, delivered, cancelled] }
+  payment_status: { gen: pick, from: [paid, pending, refunded, failed] }
+  payment_method: { gen: pick, from: [card, cash, bank_transfer, wallet] }
+  category: { gen: pick, from: [electronics, books, clothing, home, sports] }
+  color: { gen: pick, from: [red, blue, green, black, white] }
+  colour: { gen: pick, from: [red, blue, green, black, white] }
+  size: { gen: pick, from: [S, M, L, XL] }
+  weight: { gen: money, min: 0.1, max: 50 }
+  unit: { gen: pick, from: [piece, kg, litre, box] }
+  priority: { gen: pick, from: [low, medium, high] }
+
+  # --- content ----------------------------------------------------------------
+  description: { gen: text }
+  "*description": { gen: text }
+  bio: { gen: text }
+  summary: { gen: text }
+  about: { gen: text }
+  content: { gen: text, kind: paragraph }
+  body: { gen: text, kind: paragraph }
+  comment: { gen: text }
+  message: { gen: text }
+  note: { gen: text }
+  notes: { gen: text }
+  caption: { gen: text }
+  title: { gen: text }
+  subject: { gen: text }
+  headline: { gen: text }
+  review: { gen: text, kind: paragraph }
+  tag: { gen: pick, from: [new, popular, sale, featured] }
+  language: { gen: pick, from: [en, hi, ta, es, de] }
+
+  # --- tech -------------------------------------------------------------------
+  id: [{ gen: uuid }, { gen: integer, min: 1, max: 99999 }]
+  "*id": [{ gen: uuid }, { gen: integer, min: 1, max: 99999 }]
+  uuid: { gen: uuid }
+  "*uuid": { gen: uuid }
+  guid: { gen: uuid }
+  url: { gen: url }
+  "*url": { gen: url }
+  uri: { gen: url }
+  "*uri": { gen: url }
+  link: { gen: url }
+  "*link": { gen: url }
+  href: { gen: url }
+  image: { gen: url }
+  avatar: { gen: url }
+  thumbnail: { gen: url }
+  photo: { gen: url }
+  port: { gen: integer, min: 1024, max: 65535 }
+  # documentation ranges only (RFC 5737, RFC 3849); MACs locally administered
+  ip_address: { gen: pick, from: [192.0.2.10, 198.51.100.23, 203.0.113.7, 203.0.113.42] }
+  ipv6_address: { gen: pick, from: ["2001:db8::1", "2001:db8::42", "2001:db8:0:1::7"] }
+  mac_address: { gen: template, value: "02:00:00:{digits:2}:{digits:2}:{digits:2}" }
+  version: { gen: template, value: "{digits:1}.{digits:1}.{digits:1}" }
+  mime_type: { gen: pick, from: [application/json, text/plain, image/png, application/pdf] }
+  content_type: { gen: pick, from: [application/json, text/plain, image/png, application/pdf] }
+  file_name: { gen: template, value: "file-{digits:4}.pdf" }
+  "*size": { gen: integer, min: 1, max: 1000 }

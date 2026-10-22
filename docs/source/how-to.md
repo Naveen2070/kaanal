@@ -52,9 +52,9 @@ Everything lives in `crates/kaanal-core/src/dist.rs` (distributions) and `exec.r
 
 ## Change generated data
 
-Generator: `crates/kaanal-data/src/generate.rs`. An `allOf` is merged into one schema first (`merge_all_of`); then the priority order is `example → enum → oneOf/anyOf → type (format → field-name heuristic → constraints → fallback)`.
+Generator: `crates/kaanal-data/src/generate.rs`. An `allOf` is merged into one schema first (`merge_all_of`); then the priority order is `example → examples → const → enum → oneOf/anyOf → type (project dictionary → format → built-in dictionary → constraints)`.
 
-- Field-name heuristics live in `heuristic()`; word lists in `words.rs`.
+- Field names map to generators in `crates/kaanal-data/data/dictionary.yaml` (a closed generator set in `dictionary.rs`); names, places, phones and currency come from the locale packs in `data/locales/` (`pack.rs`). Edit those files, not Rust, to change what a field looks like; `words.rs` only keeps the lorem words.
 - If you add support for a schema keyword that was previously ignored, remove it from `IGNORED` in `warn.rs` — the warning list and the generator must stay in sync.
 - Rule R4.4: every field derives its seed from `(parent_seed, name, index)` via `child_seed`. Never thread one RNG through sibling fields.
 - Rule R4.5: formats beat lengths — never truncate/pad a formatted value.

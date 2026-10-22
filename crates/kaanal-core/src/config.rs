@@ -52,6 +52,16 @@ pub struct Config {
     /// More can live in `scenarios/NAME.yaml` next to this file.
     #[serde(default)]
     pub scenarios: IndexMap<String, ScenarioConfig>,
+    /// Locale pack for generated data (names, places, phone, currency), e.g. `en-US`. A node's
+    /// own `locale` wins. Default `en-IN`. A built-in tag, or a pack you add as
+    /// `locales/<tag>.yaml` next to this file; `kaanal validate` lists the available tags.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
+    /// Field dictionary for generated data, relative to this file. Default: `data.yaml` next
+    /// to this file, when it exists.
+    #[serde(default)]
+    pub data: Option<String>,
     /// **Private.** Phase One's `routes:` key, kept only to explain that it was replaced.
     #[serde(default)]
     #[schemars(skip)]
@@ -295,6 +305,19 @@ impl NodeConfig {
         }
     }
 
+    /// The node's own `locale:` tag, if set.
+    pub fn locale(&self) -> Option<&str> {
+        match self {
+            NodeConfig::Gateway(n) => n.locale.as_deref(),
+            NodeConfig::Service(n) => n.locale.as_deref(),
+            NodeConfig::Monolith(n) => n.locale.as_deref(),
+            NodeConfig::Database(n) => n.locale.as_deref(),
+            NodeConfig::Cache(n) => n.locale.as_deref(),
+            NodeConfig::ExternalApi(n) => n.locale.as_deref(),
+            NodeConfig::Auth(n) => n.locale.as_deref(),
+        }
+    }
+
     /// The `flavor` label: free text on a gateway, a preset name on databases,
     /// monoliths and caches.
     pub fn flavor(&self) -> Option<&str> {
@@ -332,6 +355,11 @@ pub struct GatewayConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// A backend service. Without a gateway, requests for the routes in its `spec` enter here.
@@ -360,6 +388,11 @@ pub struct ServiceConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// A service that can also be its own database: with `ops` (or a `flavor`) it has inline
@@ -395,6 +428,11 @@ pub struct MonolithConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// A data store with read/write/scan costs.
@@ -424,6 +462,11 @@ pub struct DatabaseConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// A cache in front of slower nodes. Its costs are used once endpoint chains land.
@@ -459,6 +502,11 @@ pub struct CacheConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// A third-party HTTP API (payments, email). Targets come from config only.
@@ -494,6 +542,11 @@ pub struct ExternalApiConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// An identity provider: serves `POST /login` (a signed RS256 token for one of its `users`)
@@ -530,6 +583,11 @@ pub struct AuthConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
+    /// `locale`.
+    #[serde(default)]
+    #[schemars(extend("pattern" = LOCALE_PATTERN))]
+    pub locale: Option<String>,
 }
 
 /// Read/write/scan costs. Without a `flavor`, all three are required.
@@ -1596,6 +1654,43 @@ fn check_claims(
     Ok(())
 }
 
+/// **Private.** The shape every `locale:` tag must have (D1.4), for the editor schema.
+const LOCALE_PATTERN: &str = "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$";
+
+/// Whether `s` is a locale tag Kaanal accepts: `^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$` (`en`,
+/// `en-IN`, `zh-Hant-TW`). Checked at load, before a tag can reach a file lookup, so `../x`,
+/// `a/b` and `en_IN` never do. `kaanal-data` keeps the same check for pack file names.
+pub fn valid_locale_tag(s: &str) -> bool {
+    let mut parts = s.split('-');
+    let first = parts.next().unwrap_or_default();
+    (2..=3).contains(&first.len())
+        && first.bytes().all(|b| b.is_ascii_alphabetic())
+        && parts.all(|p| (2..=8).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// **Private.** Every `locale:` value has the tag shape, each error at its value. Whether the
+/// pack exists is the server's check (it loads `locales/`).
+fn check_locales(cfg: &Config) -> Result<(), Located> {
+    let places = std::iter::once((keys(&["locale"]), String::new(), cfg.locale.as_deref())).chain(
+        cfg.nodes.iter().map(|(name, n)| {
+            (
+                keys(&["nodes", name.as_str(), "locale"]),
+                format!("node '{name}': "),
+                n.locale(),
+            )
+        }),
+    );
+    for (at, ctx, tag) in places {
+        if let Some(tag) = tag.filter(|t| !valid_locale_tag(t)) {
+            return Err(Located::at_value(
+                at,
+                format!("{ctx}locale: `{tag}` is not a locale tag (like en-IN or de-DE)"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// A config parse error with an optional YAML position.
 ///
 /// `Display` renders `line:col: msg` when a position is known, so the caller can
@@ -1661,6 +1756,7 @@ impl Config {
         }
         check_auth(&cfg).map_err(|e| e.in_source(src))?;
         check_capacity(&cfg).map_err(|e| e.in_source(src))?;
+        check_locales(&cfg).map_err(|e| e.in_source(src))?;
         Ok(cfg)
     }
 }

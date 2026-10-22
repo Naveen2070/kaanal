@@ -1,8 +1,10 @@
 //! The data generator: deterministic, realistic JSON from an `OpenAPI` 3.0 schema.
 //!
 //! Same seed → same output, always. An `allOf` is first merged into one schema; then
-//! field-pick priority: `example` → `enum` → `oneOf`/`anyOf` → type, and within a type: `format` → field-name
-//! heuristic → constraints → fallback. Every field derives its own seed from
+//! field-pick priority (D1.8): `example` → `const`/`enum` → `oneOf`/`anyOf` (a branch picked
+//! by the field's own seed) → type, and within a
+//! scalar type: project dictionary → `format` → built-in dictionary → constraint defaults.
+//! A dictionary entry that cannot fit the type or bounds is skipped. Every field derives its own seed from
 //! `(parent_seed, name, index)`, so schema edits never reshuffle sibling values
 //! (rule R4.4).
 
@@ -11,6 +13,9 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde_json::{Map, Value, json};
 
+use crate::dataset::Options;
+use crate::dictionary::{Dictionary, Gen, TextKind, norm, template_key, value_fits};
+use crate::pack::{Name, NameOrder, Pack, Place, digit_count, fill};
 use crate::words;
 
 /// **Private.** Recursion ceiling; deeper nesting yields `null` instead of overflowing.
@@ -27,10 +32,12 @@ pub(crate) const MAX_MIN_LENGTH: u64 = 10_000;
 const BASE_EPOCH: i64 = 1_767_225_600;
 
 /// Deterministic JSON for an `OpenAPI` 3.0 schema whose `$ref`s are already inlined.
-/// `allOf` is merged first; then example → enum → oneOf/anyOf → type (format → field-name heuristic → constraints → fallback).
-pub fn generate(schema: &Value, field: Option<&str>, seed: u64) -> Value {
+/// `allOf` is merged first; then example → const/enum → oneOf/anyOf → type (project dictionary →
+/// format → built-in dictionary → constraint defaults). Names, places, phones, currency and
+/// country come from `opts.pack`.
+pub fn generate(schema: &Value, field: Option<&str>, seed: u64, opts: &Options) -> Value {
     let mut budget = MAX_VALUES;
-    value_for(schema, field, seed, seed, 0, &mut budget)
+    value_for(schema, field, seed, seed, 0, &mut budget, opts)
 }
 
 /// **Private.** FNV-1a 64 with a separator byte between parts. Same algorithm as
@@ -91,10 +98,11 @@ fn value_for(
     group: u64,
     depth: usize,
     budget: &mut usize,
+    opts: &Options,
 ) -> Value {
     if s.get("allOf").is_some() {
         // Merge the schemas, then generate once: parts share one seed, so one person (R6.10a).
-        return value_for(&merge_all_of(s).0, field, seed, group, depth, budget);
+        return value_for(&merge_all_of(s).0, field, seed, group, depth, budget, opts);
     }
     if depth > MAX_DEPTH || *budget == 0 {
         return Value::Null;
@@ -104,6 +112,12 @@ fn value_for(
     if let Some(ex) = s.get("example") {
         return ex.clone();
     }
+    if let Some(e) = pick_example(s, rng) {
+        return e;
+    }
+    if let Some(c) = s.get("const") {
+        return c.clone();
+    }
     if let Some(choices) = s
         .get("enum")
         .and_then(Value::as_array)
@@ -111,29 +125,27 @@ fn value_for(
     {
         return choices.choose(rng).cloned().unwrap_or(Value::Null);
     }
-    if let Some(first) = ["oneOf", "anyOf"]
-        .iter()
-        .find_map(|k| s.get(*k).and_then(Value::as_array)?.first())
-    {
+    if let Some(branches) = ["oneOf", "anyOf"].iter().find_map(|k| {
+        s.get(*k)
+            .and_then(Value::as_array)
+            .filter(|a| !a.is_empty())
+    }) {
+        // R4.4: the pick comes from this value's own seed, never a parent's or sibling's
+        // rng, so adding a property elsewhere never changes the branch. A discriminator
+        // tag is the branch's single-value `enum`/`const` (a `mapping` became one in `api`).
+        let pick = ChaCha8Rng::seed_from_u64(child_seed(seed, "branch", 0))
+            .random_range(0..branches.len());
         return value_for(
-            first,
+            &branches[pick],
             field,
             child_seed(seed, "oneOf", 0),
             group,
             depth + 1,
             budget,
+            opts,
         );
     }
-    let default_type = if s.get("properties").is_some() {
-        "object"
-    } else {
-        "string"
-    };
-    match s
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or(default_type)
-    {
+    match scalar_type(s) {
         "object" => {
             let mut out = Map::new();
             if let Some(props) = s.get("properties").and_then(Value::as_object) {
@@ -151,17 +163,99 @@ fn value_for(
                             seed,
                             depth + 1,
                             budget,
+                            opts,
                         ),
                     );
                 }
             }
+            // `additionalProperties` with a schema: up to three extra seeded keys (a name
+            // that is already a property is skipped); `false`/`true`/absent add none.
+            if let Some(ap) = s.get("additionalProperties").filter(|a| a.is_object()) {
+                let extra = child_seed(seed, "additionalProperties", 0);
+                let n = ChaCha8Rng::seed_from_u64(extra).random_range(0..=3usize);
+                for i in 0..n {
+                    let k = child_seed(extra, "key", i);
+                    let name = format!("key{}", k % 10_000);
+                    if out.contains_key(&name) {
+                        continue;
+                    }
+                    let v = value_for(ap, None, k, seed, depth + 1, budget, opts);
+                    out.insert(name, v);
+                }
+            }
             Value::Object(out)
         }
-        "array" => array_for(s, rng, seed, group, depth, budget),
-        "integer" => json!(int_for(s, field, rng)),
-        "number" => number_for(s, field, rng),
+        "array" => array_for(s, rng, seed, group, depth, budget, opts),
+        ty => scalar_for(s, field, ty, rng, group, opts),
+    }
+}
+
+/// **Private.** One entry of `examples` (an array, or an `OpenAPI` map of `{ value }`),
+/// chosen from the field's own rng; `None` when absent or empty.
+fn pick_example(s: &Value, rng: &mut ChaCha8Rng) -> Option<Value> {
+    match s.get("examples")? {
+        Value::Array(a) => a.choose(rng).cloned(),
+        Value::Object(m) => {
+            let vals: Vec<&Value> = m.values().filter_map(|e| e.get("value")).collect();
+            vals.choose(rng).map(|v| (*v).clone())
+        }
+        _ => None,
+    }
+}
+
+/// **Private.** The type the generator treats `s` as: `object`, `array`, `integer`,
+/// `number`, `boolean`, else `string` (no `type` with `properties` is an object). A type
+/// array (`["string", "null"]`) uses its first non-`null` entry; `nullable` is ignored,
+/// so a real value is always emitted.
+pub(crate) fn scalar_type(s: &Value) -> &'static str {
+    let ty = match s.get("type") {
+        Some(Value::Array(a)) => a.iter().find_map(|t| t.as_str().filter(|t| *t != "null")),
+        t => t.and_then(Value::as_str),
+    };
+    match ty {
+        Some("object") => "object",
+        Some("array") => "array",
+        Some("integer") => "integer",
+        Some("number") => "number",
+        Some("boolean") => "boolean",
+        None if s.get("properties").is_some()
+            || s.get("additionalProperties").is_some_and(Value::is_object) =>
+        {
+            "object"
+        }
+        _ => "string",
+    }
+}
+
+/// **Private.** A scalar value, in D1.8 order: project dictionary → `format` → built-in
+/// dictionary → constraint defaults.
+fn scalar_for(
+    s: &Value,
+    field: Option<&str>,
+    ty: &str,
+    rng: &mut ChaCha8Rng,
+    group: u64,
+    opts: &Options,
+) -> Value {
+    let pack = &*opts.pack;
+    let project = opts.dictionary_project.as_deref();
+    if let Some(v) = from_dictionary(project, s, field, ty, rng, group, pack) {
+        return v;
+    }
+    if ty == "string"
+        && let Some(v) = format_value(s, rng, group, pack)
+    {
+        // formats beat lengths (R4.5): never truncated or padded
+        return json!(v);
+    }
+    if let Some(v) = from_dictionary(Some(&opts.dictionary), s, field, ty, rng, group, pack) {
+        return v;
+    }
+    match ty {
+        "integer" => json!(int_for(s, rng, (0, 1000))),
+        "number" => number_for(s, rng, (0.0, 1000.0), 2),
         "boolean" => json!(rng.random_bool(0.5)),
-        _ => json!(string_for(s, field, rng, group)),
+        _ => json!(fit_length(words::pick(words::WORDS, rng).to_string(), s)),
     }
 }
 
@@ -215,36 +309,9 @@ fn merge_into(out: &mut Map<String, Value>, s: &Value, conflicts: &mut Vec<Strin
     }
 }
 
-/// **Private.** `id`, `userId`, `user_id`, `ID` are ids; `valid`, `paid`, `android` are not.
-fn is_id(field: Option<&str>) -> bool {
-    let f = field.unwrap_or("");
-    f.eq_ignore_ascii_case("id")
-        || f.ends_with("Id")
-        || f.ends_with("ID")
-        || f.ends_with("_id")
-        || f.ends_with("-id")
-}
-
-/// **Private.** `firstName`, `first_name`, `first-name` → `firstname`
-fn norm(field: Option<&str>) -> String {
-    field
-        .unwrap_or("")
-        .chars()
-        .filter(|c| *c != '_' && *c != '-')
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-/// **Private.** Integer value: heuristic ranges for known names (age, quantity, ids),
-/// bounded by `minimum`/`maximum` and their exclusive variants.
-fn int_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> i64 {
-    let f = norm(field);
-    let (mut lo, mut hi) = match f.as_str() {
-        "age" => (18, 80),
-        "quantity" | "qty" | "count" => (1, 10),
-        _ if is_id(field) => (1, 99_999),
-        _ => (0, 1000),
-    };
+/// **Private.** Integer value: a default range `(lo, hi)` (from a dictionary entry, else
+/// `0..=1000`), bounded by `minimum`/`maximum` and their exclusive variants. Needs `lo <= hi`.
+fn int_for(s: &Value, rng: &mut ChaCha8Rng, (mut lo, mut hi): (i64, i64)) -> i64 {
     let min = int_bound(s, "minimum", true);
     if let Some(m) = min {
         lo = m;
@@ -263,6 +330,11 @@ fn int_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> i64 {
                 hi.saturating_sub(1000)
             };
         }
+    }
+    if s.get("format").and_then(Value::as_str) == Some("int32") {
+        // both ends move, so `lo <= hi` still holds
+        lo = lo.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
+        hi = hi.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
     }
     rng.random_range(lo..=hi)
 }
@@ -320,19 +392,10 @@ fn exclusive(s: &Value, key: &str) -> bool {
     s.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-/// **Private.** Float value: default ranges by field name (lat/lng 6 places, money and
-/// the rest 2 places), then `minimum`/`maximum` with one-unit slack for exclusive limits.
-fn number_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng) -> Value {
-    let f = norm(field);
-    let money = ["price", "total", "amount", "cost", "subtotal"]
-        .iter()
-        .any(|k| f.ends_with(k));
-    let ((dlo, dhi), places) = match f.as_str() {
-        "lat" | "latitude" => ((8.0, 35.0), 6),
-        "lng" | "lon" | "longitude" => ((68.0, 97.0), 6),
-        _ if money => ((99.0, 4999.0), 2),
-        _ => ((0.0, 1000.0), 2),
-    };
+/// **Private.** Float value: a default range `(dlo, dhi)` rounded to `places` (from a
+/// dictionary entry, else `0..=1000` at 2 places), then `minimum`/`maximum` with one-unit
+/// slack for exclusive limits.
+fn number_for(s: &Value, rng: &mut ChaCha8Rng, (dlo, dhi): (f64, f64), places: i32) -> Value {
     // values are rounded to `places`, so a strict bound is one unit in the last place inside
     let unit = 1.0 / 10f64.powi(places);
     let (min, max) = (
@@ -380,6 +443,7 @@ fn array_for(
     group: u64,
     depth: usize,
     budget: &mut usize,
+    opts: &Options,
 ) -> Value {
     let max_items = count(s, "maxItems", false);
     // default at least one item, but never more than `maxItems` (`maxItems: 0` → `[]`)
@@ -402,6 +466,7 @@ fn array_for(
                     group,
                     depth + 1,
                     budget,
+                    opts,
                 )
             })
             .collect(),
@@ -414,107 +479,308 @@ fn round(v: f64, places: i32) -> f64 {
     (v * p).round() / p
 }
 
-/// **Private.** String value: `format` first, then the field-name heuristic, then a
-/// lorem word. Formats beat lengths (rule R4.5): `fit_length` is skipped for values
-/// that must stay well-formed.
-fn string_for(s: &Value, field: Option<&str>, rng: &mut ChaCha8Rng, group: u64) -> String {
-    let format = s.get("format").and_then(Value::as_str).unwrap_or("");
-    let v = match format {
-        "email" => email(rng, group),
+/// **Private.** A value for a known string `format`; `None` for an unknown one,
+/// which then falls through to the dictionary and lengths.
+fn format_value(s: &Value, rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> Option<String> {
+    Some(match s.get("format").and_then(Value::as_str)? {
+        "email" => email(rng, group, pack),
         "uuid" => uuid(rng),
         "date-time" => date_time(rng),
         "date" => date_time(rng)[..10].to_string(),
         "uri" | "url" => format!("https://example.com/{}", words::pick(words::WORDS, rng)),
+        // RFC 5737 documentation ranges, never a real host
         "ipv4" => format!(
-            "10.{}.{}.{}",
-            rng.random_range(0..=255),
-            rng.random_range(0..=255),
+            "{}.{}",
+            ["198.51.100", "203.0.113"][rng.random_range(0..2)],
             rng.random_range(1..=254)
         ),
-        _ => heuristic(&norm(field), is_id(field), group, rng)
-            .unwrap_or_else(|| words::pick(words::WORDS, rng).to_string()),
-    };
-    // Only formats built above must stay well-formed; unknown ones (`password`) still get lengths.
-    let structured = matches!(
-        format,
-        "email" | "uuid" | "date-time" | "date" | "uri" | "url" | "ipv4"
-    ) || keeps_format(&norm(field), is_id(field));
-    // truncating or padding an email, uuid or timestamp would make it invalid; the format wins over lengths
-    if structured { v } else { fit_length(v, s) }
-}
-
-/// **Private.** Heuristic fields whose value must stay well-formed (see `heuristic`).
-fn keeps_format(f: &str, id_like: bool) -> bool {
-    id_like
-        || f.ends_with("email")
-        || f.ends_with("phone")
-        || f.ends_with("url")
-        || matches!(
-            f,
-            "mobile" | "createdat" | "updatedat" | "deletedat" | "timestamp"
-        )
-}
-
-/// **Private.** The (city, state, pincode) of the object a field belongs to: same
-/// object, same place.
-fn place(group: u64) -> (&'static str, &'static str, &'static str) {
-    let i = stable_hash(&[&group.to_le_bytes(), b"place"]) % words::CITIES.len() as u64;
-    words::CITIES[usize::try_from(i).expect("i < CITIES.len()")]
-}
-
-/// **Private.** The (first, last) name of the person an object describes: same
-/// object, same person, so `firstName`, `lastName`, `name` and `email` agree.
-fn person(group: u64) -> (&'static str, &'static str) {
-    let pick = |list: &[&'static str], tag: &[u8]| {
-        let i = stable_hash(&[&group.to_le_bytes(), tag]) % list.len() as u64;
-        list[usize::try_from(i).expect("i < list.len()")]
-    };
-    (pick(words::FIRST, b"first"), pick(words::LAST, b"last"))
-}
-
-/// **Private.** The field-name dictionary. Returns `None` when nothing matches, so
-/// the caller falls back to a lorem word.
-fn heuristic(f: &str, id_like: bool, group: u64, rng: &mut ChaCha8Rng) -> Option<String> {
-    Some(match f {
-        "firstname" | "givenname" => person(group).0.to_string(),
-        "lastname" | "surname" | "familyname" => person(group).1.to_string(),
-        "name" | "fullname" => format!("{} {}", person(group).0, person(group).1),
-        f if f.ends_with("email") => email(rng, group),
-        f if f.ends_with("phone") || f == "mobile" => format!("+91 9{}", digits(rng, 9)),
-        "city" => place(group).0.to_string(),
-        "state" => place(group).1.to_string(),
-        "pincode" | "zip" | "zipcode" | "postalcode" => place(group).2.to_string(),
-        "country" => "India".to_string(),
-        "address" | "street" => {
-            format!(
-                "{} {}, {}",
-                rng.random_range(1..=250),
-                words::pick(words::STREETS, rng),
-                place(group).0
-            )
+        // RFC 3849 documentation prefix
+        "ipv6" => format!(
+            "2001:db8::{:x}:{:x}",
+            rng.random_range(0..=0xffff),
+            rng.random_range(1..=0xffff)
+        ),
+        "hostname" => format!("{}.example.com", words::pick(words::WORDS, rng)),
+        "byte" => base64(&rng.random::<[u8; 12]>()),
+        // formats beat lengths, but a password is plain text: fit it
+        "password" => {
+            const ALNUM: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            let p = (0..16)
+                .map(|_| char::from(ALNUM[rng.random_range(0..ALNUM.len())]))
+                .collect();
+            fit_length(p, s)
         }
-        "currency" => "INR".to_string(),
-        "createdat" | "updatedat" | "deletedat" | "timestamp" => date_time(rng),
-        "description" | "bio" | "summary" => sentence(rng),
-        "status" => "active".to_string(),
-        f if f.ends_with("url") => {
-            let n = rng.random_range(1..=9999);
-            // a bare `url` field has no stem: no empty path segment (`example.com//1234`)
-            match f.strip_suffix("url").unwrap_or(f) {
-                "" => format!("https://example.com/{n}"),
-                stem => format!("https://example.com/{stem}/{n}"),
-            }
-        }
-        _ if id_like => uuid(rng),
+        "duration" => format!(
+            "P{}DT{}H{}M",
+            rng.random_range(0..=30),
+            rng.random_range(0..24),
+            rng.random_range(0..60)
+        ),
         _ => return None,
     })
 }
 
+/// **Private.** The first generator of `field`'s entry in `d` that fits `ty` and the
+/// schema's bounds, run; `None` when there is no entry or none fits (design 11a rule 2).
+fn from_dictionary(
+    d: Option<&Dictionary>,
+    s: &Value,
+    field: Option<&str>,
+    ty: &str,
+    rng: &mut ChaCha8Rng,
+    group: u64,
+    pack: &Pack,
+) -> Option<Value> {
+    let f = field?;
+    let g = d?.lookup(f)?.iter().find(|g| g.fits(s, ty))?;
+    Some(run(g, s, f, ty, rng, group, pack))
+}
+
+/// **Private.** `(min, max)` from optional entry bounds and a default range: a lone bound
+/// keeps the default's other end when it can, else extends by `step` (keeps `lo <= hi`).
+fn entry_range<T: PartialOrd + Copy>(
+    min: Option<T>,
+    max: Option<T>,
+    (dlo, dhi): (T, T),
+    up: impl Fn(T) -> T,
+    down: impl Fn(T) -> T,
+) -> (T, T) {
+    match (min, max) {
+        (Some(a), Some(b)) => (a, b),
+        (Some(a), None) => (a, if a <= dhi { dhi } else { up(a) }),
+        (None, Some(b)) => (if dlo <= b { dlo } else { down(b) }, b),
+        (None, None) => (dlo, dhi),
+    }
+}
+
+/// **Private.** A float range into an `integer` field (rounded, so `lo <= hi` holds) or a
+/// `number` field (`places` decimals); either way clamped to the schema's bounds.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "f64 -> i64 `as` saturates, which is the wanted clamp"
+)]
+fn numeric(s: &Value, ty: &str, rng: &mut ChaCha8Rng, (lo, hi): (f64, f64), places: i32) -> Value {
+    if ty == "integer" {
+        json!(int_for(s, rng, (lo.round() as i64, hi.round() as i64)))
+    } else {
+        number_for(s, rng, (lo, hi), places)
+    }
+}
+
+/// **Private.** Runs one dictionary generator for field `f` of scalar type `ty` (it fits).
+/// Numbers clamp to the schema's bounds; text is fitted to its lengths in characters,
+/// except well-formed values (email, phone, url, uuid, timestamps; R4.5).
+fn run(
+    g: &Gen,
+    s: &Value,
+    f: &str,
+    ty: &str,
+    rng: &mut ChaCha8Rng,
+    group: u64,
+    pack: &Pack,
+) -> Value {
+    let (up, down) = (|x: f64| x + 1000.0, |x: f64| x - 1000.0);
+    let v = match g {
+        Gen::Integer { min, max } => {
+            let (lo, hi) = entry_range(
+                *min,
+                *max,
+                (0, 1000),
+                |x: i64| x.saturating_add(1000),
+                |x: i64| x.saturating_sub(1000),
+            );
+            let n = json!(int_for(s, rng, (lo, hi)));
+            // a `number` field may have bounds no whole number fits (0.1..0.9): then a float
+            if ty == "number" && !value_fits(&n, s, ty) {
+                #[expect(clippy::cast_precision_loss, reason = "a default range only")]
+                return number_for(s, rng, (lo as f64, hi as f64), 2);
+            }
+            return n;
+        }
+        Gen::Money { min, max } => {
+            return numeric(
+                s,
+                ty,
+                rng,
+                entry_range(*min, *max, (99.0, 4999.0), up, down),
+                2,
+            );
+        }
+        Gen::Latitude { min, max } => {
+            return numeric(
+                s,
+                ty,
+                rng,
+                entry_range(*min, *max, (8.0, 35.0), up, down),
+                6,
+            );
+        }
+        Gen::Longitude { min, max } => {
+            return numeric(
+                s,
+                ty,
+                rng,
+                entry_range(*min, *max, (68.0, 97.0), up, down),
+                6,
+            );
+        }
+        Gen::Pick { from } => {
+            let fit: Vec<&Value> = from.iter().filter(|v| value_fits(v, s, ty)).collect();
+            let v = (*fit.choose(rng).expect("`fits` found one")).clone();
+            return user_value(v, s);
+        }
+        Gen::Static { value } => return user_value(value.clone(), s),
+        // well-formed: no length fitting (R4.5)
+        Gen::Email {} => return json!(email(rng, group, pack)),
+        Gen::Phone {} => return json!(phone(rng, pack)),
+        Gen::Url {} => return json!(url(f, rng)),
+        Gen::Uuid {} => return json!(uuid(rng)),
+        Gen::Timestamp {} => return json!(date_time(rng)),
+        Gen::Date {} => return json!(date_time(rng)[..10].to_string()),
+        Gen::FirstName {} => person(group, pack).0.name.clone(),
+        Gen::LastName {} => person(group, pack).1.name.clone(),
+        Gen::FullName {} => {
+            let (given, family) = person(group, pack);
+            match pack.name_order {
+                NameOrder::GivenFamily => format!("{} {}", given.name, family.name),
+                NameOrder::FamilyGiven => format!("{} {}", family.name, given.name),
+            }
+        }
+        Gen::Username {} => username(rng, group, pack),
+        Gen::City {} => place(group, pack).city.clone(),
+        // a stateless locale answers with the city (design 11a rule 4)
+        Gen::State {} => {
+            let p = place(group, pack);
+            p.state.as_ref().unwrap_or(&p.city).clone()
+        }
+        Gen::Postcode {} => postcode(group, pack),
+        Gen::Country {} => pack.country.clone(),
+        Gen::Street {} => pack.streets.choose(rng).expect("non-empty").clone(),
+        Gen::Address {} => address(rng, group, pack),
+        Gen::Currency {} => pack.currency.code.clone(),
+        Gen::Text { kind } => match kind {
+            TextKind::Sentence => sentence(rng),
+            TextKind::Paragraph => {
+                let n = rng.random_range(3..=5);
+                (0..n).map(|_| sentence(rng)).collect::<Vec<_>>().join(" ")
+            }
+        },
+        Gen::Template { value } => fill(value, |k| {
+            let (letters, n) = template_key(k)?;
+            Some(if letters {
+                (0..n)
+                    .map(|_| char::from(b'A' + rng.random_range(0..26u8)))
+                    .collect()
+            } else {
+                digits(rng, n)
+            })
+        })
+        .expect("templates are checked when the dictionary loads"),
+    };
+    json!(fit_length(v, s))
+}
+
+/// **Private.** A user `pick`/`static` value as-is (R5.7), a string fitted to its lengths.
+fn user_value(v: Value, s: &Value) -> Value {
+    match v {
+        Value::String(t) => json!(fit_length(t, s)),
+        other => other,
+    }
+}
+
+/// **Private.** `https://example.com/<stem>/<n>`, the stem being the field name without a
+/// trailing `url` (`avatarUrl` → `avatar`); a bare `url` has no empty segment.
+fn url(f: &str, rng: &mut ChaCha8Rng) -> String {
+    let n = rng.random_range(1..=9999);
+    let f = norm(f);
+    match f.strip_suffix("url").unwrap_or(&f) {
+        "" => format!("https://example.com/{n}"),
+        stem => format!("https://example.com/{stem}/{n}"),
+    }
+}
+
+/// **Private.** A phone number in one of the pack's formats.
+fn phone(rng: &mut ChaCha8Rng, pack: &Pack) -> String {
+    let format = pack
+        .phone
+        .formats
+        .choose(rng)
+        .expect("formats is non-empty");
+    format!("{} {}", pack.phone.prefix, digits_template(format, rng))
+}
+
+/// **Private.** The object's address from the pack's template.
+fn address(rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> String {
+    let p = place(group, pack);
+    fill(&pack.address, |k| {
+        Some(match k {
+            "number" => rng.random_range(1..=999).to_string(),
+            "street" => pack.streets.choose(rng).expect("non-empty").clone(),
+            "city" => p.city.clone(),
+            "state" => p.state.clone().unwrap_or_default(),
+            "postcode" => postcode(group, pack),
+            _ => return None,
+        })
+    })
+    .expect("the address template is checked when the pack loads")
+}
+
+/// **Private.** Index into a list of `len` items from the object's group seed and a tag.
+fn group_index(group: u64, tag: &[u8], len: usize) -> usize {
+    let i = stable_hash(&[&group.to_le_bytes(), tag]) % len as u64;
+    usize::try_from(i).expect("i < len")
+}
+
+/// **Private.** The place row of the object a field belongs to: same object, same place.
+fn place(group: u64, pack: &Pack) -> &Place {
+    &pack.places[group_index(group, b"place", pack.places.len())]
+}
+
+/// **Private.** The object's postcode: the place's pattern with `{n}` filled from the
+/// group seed, so `postcode` and `address` agree.
+fn postcode(group: u64, pack: &Pack) -> String {
+    let rng = &mut ChaCha8Rng::seed_from_u64(stable_hash(&[&group.to_le_bytes(), b"postcode"]));
+    digits_template(&place(group, pack).postcode, rng)
+}
+
+/// **Private.** A `{n}`-digit pattern (phone format, postcode) filled with seeded digits.
+fn digits_template(pattern: &str, rng: &mut ChaCha8Rng) -> String {
+    fill(pattern, |k| digit_count(k).map(|n| digits(rng, n)))
+        .expect("patterns are checked when the pack loads")
+}
+
+/// **Private.** The (given, family) name of the person an object describes: same
+/// object, same person, so `firstName`, `lastName`, `name` and `email` agree.
+fn person(group: u64, pack: &Pack) -> (&Name, &Name) {
+    (
+        &pack.first_names[group_index(group, b"first", pack.first_names.len())],
+        &pack.last_names[group_index(group, b"last", pack.last_names.len())],
+    )
+}
+
 /// **Private.** `first.lastNN@example.com` for the object's person — always a reserved domain (rule R5.7).
-fn email(rng: &mut ChaCha8Rng, group: u64) -> String {
-    let (first, last) = person(group);
-    let (first, last) = (first.to_lowercase(), last.to_lowercase());
-    format!("{first}.{last}{}@example.com", rng.random_range(1..=99))
+/// Local part is [`Pack::ascii_local`]: `latin:` form, else folded, else `user<n>`.
+fn email(rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> String {
+    let (first, last) = person(group, pack);
+    let n = rng.random_range(1..=99);
+    let (first, last) = (pack.ascii_local(first, n), pack.ascii_local(last, n));
+    let fallback = format!("user{n}");
+    if first == fallback && last == fallback {
+        // both names fell back: one `user<n>`, not `user7.user77`
+        return format!("{fallback}@example.com");
+    }
+    format!("{first}.{last}{n}@example.com")
+}
+
+/// **Private.** `first_lastNN` for the object's person, ASCII like the email's local part.
+fn username(rng: &mut ChaCha8Rng, group: u64, pack: &Pack) -> String {
+    let (first, last) = person(group, pack);
+    let n = rng.random_range(1..=99);
+    let (first, last) = (pack.ascii_local(first, n), pack.ascii_local(last, n));
+    if first == format!("user{n}") && last == first {
+        return first;
+    }
+    format!("{first}_{last}{n}")
 }
 
 /// **Private.** A random UUID with the v4 version and variant bits set.
@@ -535,6 +801,20 @@ fn uuid(rng: &mut ChaCha8Rng) -> String {
         &h[16..20],
         &h[20..32]
     )
+}
+
+/// **Private.** Standard base64 with padding.
+fn base64(b: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in b.chunks(3) {
+        let n = c.iter().fold(0u32, |n, x| n << 8 | u32::from(*x)) << (8 * (3 - c.len()));
+        for i in 0..=c.len() {
+            out.push(char::from(A[(n >> (18 - 6 * i) & 63) as usize]));
+        }
+        out.extend(std::iter::repeat_n('=', 3 - c.len()));
+    }
+    out
 }
 
 /// **Private.** `n` random decimal digits (phone numbers).

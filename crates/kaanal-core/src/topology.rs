@@ -47,6 +47,8 @@ pub struct Node {
     pub timeout: Option<Duration>,
     /// Named chains of a service or monolith (`chains:`), compiled by [`crate::chain::compile`].
     pub chains: IndexMap<String, Vec<StepConfig>>,
+    /// The node's own `locale:` tag (shape checked at parse); the server resolves the pack.
+    pub locale: Option<String>,
 }
 
 /// Admission control of a node: how many own hops run at once and what the others do.
@@ -408,6 +410,7 @@ impl Topology {
                 rate_limit: n.rate_limit().map(rate_limit_of),
                 timeout: n.timeout(),
                 chains: n.chains().cloned().unwrap_or_default(),
+                locale: n.locale().map(str::to_string),
             });
         }
         // X11: an auth node alone is a valid topology (a frontend and its login mock).

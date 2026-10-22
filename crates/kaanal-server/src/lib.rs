@@ -35,6 +35,8 @@ use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, Topology};
 
 pub use auth::AuthKey;
+/// The data-file schemas, for `kaanal schema dictionary|pack`.
+pub use kaanal_data::{dictionary_schema, pack_schema};
 pub use log::{
     ChainErrorRec, Filter, HopRec, IdGen, LOG_CAP, LogEntry, LogRing, Lookup, MAX_HOPS, MAX_TRACE,
     Page, StatusMatch, client_id, format_id, matches, parse_id,

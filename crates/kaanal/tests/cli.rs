@@ -3756,3 +3756,56 @@ fn old_endpoint_spelling_still_names_a_route() {
     let help = stdout(&out);
     assert!(help.contains("--route"), "{help}");
 }
+
+#[test]
+fn validate_reports_a_bad_dictionary_entry_with_line_and_column() {
+    let dir = project("bad-dictionary", "");
+    std::fs::write(
+        dir.join("data.yaml"),
+        "version: 1\nfields:\n  sku: { gen: sku_code }\n",
+    )
+    .unwrap();
+    let out = kaanal(&dir, &["validate"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let e = stderr(&out);
+    assert!(e.contains("data.yaml:3:"), "{e}");
+    assert!(e.contains("sku_code") && e.contains("first_name"), "{e}");
+}
+
+#[test]
+fn validate_accepts_the_ja_jp_fixture_project_and_rejects_an_unknown_locale() {
+    let fx = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let out = bin()
+        .args(["validate", "-c"])
+        .arg(fx.join("kaanal.yaml"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let dir = project("unknown-locale", "locale: ja-JP\n");
+    let out = kaanal(&dir, &["validate"]);
+    assert_eq!(out.status.code(), Some(1));
+    let e = stderr(&out);
+    assert!(
+        e.contains("kaanal.yaml:9:9: ") && e.contains("en-IN, en-US"),
+        "{e}"
+    );
+}
+
+#[test]
+fn schema_prints_config_dictionary_or_pack() {
+    let plain = bin().arg("schema").output().unwrap();
+    let config = bin().args(["schema", "config"]).output().unwrap();
+    assert_eq!(plain.status.code(), Some(0));
+    assert_eq!(
+        plain.stdout, config.stdout,
+        "`kaanal schema` stays the config schema"
+    );
+    for (which, prop) in [("dictionary", "fields"), ("pack", "first_names")] {
+        let out = bin().args(["schema", which]).output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{which}: {}", stderr(&out));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["properties"][prop].is_object(), "{which}: {v}");
+    }
+    let out = bin().args(["schema", "nope"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(64));
+}

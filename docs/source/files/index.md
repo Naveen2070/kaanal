@@ -22,14 +22,17 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)
 
-| File              | Page                                               | Contents                                                   |
-| ----------------- | -------------------------------------------------- | ---------------------------------------------------------- |
-| `src/lib.rs`      | [kaanal-data/lib.md](kaanal-data/lib.md)           | Crate root, re-exports                                     |
-| `src/api.rs`      | [kaanal-data/api.md](kaanal-data/api.md)           | OpenAPI 3.0 → `ApiModel`, `$ref` inlining with bomb guards |
-| `src/generate.rs` | [kaanal-data/generate.md](kaanal-data/generate.md) | Deterministic realistic JSON from a schema                 |
-| `src/empty.rs`    | [kaanal-data/empty.md](kaanal-data/empty.md)       | The "no data" form of a body (`empty`, `empty_of_value`)   |
-| `src/warn.rs`     | [kaanal-data/warn.md](kaanal-data/warn.md)         | Ignored-keyword warnings                                   |
-| `src/words.rs`    | [kaanal-data/words.md](kaanal-data/words.md)       | Name/city/word lists (en-IN)                               |
+| File                | Page                                                   | Contents                                                    |
+| ------------------- | ------------------------------------------------------ | ----------------------------------------------------------- |
+| `src/lib.rs`        | [kaanal-data/lib.md](kaanal-data/lib.md)               | Crate root, re-exports                                      |
+| `src/api.rs`        | [kaanal-data/api.md](kaanal-data/api.md)               | OpenAPI 3.0 → `ApiModel`, `$ref` inlining with bomb guards  |
+| `src/generate.rs`   | [kaanal-data/generate.md](kaanal-data/generate.md)     | Deterministic realistic JSON from a schema                  |
+| `src/empty.rs`      | [kaanal-data/empty.md](kaanal-data/empty.md)           | The "no data" form of a body (`empty`, `empty_of_value`)    |
+| `src/warn.rs`       | [kaanal-data/warn.md](kaanal-data/warn.md)             | Ignored-keyword warnings                                    |
+| `src/words.rs`      | [kaanal-data/words.md](kaanal-data/words.md)           | The lorem word list (names and places are in packs)         |
+| `src/pack.rs`       | [kaanal-data/pack.md](kaanal-data/pack.md)             | Locale packs: names, places, phone, currency, `DataError`   |
+| `src/dictionary.rs` | [kaanal-data/dictionary.md](kaanal-data/dictionary.md) | The field dictionary and its generators                     |
+| `src/dataset.rs`    | [kaanal-data/dataset.md](kaanal-data/dataset.md)       | `Options` and `DataSet`: loading `locales/` and `data.yaml` |
 
 ## [kaanal-server](kaanal-server/) (HTTP)
 

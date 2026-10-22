@@ -11,6 +11,8 @@ serde_json.workspace = true
 serde_yaml_ng.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
+schemars.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true

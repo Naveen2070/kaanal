@@ -697,7 +697,8 @@ fn generated_body(
     };
     // `seed:` (not the chain seed) keys the data: same seed → same data (NFR-10, D14).
     let seed = pins::route_seed(st.seed, owner, path);
-    let mut v = kaanal_data::generate(schema, None, seed);
+    let opts = st.options_for_owner(route.endpoint.owner);
+    let mut v = kaanal_data::generate(schema, None, seed, opts);
     kaanal_data::apply_params(&mut v, params);
     v
 }

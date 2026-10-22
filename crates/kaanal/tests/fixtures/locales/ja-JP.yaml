@@ -1,0 +1,20 @@
+# synthetic data, authored for Kaanal tests: a project pack in native script.
+version: 1
+tag: ja-JP
+name_order: family-given
+country: 日本
+currency: { code: JPY, symbol: "¥" }
+phone: { prefix: "+81", formats: ["90 {4} {4}"] }
+address: "〒{postcode} {city} {street} {number}"
+first_names:
+  - { name: 花子, latin: hanako }
+  - { name: 太郎, latin: taro }
+  - 陽菜
+last_names:
+  - { name: 田中, latin: tanaka }
+  - { name: 佐藤, latin: sato }
+  - 鈴木
+streets: [中央通り, 桜通り]
+places:
+  - { city: 東京, state: 東京都, postcode: "1{2}-{4}" }
+  - { city: 大阪, state: 大阪府, postcode: "5{2}-{4}" }
