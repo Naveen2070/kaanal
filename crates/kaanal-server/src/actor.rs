@@ -3,8 +3,11 @@
 //! Handlers send a sampled plan and await its [`Finished`]. The task sleeps until the engine's
 //! next event, then runs every event that is due **at its scheduled time** (`advance_to`), so a
 //! late wake-up (the Windows timer ticks about every 15 ms) delays only the answer, never the
-//! hop starts of the requests behind it. A request whose client went away stays in the engine
-//! until it ends, like a call still running on a real server; its answer is dropped.
+//! hop starts of the requests behind it. An event already due when the loop comes round (a
+//! zero-length hop) runs without touching the timer, so a lone request has no timer floor; a
+//! queued arrival still goes before it (ties favour the arrival). A request whose client went
+//! away stays in the engine until it ends, like a call still running on a real server; its
+//! answer is dropped.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,8 +74,14 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
     let mut next_tag = 0u64;
     loop {
         let due = engine.next_due();
+        // An event already due (a zero-length hop) wakes at once: `sleep_until` would round it up
+        // to the next timer tick (about 15 ms on Windows), a floor on every lone request. It stays
+        // the second select branch, so a queued arrival still goes first. No spin: `advance_to(now)`
+        // runs every event due at or before `now`, so the next `due` is later or the engine failed.
+        let already_due = due.is_some_and(|d| d <= now());
         let wake = async move {
             match due {
+                _ if already_due => {}
                 Some(d) => sleep_until(t0 + Duration::from_nanos(d)).await,
                 None => std::future::pending().await,
             }
@@ -249,6 +258,65 @@ mod tests {
     }
     /// Zero-duration hops, so the benchmark measures the actor and not the sleeps.
     const YAML0: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n";
+
+    /// Three arrivals at one instant on a zero-duration `{ limit: 1, queue: 1 }` gateway give
+    /// the engine's answers (the first runs, the second queues, the third overflows): an event
+    /// already due never jumps a queued arrival. `join!` sends all three before the actor runs.
+    #[tokio::test(start_paused = true)]
+    async fn simultaneous_arrivals_beat_an_already_due_release_like_the_engine() {
+        let yaml = "version: 1\nnodes:\n  gw: { type: gateway, concurrency: { limit: 1, queue: 1 } }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n";
+        let (t, plans) = plans_for(yaml, 3);
+        let mut direct = Engine::new(&t);
+        for (i, p) in plans.iter().enumerate() {
+            direct.submit(0, Arc::clone(p), i as u64).unwrap();
+        }
+        direct.advance_to(u64::MAX / 2).unwrap();
+        let mut want = direct.drain_finished();
+        want.sort_by_key(|f| f.order);
+
+        let h = spawn(Engine::new(&t));
+        let (first, second, third) = tokio::join!(
+            h.run(Arc::clone(&plans[0])),
+            h.run(Arc::clone(&plans[1])),
+            h.run(Arc::clone(&plans[2]))
+        );
+        let got = [first.unwrap(), second.unwrap(), third.unwrap()];
+        assert!(
+            matches!(
+                want[2].result,
+                kaanal_core::ChainResult::Err { status: 503, .. }
+            ),
+            "{:?}",
+            want[2].result
+        );
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(
+                (g.done - g.arrival, &g.result, &g.hops),
+                (w.done - w.arrival, &w.result, &w.hops)
+            );
+        }
+    }
+
+    /// A lone request through a zero-duration topology does not wait for a timer tick (about
+    /// 15 ms on Windows, 1 ms elsewhere). Real clock; the median of 50 sequential requests keeps
+    /// a loaded runner's outliers out, and 10 ms is far above the actor's microseconds.
+    #[tokio::test]
+    async fn a_lone_zero_duration_request_has_no_timer_floor() {
+        let (t, plans) = plans_for(YAML0, 1);
+        let h = spawn(Engine::new(&t));
+        let mut took: Vec<Duration> = Vec::new();
+        for _ in 0..50 {
+            let start = std::time::Instant::now();
+            h.run(Arc::clone(&plans[0])).await.unwrap();
+            took.push(start.elapsed());
+        }
+        took.sort();
+        assert!(
+            took[25] < Duration::from_millis(10),
+            "median {:?}",
+            took[25]
+        );
+    }
 
     /// `cargo test -p kaanal-server --release --lib -- --ignored --nocapture actor_throughput`
     #[tokio::test]

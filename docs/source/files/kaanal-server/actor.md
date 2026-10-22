@@ -6,7 +6,7 @@ The live driver of the replay engine: one task owns the `Engine` and a catch-up 
 
 `spawn(engine)` starts one tokio task and returns an `EngineHandle` (`Clone`; clones share the task). The channel carries `Cmd::Run { plan, reply }` and `Cmd::Refill`. A handler calls `handle.run(plan).await`, which sends the sampled `Plan` and waits for its `Finished` (result, arrival and done times, per-hop waits). `None` means the task has stopped (a clock overflow or runtime shutdown); `mock.rs` answers 500 `engine stopped`.
 
-The task loop waits for the first of: a new plan, or the engine's next due event (`Engine::next_due`, as a `sleep_until` on the task's start instant). On wake it runs `advance_to(now)`; for a new plan it calls `submit(now, plan, tag)` alone (it runs every event due strictly before `now` itself, so an arrival that ties with a release goes first, as in the simulator; the select is biased toward queued plans for the same reason), then answers every finished request.
+The task loop waits for the first of: a new plan, or the engine's next due event (`Engine::next_due`, as a `sleep_until` on the task's start instant). On wake it runs `advance_to(now)`; for a new plan it calls `submit(now, plan, tag)` alone (it runs every event due strictly before `now` itself, so an arrival that ties with a release goes first, as in the simulator; the select is biased toward queued plans for the same reason), then answers every finished request. When the next event is already due as the loop comes round (a zero-length hop), the wake branch is ready at once instead of a `sleep_until`: tokio rounds a timer up to its next tick (about 15 ms on Windows), which was a floor on every lone request. It stays the second, biased branch, so a plan already queued still goes first. It cannot spin: `advance_to(now)` runs every event due at or before `now`, so the next pass sees a later event or a failed engine.
 
 ## Why a catch-up clock
 
@@ -31,7 +31,7 @@ A request whose client went away stays in the engine until it ends, like a call 
 
 ## Tests
 
-[../../tests.md](../../tests.md#crateskaanal-serversrcactorrs-unit--the-live-engine-task): the differential test against the engine driven directly, the dropped-receiver test, the refill-ordering test, and the ignored throughput benchmark.
+[../../tests.md](../../tests.md#crateskaanal-serversrcactorrs-unit--the-live-engine-task): the differential test against the engine driven directly, the tie tests (an arrival at a release instant, and simultaneous arrivals against an already-due release), the no-timer-floor test, the dropped-receiver test, the refill-ordering test, and the ignored throughput benchmark.
 
 ## Known limits
 
