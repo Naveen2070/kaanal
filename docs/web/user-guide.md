@@ -186,7 +186,7 @@ nodes:
 ```
 
 - `locale:` is a tag such as `en-IN` or `en-US`. A node's own `locale:` beats the project default; the locale comes from the node that owns the route.
-- `en-IN` (names, `+91`, `INR`, `India`) and `en-US` (`+1`, `USD`, `United States`) are built in.
+- Seven packs are built in: `en-IN` (names, `+91`, `INR`, `India`), `en-US` (`+1`, `USD`, `United States`), `en-GB` (`+44`, `GBP`), `de-DE` (`+49`, `EUR`, no states), `fr-FR` (`+33`, `EUR`), `es-ES` (`+34`, `EUR`) and `pt-BR` (`+55`, `BRL`, states).
 - Any other tag needs a pack: drop `locales/<tag>.yaml` next to `kaanal.yaml`. A pack with a built-in's tag replaces it. [Data packs](data-packs.md) shows how to write one and where Kaanal looks.
 - An unknown locale is a startup error that lists the available tags (and says `did you mean` when only the case differs). `kaanal validate` and `kaanal up` check every pack in `locales/`, used or not.
 

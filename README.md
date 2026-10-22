@@ -68,7 +68,7 @@ When developing frontends, mobile apps, or microservices:
 
 Kaanal solves this with a **single YAML topology file** and an **OpenAPI 3.0 specification**:
 
-- Serves realistic, coherent synthetic JSON (names, emails, phones, addresses, dates) in your locale (built-in `en-IN` and `en-US`, or your own pack), with an editable field dictionary: see [data packs](docs/web/data-packs.md).
+- Serves realistic, coherent synthetic JSON (names, emails, phones, addresses, dates) in your locale (built-in `en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES` and `pt-BR`, or your own pack), with an editable field dictionary: see [data packs](docs/web/data-packs.md).
 - Simulates multi-hop latency (`gateway.proc` + `network` + `service.proc` + `database.op`).
 - Injects live chaos (latency, error rates, node down) via CLI, HTTP API, or an embedded Web UI.
 - Remains **100% deterministic** for a given seed — tests run reproducibly on CI and local workstations.

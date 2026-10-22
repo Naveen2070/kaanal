@@ -308,6 +308,11 @@ where
 const BUILTIN: &[(&str, &str)] = &[
     ("en-IN", include_str!("../data/locales/en-IN.yaml")),
     ("en-US", include_str!("../data/locales/en-US.yaml")),
+    ("en-GB", include_str!("../data/locales/en-GB.yaml")),
+    ("de-DE", include_str!("../data/locales/de-DE.yaml")),
+    ("fr-FR", include_str!("../data/locales/fr-FR.yaml")),
+    ("es-ES", include_str!("../data/locales/es-ES.yaml")),
+    ("pt-BR", include_str!("../data/locales/pt-BR.yaml")),
 ];
 
 /// Tags of the packs compiled into Kaanal.

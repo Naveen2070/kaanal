@@ -1,0 +1,140 @@
+# synthetic data, authored for Kaanal
+# Built-in de-DE locale pack. Synthetic data only (rule R5.7, FR-09): given names and surnames
+# chosen for Kaanal in no ranked order (not taken from a census or frequency list), listed
+# separately; real city names; postcodes of the right shape (5 digits, a plausible leading pair).
+# `{n}` in phone formats and postcodes is n seeded digits. Phone numbers use the ranges the
+# Bundesnetzagentur reserves for fiction where they exist: 030 23125 xxx (Berlin), 089 99998 xxx
+# (Munich), 040 66969 xxx (Hamburg), 0221 4710 xxx (Cologne), 0171 3999 xxx (mobile).
+# The pack is stateless: the address has no {state}.
+version: 1
+tag: de-DE
+name_order: given-family
+country: Germany
+currency: { code: EUR, symbol: "€" }
+phone:
+  prefix: "+49"
+  formats:
+    - "30 23125{3}"
+    - "89 99998{3}"
+    - "40 66969{3}"
+    - "221 4710{3}"
+    - "171 3999{3}"
+address: "{street} {number}, {postcode} {city}"
+geo: { lat: [47.3, 55], lon: [6, 15] }
+first_names: [
+  Anselm, Brigitte, Cornelius, Dorothea, Eckhard, Friederike, Gunther, Hannelore, Ingo, Jutta,
+  Konstantin, Lieselotte, Matthias, Natascha, Otmar, Pauline, Quirin, Roswitha, Sieglinde, Torsten,
+  Ulrike, Volker, Wiebke, Xaver, Yannick, Zita, Adelheid, Bastian, Clemens, Dagmar,
+  Egon, Frauke, Gerlinde, Hartmut, Irmgard, Jörg, Kerstin, Lukas, Mareike, Norbert,
+  Ottilie, Peer, Rüdiger, Svenja, Tilman, Uwe, Valentin, Waltraud, Arne, Birgit,
+  Carsten, Detlef, Elfriede, Florian, Gudrun, Heiko, Ilse, Jens, Karolin, Lennart,
+  Mechthild, Niklas, Oskar, Petra, Rainer, Sabine, Thorsten, Ursel, Viktoria, Wolfram,
+  Annelie, Benedikt, Cäcilie, Dietmar, Eleonore, Fabian, Gisela, Henrik, Ines, Joachim,
+  Katharina, Leander, Margarete, Nils, Ophelia, Philipp, Renate, Stefan, Theresa, Ulf,
+  Vera, Wilhelm, Almut, Bernhard, Christa, Dieter, Emilia, Falk, Gesine, Hagen,
+  Ilona, Jonas, Klaus, Lore, Moritz, Nadine, Ole, Pia, Reinhard, Silke,
+  Tobias, Ute, Veit, Walter, Amelie, Bruno, Charlotte, Dirk, Edith, Felix,
+  Greta, Hans, Isolde, Jakob, Kathrin, Leonie, Manfred, Nele, Otto, Paula,
+  Rolf, Sophie, Till, Ulla, Vincent, Wibke, Alwin, Bettina, Christoph, Dunja,
+  Erwin, Franziska, Gerhard, Hedwig, Imke, Jürgen, Kirsten, Lothar, Marlene, Nikolaus,
+  Olga, Patrick, Rebekka, Sven, Tamara, Udo, Verena, Werner, Anneliese, Boris,
+  Clara, Dominik, Ernst, Fiona, Georg, Helga, Ivo, Johanna, Kilian, Liesel,
+  Mathilde, Nora, Oliver, Philine, Ruth, Sebastian, Tatjana, Ulrich, Vroni, Winfried,
+  Ariane, Björn, Corinna, Daniel, Elke, Fritz, Gabriele, Holger, Ida, Julius,
+  Karl, Larissa, Max, Nicole, Ralf, Steffi, Thea, Rosemarie, Heinz, Mia,
+  Leopold, Frieda, Anton, Ludwig, Emil,
+]
+last_names: [
+  Ackermann, Brandt, Dreyer, Eckstein, Fassbender, Grabowski, Hartung, Imhof, Jaeger, Kessler,
+  Lindner, Maurer, Neumaier, Ostermann, Pfeiffer, Quandt, Reinhardt, Sauerbrey, Thiele, Unger,
+  Vogelsang, Weidner, Zimmermann, Albrecht, Bergmann, Christiansen, Dietrich, Engelhardt, Fuchs, Gerlach,
+  Hoffmann, Iserlohe, Jansen, Kauffmann, Lehmann, Mohr, Nagel, Oberholzer, Petersen, Rademacher,
+  Schreiber, Trautmann, Ullmann, Vollmer, Wendt, Ziegler, Auerbach, Brinkmann, Claassen, Drescher,
+  Eberhardt, Fiedler, Graf, Hausmann, Ibel, Jahn, Kowalczyk, Lauterbach, Mertens, Nolte,
+  Overbeck, Pohl, Rausch, Seidel, Tiedemann, Uhlig, Voigt, Wagenknecht, Yilmaz, Zeller,
+  Arnold, Baumgartner, Conradi, Dettmer, Ebner, Fink, Gärtner, Haas, Ihle, Jost,
+  Krämer, Lorenz, Möller, Niemeyer, Otte, Pabst, Roth, Schäfer, Thomas, Ulbricht,
+  Vetter, Wolff, Zahn, Abel, Böhm, Cramer, Dörr, Eisenhardt, Förster, Gruber,
+  Hentschel, Illing, Jünger, Keller, Lutz, Menzel, Neubauer, Opitz, Probst, Reuter,
+  Sommer, Thalmann, Urban, Vogt, Winkler, Zöllner, Aschenbach, Beckmann, Carstens, Deckert,
+  Ehlers, Friedrich, Geiger, Hellwig, Itzenplitz, Jacobi, Köhler, Lang, Marquardt, Nickel,
+  Pieper, Richter, Schütz, Tietz, Ueberroth, Vossberg, Wegener, Zorn, Appel, Bauer,
+  Clausen, Dahlke, Ernst, Fröhlich, Göbel, Heinze, Jung, Klemm, Lüders, Mayer,
+  Nowak, Pfaff, Rohde, Schindler, Täuber, Uhde, Vollrath, Wessel, Ahrens, Berger,
+  Cordes, Dold, Everding, Fahrenkrug, Gebhardt, Hilbert, Jordan, Kühn, Lenz, Müller,
+  Nitsche, Oertel, Peters, Rösler, Stumpf, Terhorst, Ulmer, Viehweg, Wittmann, Zink,
+  Aulbach, Brehm, Dannenberg, Eggert, Feldmann, Gross, Hübner, Jensen, Kloss, Lehr,
+  Merkel, Noll, Pape, Rieger, Stahl, Thieme, Walter, Zech, Kranz, Heller,
+]
+streets: [
+  Hauptstraße, Bahnhofstraße, Gartenweg, Schulstraße, Lindenallee, Marktplatz,
+  Kirchgasse, Mühlenweg, Am Hang, Rosenstraße, Waldstraße, Bergstraße,
+  Uferpromenade, Birkenweg, Eichenring, Burgstraße, Dorfanger, Fliederweg,
+  Brunnenstraße, Wiesenweg, Ringstraße, Sonnenallee, Im Winkel, Poststraße,
+  Neue Gasse, Schlossallee,
+]
+places:
+  - { city: Berlin, postcode: "10{3}" }
+  - { city: Hamburg, postcode: "20{3}" }
+  - { city: München, postcode: "80{3}" }
+  - { city: Köln, postcode: "50{3}" }
+  - { city: Frankfurt am Main, postcode: "60{3}" }
+  - { city: Stuttgart, postcode: "70{3}" }
+  - { city: Düsseldorf, postcode: "40{3}" }
+  - { city: Leipzig, postcode: "04{3}" }
+  - { city: Dortmund, postcode: "44{3}" }
+  - { city: Essen, postcode: "45{3}" }
+  - { city: Bremen, postcode: "28{3}" }
+  - { city: Dresden, postcode: "01{3}" }
+  - { city: Hannover, postcode: "30{3}" }
+  - { city: Nürnberg, postcode: "90{3}" }
+  - { city: Duisburg, postcode: "47{3}" }
+  - { city: Bochum, postcode: "44{3}" }
+  - { city: Wuppertal, postcode: "42{3}" }
+  - { city: Bielefeld, postcode: "33{3}" }
+  - { city: Bonn, postcode: "53{3}" }
+  - { city: Münster, postcode: "48{3}" }
+  - { city: Karlsruhe, postcode: "76{3}" }
+  - { city: Mannheim, postcode: "68{3}" }
+  - { city: Augsburg, postcode: "86{3}" }
+  - { city: Wiesbaden, postcode: "65{3}" }
+  - { city: Gelsenkirchen, postcode: "45{3}" }
+  - { city: Mönchengladbach, postcode: "41{3}" }
+  - { city: Braunschweig, postcode: "38{3}" }
+  - { city: Kiel, postcode: "24{3}" }
+  - { city: Chemnitz, postcode: "09{3}" }
+  - { city: Aachen, postcode: "52{3}" }
+  - { city: Halle, postcode: "06{3}" }
+  - { city: Magdeburg, postcode: "39{3}" }
+  - { city: Freiburg im Breisgau, postcode: "79{3}" }
+  - { city: Krefeld, postcode: "47{3}" }
+  - { city: Lübeck, postcode: "23{3}" }
+  - { city: Oberhausen, postcode: "46{3}" }
+  - { city: Erfurt, postcode: "99{3}" }
+  - { city: Mainz, postcode: "55{3}" }
+  - { city: Rostock, postcode: "18{3}" }
+  - { city: Kassel, postcode: "34{3}" }
+  - { city: Hagen, postcode: "58{3}" }
+  - { city: Saarbrücken, postcode: "66{3}" }
+  - { city: Potsdam, postcode: "14{3}" }
+  - { city: Ludwigshafen, postcode: "67{3}" }
+  - { city: Oldenburg, postcode: "26{3}" }
+  - { city: Osnabrück, postcode: "49{3}" }
+  - { city: Leverkusen, postcode: "51{3}" }
+  - { city: Heidelberg, postcode: "69{3}" }
+  - { city: Darmstadt, postcode: "64{3}" }
+  - { city: Würzburg, postcode: "97{3}" }
+  - { city: Regensburg, postcode: "93{3}" }
+  - { city: Ingolstadt, postcode: "85{3}" }
+  - { city: Ulm, postcode: "89{3}" }
+  - { city: Heilbronn, postcode: "74{3}" }
+  - { city: Pforzheim, postcode: "75{3}" }
+  - { city: Göttingen, postcode: "37{3}" }
+  - { city: Bremerhaven, postcode: "27{3}" }
+  - { city: Trier, postcode: "54{3}" }
+  - { city: Jena, postcode: "07{3}" }
+  - { city: Koblenz, postcode: "56{3}" }
+  - { city: Cottbus, postcode: "03{3}" }
+  - { city: Flensburg, postcode: "24{3}" }
+  - { city: Passau, postcode: "94{3}" }
+  - { city: Bayreuth, postcode: "95{3}" }

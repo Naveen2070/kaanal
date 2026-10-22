@@ -33,7 +33,12 @@ fn data_set_loads_builtins_and_project_pack_replaces_a_builtin_tag() {
     assert_eq!(ds.options_for("en-US").unwrap().pack.country, "Testland");
     assert_eq!(ds.options_for("xx-YY").unwrap().pack.country, "Nowhere");
     assert_eq!(ds.options_for("en-IN").unwrap().pack.country, "India");
-    assert_eq!(ds.tags(), ["en-IN", "en-US", "xx-YY"]);
+    assert_eq!(
+        ds.tags(),
+        [
+            "de-DE", "en-GB", "en-IN", "en-US", "es-ES", "fr-FR", "pt-BR", "xx-YY"
+        ]
+    );
 }
 
 #[test]
@@ -42,10 +47,12 @@ fn unknown_locale_error_lists_available_tags() {
     write(&dir, "locales/xx-YY.yaml", &pack("xx-YY", "Nowhere"));
     let e = DataSet::load(&dir, None)
         .unwrap()
-        .options_for("de-DE")
+        .options_for("ja-JP")
         .unwrap_err();
     assert!(
-        e.message.contains("de-DE") && e.message.contains("en-IN, en-US, xx-YY"),
+        e.message.contains("ja-JP")
+            && e.message
+                .contains("de-DE, en-GB, en-IN, en-US, es-ES, fr-FR, pt-BR, xx-YY"),
         "{e}"
     );
 }
@@ -266,7 +273,12 @@ fn yml_and_upper_case_yaml_files_are_skipped_with_a_warning() {
     write(&dir, "locales/zz-ZZ.YAML", &pack("zz-ZZ", "B"));
     write(&dir, "locales/notes.txt", "ignored silently");
     let ds = DataSet::load(&dir, None).unwrap();
-    assert_eq!(ds.tags(), ["en-IN", "en-US"]);
+    assert_eq!(
+        ds.tags(),
+        [
+            "de-DE", "en-GB", "en-IN", "en-US", "es-ES", "fr-FR", "pt-BR"
+        ]
+    );
     let w = ds.warnings();
     assert_eq!(w.len(), 2, "{w:?}");
     assert!(

@@ -5,7 +5,7 @@ Kaanal decides what a generated value looks like from two small YAML files you c
 - a **locale pack** (`locales/<tag>.yaml`): the names, places, phone numbers, currency and country of one locale;
 - a **dictionary** (`data.yaml`): which generator fills which field name.
 
-Both are optional. Without them you get the built-in `en-IN` and `en-US` packs and the built-in dictionary. The basics (setting `locale:`, the precedence order, what changed) are in the [user guide](user-guide.md#data-and-locales); this page is for writing the files.
+Both are optional. Without them you get the seven built-in packs (`en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES`, `pt-BR`) and the built-in dictionary. The basics (setting `locale:`, the precedence order, what changed) are in the [user guide](user-guide.md#data-and-locales); this page is for writing the files.
 
 ## Editor autocomplete
 
@@ -42,7 +42,7 @@ places:
   - { city: Leipzig, state: Sachsen, postcode: "04{3}" }
 ```
 
-Then `locale: de-DE` in `kaanal.yaml` (or on a single node) switches to it. Restart to pick up edits; there is no hot reload.
+`de-DE` is already built in, so this file replaces it; use a tag that is not built in (such as `ja-JP`) to add a locale. Then `locale: <tag>` in `kaanal.yaml` (or on a single node) switches to it. The built-in packs are authored for Kaanal, not taken from any census, registry or frequency list, and their phone numbers use fiction ranges where the country has one (`en-GB`, `en-US`, `de-DE`, `fr-FR`); `es-ES` and `pt-BR` have none, so treat those numbers as test data only. Restart to pick up edits; there is no hot reload.
 
 ### Fields
 

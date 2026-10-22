@@ -495,7 +495,7 @@ fn builtin_postcodes_look_valid_for_the_country() {
 
 #[test]
 fn builtin_files_are_marked_synthetic() {
-    for f in ["en-IN", "en-US"] {
+    for f in ALL_TAGS {
         let src = std::fs::read_to_string(format!("data/locales/{f}.yaml")).unwrap();
         assert!(
             src.starts_with("# synthetic data, authored for Kaanal"),
@@ -582,4 +582,129 @@ fn geo_bounds_are_checked_at_the_value() {
     }
     let e = with("{ lat: [47, 55] }").unwrap_err();
     assert!(e.message.contains("lon") && e.line.is_some(), "{e}");
+}
+
+const ALL_TAGS: [&str; 7] = [
+    "en-IN", "en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "pt-BR",
+];
+
+#[test]
+fn builtin_tags_lists_all_seven() {
+    let mut got = builtin_tags().to_vec();
+    got.sort_unstable();
+    let mut want = ALL_TAGS.to_vec();
+    want.sort_unstable();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn starter_packs_parse_and_meet_the_size_floor() {
+    for (tag, country, cur, prefix) in [
+        ("en-GB", "United Kingdom", "GBP", "+44"),
+        ("de-DE", "Germany", "EUR", "+49"),
+        ("fr-FR", "France", "EUR", "+33"),
+        ("es-ES", "Spain", "EUR", "+34"),
+        ("pt-BR", "Brasil", "BRL", "+55"),
+    ] {
+        let p = Pack::builtin(tag).unwrap_or_else(|| panic!("{tag} is built in"));
+        assert_eq!(p.tag, tag);
+        assert_eq!(
+            (
+                p.country.as_str(),
+                p.currency.code.as_str(),
+                p.phone.prefix.as_str()
+            ),
+            (country, cur, prefix),
+            "{tag}"
+        );
+        assert!(p.first_names.len() >= 150, "{tag} first");
+        assert!(p.last_names.len() >= 150, "{tag} last");
+        assert!(p.places.len() >= 50, "{tag} places");
+        assert!(p.geo.is_some(), "{tag} geo");
+        let opts = Options {
+            pack: p,
+            ..Options::default()
+        };
+        let s = json!({ "type": "object", "properties": {
+            "country": { "type": "string" }, "currency": { "type": "string" },
+            "phone": { "type": "string" }, "address": { "type": "string" }
+        }});
+        for seed in 0..20 {
+            let v = generate(&s, None, seed, &opts);
+            assert_eq!(v["country"], country, "{tag}");
+            assert_eq!(v["currency"], cur, "{tag}");
+            assert!(
+                v["phone"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with(&format!("{prefix} ")),
+                "{v}"
+            );
+            assert!(!v["address"].as_str().unwrap().contains('{'), "{v}");
+        }
+    }
+}
+
+#[test]
+fn de_de_is_stateless_and_formats_its_address() {
+    let p = Pack::builtin("de-DE").unwrap();
+    assert!(p.places.iter().all(|pl| pl.state.is_none()));
+    assert!(!p.address.contains("{state}"));
+    assert_eq!(p.address, "{street} {number}, {postcode} {city}");
+    let opts = Options {
+        pack: p,
+        ..Options::default()
+    };
+    let s = json!({ "type": "object", "properties": {
+        "address": { "type": "string" }, "zip": { "type": "string" }, "city": { "type": "string" }
+    }});
+    for seed in 0..30 {
+        let v = generate(&s, None, seed, &opts);
+        let (zip, city) = (v["zip"].as_str().unwrap(), v["city"].as_str().unwrap());
+        assert!(
+            v["address"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!(", {zip} {city}")),
+            "{v}"
+        );
+    }
+}
+
+#[test]
+fn every_starter_email_is_ascii_example_com() {
+    let opts_for = |tag: &str| Options {
+        pack: Pack::builtin(tag).unwrap(),
+        ..Options::default()
+    };
+    let s = json!({ "type": "object", "properties": {
+        "email": { "type": "string", "format": "email" }
+    }});
+    for tag in ALL_TAGS {
+        let opts = opts_for(tag);
+        for seed in 0..100 {
+            let v = generate(&s, None, seed, &opts);
+            let e = v["email"].as_str().unwrap();
+            assert!(e.is_ascii() && e.ends_with("@example.com"), "{tag}: {e}");
+        }
+    }
+}
+
+#[test]
+fn starter_postcodes_have_the_national_shape() {
+    // digits only once `{n}` is expanded; `-` and spaces are literal
+    for (tag, digits) in [("de-DE", 5), ("fr-FR", 5), ("es-ES", 5), ("pt-BR", 8)] {
+        for pl in &Pack::builtin(tag).unwrap().places {
+            let mut n = 0;
+            let mut rest = pl.postcode.as_str();
+            while let Some(i) = rest.find('{') {
+                n += rest[..i].bytes().filter(u8::is_ascii_digit).count();
+                let end = rest.find('}').unwrap();
+                n += rest[i + 1..end].parse::<usize>().unwrap();
+                rest = &rest[end + 1..];
+            }
+            n += rest.bytes().filter(u8::is_ascii_digit).count();
+            assert_eq!(n, digits, "{tag}: {} {}", pl.city, pl.postcode);
+        }
+    }
 }

@@ -1,0 +1,140 @@
+# synthetic data, authored for Kaanal
+# Built-in pt-BR locale pack. Synthetic data only (rule R5.7, FR-09): given names and surnames
+# chosen for Kaanal in no ranked order (not taken from a census or frequency list), listed
+# separately; real city names with their state abbreviation; CEPs of the right shape
+# (00000-000). `{n}` in phone formats and postcodes is n seeded digits. Brazil has no reserved
+# fiction range for phone numbers, so the numbers have the plausible shape (area code, mobile
+# 9 and eight digits, or a landline) and could belong to a real subscriber: test data only,
+# never call or text them.
+version: 1
+tag: pt-BR
+name_order: given-family
+country: Brasil
+currency: { code: BRL, symbol: "R$" }
+phone:
+  prefix: "+55"
+  formats:
+    - "11 9{4}-{4}"
+    - "21 9{4}-{4}"
+    - "31 9{4}-{4}"
+    - "41 9{4}-{4}"
+    - "71 9{4}-{4}"
+    - "11 3{3}-{4}"
+    - "51 3{3}-{4}"
+address: "{street}, {number} - {city}, {state} {postcode}"
+geo: { lat: [-33, 5], lon: [-73.5, -35] }
+first_names: [
+  Abelardo, Benedita, Caetano, Dalila, Eulália, Fabrício, Graciliano, Heloísa, Ícaro, Jandira,
+  Kauã, Lavínia, Murilo, Naiara, Osvaldo, Priscila, Quitéria, Raimundo, Sueli, Tarcísio,
+  Ubiratã, Vânia, Wagner, Xavier, Yasmin, Zilda, Aparecida, Breno, Cleuza, Davi,
+  Elisângela, Fernando, Gilberto, Hortência, Iracema, Jonas, Kátia, Leandro, Maristela, Nelson,
+  Odete, Péricles, Rosângela, Sandro, Tereza, Ulisses, Valdemar, Wanderley, Yuri, Zenaide,
+  Adalberto, Beatriz, Cássio, Denise, Edson, Fátima, Gustavo, Helena, Ivone, João,
+  Larissa, Márcio, Neusa, Orlando, Patrícia, Rogério, Solange, Tadeu, Vilma, Alessandra,
+  Bernardo, Cecília, Danilo, Eliane, Fábio, Gabriela, Heitor, Isadora, Jorge, Karina,
+  Lucas, Marlene, Natália, Otávio, Paulo, Rafaela, Silvana, Thiago, Vitória, Amanda,
+  Bruno, Clarice, Diogo, Elaine, Flávio, Giovana, Hélio, Ingrid, Joana, Kleber,
+  Luana, Mateus, Nilza, Olívia, Pedro, Regina, Sérgio, Tatiana, Vinícius, Aline,
+  Bianca, Caio, Dayane, Eduardo, Fernanda, Gael, Haroldo, Iolanda, Júlio, Laura,
+  Marcelo, Noemi, Otacílio, Paloma, Renato, Sabrina, Tales, Valentina, Wilson, Alice,
+  Benício, Camila, Diná, Enzo, Francisca, Geraldo, Hugo, Isabela, Juliano, Letícia,
+  Miguel, Nair, Pietro, Raquel, Sílvio, Théo, Verônica, Adriano, Brenda, Cauã,
+  Débora, Elias, Flora, Guilherme, Hilda, Ivan, Jéssica, Lorena, Manoel, Nicole,
+  Otto, Poliana, Ricardo, Sara, Tiago, Wesley, Arlindo, Bárbara, Cristiano, Dulce,
+  Everton, Fiona, Gilson, Hemerson, Ivanilda, Jacira, Lourdes, Mônica, Neide, Oséias,
+  Pâmela, Rubens, Simone, Tânia, Valéria, Washington, Anderson, Berenice, Cleber, Dirce,
+  Emanuel, Fausto, Glória, Humberto, Irene, Jurema, Lívia, Matheus, Nádia, Orfeu,
+  Rodrigo, Selma, Tobias, Vera, Zélia,
+]
+last_names: [
+  Albuquerque, Barbosa, Cavalcanti, Drummond, Evangelista, Figueiredo, Guimarães, Holanda, Ibiapina, Junqueira,
+  Lacerda, Mascarenhas, Nogueira, Oliveira, Pimentel, Quaresma, Rezende, Siqueira, Tavares, Uchoa,
+  Vasconcelos, Xavier, Amaral, Borges, Camargo, Duarte, Esteves, Ferraz, Gouveia, Honorato,
+  Itaborahy, Jardim, Lobato, Magalhães, Nascimento, Ornelas, Paixão, Rangel, Salgado, Teixeira,
+  Valadares, Azevedo, Bittencourt, Carvalho, Damasceno, Escobar, Fagundes, Gusmão, Henriques, Jaguaribe,
+  Leitão, Machado, Neves, Ouro, Peçanha, Queiroz, Ribeiro, Sampaio, Tenório, Vieira,
+  Aragão, Bezerra, Cordeiro, Dantas, Ferreira, Goulart, Hipólito, Lemos, Medeiros, Novaes,
+  Pacheco, Quintela, Resende, Soares, Tolentino, Veloso, Andrade, Brandão, Cunha, Domingues,
+  Eloy, Fontes, Garcia, Horta, Lins, Marinho, Nunes, Orsi, Pereira, Rocha,
+  Santos, Toledo, Urbano, Viana, Alencar, Bastos, Cardoso, Diniz, Espíndola, Fernandes,
+  Gomes, Ibrahim, Lopes, Moura, Nobre, Paiva, Rios, Sousa, Trindade, Ventura,
+  Arantes, Brito, Coelho, Dutra, Faria, Gonçalves, Lima, Matos, Pinheiro, Ramos,
+  Silveira, Tomé, Abreu, Braga, Calazans, Delgado, Freitas, Guedes, Ilha, Jesus,
+  Lustosa, Monteiro, Neto, Prado, Rabelo, Seixas, Tinoco, Vilela, Aguiar, Bandeira,
+  Castelo, Dornelles, Fraga, Galvão, Hollanda, Lessa, Meireles, Nóbrega, Paes, Ramalho,
+  Sá, Tamandaré, Vargas, Arruda, Bento, Correia, Dias, Fonseca, Gama, Leal,
+  Mendes, Paranhos, Rego, Salles, Uchôa, Vaz, Almeida, Barreto, Castro, Dourado,
+  Furtado, Gil, Jordão, Maia, Nery, Peixoto, Queirós, Rolim, Sobral, Torres,
+  Ávila, Bueno, Caldas, Dorneles, Ferro, Guerra, Ito, Kruger, Landim, Moraes,
+  Pontes, Ramires, Sena, Tabosa, Vidal, Wanderley, Zanetti, Cabral, Franco, Macedo,
+]
+streets: [
+  Rua das Flores, Avenida Brasil, Praça da Sé, Rua Sete de Setembro, Alameda dos Ipês, Travessa do Comércio,
+  Rua da Liberdade, Avenida Paulista, Rua XV de Novembro, Largo do Rosário, Rua das Palmeiras, Avenida Atlântica,
+  Rua Bela Vista, Estrada do Sol, Rua do Porto, Avenida Getúlio Vargas, Rua dos Pinheiros, Rua da Matriz,
+  Praça da República, Rua Santa Clara, Avenida Beira Mar, Rua do Mercado, Alameda das Acácias, Rua Tiradentes,
+]
+places:
+  - { city: São Paulo, state: SP, postcode: "01{3}-{3}" }
+  - { city: Rio de Janeiro, state: RJ, postcode: "20{3}-{3}" }
+  - { city: Brasília, state: DF, postcode: "70{3}-{3}" }
+  - { city: Salvador, state: BA, postcode: "40{3}-{3}" }
+  - { city: Fortaleza, state: CE, postcode: "60{3}-{3}" }
+  - { city: Belo Horizonte, state: MG, postcode: "30{3}-{3}" }
+  - { city: Manaus, state: AM, postcode: "69{3}-{3}" }
+  - { city: Curitiba, state: PR, postcode: "80{3}-{3}" }
+  - { city: Recife, state: PE, postcode: "50{3}-{3}" }
+  - { city: Porto Alegre, state: RS, postcode: "90{3}-{3}" }
+  - { city: Belém, state: PA, postcode: "66{3}-{3}" }
+  - { city: Goiânia, state: GO, postcode: "74{3}-{3}" }
+  - { city: Guarulhos, state: SP, postcode: "07{3}-{3}" }
+  - { city: Campinas, state: SP, postcode: "13{3}-{3}" }
+  - { city: São Luís, state: MA, postcode: "65{3}-{3}" }
+  - { city: Maceió, state: AL, postcode: "57{3}-{3}" }
+  - { city: Natal, state: RN, postcode: "59{3}-{3}" }
+  - { city: Teresina, state: PI, postcode: "64{3}-{3}" }
+  - { city: Campo Grande, state: MS, postcode: "79{3}-{3}" }
+  - { city: João Pessoa, state: PB, postcode: "58{3}-{3}" }
+  - { city: Florianópolis, state: SC, postcode: "88{3}-{3}" }
+  - { city: Vitória, state: ES, postcode: "29{3}-{3}" }
+  - { city: Cuiabá, state: MT, postcode: "78{3}-{3}" }
+  - { city: Aracaju, state: SE, postcode: "49{3}-{3}" }
+  - { city: Londrina, state: PR, postcode: "86{3}-{3}" }
+  - { city: Joinville, state: SC, postcode: "89{3}-{3}" }
+  - { city: Santos, state: SP, postcode: "11{3}-{3}" }
+  - { city: Ribeirão Preto, state: SP, postcode: "14{3}-{3}" }
+  - { city: Uberlândia, state: MG, postcode: "38{3}-{3}" }
+  - { city: Sorocaba, state: SP, postcode: "18{3}-{3}" }
+  - { city: Niterói, state: RJ, postcode: "24{3}-{3}" }
+  - { city: Juiz de Fora, state: MG, postcode: "36{3}-{3}" }
+  - { city: Caxias do Sul, state: RS, postcode: "95{3}-{3}" }
+  - { city: Porto Velho, state: RO, postcode: "76{3}-{3}" }
+  - { city: Macapá, state: AP, postcode: "68{3}-{3}" }
+  - { city: Boa Vista, state: RR, postcode: "69{3}-{3}" }
+  - { city: Rio Branco, state: AC, postcode: "69{3}-{3}" }
+  - { city: Palmas, state: TO, postcode: "77{3}-{3}" }
+  - { city: Petrolina, state: PE, postcode: "56{3}-{3}" }
+  - { city: Blumenau, state: SC, postcode: "89{3}-{3}" }
+  - { city: Pelotas, state: RS, postcode: "96{3}-{3}" }
+  - { city: Santa Maria, state: RS, postcode: "97{3}-{3}" }
+  - { city: Maringá, state: PR, postcode: "87{3}-{3}" }
+  - { city: Ponta Grossa, state: PR, postcode: "84{3}-{3}" }
+  - { city: Foz do Iguaçu, state: PR, postcode: "85{3}-{3}" }
+  - { city: Campos dos Goytacazes, state: RJ, postcode: "28{3}-{3}" }
+  - { city: Petrópolis, state: RJ, postcode: "25{3}-{3}" }
+  - { city: Volta Redonda, state: RJ, postcode: "27{3}-{3}" }
+  - { city: Montes Claros, state: MG, postcode: "39{3}-{3}" }
+  - { city: Ouro Preto, state: MG, postcode: "35{3}-{3}" }
+  - { city: Vitória da Conquista, state: BA, postcode: "45{3}-{3}" }
+  - { city: Feira de Santana, state: BA, postcode: "44{3}-{3}" }
+  - { city: Ilhéus, state: BA, postcode: "45{3}-{3}" }
+  - { city: Caruaru, state: PE, postcode: "55{3}-{3}" }
+  - { city: Mossoró, state: RN, postcode: "59{3}-{3}" }
+  - { city: Juazeiro do Norte, state: CE, postcode: "63{3}-{3}" }
+  - { city: Santarém, state: PA, postcode: "68{3}-{3}" }
+  - { city: Anápolis, state: GO, postcode: "75{3}-{3}" }
+  - { city: Dourados, state: MS, postcode: "79{3}-{3}" }
+  - { city: Bauru, state: SP, postcode: "17{3}-{3}" }
+  - { city: Piracicaba, state: SP, postcode: "13{3}-{3}" }
+  - { city: São José dos Campos, state: SP, postcode: "12{3}-{3}" }
+  - { city: Imperatriz, state: MA, postcode: "65{3}-{3}" }

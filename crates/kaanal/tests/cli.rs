@@ -3786,7 +3786,8 @@ fn validate_accepts_the_ja_jp_fixture_project_and_rejects_an_unknown_locale() {
     assert_eq!(out.status.code(), Some(1));
     let e = stderr(&out);
     assert!(
-        e.contains("kaanal.yaml:9:9: ") && e.contains("en-IN, en-US"),
+        e.contains("kaanal.yaml:9:9: ")
+            && e.contains("de-DE, en-GB, en-IN, en-US, es-ES, fr-FR, pt-BR"),
         "{e}"
     );
 }

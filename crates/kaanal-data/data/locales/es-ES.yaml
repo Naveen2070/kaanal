@@ -1,0 +1,136 @@
+# synthetic data, authored for Kaanal
+# Built-in es-ES locale pack. Synthetic data only (rule R5.7, FR-09): given names and surnames
+# chosen for Kaanal in no ranked order (not taken from a census or frequency list), listed
+# separately; real city names; postcodes of the right shape (5 digits, the leading pair of the
+# province). `{n}` in phone formats and postcodes is n seeded digits. Spain has no reserved
+# fiction range for phone numbers, so the numbers have the plausible shape (mobile 6xx or 7xx,
+# landline 9xx) and could belong to a real subscriber: test data only, never call or text them.
+# The pack is stateless: the address has no {state}.
+version: 1
+tag: es-ES
+name_order: given-family
+country: Spain
+currency: { code: EUR, symbol: "€" }
+phone:
+  prefix: "+34"
+  formats:
+    - "6{2} {3} {3}"
+    - "7{2} {3} {3}"
+    - "91 {3} {2} {2}"
+    - "93 {3} {2} {2}"
+    - "95 {3} {2} {2}"
+address: "{street}, {number}, {postcode} {city}"
+geo: { lat: [36, 43.8], lon: [-9.3, 3.3] }
+first_names: [
+  Aitana, Baltasar, Consuelo, Demetrio, Encarnación, Fermín, Gregoria, Hilario, Inmaculada, Jacinto,
+  Kiko, Leocadia, Marcelino, Nieves, Olegario, Pilar, Quirino, Remedios, Saturnino, Trinidad,
+  Urbano, Visitación, Wenceslao, Ximena, Yolanda, Zacarías, Alonso, Begoña, Cristóbal, Dolores,
+  Eladio, Fabiola, Gonzalo, Herminia, Íñigo, Jimena, Lázaro, Macarena, Nazario, Ofelia,
+  Plácido, Rafaela, Servando, Tomasa, Ulises, Valeria, Wilfredo, Yago, Zulema, Ángel,
+  Beatriz, Cayetano, Dámaso, Estefanía, Florencio, Genoveva, Higinio, Isidro, Jerónimo, Leandro,
+  Mercedes, Natalia, Octavio, Purificación, Rodrigo, Soledad, Teodoro, Úrsula, Venancio, Anselmo,
+  Bernardino, Candela, Domingo, Esperanza, Faustino, Gabino, Honorio, Iratxe, Joaquín, Lorenzo,
+  Matilde, Nuria, Orfeo, Primitivo, Rosendo, Sagrario, Telmo, Adela, Borja, Clotilde,
+  Eulalia, Felipe, Gaspar, Hortensia, Ildefonso, Julián, Lidia, Mateo, Narciso, Olalla,
+  Pelayo, Rosario, Sancho, Tadeo, Amparo, Bartolomé, Crispín, Dionisio, Elvira, Fulgencio,
+  Gala, Hugo, Irene, Jordi, Lourdes, Montserrat, Nerea, Óscar, Paloma, Ramiro,
+  Silvia, Tristán, Alba, Blas, Concepción, Diego, Emilia, Fidel, Guillermo, Heraclio,
+  Iker, Jaime, Leire, Mariano, Noelia, Pascual, Reyes, Sergio, Tirso, Valentín,
+  Arantxa, Belén, Cipriano, Dulce, Epifanio, Fátima, Gerardo, Hernán, Ignacio, Jesús,
+  Karmele, Lucía, Maite, Nicanor, Olga, Patricio, Rebeca, Salvador, Tamara, Vicente,
+  Abel, Brígida, Cirilo, Débora, Ernesto, Flora, Gil, Hipólito, Inés, Julia,
+  Lope, Marina, Nemesio, Ovidio, Piedad, Ricardo, Sonia, Tiburcio, Alejandro, Clara,
+  Eduardo, Francisca, Gloria, Hermenegildo, Isabel, Javier, Leopoldo, Manuela, Nicolás, Ramón,
+  Sebastián, Tania, Amadeo, Carmelo, Dorotea, Elías, Fabián, Genaro, Hércules, Josefina,
+  Kevin, Luisa, Marcos, Noa, Olivia, Pablo, Rufino, Santiago, Verónica, Zaida,
+]
+last_names: [
+  Abellán, Barrionuevo, Cifuentes, Dueñas, Echevarría, Fontanals, Galindo, Hidalgo, Iglesias, Jaramillo,
+  Larrañaga, Maldonado, Navarrete, Ochoa, Pinzón, Quevedo, Rebollo, Sepúlveda, Tejada, Uribe,
+  Valdivia, Zubiri, Aguirre, Bermúdez, Cabañas, Delgado, Escribano, Fuentes, Garrido, Herrero,
+  Ibáñez, Jiménez, Lucena, Montero, Nieto, Olmedo, Palacios, Quintana, Robles, Salvatierra,
+  Trujillo, Urrutia, Vallejo, Yáñez, Zamora, Arteaga, Benavides, Calvo, Domínguez, Elorza,
+  Fajardo, Guerrero, Heredia, Izquierdo, Lozano, Mendizábal, Núñez, Orozco, Peralta, Rueda,
+  Segovia, Tapia, Urquiza, Villalobos, Zapata, Alcázar, Bustamante, Carrasco, Duran, Espinosa,
+  Ferrer, Gallego, Haro, Ledesma, Marín, Nogueira, Ortiz, Pedraza, Rivas, Soler,
+  Toledo, Valverde, Amaya, Bolaños, Cerezo, Dorado, Estévez, Folch, Granados, Hurtado,
+  Ibarra, Lara, Moreno, Nadal, Oyarzun, Prieto, Quiroga, Ruiz, Santana, Torres,
+  Vega, Acosta, Bellido, Camacho, Díaz, Escudero, Fernández, Gil, Holgado, Jover,
+  Ladrón, Mora, Navas, Ojeda, Paredes, Roldán, Salazar, Tello, Vidal, Arroyo,
+  Bravo, Cortés, Dávila, Elizalde, Figueroa, Gómez, Huertas, Ledo, Medina, Naranjo,
+  Osorio, Pastor, Reyes, Sáez, Tomás, Villar, Alonso, Bosch, Cano, Del Río,
+  Estrada, Flores, Gutiérrez, Iturbe, Lorca, Marqués, Nevado, Pardo, Rojas, Serrano,
+  Ureña, Varela, Alvarado, Bonilla, Cuesta, Díez, Escalante, Frías, Galán, Hernández,
+  Juárez, Luna, Machado, Novoa, Pizarro, Ramos, Sandoval, Tovar, Vázquez, Arce,
+  Cabrera, Duarte, Fuster, Guillén, Lago, Martín, Olivares, Pérez, Rubio, Sanz,
+  Muñoz, Castillo, Cruz, Aranda, Blanco, Campos, Dorta, Esteban, Gimeno, Lamas,
+  Nava, Pozo, Rosales, Suárez, Vera, Bargas, Chacón, Ferreiro, Millán, Salinas,
+]
+streets: [
+  Calle Mayor, Avenida de la Constitución, Plaza del Ayuntamiento, Calle del Sol, Paseo de la Alameda, Travesía del Olivo,
+  Calle de la Iglesia, Camino Viejo, Ronda de San Pedro, Calle Real, Avenida del Mar, Plaza de España,
+  Calle de las Flores, Calle Nueva, Paseo del Prado, Callejón del Pozo, Avenida de Andalucía, Calle del Carmen,
+  Calle de la Fuente, Plaza del Mercado, Camino del Río, Calle Cervantes, Ronda del Castillo, Calle de los Naranjos,
+]
+places:
+  - { city: Madrid, postcode: "28{3}" }
+  - { city: Barcelona, postcode: "08{3}" }
+  - { city: Valencia, postcode: "46{3}" }
+  - { city: Sevilla, postcode: "41{3}" }
+  - { city: Zaragoza, postcode: "50{3}" }
+  - { city: Málaga, postcode: "29{3}" }
+  - { city: Murcia, postcode: "30{3}" }
+  - { city: Palma, postcode: "07{3}" }
+  - { city: Las Palmas de Gran Canaria, postcode: "35{3}" }
+  - { city: Bilbao, postcode: "48{3}" }
+  - { city: Alicante, postcode: "03{3}" }
+  - { city: Córdoba, postcode: "14{3}" }
+  - { city: Valladolid, postcode: "47{3}" }
+  - { city: Vigo, postcode: "36{3}" }
+  - { city: Gijón, postcode: "33{3}" }
+  - { city: Hospitalet de Llobregat, postcode: "08{3}" }
+  - { city: Vitoria-Gasteiz, postcode: "01{3}" }
+  - { city: A Coruña, postcode: "15{3}" }
+  - { city: Granada, postcode: "18{3}" }
+  - { city: Elche, postcode: "03{3}" }
+  - { city: Oviedo, postcode: "33{3}" }
+  - { city: Badalona, postcode: "08{3}" }
+  - { city: Cartagena, postcode: "30{3}" }
+  - { city: Terrassa, postcode: "08{3}" }
+  - { city: Jerez de la Frontera, postcode: "11{3}" }
+  - { city: Sabadell, postcode: "08{3}" }
+  - { city: Santa Cruz de Tenerife, postcode: "38{3}" }
+  - { city: Pamplona, postcode: "31{3}" }
+  - { city: Almería, postcode: "04{3}" }
+  - { city: San Sebastián, postcode: "20{3}" }
+  - { city: Burgos, postcode: "09{3}" }
+  - { city: Santander, postcode: "39{3}" }
+  - { city: Castellón de la Plana, postcode: "12{3}" }
+  - { city: Albacete, postcode: "02{3}" }
+  - { city: Logroño, postcode: "26{3}" }
+  - { city: Badajoz, postcode: "06{3}" }
+  - { city: Salamanca, postcode: "37{3}" }
+  - { city: Huelva, postcode: "21{3}" }
+  - { city: Marbella, postcode: "29{3}" }
+  - { city: León, postcode: "24{3}" }
+  - { city: Tarragona, postcode: "43{3}" }
+  - { city: Cádiz, postcode: "11{3}" }
+  - { city: Lleida, postcode: "25{3}" }
+  - { city: Jaén, postcode: "23{3}" }
+  - { city: Ourense, postcode: "32{3}" }
+  - { city: Girona, postcode: "17{3}" }
+  - { city: Lugo, postcode: "27{3}" }
+  - { city: Santiago de Compostela, postcode: "15{3}" }
+  - { city: Cáceres, postcode: "10{3}" }
+  - { city: Toledo, postcode: "45{3}" }
+  - { city: Guadalajara, postcode: "19{3}" }
+  - { city: Segovia, postcode: "40{3}" }
+  - { city: Ávila, postcode: "05{3}" }
+  - { city: Teruel, postcode: "44{3}" }
+  - { city: Huesca, postcode: "22{3}" }
+  - { city: Pontevedra, postcode: "36{3}" }
+  - { city: Palencia, postcode: "34{3}" }
+  - { city: Soria, postcode: "42{3}" }
+  - { city: Zamora, postcode: "49{3}" }
+  - { city: Ibiza, postcode: "07{3}" }
+  - { city: Mérida, postcode: "06{3}" }

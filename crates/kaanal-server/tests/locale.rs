@@ -107,10 +107,13 @@ async fn an_empty_pin_body_uses_the_node_locale_and_data_yaml() {
 #[test]
 fn unknown_node_locale_is_a_positioned_config_error() {
     let (dir, src) = project("unknown-node", "");
-    let src = src.replace("locale: en-US", "locale: de-DE");
+    let src = src.replace("locale: en-US", "locale: ja-JP");
     let e = check(&dir, &src).unwrap_err();
     assert!(e.starts_with("kaanal.yaml:5:47: "), "{e}");
-    assert!(e.contains("node 'us'") && e.contains("en-IN, en-US"), "{e}");
+    assert!(
+        e.contains("node 'us'") && e.contains("de-DE, en-GB, en-IN, en-US, es-ES, fr-FR, pt-BR"),
+        "{e}"
+    );
     // The project default is placed at its own value.
     let (dir, src) = project("unknown-top", "locale: xx-YY\n");
     let e = check(&dir, &src).unwrap_err();

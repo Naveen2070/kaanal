@@ -1,0 +1,139 @@
+# synthetic data, authored for Kaanal
+# Built-in en-GB locale pack. Synthetic data only (rule R5.7, FR-09): given names and surnames
+# chosen for Kaanal in no ranked order (not taken from a census or frequency list), listed
+# separately; real city names; postcodes of the right shape with made-up inward codes.
+# `{n}` in phone formats and postcodes is n seeded digits. Phone numbers use the Ofcom ranges
+# reserved for drama: 07700 900xxx (mobile), 020 7946 0xxx (London), 0121 496 0xxx
+# (Birmingham), 0161 496 0xxx (Manchester), 0113 496 0xxx (Leeds), 0141 496 0xxx (Glasgow).
+version: 1
+tag: en-GB
+name_order: given-family
+country: United Kingdom
+currency: { code: GBP, symbol: "£" }
+phone:
+  prefix: "+44"
+  formats:
+    - "7700 900{3}"
+    - "20 7946 0{3}"
+    - "121 496 0{3}"
+    - "161 496 0{3}"
+    - "113 496 0{3}"
+    - "141 496 0{3}"
+address: "{number} {street}, {city} {postcode}"
+geo: { lat: [50, 58.5], lon: [-5.5, 1.7] }
+first_names: [
+  Edmund, Philippa, Hamish, Rosalie, Gareth, Imogen, Declan, Harriet, Rhys, Verity,
+  Alistair, Bronwen, Cedric, Florence, Dougal, Henrietta, Ewan, Maisie, Giles, Ottoline,
+  Piers, Seren, Lachlan, Cordelia, Aled, Tabitha, Fergus, Ursula, Crispin, Nerys,
+  Rupert, Isla, Wilfred, Marian, Torquil, Elspeth, Barnaby, Gwendolen, Hugh, Agatha,
+  Cormac, Delyth, Jolyon, Prudence, Angus, Winifred, Dylan, Esther, Ronan, Matilda,
+  Percival, Eira, Lawrence, Beryl, Malcolm, Fenella, Nigel, Sorcha, Tristan, Hester,
+  Alun, Clemency, Gawain, Rowena, Murray, Philomena, Ivor, Leonora, Stuart, Perdita,
+  Aidan, Mabel, Ellis, Thea, Cameron, Annabel, Rory, Blodwen, Oswald, Georgina,
+  Ambrose, Nia, Quentin, Rhona, Duncan, Peregrine, Susannah, Kenneth, Bethan, Caradoc,
+  Eleanor, Fraser, Marguerite, Gethin, Honor, Ifor, Jocasta, Kit, Linnet, Magnus,
+  Nesta, Orlando, Phoebe, Rafferty, Saskia, Teague, Una, Vaughan, Wendy, Yvaine,
+  Alasdair, Briony, Conrad, Daisy, Euan, Fiona, Gilbert, Heulwen, Innes, Jasper,
+  Keir, Lorna, Merlin, Nora, Owain, Petra, Rhiannon, Sebastian, Tobias, Ulla,
+  Valentine, Wynne, Xanthe, Yorick, Zillah, Archie, Bryony, Cai, Dorothea, Elliot,
+  Freya, Gideon, Harvey, Iona, Julian, Kerensa, Lionel, Morag, Nathaniel, Olwen,
+  Pippa, Rosamund, Silas, Tamsin, Ulick, Vera, Walter, Xenia, Yasmin, Zachary,
+  Adaira, Bertram, Catriona, Dermot, Edwina, Felix, Gemma, Hywel, Isobel, Jago,
+  Kirsty, Leofric, Mairi, Neville, Oriel, Pearl, Quinn, Rosalind, Sholto, Tegan,
+  Ulrica, Vivian, Wystan, Ysolde, Zebedee, Alwyn, Brenda, Clive, Dilys, Edith,
+  Frances, Graham, Hilary, Isadora, Jennifer, Kyle, Louisa, Norman, Olive, Penelope,
+  Rowan, Siobhan, Thomasina, Hettie, Godfrey, Lowri, Kendrick,
+]
+last_names: [
+  Ashcroft, Brindley, Cartwright, Dunstable, Evershed, Fothergill, Gladwin, Hargreaves, Ingleby, Jervis,
+  Kilbride, Lythgoe, Mortlake, Netherton, Ormerod, Pendlebury, Quarmby, Rotherham, Saltmarsh, Tregarthen,
+  Underhill, Venables, Wetherby, Yelverton, Appleyard, Bickerstaff, Colquhoun, Davenport, Elphinstone, Farrington,
+  Garside, Haverford, Isherwood, Jolliffe, Kirkbride, Lambourne, Mainwaring, Nuttall, Ollerenshaw, Prothero,
+  Rowntree, Sutcliffe, Thackeray, Upsall, Vavasour, Wainwright, Yorke, Aylward, Bassett, Crabtree,
+  Duckworth, Egerton, Faraday, Goodbody, Heathcote, Ireland, Jagger, Kempster, Llewellyn, Maclean,
+  Neville, Oddie, Pargeter, Radley, Stannard, Tolley, Urquhart, Vickery, Whitcombe, Ainsworth,
+  Beddoes, Cholmondeley, Dalrymple, Entwistle, Fairclough, Gwynne, Hollinshead, Ibbotson, Jeffreys, Kenyon,
+  Lovegrove, Mapplethorpe, Naylor, Orwell, Pennington, Rathbone, Swindells, Treharne, Uttley, Verney,
+  Wragg, Yarwood, Armitage, Brocklehurst, Cavendish, Denholm, Edgecombe, Fitzgerald, Grimshaw, Holroyd,
+  Iddon, Jessop, Kershaw, Lumley, Marchbanks, Nicholls, Oakshott, Pickersgill, Quayle, Ravenscroft,
+  Shuttleworth, Thwaite, Ulyatt, Vernon, Westcott, Ashby, Barraclough, Cunliffe, Dewhurst, Elliott,
+  Foxton, Gaunt, Hesketh, Inskip, Jukes, Knowles, Lidstone, Morgan, Nightingale, Otley,
+  Pryce, Rees, Stainforth, Trevelyan, Unwin, Vowles, Worsley, Wyndham, Yeoman, Abbott,
+  Blakeney, Cresswell, Dimmock, Eastham, Frobisher, Greenhalgh, Hartnell, Ibsley, Jarrett, Kirkpatrick,
+  Lascelles, Mowbray, Nunn, Osgood, Pettigrew, Rimmer, Selby, Thistlethwaite, Uren, Vaughan,
+  Walmsley, Yates, Ackroyd, Burnside, Clegg, Dacre, Ellacott, Furness, Gillespie, Hinchcliffe,
+  Ilsley, Jenkinson, Kinnear, Lowther, Mellor, Norcross, Ormsby, Peverell, Rudd, Stobart,
+  Tattersall, Uphill, Wadsworth, Axford, Bromley, Chadwick, Dobson, Eccles, Fenwick, Garnett,
+  Hibbert, Jowett, Kemble, Lorimer, McKenzie, Nancarrow, Oxley, Pritchard, Rigby, Spurling,
+  Trelawney, Vyse, Whittaker, Bowden, Carew, Dyson, Edmondson, Foulkes, Gowers, Haigh,
+]
+streets: [
+  Church Lane, Mill Road, Station Approach, Orchard Close, Victoria Terrace, Meadow View,
+  Abbey Gardens, Bridge Street, Castle Hill, Elm Grove, Fairfield Road, Greenway,
+  Hawthorn Drive, Kings Walk, Linden Avenue, Market Square, North Parade, Old Forge Lane,
+  Priory Road, Queens Crescent, Rectory Gardens, Tannery Yard, Vicarage Close,
+  Water Lane, Willow Court, Beacon Rise, Canal Side, Dovecote Mews, Quarry Bank,
+]
+places:
+  - { city: London, postcode: "SW{1} {1}AA" }
+  - { city: Birmingham, postcode: "B{1} {1}AA" }
+  - { city: Manchester, postcode: "M{1} {1}AA" }
+  - { city: Leeds, postcode: "LS{1} {1}AA" }
+  - { city: Glasgow, postcode: "G{1} {1}AA" }
+  - { city: Edinburgh, postcode: "EH{1} {1}AA" }
+  - { city: Cardiff, postcode: "CF{1} {1}AA" }
+  - { city: Belfast, postcode: "BT{1} {1}AA" }
+  - { city: Bristol, postcode: "BS{1} {1}AA" }
+  - { city: Liverpool, postcode: "L{1} {1}AA" }
+  - { city: Sheffield, postcode: "S{1} {1}AA" }
+  - { city: Newcastle upon Tyne, postcode: "NE{1} {1}AA" }
+  - { city: Nottingham, postcode: "NG{1} {1}AA" }
+  - { city: Leicester, postcode: "LE{1} {1}AA" }
+  - { city: Southampton, postcode: "SO{1} {1}AA" }
+  - { city: Portsmouth, postcode: "PO{1} {1}AA" }
+  - { city: Brighton, postcode: "BN{1} {1}AA" }
+  - { city: Plymouth, postcode: "PL{1} {1}AA" }
+  - { city: Exeter, postcode: "EX{1} {1}AA" }
+  - { city: Norwich, postcode: "NR{1} {1}AA" }
+  - { city: Cambridge, postcode: "CB{1} {1}AA" }
+  - { city: Oxford, postcode: "OX{1} {1}AA" }
+  - { city: York, postcode: "YO{1} {1}AA" }
+  - { city: Bath, postcode: "BA{1} {1}AA" }
+  - { city: Aberdeen, postcode: "AB{1} {1}AA" }
+  - { city: Dundee, postcode: "DD{1} {1}AA" }
+  - { city: Inverness, postcode: "IV{1} {1}AA" }
+  - { city: Swansea, postcode: "SA{1} {1}AA" }
+  - { city: Newport, postcode: "NP{1} {1}AA" }
+  - { city: Derby, postcode: "DE{1} {1}AA" }
+  - { city: Coventry, postcode: "CV{1} {1}AA" }
+  - { city: Wolverhampton, postcode: "WV{1} {1}AA" }
+  - { city: Stoke-on-Trent, postcode: "ST{1} {1}AA" }
+  - { city: Hull, postcode: "HU{1} {1}AA" }
+  - { city: Bradford, postcode: "BD{1} {1}AA" }
+  - { city: Huddersfield, postcode: "HD{1} {1}AA" }
+  - { city: Preston, postcode: "PR{1} {1}AA" }
+  - { city: Blackpool, postcode: "FY{1} {1}AA" }
+  - { city: Lancaster, postcode: "LA{1} {1}AA" }
+  - { city: Carlisle, postcode: "CA{1} {1}AA" }
+  - { city: Durham, postcode: "DH{1} {1}AA" }
+  - { city: Sunderland, postcode: "SR{1} {1}AA" }
+  - { city: Middlesbrough, postcode: "TS{1} {1}AA" }
+  - { city: Lincoln, postcode: "LN{1} {1}AA" }
+  - { city: Peterborough, postcode: "PE{1} {1}AA" }
+  - { city: Ipswich, postcode: "IP{1} {1}AA" }
+  - { city: Colchester, postcode: "CO{1} {1}AA" }
+  - { city: Chelmsford, postcode: "CM{1} {1}AA" }
+  - { city: Reading, postcode: "RG{1} {1}AA" }
+  - { city: Guildford, postcode: "GU{1} {1}AA" }
+  - { city: Canterbury, postcode: "CT{1} {1}AA" }
+  - { city: Gloucester, postcode: "GL{1} {1}AA" }
+  - { city: Worcester, postcode: "WR{1} {1}AA" }
+  - { city: Hereford, postcode: "HR{1} {1}AA" }
+  - { city: Shrewsbury, postcode: "SY{1} {1}AA" }
+  - { city: Chester, postcode: "CH{1} {1}AA" }
+  - { city: Truro, postcode: "TR{1} {1}AA" }
+  - { city: Salisbury, postcode: "SP{1} {1}AA" }
+  - { city: Stirling, postcode: "FK{1} {1}AA" }
+  - { city: Perth, postcode: "PH{1} {1}AA" }
+  - { city: Wrexham, postcode: "LL{1} {1}AA" }
+  - { city: Londonderry, postcode: "BT{1} {1}AA" }
