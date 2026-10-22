@@ -59,6 +59,7 @@ jsonwebtoken = { version = "11.1", default-features = false, features = [
 kaanal-core = { path = "crates/kaanal-core" }
 kaanal-data = { path = "crates/kaanal-data" }
 kaanal-server = { path = "crates/kaanal-server" }
+kaanal-sim = { path = "crates/kaanal-sim" }
 kaanal-winhandle = { path = "crates/kaanal-winhandle" }
 
 # Lint policy for every crate (each opts in with `[lints] workspace = true`).

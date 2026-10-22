@@ -20,6 +20,11 @@ serde_json.workspace = true
 dirs.workspace = true
 sha2.workspace = true
 
+# The benchmark suite (tests/bench.rs) drives every crate.
+[dev-dependencies]
+kaanal-data.workspace = true
+kaanal-sim.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 kaanal-winhandle.workspace = true
 

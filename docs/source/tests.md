@@ -1405,9 +1405,22 @@ Golden strings; no network. See [logview](files/kaanal/logview.md).
 | `overflow_status_is_the_configured_one`              | `overflow_status: 502` yields 502 failures and no 503.                                                                                                       |
 | `a_rate_limit_under_overload_passes_exactly_its_rps` | Poisson 300/s into 100 rps with burst 50: the accepted rate is 100/s within 5% (0.00% off).                                                                  |
 
-## `crates/kaanal-sim/tests/distribution.rs` and `bench.rs` — drift and NFR-05
+## `crates/kaanal-sim/tests/distribution.rs` — drift
 
 | Test                                  | What it pins                                                                                                                                                                                                                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `zero_load_matches_live_distribution` | Fixture, sample and `CHAINS`, `GET /users/{id}`: per `(node, kind)` (cache hits and repeats change the hop count; a kind common on one side must exist on the other) the two-sample KS statistic is below the α = 0.001 critical value against live `execute()` samples for n ≥ 1 000 000. |
-| `one_million_requests`                | Ignored. NFR-05 measurement (1M simulated requests); run with `cargo test -p kaanal-sim --release --test bench -- --ignored --nocapture`.                                                                                                                                                  |
+
+## `crates/kaanal/tests/bench.rs` — benchmark suite (NFR-05)
+
+One ignored test, `suite`, in the `kaanal` crate because it drives every crate. Run it in release: `cargo test -p kaanal --release --test bench -- --ignored --nocapture` (about 30 s). Each row runs 5 times and reports median, min and max; the table goes to stdout and JSON to `target/bench.json` (or `KAANAL_BENCH_OUT`). `KAANAL_BENCH_COMPARE=<file>` adds the % change of each median against a saved run. Baselines stay local; nothing fails on a regression.
+
+| Section   | What it measures                                                                                                                                                                                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core`    | `Topology::build`, chain `compile`, and `execute` / `sample_plan` per call, on the NFR-05 topology.                                                                                                                               |
+| `sim`     | `one_million_requests`: the NFR-05 measurement (1M simulated requests through `kaanal_sim::run`), moved here from `kaanal-sim/tests/bench.rs` unchanged. The suite's only hard check: each run under 10 s and > 990 000 requests. |
+| `data`    | `generate` over a small, medium (`User`) and large (100 orders) schema with default `Options` and with another built-in locale pack; `DataSet::load` of a project with a pack and `data.yaml`; built-in dictionary lookups.       |
+| `server`  | The server in-process on an ephemeral port (as the server tests start it), zero-latency hops, one sequential keep-alive client: requests/s for a generated body, then with `error_rate: 0.5` chaos on `db`.                       |
+| `overall` | The same server with 8 concurrent clients: requests/s and p50/p95/p99 latency.                                                                                                                                                    |
+
+The `server` and `overall` rows go over loopback HTTP and are noisy: compare them only on the same machine. The sequential `server` rows also show the actor's timer floor on an idle runtime (about 15 ms per request on Windows), not handler cost.
