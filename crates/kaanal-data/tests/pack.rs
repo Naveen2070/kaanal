@@ -646,9 +646,26 @@ fn starter_packs_parse_and_meet_the_size_floor() {
 }
 
 #[test]
-fn de_de_is_stateless_and_formats_its_address() {
+fn european_packs_carry_a_region_but_keep_it_out_of_the_address() {
+    for tag in ["en-GB", "de-DE", "fr-FR", "es-ES"] {
+        let p = Pack::builtin(tag).unwrap();
+        assert!(p.places.iter().all(|pl| pl.state.is_some()), "{tag}");
+        assert!(!p.address.contains("{state}"), "{tag}");
+    }
+    let de = Pack::builtin("de-DE").unwrap();
+    let state_of = |city: &str| {
+        de.places
+            .iter()
+            .find(|pl| pl.city == city)
+            .and_then(|pl| pl.state.as_deref())
+    };
+    assert_eq!(state_of("München"), Some("Bayern"));
+    assert_eq!(state_of("Köln"), Some("Nordrhein-Westfalen"));
+}
+
+#[test]
+fn de_de_formats_its_address() {
     let p = Pack::builtin("de-DE").unwrap();
-    assert!(p.places.iter().all(|pl| pl.state.is_none()));
     assert!(!p.address.contains("{state}"));
     assert_eq!(p.address, "{street} {number}, {postcode} {city}");
     let opts = Options {

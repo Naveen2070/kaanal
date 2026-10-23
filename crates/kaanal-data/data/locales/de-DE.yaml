@@ -5,7 +5,7 @@
 # `{n}` in phone formats and postcodes is n seeded digits. Phone numbers use the ranges the
 # Bundesnetzagentur reserves for fiction where they exist: 030 23125 xxx (Berlin), 089 99998 xxx
 # (Munich), 040 66969 xxx (Hamburg), 0221 4710 xxx (Cologne), 0171 3999 xxx (mobile).
-# The pack is stateless: the address has no {state}.
+# `state` is the region (Bundesland); the address has no {state}.
 version: 1
 tag: de-DE
 name_order: given-family
@@ -74,67 +74,67 @@ streets: [
   Neue Gasse, Schlossallee,
 ]
 places:
-  - { city: Berlin, postcode: "10{3}" }
-  - { city: Hamburg, postcode: "20{3}" }
-  - { city: München, postcode: "80{3}" }
-  - { city: Köln, postcode: "50{3}" }
-  - { city: Frankfurt am Main, postcode: "60{3}" }
-  - { city: Stuttgart, postcode: "70{3}" }
-  - { city: Düsseldorf, postcode: "40{3}" }
-  - { city: Leipzig, postcode: "04{3}" }
-  - { city: Dortmund, postcode: "44{3}" }
-  - { city: Essen, postcode: "45{3}" }
-  - { city: Bremen, postcode: "28{3}" }
-  - { city: Dresden, postcode: "01{3}" }
-  - { city: Hannover, postcode: "30{3}" }
-  - { city: Nürnberg, postcode: "90{3}" }
-  - { city: Duisburg, postcode: "47{3}" }
-  - { city: Bochum, postcode: "44{3}" }
-  - { city: Wuppertal, postcode: "42{3}" }
-  - { city: Bielefeld, postcode: "33{3}" }
-  - { city: Bonn, postcode: "53{3}" }
-  - { city: Münster, postcode: "48{3}" }
-  - { city: Karlsruhe, postcode: "76{3}" }
-  - { city: Mannheim, postcode: "68{3}" }
-  - { city: Augsburg, postcode: "86{3}" }
-  - { city: Wiesbaden, postcode: "65{3}" }
-  - { city: Gelsenkirchen, postcode: "45{3}" }
-  - { city: Mönchengladbach, postcode: "41{3}" }
-  - { city: Braunschweig, postcode: "38{3}" }
-  - { city: Kiel, postcode: "24{3}" }
-  - { city: Chemnitz, postcode: "09{3}" }
-  - { city: Aachen, postcode: "52{3}" }
-  - { city: Halle, postcode: "06{3}" }
-  - { city: Magdeburg, postcode: "39{3}" }
-  - { city: Freiburg im Breisgau, postcode: "79{3}" }
-  - { city: Krefeld, postcode: "47{3}" }
-  - { city: Lübeck, postcode: "23{3}" }
-  - { city: Oberhausen, postcode: "46{3}" }
-  - { city: Erfurt, postcode: "99{3}" }
-  - { city: Mainz, postcode: "55{3}" }
-  - { city: Rostock, postcode: "18{3}" }
-  - { city: Kassel, postcode: "34{3}" }
-  - { city: Hagen, postcode: "58{3}" }
-  - { city: Saarbrücken, postcode: "66{3}" }
-  - { city: Potsdam, postcode: "14{3}" }
-  - { city: Ludwigshafen, postcode: "67{3}" }
-  - { city: Oldenburg, postcode: "26{3}" }
-  - { city: Osnabrück, postcode: "49{3}" }
-  - { city: Leverkusen, postcode: "51{3}" }
-  - { city: Heidelberg, postcode: "69{3}" }
-  - { city: Darmstadt, postcode: "64{3}" }
-  - { city: Würzburg, postcode: "97{3}" }
-  - { city: Regensburg, postcode: "93{3}" }
-  - { city: Ingolstadt, postcode: "85{3}" }
-  - { city: Ulm, postcode: "89{3}" }
-  - { city: Heilbronn, postcode: "74{3}" }
-  - { city: Pforzheim, postcode: "75{3}" }
-  - { city: Göttingen, postcode: "37{3}" }
-  - { city: Bremerhaven, postcode: "27{3}" }
-  - { city: Trier, postcode: "54{3}" }
-  - { city: Jena, postcode: "07{3}" }
-  - { city: Koblenz, postcode: "56{3}" }
-  - { city: Cottbus, postcode: "03{3}" }
-  - { city: Flensburg, postcode: "24{3}" }
-  - { city: Passau, postcode: "94{3}" }
-  - { city: Bayreuth, postcode: "95{3}" }
+  - { city: Berlin, state: "Berlin", postcode: "10{3}" }
+  - { city: Hamburg, state: "Hamburg", postcode: "20{3}" }
+  - { city: München, state: "Bayern", postcode: "80{3}" }
+  - { city: Köln, state: "Nordrhein-Westfalen", postcode: "50{3}" }
+  - { city: Frankfurt am Main, state: "Hessen", postcode: "60{3}" }
+  - { city: Stuttgart, state: "Baden-Württemberg", postcode: "70{3}" }
+  - { city: Düsseldorf, state: "Nordrhein-Westfalen", postcode: "40{3}" }
+  - { city: Leipzig, state: "Sachsen", postcode: "04{3}" }
+  - { city: Dortmund, state: "Nordrhein-Westfalen", postcode: "44{3}" }
+  - { city: Essen, state: "Nordrhein-Westfalen", postcode: "45{3}" }
+  - { city: Bremen, state: "Bremen", postcode: "28{3}" }
+  - { city: Dresden, state: "Sachsen", postcode: "01{3}" }
+  - { city: Hannover, state: "Niedersachsen", postcode: "30{3}" }
+  - { city: Nürnberg, state: "Bayern", postcode: "90{3}" }
+  - { city: Duisburg, state: "Nordrhein-Westfalen", postcode: "47{3}" }
+  - { city: Bochum, state: "Nordrhein-Westfalen", postcode: "44{3}" }
+  - { city: Wuppertal, state: "Nordrhein-Westfalen", postcode: "42{3}" }
+  - { city: Bielefeld, state: "Nordrhein-Westfalen", postcode: "33{3}" }
+  - { city: Bonn, state: "Nordrhein-Westfalen", postcode: "53{3}" }
+  - { city: Münster, state: "Nordrhein-Westfalen", postcode: "48{3}" }
+  - { city: Karlsruhe, state: "Baden-Württemberg", postcode: "76{3}" }
+  - { city: Mannheim, state: "Baden-Württemberg", postcode: "68{3}" }
+  - { city: Augsburg, state: "Bayern", postcode: "86{3}" }
+  - { city: Wiesbaden, state: "Hessen", postcode: "65{3}" }
+  - { city: Gelsenkirchen, state: "Nordrhein-Westfalen", postcode: "45{3}" }
+  - { city: Mönchengladbach, state: "Nordrhein-Westfalen", postcode: "41{3}" }
+  - { city: Braunschweig, state: "Niedersachsen", postcode: "38{3}" }
+  - { city: Kiel, state: "Schleswig-Holstein", postcode: "24{3}" }
+  - { city: Chemnitz, state: "Sachsen", postcode: "09{3}" }
+  - { city: Aachen, state: "Nordrhein-Westfalen", postcode: "52{3}" }
+  - { city: Halle, state: "Sachsen-Anhalt", postcode: "06{3}" }
+  - { city: Magdeburg, state: "Sachsen-Anhalt", postcode: "39{3}" }
+  - { city: Freiburg im Breisgau, state: "Baden-Württemberg", postcode: "79{3}" }
+  - { city: Krefeld, state: "Nordrhein-Westfalen", postcode: "47{3}" }
+  - { city: Lübeck, state: "Schleswig-Holstein", postcode: "23{3}" }
+  - { city: Oberhausen, state: "Nordrhein-Westfalen", postcode: "46{3}" }
+  - { city: Erfurt, state: "Thüringen", postcode: "99{3}" }
+  - { city: Mainz, state: "Rheinland-Pfalz", postcode: "55{3}" }
+  - { city: Rostock, state: "Mecklenburg-Vorpommern", postcode: "18{3}" }
+  - { city: Kassel, state: "Hessen", postcode: "34{3}" }
+  - { city: Hagen, state: "Nordrhein-Westfalen", postcode: "58{3}" }
+  - { city: Saarbrücken, state: "Saarland", postcode: "66{3}" }
+  - { city: Potsdam, state: "Brandenburg", postcode: "14{3}" }
+  - { city: Ludwigshafen, state: "Rheinland-Pfalz", postcode: "67{3}" }
+  - { city: Oldenburg, state: "Niedersachsen", postcode: "26{3}" }
+  - { city: Osnabrück, state: "Niedersachsen", postcode: "49{3}" }
+  - { city: Leverkusen, state: "Nordrhein-Westfalen", postcode: "51{3}" }
+  - { city: Heidelberg, state: "Baden-Württemberg", postcode: "69{3}" }
+  - { city: Darmstadt, state: "Hessen", postcode: "64{3}" }
+  - { city: Würzburg, state: "Bayern", postcode: "97{3}" }
+  - { city: Regensburg, state: "Bayern", postcode: "93{3}" }
+  - { city: Ingolstadt, state: "Bayern", postcode: "85{3}" }
+  - { city: Ulm, state: "Baden-Württemberg", postcode: "89{3}" }
+  - { city: Heilbronn, state: "Baden-Württemberg", postcode: "74{3}" }
+  - { city: Pforzheim, state: "Baden-Württemberg", postcode: "75{3}" }
+  - { city: Göttingen, state: "Niedersachsen", postcode: "37{3}" }
+  - { city: Bremerhaven, state: "Bremen", postcode: "27{3}" }
+  - { city: Trier, state: "Rheinland-Pfalz", postcode: "54{3}" }
+  - { city: Jena, state: "Thüringen", postcode: "07{3}" }
+  - { city: Koblenz, state: "Rheinland-Pfalz", postcode: "56{3}" }
+  - { city: Cottbus, state: "Brandenburg", postcode: "03{3}" }
+  - { city: Flensburg, state: "Schleswig-Holstein", postcode: "24{3}" }
+  - { city: Passau, state: "Bayern", postcode: "94{3}" }
+  - { city: Bayreuth, state: "Bayern", postcode: "95{3}" }

@@ -4,7 +4,7 @@
 # separately; real city names; postcodes of the right shape (5 digits, the leading pair of the
 # department). `{n}` in phone formats and postcodes is n seeded digits. Phone numbers use the
 # ARCEP fiction ranges: 01 99 00 xx xx, 02 61 91 xx xx, 03 53 01 xx xx, 04 65 71 xx xx,
-# 05 36 49 xx xx and 06 39 98 xx xx. The pack is stateless: the address has no {state}.
+# 05 36 49 xx xx and 06 39 98 xx xx. `state` is the région; the address has no {state}.
 version: 1
 tag: fr-FR
 name_order: given-family
@@ -73,66 +73,66 @@ streets: [
   Chemin du Lavoir, Rue de la République, Square des Acacias, Rue Nationale,
 ]
 places:
-  - { city: Paris, postcode: "75{3}" }
-  - { city: Marseille, postcode: "13{3}" }
-  - { city: Lyon, postcode: "69{3}" }
-  - { city: Toulouse, postcode: "31{3}" }
-  - { city: Nice, postcode: "06{3}" }
-  - { city: Nantes, postcode: "44{3}" }
-  - { city: Strasbourg, postcode: "67{3}" }
-  - { city: Montpellier, postcode: "34{3}" }
-  - { city: Bordeaux, postcode: "33{3}" }
-  - { city: Lille, postcode: "59{3}" }
-  - { city: Rennes, postcode: "35{3}" }
-  - { city: Reims, postcode: "51{3}" }
-  - { city: Le Havre, postcode: "76{3}" }
-  - { city: Saint-Étienne, postcode: "42{3}" }
-  - { city: Toulon, postcode: "83{3}" }
-  - { city: Grenoble, postcode: "38{3}" }
-  - { city: Dijon, postcode: "21{3}" }
-  - { city: Angers, postcode: "49{3}" }
-  - { city: Nîmes, postcode: "30{3}" }
-  - { city: Villeurbanne, postcode: "69{3}" }
-  - { city: Clermont-Ferrand, postcode: "63{3}" }
-  - { city: Le Mans, postcode: "72{3}" }
-  - { city: Aix-en-Provence, postcode: "13{3}" }
-  - { city: Brest, postcode: "29{3}" }
-  - { city: Tours, postcode: "37{3}" }
-  - { city: Amiens, postcode: "80{3}" }
-  - { city: Limoges, postcode: "87{3}" }
-  - { city: Annecy, postcode: "74{3}" }
-  - { city: Perpignan, postcode: "66{3}" }
-  - { city: Metz, postcode: "57{3}" }
-  - { city: Besançon, postcode: "25{3}" }
-  - { city: Orléans, postcode: "45{3}" }
-  - { city: Rouen, postcode: "76{3}" }
-  - { city: Mulhouse, postcode: "68{3}" }
-  - { city: Caen, postcode: "14{3}" }
-  - { city: Nancy, postcode: "54{3}" }
-  - { city: Avignon, postcode: "84{3}" }
-  - { city: Poitiers, postcode: "86{3}" }
-  - { city: La Rochelle, postcode: "17{3}" }
-  - { city: Pau, postcode: "64{3}" }
-  - { city: Bayonne, postcode: "64{3}" }
-  - { city: Cannes, postcode: "06{3}" }
-  - { city: Antibes, postcode: "06{3}" }
-  - { city: Ajaccio, postcode: "20{3}" }
-  - { city: Bastia, postcode: "20{3}" }
-  - { city: Colmar, postcode: "68{3}" }
-  - { city: Troyes, postcode: "10{3}" }
-  - { city: Valence, postcode: "26{3}" }
-  - { city: Chambéry, postcode: "73{3}" }
-  - { city: Lorient, postcode: "56{3}" }
-  - { city: Quimper, postcode: "29{3}" }
-  - { city: Saint-Malo, postcode: "35{3}" }
-  - { city: Cherbourg-en-Cotentin, postcode: "50{3}" }
-  - { city: Albi, postcode: "81{3}" }
-  - { city: Carcassonne, postcode: "11{3}" }
-  - { city: Béziers, postcode: "34{3}" }
-  - { city: Arles, postcode: "13{3}" }
-  - { city: Dunkerque, postcode: "59{3}" }
-  - { city: Boulogne-sur-Mer, postcode: "62{3}" }
-  - { city: Angoulême, postcode: "16{3}" }
-  - { city: Vannes, postcode: "56{3}" }
-  - { city: Épinal, postcode: "88{3}" }
-  - { city: Tarbes, postcode: "65{3}" }
+  - { city: Paris, state: "Île-de-France", postcode: "75{3}" }
+  - { city: Marseille, state: "Provence-Alpes-Côte d'Azur", postcode: "13{3}" }
+  - { city: Lyon, state: "Auvergne-Rhône-Alpes", postcode: "69{3}" }
+  - { city: Toulouse, state: "Occitanie", postcode: "31{3}" }
+  - { city: Nice, state: "Provence-Alpes-Côte d'Azur", postcode: "06{3}" }
+  - { city: Nantes, state: "Pays de la Loire", postcode: "44{3}" }
+  - { city: Strasbourg, state: "Grand Est", postcode: "67{3}" }
+  - { city: Montpellier, state: "Occitanie", postcode: "34{3}" }
+  - { city: Bordeaux, state: "Nouvelle-Aquitaine", postcode: "33{3}" }
+  - { city: Lille, state: "Hauts-de-France", postcode: "59{3}" }
+  - { city: Rennes, state: "Bretagne", postcode: "35{3}" }
+  - { city: Reims, state: "Grand Est", postcode: "51{3}" }
+  - { city: Le Havre, state: "Normandie", postcode: "76{3}" }
+  - { city: Saint-Étienne, state: "Auvergne-Rhône-Alpes", postcode: "42{3}" }
+  - { city: Toulon, state: "Provence-Alpes-Côte d'Azur", postcode: "83{3}" }
+  - { city: Grenoble, state: "Auvergne-Rhône-Alpes", postcode: "38{3}" }
+  - { city: Dijon, state: "Bourgogne-Franche-Comté", postcode: "21{3}" }
+  - { city: Angers, state: "Pays de la Loire", postcode: "49{3}" }
+  - { city: Nîmes, state: "Occitanie", postcode: "30{3}" }
+  - { city: Villeurbanne, state: "Auvergne-Rhône-Alpes", postcode: "69{3}" }
+  - { city: Clermont-Ferrand, state: "Auvergne-Rhône-Alpes", postcode: "63{3}" }
+  - { city: Le Mans, state: "Pays de la Loire", postcode: "72{3}" }
+  - { city: Aix-en-Provence, state: "Provence-Alpes-Côte d'Azur", postcode: "13{3}" }
+  - { city: Brest, state: "Bretagne", postcode: "29{3}" }
+  - { city: Tours, state: "Centre-Val de Loire", postcode: "37{3}" }
+  - { city: Amiens, state: "Hauts-de-France", postcode: "80{3}" }
+  - { city: Limoges, state: "Nouvelle-Aquitaine", postcode: "87{3}" }
+  - { city: Annecy, state: "Auvergne-Rhône-Alpes", postcode: "74{3}" }
+  - { city: Perpignan, state: "Occitanie", postcode: "66{3}" }
+  - { city: Metz, state: "Grand Est", postcode: "57{3}" }
+  - { city: Besançon, state: "Bourgogne-Franche-Comté", postcode: "25{3}" }
+  - { city: Orléans, state: "Centre-Val de Loire", postcode: "45{3}" }
+  - { city: Rouen, state: "Normandie", postcode: "76{3}" }
+  - { city: Mulhouse, state: "Grand Est", postcode: "68{3}" }
+  - { city: Caen, state: "Normandie", postcode: "14{3}" }
+  - { city: Nancy, state: "Grand Est", postcode: "54{3}" }
+  - { city: Avignon, state: "Provence-Alpes-Côte d'Azur", postcode: "84{3}" }
+  - { city: Poitiers, state: "Nouvelle-Aquitaine", postcode: "86{3}" }
+  - { city: La Rochelle, state: "Nouvelle-Aquitaine", postcode: "17{3}" }
+  - { city: Pau, state: "Nouvelle-Aquitaine", postcode: "64{3}" }
+  - { city: Bayonne, state: "Nouvelle-Aquitaine", postcode: "64{3}" }
+  - { city: Cannes, state: "Provence-Alpes-Côte d'Azur", postcode: "06{3}" }
+  - { city: Antibes, state: "Provence-Alpes-Côte d'Azur", postcode: "06{3}" }
+  - { city: Ajaccio, state: "Corse", postcode: "20{3}" }
+  - { city: Bastia, state: "Corse", postcode: "20{3}" }
+  - { city: Colmar, state: "Grand Est", postcode: "68{3}" }
+  - { city: Troyes, state: "Grand Est", postcode: "10{3}" }
+  - { city: Valence, state: "Auvergne-Rhône-Alpes", postcode: "26{3}" }
+  - { city: Chambéry, state: "Auvergne-Rhône-Alpes", postcode: "73{3}" }
+  - { city: Lorient, state: "Bretagne", postcode: "56{3}" }
+  - { city: Quimper, state: "Bretagne", postcode: "29{3}" }
+  - { city: Saint-Malo, state: "Bretagne", postcode: "35{3}" }
+  - { city: Cherbourg-en-Cotentin, state: "Normandie", postcode: "50{3}" }
+  - { city: Albi, state: "Occitanie", postcode: "81{3}" }
+  - { city: Carcassonne, state: "Occitanie", postcode: "11{3}" }
+  - { city: Béziers, state: "Occitanie", postcode: "34{3}" }
+  - { city: Arles, state: "Provence-Alpes-Côte d'Azur", postcode: "13{3}" }
+  - { city: Dunkerque, state: "Hauts-de-France", postcode: "59{3}" }
+  - { city: Boulogne-sur-Mer, state: "Hauts-de-France", postcode: "62{3}" }
+  - { city: Angoulême, state: "Nouvelle-Aquitaine", postcode: "16{3}" }
+  - { city: Vannes, state: "Bretagne", postcode: "56{3}" }
+  - { city: Épinal, state: "Grand Est", postcode: "88{3}" }
+  - { city: Tarbes, state: "Occitanie", postcode: "65{3}" }

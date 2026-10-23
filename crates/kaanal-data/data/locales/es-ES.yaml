@@ -5,7 +5,7 @@
 # province). `{n}` in phone formats and postcodes is n seeded digits. Spain has no reserved
 # fiction range for phone numbers, so the numbers have the plausible shape (mobile 6xx or 7xx,
 # landline 9xx) and could belong to a real subscriber: test data only, never call or text them.
-# The pack is stateless: the address has no {state}.
+# `state` is the region (comunidad autónoma); the address has no {state}.
 version: 1
 tag: es-ES
 name_order: given-family
@@ -73,64 +73,64 @@ streets: [
   Calle de la Fuente, Plaza del Mercado, Camino del Río, Calle Cervantes, Ronda del Castillo, Calle de los Naranjos,
 ]
 places:
-  - { city: Madrid, postcode: "28{3}" }
-  - { city: Barcelona, postcode: "08{3}" }
-  - { city: Valencia, postcode: "46{3}" }
-  - { city: Sevilla, postcode: "41{3}" }
-  - { city: Zaragoza, postcode: "50{3}" }
-  - { city: Málaga, postcode: "29{3}" }
-  - { city: Murcia, postcode: "30{3}" }
-  - { city: Palma, postcode: "07{3}" }
-  - { city: Las Palmas de Gran Canaria, postcode: "35{3}" }
-  - { city: Bilbao, postcode: "48{3}" }
-  - { city: Alicante, postcode: "03{3}" }
-  - { city: Córdoba, postcode: "14{3}" }
-  - { city: Valladolid, postcode: "47{3}" }
-  - { city: Vigo, postcode: "36{3}" }
-  - { city: Gijón, postcode: "33{3}" }
-  - { city: Hospitalet de Llobregat, postcode: "08{3}" }
-  - { city: Vitoria-Gasteiz, postcode: "01{3}" }
-  - { city: A Coruña, postcode: "15{3}" }
-  - { city: Granada, postcode: "18{3}" }
-  - { city: Elche, postcode: "03{3}" }
-  - { city: Oviedo, postcode: "33{3}" }
-  - { city: Badalona, postcode: "08{3}" }
-  - { city: Cartagena, postcode: "30{3}" }
-  - { city: Terrassa, postcode: "08{3}" }
-  - { city: Jerez de la Frontera, postcode: "11{3}" }
-  - { city: Sabadell, postcode: "08{3}" }
-  - { city: Santa Cruz de Tenerife, postcode: "38{3}" }
-  - { city: Pamplona, postcode: "31{3}" }
-  - { city: Almería, postcode: "04{3}" }
-  - { city: San Sebastián, postcode: "20{3}" }
-  - { city: Burgos, postcode: "09{3}" }
-  - { city: Santander, postcode: "39{3}" }
-  - { city: Castellón de la Plana, postcode: "12{3}" }
-  - { city: Albacete, postcode: "02{3}" }
-  - { city: Logroño, postcode: "26{3}" }
-  - { city: Badajoz, postcode: "06{3}" }
-  - { city: Salamanca, postcode: "37{3}" }
-  - { city: Huelva, postcode: "21{3}" }
-  - { city: Marbella, postcode: "29{3}" }
-  - { city: León, postcode: "24{3}" }
-  - { city: Tarragona, postcode: "43{3}" }
-  - { city: Cádiz, postcode: "11{3}" }
-  - { city: Lleida, postcode: "25{3}" }
-  - { city: Jaén, postcode: "23{3}" }
-  - { city: Ourense, postcode: "32{3}" }
-  - { city: Girona, postcode: "17{3}" }
-  - { city: Lugo, postcode: "27{3}" }
-  - { city: Santiago de Compostela, postcode: "15{3}" }
-  - { city: Cáceres, postcode: "10{3}" }
-  - { city: Toledo, postcode: "45{3}" }
-  - { city: Guadalajara, postcode: "19{3}" }
-  - { city: Segovia, postcode: "40{3}" }
-  - { city: Ávila, postcode: "05{3}" }
-  - { city: Teruel, postcode: "44{3}" }
-  - { city: Huesca, postcode: "22{3}" }
-  - { city: Pontevedra, postcode: "36{3}" }
-  - { city: Palencia, postcode: "34{3}" }
-  - { city: Soria, postcode: "42{3}" }
-  - { city: Zamora, postcode: "49{3}" }
-  - { city: Ibiza, postcode: "07{3}" }
-  - { city: Mérida, postcode: "06{3}" }
+  - { city: Madrid, state: "Comunidad de Madrid", postcode: "28{3}" }
+  - { city: Barcelona, state: "Cataluña", postcode: "08{3}" }
+  - { city: Valencia, state: "Comunitat Valenciana", postcode: "46{3}" }
+  - { city: Sevilla, state: "Andalucía", postcode: "41{3}" }
+  - { city: Zaragoza, state: "Aragón", postcode: "50{3}" }
+  - { city: Málaga, state: "Andalucía", postcode: "29{3}" }
+  - { city: Murcia, state: "Región de Murcia", postcode: "30{3}" }
+  - { city: Palma, state: "Islas Baleares", postcode: "07{3}" }
+  - { city: Las Palmas de Gran Canaria, state: "Canarias", postcode: "35{3}" }
+  - { city: Bilbao, state: "País Vasco", postcode: "48{3}" }
+  - { city: Alicante, state: "Comunitat Valenciana", postcode: "03{3}" }
+  - { city: Córdoba, state: "Andalucía", postcode: "14{3}" }
+  - { city: Valladolid, state: "Castilla y León", postcode: "47{3}" }
+  - { city: Vigo, state: "Galicia", postcode: "36{3}" }
+  - { city: Gijón, state: "Principado de Asturias", postcode: "33{3}" }
+  - { city: Hospitalet de Llobregat, state: "Cataluña", postcode: "08{3}" }
+  - { city: Vitoria-Gasteiz, state: "País Vasco", postcode: "01{3}" }
+  - { city: A Coruña, state: "Galicia", postcode: "15{3}" }
+  - { city: Granada, state: "Andalucía", postcode: "18{3}" }
+  - { city: Elche, state: "Comunitat Valenciana", postcode: "03{3}" }
+  - { city: Oviedo, state: "Principado de Asturias", postcode: "33{3}" }
+  - { city: Badalona, state: "Cataluña", postcode: "08{3}" }
+  - { city: Cartagena, state: "Región de Murcia", postcode: "30{3}" }
+  - { city: Terrassa, state: "Cataluña", postcode: "08{3}" }
+  - { city: Jerez de la Frontera, state: "Andalucía", postcode: "11{3}" }
+  - { city: Sabadell, state: "Cataluña", postcode: "08{3}" }
+  - { city: Santa Cruz de Tenerife, state: "Canarias", postcode: "38{3}" }
+  - { city: Pamplona, state: "Navarra", postcode: "31{3}" }
+  - { city: Almería, state: "Andalucía", postcode: "04{3}" }
+  - { city: San Sebastián, state: "País Vasco", postcode: "20{3}" }
+  - { city: Burgos, state: "Castilla y León", postcode: "09{3}" }
+  - { city: Santander, state: "Cantabria", postcode: "39{3}" }
+  - { city: Castellón de la Plana, state: "Comunitat Valenciana", postcode: "12{3}" }
+  - { city: Albacete, state: "Castilla-La Mancha", postcode: "02{3}" }
+  - { city: Logroño, state: "La Rioja", postcode: "26{3}" }
+  - { city: Badajoz, state: "Extremadura", postcode: "06{3}" }
+  - { city: Salamanca, state: "Castilla y León", postcode: "37{3}" }
+  - { city: Huelva, state: "Andalucía", postcode: "21{3}" }
+  - { city: Marbella, state: "Andalucía", postcode: "29{3}" }
+  - { city: León, state: "Castilla y León", postcode: "24{3}" }
+  - { city: Tarragona, state: "Cataluña", postcode: "43{3}" }
+  - { city: Cádiz, state: "Andalucía", postcode: "11{3}" }
+  - { city: Lleida, state: "Cataluña", postcode: "25{3}" }
+  - { city: Jaén, state: "Andalucía", postcode: "23{3}" }
+  - { city: Ourense, state: "Galicia", postcode: "32{3}" }
+  - { city: Girona, state: "Cataluña", postcode: "17{3}" }
+  - { city: Lugo, state: "Galicia", postcode: "27{3}" }
+  - { city: Santiago de Compostela, state: "Galicia", postcode: "15{3}" }
+  - { city: Cáceres, state: "Extremadura", postcode: "10{3}" }
+  - { city: Toledo, state: "Castilla-La Mancha", postcode: "45{3}" }
+  - { city: Guadalajara, state: "Castilla-La Mancha", postcode: "19{3}" }
+  - { city: Segovia, state: "Castilla y León", postcode: "40{3}" }
+  - { city: Ávila, state: "Castilla y León", postcode: "05{3}" }
+  - { city: Teruel, state: "Aragón", postcode: "44{3}" }
+  - { city: Huesca, state: "Aragón", postcode: "22{3}" }
+  - { city: Pontevedra, state: "Galicia", postcode: "36{3}" }
+  - { city: Palencia, state: "Castilla y León", postcode: "34{3}" }
+  - { city: Soria, state: "Castilla y León", postcode: "42{3}" }
+  - { city: Zamora, state: "Castilla y León", postcode: "49{3}" }
+  - { city: Ibiza, state: "Islas Baleares", postcode: "07{3}" }
+  - { city: Mérida, state: "Extremadura", postcode: "06{3}" }
