@@ -271,3 +271,65 @@ paths:
         "{err}"
     );
 }
+
+/// A one-endpoint spec with the given `servers:` block (YAML text, may be empty).
+fn with_servers(servers: &str) -> String {
+    format!(
+        "openapi: 3.0.3\ninfo: {{ title: t, version: \"1\" }}\n{servers}\npaths:\n  /pets:\n    get:\n      responses:\n        \"200\": {{ description: ok }}\n"
+    )
+}
+
+fn pet_path(servers: &str) -> String {
+    let m = ApiModel::from_openapi(&with_servers(servers)).expect("parses");
+    m.endpoints[0].path.clone()
+}
+
+#[test]
+fn a_relative_server_url_prefixes_every_path() {
+    assert_eq!(pet_path("servers: [{ url: /api/v3 }]"), "/api/v3/pets");
+}
+
+#[test]
+fn an_absolute_server_url_contributes_its_path_only() {
+    assert_eq!(
+        pet_path("servers: [{ url: \"https://api.example.com:8443/v1/\" }]"),
+        "/v1/pets"
+    );
+}
+
+#[test]
+fn no_servers_a_root_url_or_a_host_only_url_add_no_prefix() {
+    for servers in [
+        "",
+        "servers: []",
+        "servers: [{ url: / }]",
+        "servers: [{ url: \"https://api.example.com\" }]",
+        "servers: [{ description: no url }]",
+    ] {
+        assert_eq!(pet_path(servers), "/pets", "{servers}");
+    }
+}
+
+#[test]
+fn only_the_first_server_counts() {
+    assert_eq!(pet_path("servers: [{ url: /a }, { url: /b }]"), "/a/pets");
+}
+
+#[test]
+fn server_variables_use_their_defaults() {
+    let servers = "servers:\n  - url: \"https://{env}.example.com/{ver}\"\n    variables:\n      env: { default: api }\n      ver: { default: v2, enum: [v1, v2] }";
+    assert_eq!(pet_path(servers), "/v2/pets");
+}
+
+#[test]
+fn a_variable_without_a_default_is_an_error() {
+    let err = ApiModel::from_openapi(&with_servers("servers: [{ url: \"/{ver}\" }]")).unwrap_err();
+    assert!(err.contains("ver") && err.contains("default"), "{err}");
+}
+
+#[test]
+fn a_prefix_that_is_still_a_template_is_an_error() {
+    let servers = "servers:\n  - url: /{p}\n    variables:\n      p: { default: \"{x}\" }";
+    let err = ApiModel::from_openapi(&with_servers(servers)).unwrap_err();
+    assert!(err.contains("servers"), "{err}");
+}

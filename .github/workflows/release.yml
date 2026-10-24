@@ -1,0 +1,148 @@
+name: Release
+
+# Manual only. How to release:
+#   1. Set the version in Cargo.toml ([workspace.package]) and write RELEASE.md: its first line is
+#      `Tag: vX.Y.Z` (it must match the Cargo.toml version), the rest is the release notes.
+#   2. Merge that to main.
+#   3. Run this workflow on main with "publish" ticked. It builds Linux x86_64, macOS arm64 and Windows
+#      x86_64 archives, then creates the tag at the built commit and a GitHub release with the archives and
+#      SHA256SUMS. Versions below 1.0 are marked as pre-releases.
+# Running it with "publish" off, or on another branch, only builds the archives (kept as artifacts for a
+# week) and checks RELEASE.md; nothing is tagged or published.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create the tag and the GitHub release (main only); off = build only"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  info:
+    name: Read RELEASE.md
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.info.outputs.tag }}
+      prerelease: ${{ steps.info.outputs.prerelease }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check RELEASE.md against Cargo.toml
+        id: info
+        run: bash scripts/release-info.sh | tee -a "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Refuse to publish from another branch or over an existing tag
+        if: inputs.publish
+        env:
+          TAG: ${{ steps.info.outputs.tag }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "publishing is only allowed from main (this is $GITHUB_REF)" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "tag $TAG already exists" >&2
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: info
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, ext: tar.gz }
+          - { os: macos-latest, target: aarch64-apple-darwin, ext: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, ext: zip }
+    env:
+      TAG: ${{ needs.info.outputs.tag }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # rustup ships on every runner, so no third-party action is needed. There is no build cache on
+      # purpose: nothing restored from a cache may end up in a release binary.
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target "$TARGET" && rustup default stable
+        shell: bash
+
+      # Cargo.toml has no [profile.release], so this is the default release build: not stripped, no LTO, no
+      # size tuning. A tuning pass is a separate job that needs measuring (see docs/source/how-to.md).
+      - name: Build
+        run: cargo build --release --locked -p kaanal --target "$TARGET"
+        shell: bash
+
+      - name: Check the binary runs
+        run: |
+          bin=target/$TARGET/release/kaanal
+          [ -f "$bin.exe" ] && bin=$bin.exe
+          "$bin" --version
+        shell: bash
+
+      - name: Package
+        run: |
+          name=kaanal-$TAG-$TARGET
+          mkdir "$name"
+          bin=target/$TARGET/release/kaanal
+          [ -f "$bin.exe" ] && bin=$bin.exe
+          cp "$bin" LICENSE README.md "$name"/
+          if [ "${{ matrix.ext }}" = zip ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          file=$name.${{ matrix.ext }}
+          if command -v sha256sum > /dev/null; then sha256sum "$file" > "$file.sha256"; else shasum -a 256 "$file" > "$file.sha256"; fi
+          cat "$file.sha256"
+        shell: bash
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaanal-${{ matrix.target }}
+          path: |
+            kaanal-${{ needs.info.outputs.tag }}-${{ matrix.target }}.${{ matrix.ext }}
+            kaanal-${{ needs.info.outputs.tag }}-${{ matrix.target }}.${{ matrix.ext }}.sha256
+          retention-days: 7
+
+  publish:
+    name: Tag and publish
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    needs: [info, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.info.outputs.tag }}
+      PRERELEASE: ${{ needs.info.outputs.prerelease }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download the archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kaanal-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create the release
+        run: |
+          bash scripts/release-info.sh --notes notes.md > /dev/null
+          (cd dist && cat ./*.sha256 > SHA256SUMS && rm ./*.sha256)
+          flags=
+          [ "$PRERELEASE" = true ] && flags=--prerelease
+          gh release create "$TAG" dist/* $flags --target "$GITHUB_SHA" --title "Kaanal $TAG" --notes-file notes.md

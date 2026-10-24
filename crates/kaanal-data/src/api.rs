@@ -62,6 +62,7 @@ impl ApiModel {
             .get("paths")
             .and_then(Value::as_object)
             .ok_or_else(|| String::from("missing 'paths'"))?;
+        let base = base_path(&doc)?;
         let mut endpoints = Vec::new();
         for (path, item) in paths {
             if !path.starts_with('/') {
@@ -76,7 +77,7 @@ impl ApiModel {
                 let (status, schema) = pick_response(op, &doc, &ptr)?;
                 endpoints.push(Endpoint {
                     method: m.to_uppercase(),
-                    path: path.clone(),
+                    path: format!("{base}{path}"),
                     status,
                     schema,
                 });
@@ -84,6 +85,71 @@ impl ApiModel {
         }
         Ok(ApiModel { endpoints })
     }
+}
+
+/// **Private.** The path of the first `servers` entry (`/api/v3` for `url: /api/v3` or
+/// `url: https://host/api/v3/`), which every path in the document sits under; empty when there
+/// is no usable server, or its path is `/`. Server variables take their `default`. Only the first
+/// server counts: a mock answers one base path.
+fn base_path(doc: &Value) -> Result<String, String> {
+    let Some(server) = doc
+        .get("servers")
+        .and_then(Value::as_array)
+        .and_then(|s| s.first())
+    else {
+        return Ok(String::new());
+    };
+    let Some(url) = server.get("url").and_then(Value::as_str) else {
+        return Ok(String::new());
+    };
+    let url = fill_variables(url, server)?;
+    // Past `scheme://host`, up to any query or fragment.
+    let rest = match url.split_once("://") {
+        Some((_, after)) => after.find('/').map_or("", |i| &after[i..]),
+        None => url.as_str(),
+    };
+    let rest = rest
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
+    if rest.is_empty() {
+        return Ok(String::new());
+    }
+    if rest.contains(['{', '}']) {
+        return Err(format!("servers[0].url path '{rest}' is not a plain path"));
+    }
+    Ok(if rest.starts_with('/') {
+        rest.to_string()
+    } else {
+        format!("/{rest}")
+    })
+}
+
+/// **Private.** `url` with each `{name}` replaced by that server variable's `default`.
+fn fill_variables(url: &str, server: &Value) -> Result<String, String> {
+    let mut out = String::new();
+    let mut rest = url;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let Some(len) = rest[open..].find('}') else {
+            return Err(format!("servers[0].url '{url}' has an unclosed '{{'"));
+        };
+        let name = &rest[open + 1..open + len];
+        let default = server
+            .pointer(&format!(
+                "/variables/{}/default",
+                name.replace('~', "~0").replace('/', "~1")
+            ))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                format!("servers[0].url uses variable '{name}', which has no default")
+            })?;
+        out.push_str(default);
+        rest = &rest[open + len + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// **Private.** Lowest 2xx response, and its application/json schema if it has one.

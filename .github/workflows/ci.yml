@@ -7,6 +7,12 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
+# One run per branch or pull request: a newer push cancels the older run, so only the latest commit is
+# tested. Pushes to main are never cancelled (the benchmark baseline comes from main's push runs).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   lint:
     name: Lint & Format (fmt, clippy, dprint)

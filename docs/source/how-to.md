@@ -64,6 +64,26 @@ Generator: `crates/kaanal-data/src/generate.rs`. An `allOf` is merged into one s
 
 Users do this in `kaanal.yaml` under `endpoints:` (`"GET /health": { override: { body: { ok: true } } }`). The merge/validation logic is in `AppState::build` (`server/src/state.rs`): shape conflicts (`/users/{id}` vs `/users/{x}`), reserved `/__kaanal` namespace, method and status checks. Tests in `server/tests/state.rs`.
 
+## Cut a release
+
+Releases are manual (R1.60). The repo is private for now and nothing is published to crates.io yet.
+
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and write `RELEASE.md`: the first line is `Tag: vX.Y.Z`, which must equal that version, and the rest is the release notes. `bash scripts/release-info.sh` checks both locally.
+2. Merge it to `main`.
+3. Run the **Release** workflow on `main` with "publish" ticked. It builds Linux x86_64, macOS arm64 and Windows x86_64 archives (macOS x86_64 is skipped), then creates the tag and a GitHub release (a pre-release below 1.0) with the archives and `SHA256SUMS`. Each archive holds the `kaanal` binary, `LICENSE` and `README.md`.
+4. To try it first, run the workflow with "publish" off: it only builds, and keeps the archives as artifacts for a week.
+
+**What the binaries are.** `Cargo.toml` has no `[profile.release]` section, so they are default release builds: not stripped, no LTO, no size tuning. They are larger than they could be. A size and speed tuning pass (`strip`, `lto`, `codegen-units`, `panic = "abort"`) is a separate job and needs measuring first (`scripts/bench.sh` for speed, the archive sizes for size).
+
+**To do before a public release.**
+
+- Add a generated `THIRD_PARTY_LICENSES` file to each archive (for example with `cargo-about`): the binary contains MIT, Apache and BSD crates whose notices should travel with it. Decide whether a `NOTICE` file is needed.
+- Tune the release profile (above) once it has been measured.
+- Pin the GitHub Actions to commit SHAs, with Dependabot to keep them current.
+- Optional: signed checksums or build attestations; Linux musl and arm64 builds; macOS x86_64.
+- crates.io: publish the six crates (`kaanal-winhandle`, `kaanal-core`, `kaanal-data`, `kaanal-sim`, `kaanal-server`, `kaanal`) in that order. The internal path dependencies need versions first, `cargo publish --dry-run` must pass, and the `repository` link needs a public repo. Publishing is permanent and makes the source public.
+- Install channels (Homebrew, Scoop, winget, Docker) are M4.
+
 ## Debugging tips
 
 - Every mock response carries `X-Kaanal-Trace` with the per-hop waterfall, e.g. `nginx.proc=1.0ms,net=1.0ms,app.proc=1.0ms,net=1.0ms,db.read=1.0ms`.

@@ -12,6 +12,8 @@ endpoints: kaanal.endpoints.yaml    # or write the map right here
 
 Each key is `"METHOD /path"` as in the spec (`"GET /orders/{id}"`). Every field is optional.
 
+**Base path.** If the spec declares `servers`, the path of the first server is part of every route: with `servers: [{ url: /api/v3 }]` (or `https://example.com/api/v3`), `GET /pet/{petId}` is served at `/api/v3/pet/{petId}` and its key is `"GET /api/v3/pet/{petId}"`, in `endpoints:`, in chaos, in pins and in the trace. A server URL of `/` or with no path adds nothing. Server variables use their `default`; a variable with no default is an error. Only the first server counts.
+
 ```yaml
 "GET /orders/{id}":
   op: read                       # default op; else inferred from the method and path
