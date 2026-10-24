@@ -1,8 +1,12 @@
-# `crates/kaanal-server/src/record.rs`
+# `crates/kaanal-server/src/record/`
 
 What one finished request leaves behind: the `X-Kaanal-Trace` text, the `LogEntry` for the request log ([log.md](log.md)) and the bus `Event`, all built from the same plan and `Finished`, so the header, the entry and the event cannot disagree. It is the adapter between the engine and plan types and the pure log types. User reference: [../../../web/observability.md](../../../web/observability.md).
 
 Secrets never get here: only names, times, statuses and the path (no query string, no headers, no bodies).
+
+## Modules (R3.8)
+
+`record` is a folder module: `mod.rs` holds the code, `tests.rs` the unit tests (they were over half of the old file).
 
 ## The trace text
 
@@ -54,4 +58,4 @@ One `HopRec` per finished hop, at most `MAX_HOPS` (512; `truncated` when more ra
 
 ## Tests
 
-[../../tests.md](../../tests.md#crateskaanal-serversrcrecordrs-unit--trace-text-flags-and-hops): 9 unit tests in the file, plus the `mock.rs` tests that run whole requests through it.
+[../../tests.md](../../tests.md#crateskaanal-serversrcrecordtestsrs-unit--trace-text-flags-and-hops): 9 unit tests in the file, plus the `mock.rs` tests that run whole requests through it.

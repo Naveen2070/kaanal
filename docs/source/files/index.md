@@ -36,25 +36,35 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-server](kaanal-server/) (HTTP)
 
-| File                 | Page                                                         | Contents                                              |
-| -------------------- | ------------------------------------------------------------ | ----------------------------------------------------- |
-| `src/lib.rs`         | [kaanal-server/lib.md](kaanal-server/lib.md)                 | `serve`/`check`, router, port binding                 |
-| `src/actor.rs`       | [kaanal-server/actor.md](kaanal-server/actor.md)             | Live replay-engine actor task and its handle          |
-| `src/auth.rs`        | [kaanal-server/auth.md](kaanal-server/auth.md)               | Signing key, JWKS, RS256 tokens, login                |
-| `src/control.rs`     | [kaanal-server/control.md](kaanal-server/control.md)         | Control API handlers + the auth/Host guard            |
-| `src/chaos_lease.rs` | [kaanal-server/chaos_lease.md](kaanal-server/chaos_lease.md) | Leases on live chaos (`ttl`): units, table, pruning   |
-| `src/mock.rs`        | [kaanal-server/mock.md](kaanal-server/mock.md)               | Mock request handler, request ids, CORS               |
-| `src/scenarios.rs`   | [kaanal-server/scenarios.md](kaanal-server/scenarios.md)     | Scenario file discovery and atomic save               |
-| `src/state.rs`       | [kaanal-server/state.md](kaanal-server/state.md)             | `AppState::build` load pipeline, route conflicts      |
-| `src/wire.rs`        | [kaanal-server/wire.md](kaanal-server/wire.md)               | `Cut` body stream for the `reset` failure kind        |
-| `src/scope.rs`       | [kaanal-server/scope.md](kaanal-server/scope.md)             | `X-Kaanal-Scenario` scoping and its stack cache       |
-| `src/pins.rs`        | [kaanal-server/pins.md](kaanal-server/pins.md)               | `empty_form`, `empty_ok`: what an `empty` pin answers |
-| `src/pin_api.rs`     | [kaanal-server/pin_api.md](kaanal-server/pin_api.md)         | `/pins` and `/cycle` routes                           |
-| `src/log.rs`         | [kaanal-server/log.md](kaanal-server/log.md)                 | Request ids, the 1000-entry log ring, query filters   |
-| `src/record.rs`      | [kaanal-server/record.md](kaanal-server/record.md)           | Trace text, log entry, flags and the bus event        |
-| `src/log_api.rs`     | [kaanal-server/log_api.md](kaanal-server/log_api.md)         | `/logs` and `/trace/{id}` routes                      |
-| `src/shutdown.rs`    | [kaanal-server/shutdown.md](kaanal-server/shutdown.md)       | The graceful stop: deadline handle, cutting listener  |
-| `src/ui.html`        | [../../web/web-ui.md](../../web/web-ui.md)                   | Embedded status page (documented with the web docs)   |
+| File                      | Page                                                         | Contents                                                                                                                        |
+| ------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib.rs`              | [kaanal-server/lib.md](kaanal-server/lib.md)                 | `serve`/`check`, router, port binding                                                                                           |
+| `src/actor.rs`            | [kaanal-server/actor.md](kaanal-server/actor.md)             | Live replay-engine actor task and its handle                                                                                    |
+| `src/auth.rs`             | [kaanal-server/auth.md](kaanal-server/auth.md)               | Signing key, JWKS, RS256 tokens, login                                                                                          |
+| `src/control/mod.rs`      | [kaanal-server/control.md](kaanal-server/control.md)         | Control API handlers + the auth/Host guard                                                                                      |
+| `src/control/guard.rs`    | [kaanal-server/control.md](kaanal-server/control.md)         | The security guard: Host check, bearer token, constant-time compare                                                             |
+| `src/control/chaos.rs`    | [kaanal-server/control.md](kaanal-server/control.md)         | The chaos handlers (`get_chaos`, `set_chaos`, `set_chaos_keyed`, `clear_node`, `clear_keyed`, `topology`) and their patch types |
+| `src/control/view.rs`     | [kaanal-server/control.md](kaanal-server/control.md)         | JSON views of chaos layers and the effective chaos, and the key and path helpers                                                |
+| `src/control/scenario.rs` | [kaanal-server/control.md](kaanal-server/control.md)         | The scenario handlers: list, get, put, delete, activate (ttl lease), deactivate, the active stack                               |
+| `src/control/lease.rs`    | [kaanal-server/control.md](kaanal-server/control.md)         | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`                                     |
+| `src/control/save.rs`     | [kaanal-server/control.md](kaanal-server/control.md)         | `POST /scenarios/save`: live, effective or a named scenario to a file                                                           |
+| `src/control/admin.rs`    | [kaanal-server/control.md](kaanal-server/control.md)         | `reset`, `shutdown`, the `events` stream and the `ui` page                                                                      |
+| `src/control/tests.rs`    | [kaanal-server/control.md](kaanal-server/control.md)         | The unit tests (see the last section)                                                                                           |
+| `src/chaos_lease.rs`      | [kaanal-server/chaos_lease.md](kaanal-server/chaos_lease.md) | Leases on live chaos (`ttl`): units, table, pruning                                                                             |
+| `src/mock/mod.rs`         | [kaanal-server/mock.md](kaanal-server/mock.md)               | Mock request handler, request ids, CORS                                                                                         |
+| `src/mock/flight.rs`      | [kaanal-server/mock.md](kaanal-server/mock.md)               | One request in flight: log entry, identity, early exits                                                                         |
+| `src/mock/reply.rs`       | [kaanal-server/mock.md](kaanal-server/mock.md)               | Building the answer: chaos, pins, wire failures, CORS                                                                           |
+| `src/scenarios.rs`        | [kaanal-server/scenarios.md](kaanal-server/scenarios.md)     | Scenario file discovery and atomic save                                                                                         |
+| `src/state.rs`            | [kaanal-server/state.md](kaanal-server/state.md)             | `AppState::build` load pipeline, route conflicts                                                                                |
+| `src/wire.rs`             | [kaanal-server/wire.md](kaanal-server/wire.md)               | `Cut` body stream for the `reset` failure kind                                                                                  |
+| `src/scope.rs`            | [kaanal-server/scope.md](kaanal-server/scope.md)             | `X-Kaanal-Scenario` scoping and its stack cache                                                                                 |
+| `src/pins.rs`             | [kaanal-server/pins.md](kaanal-server/pins.md)               | `empty_form`, `empty_ok`: what an `empty` pin answers                                                                           |
+| `src/pin_api.rs`          | [kaanal-server/pin_api.md](kaanal-server/pin_api.md)         | `/pins` and `/cycle` routes                                                                                                     |
+| `src/log.rs`              | [kaanal-server/log.md](kaanal-server/log.md)                 | Request ids, the 1000-entry log ring, query filters                                                                             |
+| `src/record/mod.rs`       | [kaanal-server/record.md](kaanal-server/record.md)           | Trace text, log entry, flags and the bus event                                                                                  |
+| `src/log_api.rs`          | [kaanal-server/log_api.md](kaanal-server/log_api.md)         | `/logs` and `/trace/{id}` routes                                                                                                |
+| `src/shutdown.rs`         | [kaanal-server/shutdown.md](kaanal-server/shutdown.md)       | The graceful stop: deadline handle, cutting listener                                                                            |
+| `src/ui.html`             | [../../web/web-ui.md](../../web/web-ui.md)                   | Embedded status page (documented with the web docs)                                                                             |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
 

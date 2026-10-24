@@ -23,9 +23,9 @@ A ready-made playground config lives in `crates/kaanal-server/tests/fixtures/` (
 ## Add a control API endpoint
 
 1. Add the route in `router()` in `crates/kaanal-server/src/lib.rs`, **above** the `route_layer` line so the `guard` middleware covers it — the guard is what enforces Host and token checks.
-2. Write the handler in `crates/kaanal-server/src/control.rs`. Take `State<Arc<AppState>>`; return `Json<Value>` or the `Reject` tuple for errors.
+2. Write the handler in the matching file in `crates/kaanal-server/src/control/` (re-export it in `mod.rs`). Take `State<Arc<AppState>>`; return `Json<Value>` or the `Reject` tuple for errors.
 3. If it mutates anything, it must need the token — the guard does this for you unless the path is `health` or `ui` (do not extend that exemption list without a security discussion).
-4. Test it in `crates/kaanal-server/tests/http.rs` with the `Srv` helper.
+4. Test it in the matching module of `crates/kaanal-server/tests/http/` with the `Srv` helper from `common.rs`.
 
 ## Add a node type
 

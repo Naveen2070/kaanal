@@ -1,6 +1,17 @@
-# `crates/kaanal-server/src/mock.rs`
+# `crates/kaanal-server/src/mock/`
 
 The mock request handler — the axum fallback that serves every non-control route.
+
+## Modules (R3.8)
+
+`mock` is a folder module; `lib.rs` still mounts `mock::handle`. The module is private to the crate, so none of this is public API.
+
+| File        | What it holds                                                                                                                                                   |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`    | `handle` (the request path), the body reader, and the scope and plan helpers.                                                                                   |
+| `flight.rs` | One request in flight: the log entry it must leave, the identity it carries, and the paths that end a request early (`rejected`, `no_route`, `engine_stopped`). |
+| `reply.rs`  | Building the answer: chaos failures, pinned states, the success body, wire failures and CORS.                                                                   |
+| `tests.rs`  | The unit tests (see the last section).                                                                                                                          |
 
 ## What it does
 
@@ -47,6 +58,6 @@ The mock request handler — the axum fallback that serves every non-control rou
 | `rejected(st, ident, method, path, endpoint, why, resp)`         | Tags and logs a response that no chain produced (`unmatched`, `bad-scope`, `engine-stopped`).                                                                                                                                                                                   |
 | `publish(st, entry, nodes)`, `tag(resp, id)`                     | Ring push then bus event; the `X-Request-Id` header.                                                                                                                                                                                                                            |
 
-## Unit tests in this file
+## Unit tests (`mock/tests.rs`)
 
-Unit tests are listed in [../tests.md](../../tests.md#crateskaanal-serversrcmockrs-unit--ids-the-log-and-the-event). Path params are decoded with `percent_encoding::percent_decode_str` (invalid escapes kept, invalid UTF-8 → U+FFFD). HTTP-level behaviour: [../tests.md](../../tests.md#crateskaanal-servertestshttprs).
+Unit tests are listed in [../tests.md](../../tests.md#crateskaanal-serversrcmocktestsrs-unit--ids-the-log-and-the-event). Path params are decoded with `percent_encoding::percent_decode_str` (invalid escapes kept, invalid UTF-8 → U+FFFD). HTTP-level behaviour: [../tests.md](../../tests.md#crateskaanal-servertestshttprs).

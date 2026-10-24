@@ -1,6 +1,22 @@
-# `crates/kaanal-server/src/control.rs`
+# `crates/kaanal-server/src/control/`
 
 The control API handlers and the security guard that stands in front of them.
+
+## Modules (R3.8)
+
+`control` is a folder module; `mod.rs` re-exports the handlers, so `lib.rs` still mounts `control::get_chaos` and the like. The module is private to the crate, so none of this is public API. The pages below describe all of it.
+
+| File          | What it holds                                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`      | `Reject`, `reject`, and the one write path `lock`, `commit`, `emit`, `remaining_ms`; re-exports the handlers `lib.rs` mounts.    |
+| `guard.rs`    | The security guard: Host check, bearer token, constant-time compare.                                                             |
+| `chaos.rs`    | The chaos handlers (`get_chaos`, `set_chaos`, `set_chaos_keyed`, `clear_node`, `clear_keyed`, `topology`) and their patch types. |
+| `view.rs`     | JSON views of chaos layers and the effective chaos, and the key and path helpers.                                                |
+| `scenario.rs` | The scenario handlers: list, get, put, delete, activate (ttl lease), deactivate, the active stack.                               |
+| `lease.rs`    | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`.                                     |
+| `save.rs`     | `POST /scenarios/save`: live, effective or a named scenario to a file.                                                           |
+| `admin.rs`    | `reset`, `shutdown`, the `events` stream and the `ui` page.                                                                      |
+| `tests.rs`    | The unit tests (see the last section).                                                                                           |
 
 ## The guard (runs before every `/__kaanal/*` route)
 
@@ -72,6 +88,6 @@ Only writers and the two scenario GETs (`list_scenarios`, `get_scenario`, whose 
 | `place`, `unknown`, `source_name`                                         | A `ScenarioError` path as `chaos[2].node: msg`; the 404 for a scenario name; `inline`/`file`/`runtime`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `node_id`                                                                 | Resolves a node name or 404. The key normalizer is core's `endpoint_key`; the private copy in this file is gone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-## Unit tests in this file
+## Unit tests (`control/tests.rs`)
 
 `hosts` (Host parsing incl. attack spellings), `constant_time_eq`, `token_comes_only_from_the_token_parameter`, and the lease timer on the paused clock (scenario and chaos leases, see [../../tests.md](../../tests.md#unit-tests-inside-source-files)). The shutdown route is tested over HTTP in [../../tests.md](../../tests.md#crateskaanal-servertestsshutdown_httprs--the-drain-over-http). HTTP-level tests: [../../tests.md](../../tests.md#crateskaanal-servertestshttprs--end-to-end-http) and [../../tests.md](../../tests.md#crateskaanal-servertestsscenarios_httprs--scenario-control-api).
