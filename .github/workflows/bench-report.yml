@@ -1,0 +1,80 @@
+name: Benchmark report
+
+# Manual only. Each run benchmarks the chosen ref, adds one entry to a history kept as an artifact
+# (bench-history, from the previous run of this workflow) and publishes a cumulative report in the job
+# summary and as the bench-report artifact. Artifacts expire (90 days by default), so run it at least
+# every few weeks to keep the history; the history starts again if the last artifact is gone.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Suite runs to merge (median of medians); more means less noise"
+        default: "5"
+        required: true
+      note:
+        description: "Free text for this entry, e.g. what changed"
+        required: false
+        default: ""
+
+concurrency:
+  group: bench-report
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    name: Benchmark history
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUNS: ${{ inputs.runs }}
+      NOTE: ${{ inputs.note }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: bench
+
+      # Only earlier manual runs of this workflow are trusted (starting one needs write access).
+      - name: Fetch the previous history
+        continue-on-error: true
+        run: |
+          mkdir -p target/bench
+          for id in $(gh run list --workflow bench-report.yml --event workflow_dispatch --status success --limit 10 \
+              --json databaseId --jq '.[].databaseId' --repo "$GITHUB_REPOSITORY"); do
+            if gh run download "$id" --name bench-history --dir target/bench/download --repo "$GITHUB_REPOSITORY"; then
+              mv target/bench/download/history.json target/bench/history.json
+              echo "history from run $id"
+              break
+            fi
+          done
+
+      - name: Run the benchmarks
+        run: bash scripts/bench.sh --runs "$RUNS" --out bench.json
+
+      - name: Add to the history and build the report
+        run: |
+          node scripts/bench-report.mjs append target/bench/history.json bench.json \
+            "commit=$GITHUB_SHA" "ref=$GITHUB_REF_NAME" "os=ubuntu-latest" "runs=$RUNS" "note=$NOTE"
+          node scripts/bench-report.mjs report target/bench/history.json > bench-report.md
+          cp target/bench/history.json history.json
+          cat bench-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the history
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-history
+          path: history.json
+
+      - name: Keep the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-report
+          path: bench-report.md

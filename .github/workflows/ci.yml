@@ -71,3 +71,69 @@ jobs:
       # Keep in sync with `rust-version` in Cargo.toml.
       - name: Build and test on the minimum supported Rust
         run: cargo test --workspace
+
+  # Report-only: it never fails on a regression (shared runners are noisy). The suite's one hard check
+  # is NFR-05 (1M simulated requests under 10 s). Pushes to main store their result as the baseline that
+  # later runs compare against; scripts/bench.sh runs the same thing locally.
+  bench:
+    name: Benchmarks (report only)
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: bench
+
+      # Only runs this workflow made for pushes to main are trusted: a branch or pull request run could
+      # otherwise leave an artifact of the same name behind.
+      - name: Fetch the baseline from the last push to main
+        continue-on-error: true
+        run: |
+          mkdir -p target/bench
+          for id in $(gh run list --workflow ci.yml --branch main --event push --limit 10 \
+              --json databaseId --jq '.[].databaseId' --repo "$GITHUB_REPOSITORY"); do
+            if gh run download "$id" --name bench-baseline --dir target/bench/download --repo "$GITHUB_REPOSITORY"; then
+              mv target/bench/download/bench.json target/bench/baseline.json
+              echo "baseline from run $id"
+              break
+            fi
+          done
+
+      - name: Run the benchmarks
+        run: bash scripts/bench.sh --runs 3 --out bench.json
+
+      - name: Summary
+        run: |
+          {
+            echo "## Benchmarks (3 runs, median of medians)"
+            echo
+            if [ -f target/bench/baseline.json ]; then
+              node scripts/bench-report.mjs compare target/bench/baseline.json bench.json
+            else
+              echo "No baseline yet: the first push to main creates it."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-run
+          path: bench.json
+
+      - name: Keep it as the baseline (push to main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-baseline
+          path: bench.json

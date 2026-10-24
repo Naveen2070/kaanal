@@ -1724,3 +1724,10 @@ One ignored test, `suite`, in the `kaanal` crate because it drives every crate. 
 | `overall` | The same server with 8 concurrent clients: requests/s and p50/p95/p99 latency.                                                                                                                                                    |
 
 The `server` and `overall` rows go over loopback HTTP and are noisy: compare them only on the same machine.
+
+### Running it: local script and CI
+
+- **Locally:** `scripts/bench.sh [--runs N] [--save-baseline] [--compare FILE] [--out FILE]`. It runs the suite in release, keeps every run in `target/bench/` (ignored by git), merges `--runs N` runs (median of the medians), and compares with `target/bench/baseline.json` when one exists. Typical use: `scripts/bench.sh --runs 3 --save-baseline` before a change, `scripts/bench.sh --runs 3` after it.
+- **CI, every push and pull request:** the `bench` job in `ci.yml` runs the suite three times and writes a comparison table into the job summary. A push to `main` stores its result as the `bench-baseline` artifact; later runs fetch the latest one to compare. It is report-only: a regression never fails the build, only the NFR-05 assertion can.
+- **CI, manual cumulative report:** the `Benchmark report` workflow (Actions tab, Run workflow; inputs `runs` and `note`) benchmarks the chosen ref, adds an entry to a history kept as the `bench-history` artifact and publishes a table of the last eight entries in the job summary and as the `bench-report` artifact. Artifacts expire after 90 days, so run it now and then; the history restarts if the last artifact is gone.
+- **Reading the numbers:** shared runners and busy laptops swing by 2x between runs, so changes within +-25% are marked `~`. Judge trends over several runs, not one comparison. `scripts/bench-report.mjs` (Node, no dependencies) does the merge, compare, append and report steps.
