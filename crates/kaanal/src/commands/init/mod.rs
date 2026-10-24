@@ -5,7 +5,9 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-use super::{Fail, STATE_DIR, err, fetch, load, located_err, output};
+mod fetch;
+
+use crate::{Fail, STATE_DIR, err, load, located_err, output};
 
 /// Written at the top of the config so editors offer completion (R1.15, `kaanal schema`).
 const SCHEMA_HEADER: &str =

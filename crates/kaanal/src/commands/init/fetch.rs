@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use url::{Host, Url};
 
-use super::{Fail, err};
+use crate::{Fail, err};
 
 /// The body cap: reading stops here and the fetch fails (`Content-Length` is not trusted).
 pub const MAX_BODY: u64 = 10 * 1024 * 1024;

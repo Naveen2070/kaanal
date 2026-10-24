@@ -292,4 +292,4 @@ until curl -fs http://localhost:8080/__kaanal/health >/dev/null; do sleep 0.2; d
 - The daemon log holds process output only. There is no access log and no request data on disk; the [request log](observability.md) is a 1000-entry ring in memory.
 - `.kaanal/lock` and `.kaanal/start.lock` are empty files that exist to be locked. They are safe to delete when nothing runs, and are re-created on demand.
 
-> Contributor pointer: the pieces are `crates/kaanal/src/lifecycle.rs` (liveness, stopping, detaching) and `up`, `up_detached` and `down` in `main.rs`; the server side is `crates/kaanal-server/src/shutdown.rs`. See [../source/files/kaanal/lifecycle.md](../source/files/kaanal/lifecycle.md).
+> Contributor pointer: the pieces are `crates/kaanal/src/instance/lifecycle/` (liveness, stopping, detaching) and `up`, `up_detached` and `down` in `main.rs`; the server side is `crates/kaanal-server/src/shutdown.rs`. See [../source/files/kaanal/lifecycle.md](../source/files/kaanal/lifecycle.md).

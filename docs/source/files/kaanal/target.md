@@ -1,4 +1,4 @@
-# `crates/kaanal/src/target.rs` (private)
+# `crates/kaanal/src/instance/target.rs` (private)
 
 Where a client command sends its request: the local instance found through `.kaanal/run.json`, or a remote one named by `--endpoint` / `KAANAL_ENDPOINT` with `--token` / `KAANAL_TOKEN` (spec E1-E6).
 

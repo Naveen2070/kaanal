@@ -1,4 +1,4 @@
-# `crates/kaanal/src/keys.rs` (private)
+# `crates/kaanal/src/instance/keys.rs` (private)
 
 The per-project signing key on disk.
 

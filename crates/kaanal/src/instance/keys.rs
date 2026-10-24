@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use kaanal_server::AuthKey;
 use sha2::{Digest, Sha256};
 
-use super::{Fail, err, private_dir};
+use crate::{Fail, err, private_dir};
 
 /// The project's signing key: read from its file, or generated and stored when there is
 /// none (`Generating signing key...` on stdout). A corrupt, unreadable or (Unix) group- or

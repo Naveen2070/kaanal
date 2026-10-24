@@ -1,4 +1,4 @@
-# `crates/kaanal/src/logview.rs`
+# `crates/kaanal/src/util/logview/mod.rs`
 
 Pure rendering and filtering for `kaanal logs` and `kaanal trace`: log lines, the ASCII waterfall, the follow de-dup set and printer loop, the client-side filter and the SSE line parser. No network (the commands in [main.md](main.md) do the fetching), so all of it is unit tested with golden strings. User reference: [../../../web/observability.md](../../../web/observability.md).
 
@@ -28,4 +28,4 @@ Every piece of text that came from the server (node names, paths, client ids, ca
 
 ## Tests
 
-[../../tests.md](../../tests.md#crateskaanalsrclogviewrs-unit--lines-waterfalls-and-follow): 22 unit tests in the file.
+[../../tests.md](../../tests.md#crateskaanalsrcutillogviewtestsrs-unit--lines-waterfalls-and-follow): 22 unit tests in the file.

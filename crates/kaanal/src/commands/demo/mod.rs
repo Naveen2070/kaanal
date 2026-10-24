@@ -1,4 +1,4 @@
-//! `kaanal demo`: writes the embedded e-commerce project (`demo_files`) to `.kaanal/demo/` and
+//! `kaanal demo`: writes the embedded e-commerce project (`files`) to `.kaanal/demo/` and
 //! runs it through the same path as `up`, in the foreground, on `127.0.0.1` only (M1-F spec C1,
 //! C3, C4, C10, C12, C13). `.kaanal/` stays the state dir, so `kaanal chaos`, `logs`, `down` and
 //! `scenario` in the same folder find the instance through `./.kaanal/run.json` as usual.
@@ -8,9 +8,13 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use super::{
-    Fail, STATE_DIR, Started, demo_files::FILES, err, lifecycle, load, lock_instance, output,
-    private_dir, serve_locked,
+mod files;
+
+use files::FILES;
+
+use crate::{
+    Fail, STATE_DIR, Started, err, lifecycle, load, lock_instance, output, private_dir,
+    serve_locked,
 };
 
 /// **Private.** The template's own locale line; `--locale` replaces it.

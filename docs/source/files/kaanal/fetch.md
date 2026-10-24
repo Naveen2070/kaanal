@@ -1,4 +1,4 @@
-# `crates/kaanal/src/fetch.rs` (private)
+# `crates/kaanal/src/commands/init/fetch.rs` (private)
 
 `kaanal init URL`: downloads an OpenAPI spec under hard limits (M1-F spec C8, C9). `init.rs` calls it; nothing else does.
 

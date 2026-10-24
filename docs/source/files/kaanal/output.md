@@ -1,4 +1,4 @@
-# `crates/kaanal/src/output.rs` (private)
+# `crates/kaanal/src/util/output.rs` (private)
 
 The global `--json` switch: one process-wide bit, set once in `main`, read by every command that prints.
 

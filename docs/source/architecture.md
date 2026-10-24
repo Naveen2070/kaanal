@@ -331,3 +331,18 @@ flowchart TD
 | **Token Leakage via Proxy / Redirect** | CLI tool obeys `HTTP_PROXY` or follows malicious redirects.    | CLI `ureq` client explicitly disables system proxies and redirects.                                     |
 | **Token Compromise in Logs**           | Token passed via query string appears in server or proxy logs. | Query string tokens are rejected everywhere except `/__kaanal/events`. UI reads token from `#fragment`. |
 | **Port Clashing**                      | Configured port is already occupied by another service.        | Server automatically probes `port..=port+20`, binding the first available socket.                       |
+
+## Code layout and file size
+
+Source files stay small enough to read in one sitting. These are soft limits, a review trigger and not a compiler rule:
+
+| File                                                 | Look for a seam | Split                     |
+| ---------------------------------------------------- | --------------- | ------------------------- |
+| Source (`src/**`, inline `#[cfg(test)]` code counts) | over 600 lines  | over 800 lines            |
+| Integration tests (`tests/*.rs`)                     |                 | over 1000 lines, by topic |
+
+A file may stay longer when it is one cohesive table or one type's impl; it then says why in a comment at the top. A split follows responsibility, not line count: the old module path stays (a folder module re-exports it, so callers do not change), the code is moved and not rewritten, and the matching page under `docs/source/files/` is updated in the same change.
+
+Inside a crate, group files in folders by role instead of keeping a long flat `src/`. The `kaanal` binary is the model: `commands/` (one file per subcommand family; `demo/` and `init/` are folders), `instance/` (the running instance on disk and over HTTP) and `util/` (shared helpers), with `main.rs` and `cli.rs` at the top. Avoid a folder called `core`: it reads like the `kaanal-core` crate and shadows the standard library's `core` in paths. Folder modules are `pub(crate)`, and `main.rs` re-exports the few module names commands use by their short path.
+
+A split must not widen what a crate exposes: items that were private become `pub(crate)` (or `pub(super)` inside a folder module), items that were `pub` stay as they were, and the old public paths keep working. A binary crate has no external API at all; for the library crates the plain-`pub` item set is compared before and after.

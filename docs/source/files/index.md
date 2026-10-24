@@ -65,18 +65,33 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal](kaanal/) (binary)
 
-| File                | Page                                       | Contents                                                              |
-| ------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
-| `src/main.rs`       | [kaanal/main.md](kaanal/main.md)           | CLI, instance lock, run file, control-API client                      |
-| `src/init.rs`       | [kaanal/init.md](kaanal/init.md)           | `kaanal init`: prompts, config rendering, checked write               |
-| `src/fetch.rs`      | [kaanal/fetch.md](kaanal/fetch.md)         | `kaanal init URL`: the limited spec download and its URL policy       |
-| `src/demo.rs`       | [kaanal/demo.md](kaanal/demo.md)           | `kaanal demo`: checks, the template write, the banner, `--open`       |
-| `src/demo_files.rs` | [kaanal/demo.md](kaanal/demo.md)           | The embedded demo project (`FILES`), from `crates/kaanal/demo/`       |
-| `src/keys.rs`       | [kaanal/keys.md](kaanal/keys.md)           | Signing key file: location, identity, race-safe creation, permissions |
-| `src/logview.rs`    | [kaanal/logview.md](kaanal/logview.md)     | Log lines, the waterfall, the `logs -f` follow machinery              |
-| `src/lifecycle.rs`  | [kaanal/lifecycle.md](kaanal/lifecycle.md) | Liveness by lock, `run.json` reader, stopping, detaching, signals     |
-| `src/output.rs`     | [kaanal/output.md](kaanal/output.md)       | The global `--json` switch and `emit`                                 |
-| `src/target.rs`     | [kaanal/target.md](kaanal/target.md)       | `--endpoint` / `--token`: local or remote target, errors, warning     |
+| File                                 | Page                                                         | Contents                                                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/main.rs`                        | [kaanal/main.md](kaanal/main.md)                             | Entry point and dispatch (the commands are in the modules below)                                                         |
+| `src/commands/chaos.rs`              | [kaanal/chaos_cmd.md](kaanal/chaos_cmd.md)                   | `kaanal chaos`, `node`, `cycle` and `pins`: patch bodies, paths and the text views of live chaos and pins                |
+| `src/cli.rs`                         | [kaanal/cli.md](kaanal/cli.md)                               | The command-line shape: clap types for every subcommand, the `Cli` parse fix-ups, `schema` and `completions`             |
+| `src/commands/down.rs`               | [kaanal/down.md](kaanal/down.md)                             | `kaanal down`: stop a local instance (drain, then force) or ask a remote one to shut down                                |
+| `src/util/load.rs`                   | [kaanal/load.md](kaanal/load.md)                             | Loading and checking `kaanal.yaml`: capped reads, positioned config errors, the auth user list                           |
+| `src/commands/logs.rs`               | [kaanal/logs_cmd.md](kaanal/logs_cmd.md)                     | `kaanal logs` and `trace`: one-shot and `--follow` reading of the request log, and the output helpers                    |
+| `src/util/parse.rs`                  | [kaanal/parse.md](kaanal/parse.md)                           | Small argument parsers and text cleaners shared by the commands (durations, rates, path segments, control-text cleaning) |
+| `src/instance/remote.rs`             | [kaanal/remote.md](kaanal/remote.md)                         | The thin HTTP client for the control API: one agent, one `call`, `status` and the shutdown reply                         |
+| `src/commands/scenario.rs`           | [kaanal/scenario_cmd.md](kaanal/scenario_cmd.md)             | `kaanal scenario` and `kaanal endpoints`: list, activate, save and print scenarios, and write missing endpoints          |
+| `src/commands/serve.rs`              | [kaanal/serve.md](kaanal/serve.md)                           | `kaanal up`: start the server in the foreground or detached, the startup banner and the exposure warnings                |
+| `src/instance/state_dir.rs`          | [kaanal/state_dir.md](kaanal/state_dir.md)                   | The `.kaanal/` state directory: a private folder, the one-instance lock and `run.json`                                   |
+| `src/commands/init/mod.rs`           | [kaanal/init.md](kaanal/init.md)                             | `kaanal init`: prompts, config rendering, checked write                                                                  |
+| `src/commands/init/fetch.rs`         | [kaanal/fetch.md](kaanal/fetch.md)                           | `kaanal init URL`: the limited spec download and its URL policy                                                          |
+| `src/commands/demo/mod.rs`           | [kaanal/demo.md](kaanal/demo.md)                             | `kaanal demo`: checks, the template write, the banner, `--open`                                                          |
+| `src/commands/demo/files.rs`         | [kaanal/demo.md](kaanal/demo.md)                             | The embedded demo project (`FILES`), from `crates/kaanal/demo/`                                                          |
+| `src/instance/keys.rs`               | [kaanal/keys.md](kaanal/keys.md)                             | Signing key file: location, identity, race-safe creation, permissions                                                    |
+| `src/util/logview/mod.rs`            | [kaanal/logview.md](kaanal/logview.md)                       | Log lines, the waterfall, the `logs -f` follow machinery                                                                 |
+| `src/instance/lifecycle/`            | [kaanal/lifecycle.md](kaanal/lifecycle.md)                   | Liveness by lock, `run.json` reader, stopping, detaching, signals                                                        |
+| `src/instance/lifecycle/liveness.rs` | [kaanal/lifecycle_liveness.md](kaanal/lifecycle_liveness.md) | Is an instance running: the lock probe, the `run.json` reader and the stale-state cleanup                                |
+| `src/instance/lifecycle/pid.rs`      | [kaanal/lifecycle_pid.md](kaanal/lifecycle_pid.md)           | Telling whether a pid is a `kaanal` process (`tasklist` / `ps` parsing) and killing it                                   |
+| `src/instance/lifecycle/stop.rs`     | [kaanal/lifecycle_stop.md](kaanal/lifecycle_stop.md)         | Stopping an instance: waiting for it, the forced stop, and the stop signals of the server process                        |
+| `src/instance/lifecycle/spawn.rs`    | [kaanal/lifecycle_spawn.md](kaanal/lifecycle_spawn.md)       | Starting the background instance for `up -d`: the log rotation and the detached spawn                                    |
+| `src/instance/lifecycle/ready.rs`    | [kaanal/lifecycle_ready.md](kaanal/lifecycle_ready.md)       | Waiting for a started instance to answer: polling, the unready settle, and the existing-instance check                   |
+| `src/util/output.rs`                 | [kaanal/output.md](kaanal/output.md)                         | The global `--json` switch and `emit`                                                                                    |
+| `src/instance/target.rs`             | [kaanal/target.md](kaanal/target.md)                         | `--endpoint` / `--token`: local or remote target, errors, warning                                                        |
 
 ## [kaanal-winhandle](kaanal-winhandle/) (the one `unsafe` crate)
 

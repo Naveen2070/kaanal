@@ -1,4 +1,4 @@
-# `crates/kaanal/src/init.rs` (private)
+# `crates/kaanal/src/commands/init/mod.rs` (private)
 
 `kaanal init SPEC`: a starter project from an OpenAPI file (RULES R1.20; M1-F spec C6 to C8, C15).
 
