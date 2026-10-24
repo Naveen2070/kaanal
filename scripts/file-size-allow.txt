@@ -1,0 +1,2 @@
+# Files allowed over the R3.8 limits: one per line, "path reason". Keep this list short.
+crates/kaanal-core/src/replay/engine/mod.rs one type's hot-path impl (impl Engine); kept in one module so inlining is unchanged, see the comment at the top of the file

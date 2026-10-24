@@ -28,6 +28,10 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Rule R3.8: no source file over 800 lines, no test file over 1000 (allowlist in scripts/file-size-allow.txt).
+      - name: Check file sizes
+        run: bash scripts/check-file-size.sh
+
       - name: Run dprint markdown check
         uses: dprint/check@v2.5
 
