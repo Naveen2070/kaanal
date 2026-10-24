@@ -175,13 +175,10 @@ fn eject_prints_the_next_command() {
     // --json: one object with the root, the files and the command.
     let o = run(&work, &["--json", "demo", "--eject", "j"]);
     let j: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(
-        j["root"],
-        std::path::absolute(work.join("j"))
-            .unwrap()
-            .display()
-            .to_string()
-    );
+    // The printed root is the absolute path of the new folder; on macOS the temp dir is a symlink
+    // (`/var` is `/private/var`), so compare what both sides resolve to.
+    let printed = std::fs::canonicalize(j["root"].as_str().unwrap()).unwrap();
+    assert_eq!(printed, std::fs::canonicalize(work.join("j")).unwrap());
     assert_eq!(j["next"], "cd j && kaanal up");
     let mut written: Vec<String> = j["written"]
         .as_array()
