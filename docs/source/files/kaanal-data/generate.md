@@ -1,6 +1,18 @@
-# `crates/kaanal-data/src/generate.rs`
+# `crates/kaanal-data/src/generate/`
 
 The data generator: deterministic, realistic JSON from an OpenAPI 3.0 schema.
+
+## Modules (R3.8)
+
+`generate` is a folder module (private; the crate root re-exports `generate` and `apply_params`, unchanged). The sections below describe all of it.
+
+| File         | What it holds                                                                                                         |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`     | `generate`, `apply_params`, `property`, the value picker (`value_for`, `scalar_for`), `allOf` merging and the limits. |
+| `numbers.rs` | Integers, numbers, arrays: bounds, counts, rounding.                                                                  |
+| `format.rs`  | `format` strings and dictionary values.                                                                               |
+| `text.rs`    | Text values: names, addresses, phones, emails, ids, base64, dates, `fit_length`.                                      |
+| `tests.rs`   | The unit tests.                                                                                                       |
 
 ## What it does
 
