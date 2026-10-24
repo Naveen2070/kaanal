@@ -30,7 +30,12 @@ pub(crate) fn signing_key(config: &Path) -> Result<AuthKey, Fail> {
     match std::fs::read_to_string(&file) {
         Ok(pem) => parse(&file, &pem),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            println!("Generating signing key...");
+            // Off stdout under --json, where `demo` prints exactly one object.
+            if crate::output::json_on() {
+                eprintln!("Generating signing key...");
+            } else {
+                println!("Generating signing key...");
+            }
             let key = AuthKey::generate().map_err(err)?;
             let pem = key.to_pem().map_err(err)?;
             let stored = store(&dir, &file, &pem)?;

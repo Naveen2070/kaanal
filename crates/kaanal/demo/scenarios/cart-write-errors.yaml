@@ -1,0 +1,4 @@
+description: "Cart writes fail half the time: adding and removing items may not stick"
+chaos:
+  - { node: db, endpoint: "POST /cart", error_rate: 0.5 }
+  - { node: db, endpoint: "DELETE /cart/{id}", error_rate: 0.5 }

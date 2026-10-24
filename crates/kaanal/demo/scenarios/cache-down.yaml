@@ -1,0 +1,4 @@
+description: "The cache is down: product pages lose their fast path and the database buckles"
+chaos:
+  - { node: cache, down: true }
+  - { node: db, latency_ms: 250 }

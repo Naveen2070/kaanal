@@ -1,0 +1,6 @@
+description: "Everything at once: slow gateway, cache down, struggling database and failing sign-ins"
+chaos:
+  - { node: nginx, latency_ms: 300 }
+  - { node: cache, down: true }
+  - { node: db, latency_ms: 900, error_rate: 0.25, error_status: 504 }
+  - { node: auth, down: true }

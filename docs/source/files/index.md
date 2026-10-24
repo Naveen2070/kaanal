@@ -65,14 +65,18 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal](kaanal/) (binary)
 
-| File               | Page                                       | Contents                                                              |
-| ------------------ | ------------------------------------------ | --------------------------------------------------------------------- |
-| `src/main.rs`      | [kaanal/main.md](kaanal/main.md)           | CLI, instance lock, run file, control-API client                      |
-| `src/keys.rs`      | [kaanal/keys.md](kaanal/keys.md)           | Signing key file: location, identity, race-safe creation, permissions |
-| `src/logview.rs`   | [kaanal/logview.md](kaanal/logview.md)     | Log lines, the waterfall, the `logs -f` follow machinery              |
-| `src/lifecycle.rs` | [kaanal/lifecycle.md](kaanal/lifecycle.md) | Liveness by lock, `run.json` reader, stopping, detaching, signals     |
-| `src/output.rs`    | [kaanal/output.md](kaanal/output.md)       | The global `--json` switch and `emit`                                 |
-| `src/target.rs`    | [kaanal/target.md](kaanal/target.md)       | `--endpoint` / `--token`: local or remote target, errors, warning     |
+| File                | Page                                       | Contents                                                              |
+| ------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
+| `src/main.rs`       | [kaanal/main.md](kaanal/main.md)           | CLI, instance lock, run file, control-API client                      |
+| `src/init.rs`       | [kaanal/init.md](kaanal/init.md)           | `kaanal init`: prompts, config rendering, checked write               |
+| `src/fetch.rs`      | [kaanal/fetch.md](kaanal/fetch.md)         | `kaanal init URL`: the limited spec download and its URL policy       |
+| `src/demo.rs`       | [kaanal/demo.md](kaanal/demo.md)           | `kaanal demo`: checks, the template write, the banner, `--open`       |
+| `src/demo_files.rs` | [kaanal/demo.md](kaanal/demo.md)           | The embedded demo project (`FILES`), from `crates/kaanal/demo/`       |
+| `src/keys.rs`       | [kaanal/keys.md](kaanal/keys.md)           | Signing key file: location, identity, race-safe creation, permissions |
+| `src/logview.rs`    | [kaanal/logview.md](kaanal/logview.md)     | Log lines, the waterfall, the `logs -f` follow machinery              |
+| `src/lifecycle.rs`  | [kaanal/lifecycle.md](kaanal/lifecycle.md) | Liveness by lock, `run.json` reader, stopping, detaching, signals     |
+| `src/output.rs`     | [kaanal/output.md](kaanal/output.md)       | The global `--json` switch and `emit`                                 |
+| `src/target.rs`     | [kaanal/target.md](kaanal/target.md)       | `--endpoint` / `--token`: local or remote target, errors, warning     |
 
 ## [kaanal-winhandle](kaanal-winhandle/) (the one `unsafe` crate)
 

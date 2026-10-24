@@ -2,10 +2,11 @@
 //!
 //! One request, end to end: CORS → matchit routing → the endpoint's compiled chain
 //! (`kaanal_core::sample_plan`) → the replay engine actor (queues, pools, rate limits, real
-//! time) → `override`, a built-in responder (login, JWKS), a generated body, or the
-//! `error_map` response → `X-Kaanal-Trace` (+ `Retry-After` on a 429) + an event on the
-//! broadcast bus. A built-in login reads its body before the chain runs, so a
-//! bad body still costs the full chain latency and a chain failure still wins (spec §5).
+//! time) → `override`, a `collection:` operation, a built-in responder (login, JWKS), a generated
+//! body, or the `error_map` response → `X-Kaanal-Trace` (+ `Retry-After` on a 429) + an event on
+//! the broadcast bus. A built-in login and a collection add read their body before the chain runs,
+//! so a bad body still costs the full chain latency and a chain failure still wins (spec §5). A
+//! collection changes only when the route answers normally, and at most once (see [`answer`]).
 //! A `reset` or `malformed` failure at a wire node (the gateway or the route's owner) is not
 //! JSON: it is a body that breaks off or is cut short (B2a Z7); see [`wire_failure`].
 
@@ -19,13 +20,15 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
-    ChainRequest, ChainResult, EffectiveChaos, EffectivePins, Endpoint, FailKind, Finished,
-    FinishedHop, Outcome, PinState, Plan, Responder, Topology, resolve, resolve_error, sample_plan,
+    ChainRequest, ChainResult, CollectionOp, EffectiveChaos, EffectivePins, Endpoint, FailKind,
+    Finished, FinishedHop, Outcome, PinState, Plan, Responder, Topology, resolve, resolve_error,
+    sample_plan,
 };
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use crate::auth;
+use crate::collections::{self, Call};
 use crate::log::{self, LogEntry};
 use crate::pins;
 use crate::record::{self, Answer, Facts, Run, TraceParts};
@@ -57,7 +60,15 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     if control {
         return no_route(&path);
     }
-    // Preflights take no id; everything below does, so ids count the requests that are logged.
+    // C11: a site file, when no spec route has this path. Before `Flight`, so it takes no id, no
+    // counter and no log entry, and never meets the engine (chaos cannot hide the page).
+    if let Some(site) = &st.site
+        && st.paths.at(&path).is_err()
+        && let Some(resp) = crate::site::serve(site, req.method(), &path).await
+    {
+        return resp;
+    }
+    // Preflights and site files take no id; everything below does, so ids count the requests that are logged.
     let mut flight = Flight::new(&st, &req, path);
     let (method, path) = (flight.method.as_str(), flight.path.as_str());
 
@@ -92,15 +103,11 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         .map(|(k, v)| (k.to_string(), percent_decode_str(v).decode_utf8_lossy().into_owned()))
         .collect();
 
-    let ep = &route.endpoint;
-    debug_assert_eq!(route.key, ep.key, "a route answers with its own endpoint");
-    // Spec §5: a built-in login reads (and checks) its body before the chain, with no sleep
-    // yet; an `override` replaces the responder, so its body is never read.
-    let login = if ep.responder == Some(Responder::Login) && ep.response.is_none() {
-        Some(auth::read_login(req).await)
-    } else {
-        None
-    };
+    debug_assert_eq!(
+        route.key, route.endpoint.key,
+        "a route answers with its own endpoint"
+    );
+    let body = read_body(route, &params, req).await;
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     // S10: the scoped stack, or else one snapshot of the live one (the `Arc` is cloned once here
     // and kept until the entry is built, so a swap mid-request never reaches this request). A
@@ -135,7 +142,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let ident = flight.ident.take().expect("armed");
     let resp = finish(
         &st,
-        login,
+        body,
         Served {
             route,
             ident,
@@ -150,6 +157,35 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         },
     );
     cors(resp)
+}
+
+/// **Private.** What [`read_body`] read: a built-in login's credentials, or a collection operation.
+/// Moved into the one place that answers, so a collection changes at most once per request.
+type Read<'a> = (
+    Option<Result<auth::Credentials, auth::Reject>>,
+    Option<Call<'a>>,
+);
+
+/// **Private.** What a request brings to its answer, read before the chain (spec §5): a built-in
+/// login's credentials, or its collection operation with an add's body (read with a hard cap). No
+/// sleep yet, so a bad body still costs the full chain latency and a chain failure still wins. An
+/// `override` replaces the responder, so its body is never read.
+async fn read_body<'a>(route: &'a Route, params: &'a [(String, String)], req: Request) -> Read<'a> {
+    let ep = &route.endpoint;
+    if let (Some(name), Some(op)) = (ep.collection.as_deref(), collections::op_of(route)) {
+        let item = if op == CollectionOp::Add {
+            Some(collections::read_item(req).await)
+        } else {
+            None
+        };
+        // A by-id shape has exactly one path parameter; the name comes from the config alone.
+        let id = params.first().map(|(_, v)| v.as_str());
+        return (None, Some(Call { name, op, id, item }));
+    }
+    if ep.responder == Some(Responder::Login) && ep.response.is_none() {
+        return (Some(auth::read_login(req).await), None);
+    }
+    (None, None)
 }
 
 /// **Private.** A mock request in flight. If the handler future is dropped (the client went away)
@@ -217,11 +253,7 @@ struct Served<'a> {
 }
 
 /// **Private.** Builds the response of a request the chain served, then logs it and tells the bus.
-fn finish(
-    st: &AppState,
-    login: Option<Result<auth::Credentials, auth::Reject>>,
-    s: Served,
-) -> Response {
+fn finish(st: &AppState, read: Read, s: Served) -> Response {
     let Served {
         route,
         ident,
@@ -251,8 +283,8 @@ fn finish(
         retry,
         wire,
     } = match pin {
-        Some(o) => pinned_reply(st, route, &ask, login, o),
-        None => chaos_reply(st, route, &fin.result, &ask, login, &header),
+        Some(o) => pinned_reply(st, route, &ask, read, o),
+        None => chaos_reply(st, route, &fin.result, &ask, read, &header),
     };
 
     let mut resp = wire.unwrap_or_else(|| response(status, body, &header, retry));
@@ -458,13 +490,14 @@ struct Ask<'a> {
     params: &'a [(String, String)],
 }
 
-/// **Private.** The reply of a request with no pin: the chain's verdict decides.
+/// **Private.** The reply of a request with no pin: the chain's verdict decides. Only `Ok` applies
+/// a collection operation; a wire failure shows a preview of it, which changes nothing.
 fn chaos_reply(
     st: &AppState,
     route: &Route,
     result: &ChainResult,
     ask: &Ask,
-    login: Option<Result<auth::Credentials, auth::Reject>>,
+    read: Read,
     trace: &str,
 ) -> Reply {
     let ep = &route.endpoint;
@@ -488,8 +521,19 @@ fn chaos_reply(
             let overridden =
                 ep.error_map.contains_key(name(*node)) || ep.error_map.contains_key(kind.as_str());
             let failed = Some((name(*node).to_string(), *kind));
-            if at_wire && !overridden {
-                let ok = answer(st, route, ask.path, ask.params, login);
+            // The would-be reply, built only for a wire failure (a collection previews, never applies).
+            let would = (at_wire && !overridden).then(|| match read {
+                (_, Some(c)) => (c.preview(&st.collections), true),
+                (login, None) => (answer(st, route, ask, (login, None)), false),
+            });
+            // A collection reply with no body to break (a 204, a HEAD) would read as a clean
+            // success the store contradicts; it fails as at a non-wire node instead. A collection
+            // never answers 304; it is listed because it is bodyless like the others.
+            let bodyless = would.as_ref().is_some_and(|((status, _), coll)| {
+                *coll && (ask.method == "HEAD" || matches!(status, 204 | 304))
+            });
+            let wire = would.filter(|_| !bodyless);
+            if let Some((ok, _)) = wire {
                 let (s, r) = wire_failure(*kind, ok, trace, ask.method);
                 return Reply {
                     status: s,
@@ -508,7 +552,7 @@ fn chaos_reply(
             }
         }
         ChainResult::Ok => {
-            let (status, body) = answer(st, route, ask.path, ask.params, login);
+            let (status, body) = answer(st, route, ask, read);
             Reply {
                 status,
                 body,
@@ -522,14 +566,8 @@ fn chaos_reply(
 
 /// **Private.** The reply of a pinned request (P2: the pin beats `down`, `error_map`, wire
 /// failures, 429 and overflow; the chain's verdict is not read). Never a failed node.
-fn pinned_reply(
-    st: &AppState,
-    route: &Route,
-    ask: &Ask,
-    login: Option<Result<auth::Credentials, auth::Reject>>,
-    out: &Outcome,
-) -> Reply {
-    let (status, body, retry) = pinned_response(st, route, ask, login, out);
+fn pinned_reply(st: &AppState, route: &Route, ask: &Ask, read: Read, out: &Outcome) -> Reply {
+    let (status, body, retry) = pinned_response(st, route, ask, read, out);
     Reply {
         status,
         body,
@@ -544,12 +582,13 @@ fn pinned_reply(
 /// schema) with the path parameters applied, the pin's or `states:` status or the normal success
 /// status; a 204 or 304 (the route's own or a pinned one) never has a body. `error`: the pin's status
 /// (500 by default) with the `states.error.body` or a small default, plus `Retry-After: 1` for
-/// 429 and 503. Never `error_map`, never a wire failure.
+/// 429 and 503. Never `error_map`, never a wire failure. Only the states that answer normally
+/// apply a collection operation; `empty` and `error` change nothing.
 fn pinned_response(
     st: &AppState,
     route: &Route,
     ask: &Ask,
-    login: Option<Result<auth::Credentials, auth::Reject>>,
+    read: Read,
     out: &Outcome,
 ) -> (u16, Value, Option<Duration>) {
     match out.state {
@@ -586,7 +625,7 @@ fn pinned_response(
             (status, body, None)
         }
         PinState::Loading | PinState::Slow | PinState::Success => {
-            let (status, body) = answer(st, route, ask.path, ask.params, login);
+            let (status, body) = answer(st, route, ask, read);
             (status, body, None)
         }
     }
@@ -612,19 +651,17 @@ fn success(st: &AppState, route: &Route, path: &str, params: &[(String, String)]
     (route.status, generated_body(st, route, owner, path, params))
 }
 
-/// **Private.** What the route answers when nothing fails: a built-in responder (it owns its status
-/// codes; the route's 200 and schema do not apply), else [`success`].
-fn answer(
-    st: &AppState,
-    route: &Route,
-    path: &str,
-    params: &[(String, String)],
-    login: Option<Result<auth::Credentials, auth::Reject>>,
-) -> (u16, Value) {
+/// **Private.** What the route answers when nothing fails: its collection operation (applied here
+/// and nowhere else), a built-in responder (it owns its status codes; the route's 200 and schema
+/// do not apply), else [`success`].
+fn answer(st: &AppState, route: &Route, ask: &Ask, (login, coll): Read) -> (u16, Value) {
+    if let Some(c) = coll {
+        return c.apply(&st.collections);
+    }
     let ep = &route.endpoint;
     match ep.responder.filter(|_| ep.response.is_none()) {
         Some(r) => auth::respond(r, st.auth.as_ref(), login),
-        None => success(st, route, path, params),
+        None => success(st, route, ask.path, ask.params),
     }
 }
 

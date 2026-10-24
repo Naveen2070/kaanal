@@ -29,6 +29,10 @@ use kaanal_server::ServeOpts;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
 
+mod demo;
+mod demo_files;
+mod fetch;
+mod init;
 mod keys;
 mod lifecycle;
 mod logview;
@@ -102,6 +106,10 @@ enum Cmd {
         #[arg(value_enum, default_value_t = SchemaKind::Config)]
         kind: SchemaKind,
     },
+    /// Create a starter kaanal.yaml from an `OpenAPI` 3.0 file
+    Init(init::InitArgs),
+    /// Run a demo shop with a chaos bar in your browser (writes only .kaanal/; Ctrl-C to stop)
+    Demo(demo::DemoArgs),
     /// Print skeleton endpoint entries for spec routes that have none (add-only)
     Endpoints {
         #[arg(short, long, default_value = "kaanal.yaml")]
@@ -422,6 +430,18 @@ fn run(cli: Cli) -> Result<(), Fail> {
             println!("ok: {}", config.display());
             Ok(())
         }
+        Cmd::Init(args) => {
+            no_endpoint("init writes local files and takes no endpoint")?;
+            let stdin = std::io::stdin();
+            let interactive = std::io::IsTerminal::is_terminal(&stdin);
+            init::init(
+                &args,
+                &mut stdin.lock(),
+                &mut std::io::stderr(),
+                &mut std::io::stdout(),
+                interactive,
+            )
+        }
         Cmd::Completions { shell } => {
             completions(shell);
             Ok(())
@@ -442,6 +462,10 @@ fn run(cli: Cli) -> Result<(), Fail> {
             } else {
                 up(&config, port, host, detached)
             }
+        }
+        Cmd::Demo(args) => {
+            no_endpoint("demo starts a local instance and takes no endpoint")?;
+            demo::demo(&args)
         }
         Cmd::Endpoints { config, write } => endpoints(&config, write),
         Cmd::Down { timeout } => {
@@ -687,11 +711,56 @@ fn auth_users(cfg: &Config) -> Option<usize> {
 /// `detached` (the hidden `--detached`) is `up -d`'s child: its stdout is a log file, so the UI
 /// URL carries no token (M4), and it ignores SIGHUP (M11).
 fn up(config: &Path, port: Option<u16>, host: IpAddr, detached: bool) -> Result<(), Fail> {
-    let (cfg, dir, src) = load(config)?;
+    let loaded = load(config)?;
     private_dir(Path::new(STATE_DIR))?;
     // Held until this process exits. The OS releases it even if we crash, so there is no stale lock,
     // and two `up` runs started at the same instant cannot both get past this point.
-    let _lock = lock_instance()?;
+    let lock = lock_instance()?;
+    serve_locked(config, loaded, port, host, detached, lock, |s| {
+        let port = s.port;
+        println!("Mocks: http://localhost:{port}");
+        if detached {
+            println!("UI:    http://localhost:{port}/__kaanal/ui");
+        } else {
+            println!(
+                "UI:    http://localhost:{port}/__kaanal/ui#token={}",
+                s.token
+            );
+        }
+        if let Some(a) = s.auth {
+            println!("Auth:  {a}");
+        }
+        if let Some(seed) = s.drawn_seed {
+            println!("{}", seed_line(seed));
+        }
+    })
+}
+
+/// **Private.** What a started instance tells the caller of [`serve_locked`], to print.
+struct Started<'a> {
+    port: u16,
+    token: &'a str,
+    /// The `Auth:` text, with an auth node.
+    auth: Option<&'a str>,
+    /// The seed picked at startup (`determinism: realistic`), else `None`.
+    drawn_seed: Option<u64>,
+    /// The seed in force: the drawn one, else the config's.
+    seed: u64,
+    warnings: &'a [String],
+}
+
+/// **Private.** The rest of [`up`] once `lock` (the instance lock) is held: shared by `up` and
+/// `kaanal demo`, which print different lines through `announce` (called once, after `run.json`
+/// is written).
+fn serve_locked(
+    config: &Path,
+    (cfg, dir, src): (Config, PathBuf, String),
+    port: Option<u16>,
+    host: IpAddr,
+    detached: bool,
+    _lock: std::fs::File,
+    announce: impl FnOnce(&Started),
+) -> Result<(), Fail> {
     // The lock proves no live instance owns run.json, so whatever is there is a dead one's (M9).
     // Removed now, not overwritten after binding, so nothing reads it as live during startup.
     let _ = std::fs::remove_file(RUN_FILE);
@@ -741,18 +810,14 @@ fn up(config: &Path, port: Option<u16>, host: IpAddr, detached: bool) -> Result<
             &token,
             &json!({ "auth": auth, "seed": server.drawn_seed, "warnings": server.warnings }),
         )?;
-        println!("Mocks: http://localhost:{port}");
-        if detached {
-            println!("UI:    http://localhost:{port}/__kaanal/ui");
-        } else {
-            println!("UI:    http://localhost:{port}/__kaanal/ui#token={token}");
-        }
-        if let Some(a) = &auth {
-            println!("Auth:  {a}");
-        }
-        if let Some(seed) = server.drawn_seed {
-            println!("{}", seed_line(seed));
-        }
+        announce(&Started {
+            port,
+            token: &token,
+            auth: auth.as_deref(),
+            drawn_seed: server.drawn_seed,
+            seed: server.drawn_seed.unwrap_or(cfg.seed),
+            warnings: &server.warnings,
+        });
         // A stop signal (or POST /__kaanal/shutdown, which ends `wait` by itself) drains for up
         // to 5s, then cuts what is left; either way the run file goes below.
         let stop = server.stopper();

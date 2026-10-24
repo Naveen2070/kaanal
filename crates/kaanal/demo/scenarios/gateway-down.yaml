@@ -1,0 +1,3 @@
+description: "The gateway is down: every API call is refused with 503"
+chaos:
+  - { node: nginx, down: true }

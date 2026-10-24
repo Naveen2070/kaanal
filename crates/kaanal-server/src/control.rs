@@ -1189,8 +1189,8 @@ pub async fn clear_scenarios(State(st): State<Arc<AppState>>) -> Result<StatusCo
 
 /// `POST /__kaanal/reset` — back to a clean slate for `beforeEach` (S18): deactivates every
 /// scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the
-/// live layer, zeroes every route counter and refills the engine's rate-limit buckets, so a
-/// seeded run repeats.
+/// live layer, zeroes every route counter, empties every collection and refills the engine's
+/// rate-limit buckets, so a seeded run repeats.
 ///
 /// Requests already in flight are not interrupted: they keep the chaos they were planned with
 /// and the slots and queue places they hold (gates and pools are deliberately not reset, which
@@ -1231,6 +1231,7 @@ pub async fn reset(State(st): State<Arc<AppState>>) -> Result<StatusCode, Reject
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clear();
+    st.collections.clear();
     emit(&st, "reset", None, &snap);
     Ok(StatusCode::NO_CONTENT)
 }

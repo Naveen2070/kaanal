@@ -238,6 +238,13 @@
             "null"
           ]
         },
+        "collection": {
+          "description": "Name of an in-memory collection this route reads or writes (`GET /x` lists, `GET /x/{id}`\ngets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "error_map": {
           "additionalProperties": {
             "$ref": "#/$defs/ErrorMapping"
@@ -1423,6 +1430,14 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "site": {
+      "default": null,
+      "description": "Static files served next to the mocks, a folder relative to this file.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "version": {
       "description": "Config schema version. Must be `1`.",

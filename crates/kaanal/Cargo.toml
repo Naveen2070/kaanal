@@ -19,11 +19,19 @@ ureq.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
 sha2.workspace = true
+# `init URL` checks the download is OpenAPI 3.0 before saving it.
+kaanal-data.workspace = true
+url.workspace = true
 
 # The benchmark suite (tests/bench.rs) drives every crate.
 [dev-dependencies]
-kaanal-data.workspace = true
 kaanal-sim.workspace = true
+
+[features]
+default = ["https"]
+# TLS for `kaanal init https://...`: ureq's rustls with the ring provider and the webpki roots.
+# Without it, an https URL is a usage error.
+https = ["ureq/rustls"]
 
 [target.'cfg(windows)'.dependencies]
 kaanal-winhandle.workspace = true

@@ -1,0 +1,3 @@
+description: "The card processor hangs: checkout gives up after 3 s with a 504"
+chaos:
+  - { node: payments, error_rate: 1.0, error_kind: hang }

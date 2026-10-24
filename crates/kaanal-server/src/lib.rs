@@ -11,6 +11,7 @@
 mod actor;
 mod auth;
 mod chaos_lease;
+mod collections;
 mod control;
 mod log;
 mod log_api;
@@ -21,6 +22,7 @@ mod record;
 mod scenarios;
 mod scope;
 mod shutdown;
+mod site;
 mod state;
 mod wire;
 
@@ -35,6 +37,7 @@ use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, Topology};
 
 pub use auth::AuthKey;
+pub use collections::{Collections, MAX_ITEM_BYTES, MAX_ITEMS};
 /// The data-file schemas, for `kaanal schema dictionary|pack`.
 pub use kaanal_data::{dictionary_schema, pack_schema};
 pub use log::{

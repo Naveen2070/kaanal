@@ -1,0 +1,3 @@
+description: "The shop service is overloaded: slower answers and three in ten fail with 503"
+chaos:
+  - { node: shop, latency_ms: 400, error_rate: 0.3 }

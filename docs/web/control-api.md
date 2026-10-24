@@ -153,7 +153,7 @@ It is checked exactly like a file: names against your topology, limits, duplicat
 - `warnings` is an array of strings: with `from: "live"` or `"effective"`, live fields set with a `ttl` are written as permanent (a file has no `ttl`), and the response says how many: `"N fields have a ttl; the file has none"`.
 - `clear_live: true` clears the live chaos after writing, so activating the saved scenario does not count it twice. Saving over an active scenario updates it in place.
 
-**Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats), refills rate-limit buckets and empties the [request log](observability.md) (request ids keep counting). Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.
+**Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats), refills rate-limit buckets, empties every [collection](collections.md) and empties the [request log](observability.md) (request ids keep counting). Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.
 
 ### Pins
 

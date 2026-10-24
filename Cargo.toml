@@ -52,6 +52,7 @@ sha2 = "0.10"
 base64 = "0.22"
 dirs = "6"
 serde_urlencoded = "0.7"
+url = "2"
 # Dev-only independent verifier for our hand-rolled RS256 (pure Rust backend, same rsa/sha2).
 jsonwebtoken = { version = "11.1", default-features = false, features = [
     "rust_crypto",

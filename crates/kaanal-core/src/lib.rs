@@ -29,8 +29,8 @@ pub mod schema;
 pub mod topology;
 
 pub use chain::{
-    Endpoint, Endpoints, EndpointsInput, JWKS_KEY, LOGIN_KEY, Responder, RouteSpec, compile,
-    resolve_error, skeleton,
+    CollectionOp, Endpoint, Endpoints, EndpointsInput, JWKS_KEY, LOGIN_KEY, Responder, RouteSpec,
+    collection_op, compile, resolve_error, skeleton,
 };
 pub use chaos::{
     ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, ErrorKind, FailKind, Fault, HANG_CAP,

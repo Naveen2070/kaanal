@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://kaanal.naveenr.in/schema/v1.json
+version: 1
+seed: 7
+locale: en-IN
+site: site
+nodes:
+  nginx: { type: gateway, flavor: nginx, proc: { p50: 1ms, p99: 3ms } }
+  shop: { type: service, spec: openapi.yaml, proc: { p50: 4ms, p99: 15ms } }
+  auth:
+    type: auth
+    proc: { p50: 6ms, p99: 20ms }
+    users:
+      - { username: demo@example.com, password: demo }
+  db:
+    type: database
+    # Calls to the db give up after 3 s (504), so a hung database ends in a clean error.
+    timeout: 3s
+    ops:
+      read: { p50: 6ms, p99: 30ms }
+      write: { p50: 10ms, p99: 50ms }
+      scan: { p50: 25ms, p99: 120ms }
+  # A warm cache: every product page hits while it is up.
+  cache: { type: cache, flavor: redis, hit_ratio: 1.0 }
+  # The card processor: a third party the shop calls once per checkout. A hung call gives up after 3 s (504).
+  payments: { type: external-api, proc: { p50: 120ms, p99: 600ms }, timeout: 3s }
+edges:
+  - { from: nginx, to: shop, net: { p50: 1ms, p99: 3ms } }
+  - { from: shop, to: db, net: { p50: 1ms, p99: 3ms } }
+  - { from: shop, to: cache, net: { p50: 1ms, p99: 2ms } }
+  - { from: shop, to: payments, net: { p50: 20ms, p99: 80ms } }
+# Explicit chains, so every chaos story lands on the same requests every time.
+endpoints:
+  # The catalogue query is never cached: every list load scans the db.
+  "GET /products": { op: scan, chain: [{ call: db }] }
+  # Product pages are read through the cache; a miss (or a down cache) falls through to the db.
+  "GET /products/{id}": { op: read, chain: [{ cache: cache }, { call: db }] }
+  "GET /cart": { collection: cart, op: read, chain: [{ call: db }] }
+  "POST /cart": { collection: cart, op: write, chain: [{ call: db }] }
+  "DELETE /cart/{id}": { collection: cart, op: write, chain: [{ call: db }] }
+  # Checkout charges the card first, then writes the order: a failed payment stores nothing.
+  "POST /checkout": { collection: orders, op: write, chain: [{ call: payments }, { call: db }] }
+  "GET /orders": { collection: orders, op: read, chain: [{ call: db }] }
+  "GET /orders/{id}": { collection: orders, op: read, chain: [{ call: db }] }

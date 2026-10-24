@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Kaanal Supply</title>
+    <link rel="icon" href="/img/product.svg">
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" id="skip" href="#main">Skip to content</a>
+    <header class="top">
+      <div class="top-in">
+        <a class="brand" href="#/" aria-label="Kaanal Supply, home">
+          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect width="32" height="32" rx="8" fill="currentColor"/>
+            <path d="M6 13c3.3 0 3.3-3 6.7-3s3.3 3 6.6 3 3.4-3 6.7-3M6 21c3.3 0 3.3-3 6.7-3s3.3 3 6.6 3 3.4-3 6.7-3" fill="none" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>
+          <span class="wordmark">Kaanal <span>Supply</span></span>
+        </a>
+        <nav aria-label="Store">
+          <a href="#/" data-nav="shop">Shop</a>
+          <a href="#/cart" data-nav="cart" class="cart-link">Cart <span class="count" id="cart-count" hidden></span></a>
+          <a href="#/orders" data-nav="orders">Orders</a>
+          <a href="#/login" data-nav="login" id="account-link">Sign in</a>
+        </nav>
+        <span class="pill" id="api-pill" hidden></span>
+      </div>
+    </header>
+
+    <div class="incident" id="incident" hidden></div>
+
+    <main id="main" tabindex="-1"></main>
+
+    <footer class="foot">
+      <div class="foot-in">
+        <p><strong>Kaanal Supply</strong> is a pretend shop. Every request it makes runs through a simulated gateway, shop service, cache and database, served by Kaanal on this machine.</p>
+        <p class="foot-links"><a href="#/">Shop</a> <a href="#/cart">Cart</a> <a href="#/orders">Orders</a> <a href="#/login">Account</a></p>
+      </div>
+    </footer>
+
+    <p class="sr-only" id="announce" role="status" aria-live="polite"></p>
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+    <div class="chaos" id="chaos" hidden>
+      <p class="chaos-hint" id="chaos-hint" hidden>Try a chaos story: slow the database, decline a payment, take the gateway down or start a meltdown, then watch the shop react.</p>
+      <button type="button" class="fab" id="chaos-fab" aria-expanded="false" aria-controls="chaos-panel" aria-label="Chaos controls">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/></svg>
+        <span class="fab-badge" id="chaos-badge" hidden></span>
+      </button>
+      <section class="panel" id="chaos-panel" role="dialog" aria-modal="false" aria-labelledby="chaos-title" hidden>
+        <header class="panel-head">
+          <h2 id="chaos-title">Chaos controls</h2>
+          <button type="button" class="icon-btn" id="chaos-close" aria-label="Close chaos controls">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </header>
+        <div class="panel-body">
+          <p class="readout" id="chaos-readout" aria-live="polite">Open the shop to measure it.</p>
+          <p class="chaos-status" id="chaos-status" role="status"></p>
+          <div class="group">
+            <h3>Stories</h3>
+            <p class="note">Each one is a file in scenarios/; add your own and restart.</p>
+            <div class="stories" id="chaos-scenarios"></div>
+          </div>
+          <div class="group">
+            <h3>Pins</h3>
+            <p class="note">Force the product list into one state.</p>
+            <div class="chips" id="chaos-pins"></div>
+          </div>
+          <div class="group">
+            <h3>Dials</h3>
+            <p class="note">The product list always reads the database; product pages read through the cache first. Login goes through auth only. Checkout calls payments, then the database.</p>
+            <div class="nodes" id="chaos-nodes"></div>
+          </div>
+          <p class="note">Everything here switches itself off after 30 s, and leaving the page lifts the product-list state.</p>
+          <div class="panel-actions">
+            <button type="button" class="btn danger" id="chaos-reset">Reset all chaos</button>
+            <button type="button" class="btn quiet" id="chaos-forget">Forget token</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

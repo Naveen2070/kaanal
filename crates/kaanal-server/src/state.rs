@@ -182,6 +182,10 @@ pub struct AppState {
     pub log: Mutex<crate::log::LogRing>,
     /// The graceful stop: `POST /__kaanal/shutdown` and `BoundServer::shutdown` ask it.
     pub shutdown: crate::shutdown::Shutdown,
+    /// The `site:` folder, when the config names one.
+    pub site: Option<crate::site::Site>,
+    /// The `collection:` items; shared by every scope and user, emptied by `POST /reset`.
+    pub collections: crate::collections::Collections,
     /// **Private.** Generation options per node, by [`NodeId`]: the node's `locale`, else the
     /// project's (see [`AppState::options_for_owner`]).
     options: Vec<Options>,
@@ -351,6 +355,17 @@ fn load_data(
     Ok((nodes, project))
 }
 
+/// **Private.** The `site:` folder, if any; a bad one is placed at the `site:` value.
+fn load_site(cfg: &Config, base_dir: &Path) -> Result<Option<crate::site::Site>, Located> {
+    cfg.site
+        .as_deref()
+        .map(|rel| {
+            crate::site::Site::open(base_dir, rel)
+                .map_err(|m| Located::at_value(keys(&["site"]), m))
+        })
+        .transpose()
+}
+
 /// **Private.** Compiles the spec routes with `endpoints:`: the inline map, or the file it
 /// names (relative to `base_dir`). A missing file is placed at the `endpoints:` value;
 /// errors inside the file carry that file (spec §8).
@@ -479,6 +494,10 @@ impl AppState {
     /// where relevant) for unreadable or invalid specs or endpoints file, route conflicts,
     /// any `endpoints:` error from `compile` (placed in the endpoints file when it comes
     /// from there), or any topology error. Nothing is served half-configured (rule R6.1).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear load pipeline; two lines over after the site: step"
+    )]
     pub fn build(
         cfg: &Config,
         base_dir: &Path,
@@ -501,6 +520,7 @@ impl AppState {
         }
 
         let (options, project_options) = load_data(cfg, base_dir, &topo, &mut warnings)?;
+        let site = load_site(cfg, base_dir)?;
         let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings, Some(&options))?;
         let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
         warnings.extend(endpoints.warnings.iter().cloned());
@@ -587,6 +607,8 @@ impl AppState {
             warnings,
             auth: None,
             engine: None,
+            site,
+            collections: crate::collections::Collections::new(),
             ids,
             log,
             shutdown: crate::shutdown::Shutdown::new(),

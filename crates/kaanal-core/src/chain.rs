@@ -220,6 +220,8 @@ pub struct Endpoint {
     pub states: StateOverrides,
     /// The built-in body producer of an auth node's routes; `None` for spec and static routes.
     pub responder: Option<Responder>,
+    /// The in-memory collection this route reads or writes; see [`collection_op`].
+    pub collection: Option<String>,
     /// **Private.** Where the `endpoints:` entry sits (path and file), if there is one.
     entry: Option<(Vec<PathSeg>, Option<PathBuf>)>,
 }
@@ -240,6 +242,49 @@ impl Endpoint {
             None => l,
         }
     }
+}
+
+/// What a route does to its collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectionOp {
+    /// `GET /x`: every item.
+    List,
+    /// `GET /x/{p}`: one item.
+    Get,
+    /// `POST /x`: add an item.
+    Add,
+    /// `DELETE /x/{p}`: remove an item.
+    Remove,
+}
+
+/// The collection operation of an uppercase `method` and a `path`, `None` for any other shape.
+pub fn collection_op(method: &str, path: &str) -> Option<CollectionOp> {
+    let mut segs = path.strip_prefix('/')?.split('/');
+    let (first, last) = (segs.next()?, segs.next());
+    // Exactly one parameter: `{name}` with no further braces inside.
+    let param = |s: &str| {
+        s.strip_prefix('{')
+            .and_then(|r| r.strip_suffix('}'))
+            .is_some_and(|n| !n.is_empty() && !n.contains(['{', '}']))
+    };
+    if first.is_empty() || param(first) || segs.next().is_some() {
+        return None;
+    }
+    match (method, last) {
+        ("GET", None) => Some(CollectionOp::List),
+        ("POST", None) => Some(CollectionOp::Add),
+        ("GET", Some(p)) if param(p) => Some(CollectionOp::Get),
+        ("DELETE", Some(p)) if param(p) => Some(CollectionOp::Remove),
+        _ => None,
+    }
+}
+
+/// **Private.** `^[a-z][a-z0-9_-]{0,31}$`.
+fn collection_name_ok(n: &str) -> bool {
+    n.len() <= 32
+        && n.starts_with(|c: char| c.is_ascii_lowercase())
+        && n.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
 /// Every compiled endpoint, by key.
@@ -649,6 +694,22 @@ impl Compiler<'_> {
             }
             // Every entry, live or stale, so a typo in `states:` is always caught.
             Self::states(Some(cfg), &place)?;
+            if let Some(name) = &cfg.collection {
+                if !collection_name_ok(name) {
+                    return Err(place.err(format!(
+                        "collection: name '{name}' must be 1-32 characters of a-z, 0-9, '_' or '-', starting with a letter"
+                    )));
+                }
+                if collection_op(&m, p).is_none() {
+                    return Err(place
+                        .err("collection: needs GET /x, GET /x/{id}, POST /x or DELETE /x/{id}"));
+                }
+                if cfg.response.is_some() {
+                    return Err(place.err(
+                        "collection: cannot be used with override (override replaces the responder)",
+                    ));
+                }
+            }
             let mut error_map = IndexMap::new();
             let mut written_keys: BTreeMap<String, String> = BTreeMap::new();
             for (k, v) in &cfg.error_map {
@@ -1199,6 +1260,7 @@ impl Compiler<'_> {
             synthesized: false,
             states: Self::states(j.cfg, &j.place)?,
             responder: j.responder,
+            collection: j.cfg.and_then(|c| c.collection.clone()),
             entry: j.cfg.map(|_| (j.place.path.clone(), j.place.file.clone())),
         };
         self.done.insert(j.key.clone(), Arc::new(ep));

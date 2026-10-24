@@ -62,6 +62,9 @@ pub struct Config {
     /// to this file, when it exists.
     #[serde(default)]
     pub data: Option<String>,
+    /// Static files served next to the mocks, a folder relative to this file.
+    #[serde(default)]
+    pub site: Option<String>,
     /// **Private.** Phase One's `routes:` key, kept only to explain that it was replaced.
     #[serde(default)]
     #[schemars(skip)]
@@ -958,6 +961,9 @@ pub struct EndpointConfig {
     /// `slow`: a `status`, a `body` and a `delay` each.
     #[serde(default)]
     pub states: IndexMap<String, StateOverrideConfig>,
+    /// Name of an in-memory collection this route reads or writes (`GET /x` lists, `GET /x/{id}`
+    /// gets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`.
+    pub collection: Option<String>,
 }
 
 /// An `error_map` value: the status to answer with and an optional body.

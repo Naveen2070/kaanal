@@ -135,6 +135,7 @@ kaanal scenario activate flaky-db              # same behaviour, now reusable
 - clears the chaos you set by hand;
 - zeroes the request counters, so the same seeded run repeats;
 - refills rate limits (a node that answered 429 starts with full tokens again).
+- empties every [collection](collections.md) (ids start at 1 again).
 
 Queues and connection pools are not reset: requests already running finish normally. Call it between tests, not during one.
 

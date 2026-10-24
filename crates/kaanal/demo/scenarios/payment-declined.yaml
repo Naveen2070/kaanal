@@ -1,0 +1,3 @@
+description: "Every card is declined with a 402 and no order is stored"
+pins:
+  - { endpoint: "POST /checkout", state: error, status: 402 }

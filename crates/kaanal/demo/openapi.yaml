@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: Demo shop
+  version: 1.0.0
+paths:
+  /products:
+    get:
+      summary: List products
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 24
+                maxItems: 24
+                items: { $ref: "#/components/schemas/Product" }
+              example:
+                - { id: 1, kind: backpack, name: Canvas Backpack, price: 2499, image: /img/product.svg, description: "Roomy, rugged and easy to clean." }
+                - { id: 2, kind: backpack, name: Trail Daypack, price: 1899, image: /img/product.svg, description: "Light enough for a whole day on foot." }
+                - { id: 3, kind: backpack, name: Laptop Backpack, price: 3299, image: /img/product.svg, description: "A padded sleeve and a place for the charger." }
+                - { id: 4, kind: backpack, name: Mini Sling Backpack, price: 1299, image: /img/product.svg, description: "Phone, keys and a book, worn across the chest." }
+                - { id: 5, kind: mug, name: Ceramic Mug, price: 499, image: /img/product.svg, description: "Holds a proper cup of coffee." }
+                - { id: 6, kind: mug, name: Enamel Camp Mug, price: 399, image: /img/product.svg, description: "Survives the campfire and the dishwasher." }
+                - { id: 7, kind: mug, name: Double-Wall Glass Mug, price: 649, image: /img/product.svg, description: "Hot inside, cool to hold." }
+                - { id: 8, kind: mug, name: Travel Coffee Mug, price: 899, image: /img/product.svg, description: "A lid that stays on and a handle that fits." }
+                - { id: 9, kind: lamp, name: Desk Lamp, price: 1799, image: /img/product.svg, description: "Warm light with a dimmer." }
+                - { id: 10, kind: lamp, name: Reading Lamp, price: 1499, image: /img/product.svg, description: "A narrow beam for late chapters." }
+                - { id: 11, kind: lamp, name: Clip-on Lamp, price: 999, image: /img/product.svg, description: "Grips a shelf, a desk or a headboard." }
+                - { id: 12, kind: lamp, name: Bedside Lamp, price: 2199, image: /img/product.svg, description: "A soft glow and a touch switch." }
+                - { id: 13, kind: blanket, name: Wool Blanket, price: 3499, image: /img/product.svg, description: "Soft, heavy and made to last." }
+                - { id: 14, kind: blanket, name: Cotton Throw, price: 1999, image: /img/product.svg, description: "Breathable, for the sofa in any season." }
+                - { id: 15, kind: blanket, name: Fleece Blanket, price: 1599, image: /img/product.svg, description: "Warm the moment you unfold it." }
+                - { id: 16, kind: blanket, name: Picnic Blanket, price: 1299, image: /img/product.svg, description: "Waterproof on one side, soft on the other." }
+                - { id: 17, kind: bottle, name: Steel Water Bottle, price: 799, image: /img/product.svg, description: "Cold for a day, hot for half of one." }
+                - { id: 18, kind: bottle, name: Insulated Flask, price: 1199, image: /img/product.svg, description: "Keeps tea hot through a long train ride." }
+                - { id: 19, kind: bottle, name: Sports Bottle, price: 449, image: /img/product.svg, description: "Squeeze it, sip it, forget it." }
+                - { id: 20, kind: bottle, name: Glass Bottle, price: 699, image: /img/product.svg, description: "No aftertaste, with a sleeve that cushions drops." }
+                - { id: 21, kind: tote, name: Linen Tote Bag, price: 599, image: /img/product.svg, description: "Fits a week of groceries." }
+                - { id: 22, kind: tote, name: Canvas Tote, price: 449, image: /img/product.svg, description: "Thick canvas and handles that do not dig in." }
+                - { id: 23, kind: tote, name: Jute Market Bag, price: 349, image: /img/product.svg, description: "Made for the vegetable market." }
+                - { id: 24, kind: tote, name: Foldable Shopping Tote, price: 299, image: /img/product.svg, description: "Folds into its own pocket." }
+  /products/{id}:
+    get:
+      summary: One product
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: A product
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+              example: { id: 1, kind: backpack, name: Canvas Backpack, price: 2499, image: /img/product.svg, description: "Roomy, rugged and easy to clean." }
+  /cart:
+    get:
+      summary: List the cart
+      responses:
+        "200":
+          description: Cart items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CartItem" }
+    post:
+      summary: Add to the cart
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CartItem" }
+      responses:
+        "201":
+          description: The stored item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CartItem" }
+  /cart/{id}:
+    delete:
+      summary: Remove from the cart
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: "Removed" }
+  /checkout:
+    post:
+      summary: Pay for an order
+      description: Calls the payment service; the order is stored only when the payment goes through.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Order" }
+      responses:
+        "201":
+          description: The stored order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+  /orders:
+    get:
+      summary: List the orders
+      responses:
+        "200":
+          description: Orders, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Order" }
+  /orders/{id}:
+    get:
+      summary: One order
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: An order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+components:
+  schemas:
+    Product:
+      type: object
+      required: [id, kind, name, price, image, description]
+      properties:
+        id: { type: integer, minimum: 1, maximum: 24 }
+        kind: { type: string, enum: [backpack, mug, lamp, blanket, bottle, tote] }
+        name: { type: string }
+        price: { type: integer, minimum: 100, maximum: 10000 }
+        image: { type: string, enum: ["/img/product.svg"] }
+        description: { type: string }
+    CartItem:
+      type: object
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        qty: { type: integer, minimum: 1 }
+    Order:
+      type: object
+      properties:
+        id: { type: integer }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              productId: { type: integer }
+              name: { type: string }
+              qty: { type: integer, minimum: 1 }
+              price: { type: integer }
+        total: { type: integer }
+        method: { type: string, enum: [card] }
+        last4: { type: string }

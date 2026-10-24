@@ -1,0 +1,3 @@
+description: "The card processor fails four payments in ten with a 502"
+chaos:
+  - { node: payments, error_rate: 0.4, error_status: 502 }
