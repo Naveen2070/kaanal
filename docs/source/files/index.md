@@ -4,35 +4,51 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-core](kaanal-core/) (pure logic)
 
-| File                 | Page                                                     | Contents                                                              |
-| -------------------- | -------------------------------------------------------- | --------------------------------------------------------------------- |
-| `src/lib.rs`         | [kaanal-core/lib.md](kaanal-core/lib.md)                 | Crate root, re-exports, `stable_hash`                                 |
-| `src/config.rs`      | [kaanal-core/config.md](kaanal-core/config.md)           | `kaanal.yaml` parsing: tagged node kinds, `DistConfig`, `ConfigError` |
-| `src/diagnostics.rs` | [kaanal-core/diagnostics.md](kaanal-core/diagnostics.md) | Error positions: saphyr tree, per-branch schema check, `Located`      |
-| `src/presets.rs`     | [kaanal-core/presets.md](kaanal-core/presets.md)         | Flavor presets (estimates) and gap filling                            |
-| `src/schema.rs`      | [kaanal-core/schema.md](kaanal-core/schema.md)           | JSON Schema of `kaanal.yaml` (schemars)                               |
-| `src/topology.rs`    | [kaanal-core/topology.md](kaanal-core/topology.md)       | Graph build + validation (optional gateway, edge table, DAG, presets) |
-| `src/replay/`        | [kaanal-core/replay.md](kaanal-core/replay.md)           | Token bucket (GCRA) and slot gate with FIFO hand-over                 |
-| `src/dist.rs`        | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                               |
-| `src/chaos.rs`       | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | Chaos layers, `ChaosState`, compiled `EffectiveChaos` / `Resolved`    |
-| `src/scenario.rs`    | [kaanal-core/scenario.md](kaanal-core/scenario.md)       | Scenarios: names, `ScenarioSet`, `ChaosStack`, `resolve_scenario`     |
-| `src/chain.rs`       | [kaanal-core/chain.md](kaanal-core/chain.md)             | Endpoint compile: default chains, via/with, limits, error_map lookup  |
-| `src/exec.rs`        | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, spans, determinism         |
-| `src/pin.rs`         | [kaanal-core/pin.md](kaanal-core/pin.md)                 | UI-state pins: `PinState`, layers, `states:` overrides, `resolve`     |
+| File                      | Page                                                     | Contents                                                                                                                    |
+| ------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib.rs`              | [kaanal-core/lib.md](kaanal-core/lib.md)                 | Crate root, re-exports, `stable_hash`                                                                                       |
+| `src/config/mod.rs`       | [kaanal-core/config.md](kaanal-core/config.md)           | `kaanal.yaml` parsing: tagged node kinds, `DistConfig`, `ConfigError`                                                       |
+| `src/config/nodes.rs`     | [kaanal-core/config.md](kaanal-core/config.md)           | The node kinds and the per-kind structs (gateway, service, monolith, database, cache, external API, auth), the flavor enums |
+| `src/config/limits.rs`    | [kaanal-core/config.md](kaanal-core/config.md)           | Concurrency, pools and rate limits                                                                                          |
+| `src/config/shared.rs`    | [kaanal-core/config.md](kaanal-core/config.md)           | Users, edges, latency distributions (`DistConfig`) and endpoint overrides                                                   |
+| `src/config/endpoints.rs` | [kaanal-core/config.md](kaanal-core/config.md)           | The `endpoints:` map, error maps and the step deserializers (`call`, `cache`, `parallel`, `repeat`)                         |
+| `src/config/scenario.rs`  | [kaanal-core/config.md](kaanal-core/config.md)           | Scenario files: `chaos:` entries, `pins:`, `parse_scenario`                                                                 |
+| `src/config/values.rs`    | [kaanal-core/config.md](kaanal-core/config.md)           | Field-level serde helpers (ratios, rates, statuses, URLs, durations, unique names)                                          |
+| `src/config/checks.rs`    | [kaanal-core/config.md](kaanal-core/config.md)           | Cross-field checks serde cannot place: auth, capacity, locales                                                              |
+| `src/diagnostics.rs`      | [kaanal-core/diagnostics.md](kaanal-core/diagnostics.md) | Error positions: saphyr tree, per-branch schema check, `Located`                                                            |
+| `src/presets.rs`          | [kaanal-core/presets.md](kaanal-core/presets.md)         | Flavor presets (estimates) and gap filling                                                                                  |
+| `src/schema.rs`           | [kaanal-core/schema.md](kaanal-core/schema.md)           | JSON Schema of `kaanal.yaml` (schemars)                                                                                     |
+| `src/topology.rs`         | [kaanal-core/topology.md](kaanal-core/topology.md)       | Graph build + validation (optional gateway, edge table, DAG, presets)                                                       |
+| `src/replay/`             | [kaanal-core/replay.md](kaanal-core/replay.md)           | Token bucket (GCRA) and slot gate with FIFO hand-over                                                                       |
+| `src/dist.rs`             | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                                                                                     |
+| `src/chaos.rs`            | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | Chaos layers, `ChaosState`, compiled `EffectiveChaos` / `Resolved`                                                          |
+| `src/scenario.rs`         | [kaanal-core/scenario.md](kaanal-core/scenario.md)       | Scenarios: names, `ScenarioSet`, `ChaosStack`, `resolve_scenario`                                                           |
+| `src/chain/mod.rs`        | [kaanal-core/chain.md](kaanal-core/chain.md)             | Endpoint compile: default chains, via/with, limits, error_map lookup                                                        |
+| `src/chain/types.rs`      | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Step`, `Call`, `CacheStep`, `Seq`, `Endpoint`, `Endpoints`, `CollectionOp`, `RouteSpec`, `EndpointsInput`, `resolve_error` |
+| `src/chain/place.rs`      | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Place` (where a step sits, for positioned errors), `Keys`, `Job`, `Entry`                                                  |
+| `src/chain/compiler.rs`   | [kaanal-core/chain.md](kaanal-core/chain.md)             | `compile`, `skeleton`, the limits check and the `Compiler` state                                                            |
+| `src/chain/entries.rs`    | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Compiler` methods that list the endpoints and their jobs, built-in and user                                                |
+| `src/chain/steps.rs`      | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Compiler` methods that compile one step: `call`, `cache`, `parallel`, `repeat`                                             |
+| `src/chain/endpoint.rs`   | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Compiler` methods that compile a whole endpoint: node chains, state overrides, heads                                       |
+| `src/exec.rs`             | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, spans, determinism                                                               |
+| `src/pin.rs`              | [kaanal-core/pin.md](kaanal-core/pin.md)                 | UI-state pins: `PinState`, layers, `states:` overrides, `resolve`                                                           |
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)
 
-| File                | Page                                                   | Contents                                                    |
-| ------------------- | ------------------------------------------------------ | ----------------------------------------------------------- |
-| `src/lib.rs`        | [kaanal-data/lib.md](kaanal-data/lib.md)               | Crate root, re-exports                                      |
-| `src/api.rs`        | [kaanal-data/api.md](kaanal-data/api.md)               | OpenAPI 3.0 → `ApiModel`, `$ref` inlining with bomb guards  |
-| `src/generate.rs`   | [kaanal-data/generate.md](kaanal-data/generate.md)     | Deterministic realistic JSON from a schema                  |
-| `src/empty.rs`      | [kaanal-data/empty.md](kaanal-data/empty.md)           | The "no data" form of a body (`empty`, `empty_of_value`)    |
-| `src/warn.rs`       | [kaanal-data/warn.md](kaanal-data/warn.md)             | Ignored-keyword warnings                                    |
-| `src/words.rs`      | [kaanal-data/words.md](kaanal-data/words.md)           | The lorem word list (names and places are in packs)         |
-| `src/pack.rs`       | [kaanal-data/pack.md](kaanal-data/pack.md)             | Locale packs: names, places, phone, currency, `DataError`   |
-| `src/dictionary.rs` | [kaanal-data/dictionary.md](kaanal-data/dictionary.md) | The field dictionary and its generators                     |
-| `src/dataset.rs`    | [kaanal-data/dataset.md](kaanal-data/dataset.md)       | `Options` and `DataSet`: loading `locales/` and `data.yaml` |
+| File                      | Page                                                   | Contents                                                                        |
+| ------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `src/lib.rs`              | [kaanal-data/lib.md](kaanal-data/lib.md)               | Crate root, re-exports                                                          |
+| `src/api.rs`              | [kaanal-data/api.md](kaanal-data/api.md)               | OpenAPI 3.0 → `ApiModel`, `$ref` inlining with bomb guards                      |
+| `src/generate/mod.rs`     | [kaanal-data/generate.md](kaanal-data/generate.md)     | Deterministic realistic JSON from a schema                                      |
+| `src/generate/numbers.rs` | [kaanal-data/generate.md](kaanal-data/generate.md)     | Integers, numbers, arrays: bounds, counts, rounding                             |
+| `src/generate/format.rs`  | [kaanal-data/generate.md](kaanal-data/generate.md)     | `format` strings and dictionary values                                          |
+| `src/generate/text.rs`    | [kaanal-data/generate.md](kaanal-data/generate.md)     | Text values: names, addresses, phones, emails, ids, base64, dates, `fit_length` |
+| `src/empty.rs`            | [kaanal-data/empty.md](kaanal-data/empty.md)           | The "no data" form of a body (`empty`, `empty_of_value`)                        |
+| `src/warn.rs`             | [kaanal-data/warn.md](kaanal-data/warn.md)             | Ignored-keyword warnings                                                        |
+| `src/words.rs`            | [kaanal-data/words.md](kaanal-data/words.md)           | The lorem word list (names and places are in packs)                             |
+| `src/pack.rs`             | [kaanal-data/pack.md](kaanal-data/pack.md)             | Locale packs: names, places, phone, currency, `DataError`                       |
+| `src/dictionary.rs`       | [kaanal-data/dictionary.md](kaanal-data/dictionary.md) | The field dictionary and its generators                                         |
+| `src/dataset.rs`          | [kaanal-data/dataset.md](kaanal-data/dataset.md)       | `Options` and `DataSet`: loading `locales/` and `data.yaml`                     |
 
 ## [kaanal-server](kaanal-server/) (HTTP)
 

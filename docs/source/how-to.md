@@ -29,14 +29,14 @@ A ready-made playground config lives in `crates/kaanal-server/tests/fixtures/` (
 
 ## Add a node type
 
-1. Add the kind to `NodeKind` in `crates/kaanal-core/src/config.rs` (lowercase serde rename).
+1. Add the kind to `NodeKind` in `crates/kaanal-core/src/config/nodes.rs` (lowercase serde rename).
 2. Extend validation in `Topology::build` (`core/src/topology.rs`): update `callees` (the edge table) and add the kind to `NodeConfig`; the schema test fails until every new field has a doc comment. Anything the simulator cannot honour must be **rejected loudly**, not silently ignored.
 3. Give it a cost in the chain executor (`core/src/exec.rs`). Rule R2.5: timing/failure logic lives **once** in core; never re-implement it in the server or (later) the simulator.
 4. Tests: topology validation in `core/tests/topology.rs`, chain behaviour in `core/tests/exec.rs`.
 
 ## Add a step kind
 
-1. Add the visitor in `crates/kaanal-core/src/config.rs` and its schema in `schema.rs` (every new field needs a doc comment; the schema test fails otherwise).
+1. Add the visitor in `crates/kaanal-core/src/config/endpoints.rs` and its schema in `schema.rs` (every new field needs a doc comment; the schema test fails otherwise).
 2. Resolve it in `chain.rs`: compile it into a step, and count it against the limits.
 3. Walk it in `exec.rs`, with a new draw tag so existing seeds keep their numbers.
 4. The simulator needs nothing unless the step adds a new `PlanItem`.

@@ -6,7 +6,19 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 
 ---
 
-## `crates/kaanal-core/tests/config.rs` — YAML parsing
+## `crates/kaanal-core/tests/config/` — YAML parsing
+
+One test target (`cargo test -p kaanal-core --test config`), one module per topic in `tests/config/` (R3.8):
+
+| Module         | What it covers                                  |
+| -------------- | ----------------------------------------------- |
+| `common.rs`    | The sample config.                              |
+| `basics.rs`    | Defaults, positioned errors, durations.         |
+| `nodes.rs`     | Node kinds, p50 and p99, edges, the schema.     |
+| `endpoints.rs` | The `endpoints:` map and its positioned errors. |
+| `auth.rs`      | Claims, scopes, users, passwords, token ttl.    |
+| `limits.rs`    | Concurrency, rate limits, capacity checks.      |
+| `locale.rs`    | Locale tags.                                    |
 
 | Test                                                         | What it proves                                                                                                                                                                                                             |
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -91,7 +103,19 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `cache_flavor_fills_the_gaps`                      | A cache flavor fills `hit`/`miss` while the user's `hit_ratio` wins; without a flavor a missing `hit_ratio` resolves to nothing.                      |
 | `presets_are_sane`                                 | Every preset is a `{ p50, p99 }` pair with 0 < p50 ≤ p99 ≤ 1 s, and hit ratios are in 0..=1.                                                          |
 
-## `crates/kaanal-core/tests/replay.rs` — token bucket and slot gate
+## `crates/kaanal-core/tests/replay/` — token bucket and slot gate
+
+One test target (`cargo test -p kaanal-core --test replay`), one module per topic in `tests/replay/` (R3.8):
+
+| Module           | What it covers                                                |
+| ---------------- | ------------------------------------------------------------- |
+| `common.rs`      | Topology, hops, plans, the run loop.                          |
+| `bucket_gate.rs` | The token bucket and the slot gate.                           |
+| `engine.rs`      | FIFO hand-over, answers, stamps, clock, table, submit, drain. |
+| `limits.rs`      | Rate limits and queue overflow.                               |
+| `spans.rs`       | Timeout spans, zombies, deadlines.                            |
+| `reference.rs`   | The engine against a reference queue.                         |
+| `cause.rs`       | The failure cause per failure kind.                           |
 
 | Test                                                             | What it proves                                                                                                               |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -149,7 +173,18 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `second_auth_is_rejected_by_name`                         | A second auth node fails with `SecondAuth` naming it, placed at `nodes.<it>` (5:3), with the "at most one auth node" text.                                      |
 | `an_auth_only_topology_is_valid`                          | A lone auth node builds (`gateway` None, `auth` Some(0)); `auth` is None without one; `NoEntry` has the new message that names the auth node.                   |
 
-## `crates/kaanal-core/tests/exec.rs` — the chain executor
+## `crates/kaanal-core/tests/exec/` — the chain executor
+
+One test target (`cargo test -p kaanal-core --test exec`), one module per topic in `tests/exec/` (R3.8):
+
+| Module         | What it covers                                         |
+| -------------- | ------------------------------------------------------ |
+| `common.rs`    | Base config and run functions.                         |
+| `basic.rs`     | The walk: determinism, failures, latency, gatewayless. |
+| `timeouts.rs`  | Spans, hang, reset, malformed, deadlines.              |
+| `endpoint.rs`  | Endpoint and node-at-endpoint chaos, cache timeouts.   |
+| `deadlines.rs` | Ties, earliest deadline, parallel branches, repeats.   |
+| `layers.rs`    | Stacked layers and banded failures.                    |
 
 | Test                                                                  | What it proves                                                                                                                                                                                                                                         |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -221,7 +256,17 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `timeout_range_is_checked_with_a_positioned_error`          | `timeout: 0s` and `timeout: 6m` fail at load with the error placed at the value.                                                                 |
 | `timeout_boundaries_load_on_gateway_service_and_cache`      | 1 ns and exactly 5 min are accepted.                                                                                                             |
 
-## `crates/kaanal-core/tests/chain.rs` — endpoint compile
+## `crates/kaanal-core/tests/chain/` — endpoint compile
+
+One test target (`cargo test -p kaanal-core --test chain`), one module per topic in `tests/chain/` (R3.8):
+
+| Module           | What it covers                                           |
+| ---------------- | -------------------------------------------------------- |
+| `common.rs`      | Base config, routes, outline printer.                    |
+| `compile.rs`     | Default and custom chains, step keys, compile errors.    |
+| `maps.rs`        | Stale entries, error maps, limits, wire nodes, skeleton. |
+| `auth.rs`        | Built-in login and JWKS routes.                          |
+| `collections.rs` | Collection routes.                                       |
 
 | Test                                                              | What it proves                                                                                                                                                                                                          |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -319,7 +364,15 @@ Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/
 | `duplicate_key_names_the_earlier_entry`                  | With a different key between them, the repeated db entry fails with "same key as chaos[0]".                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `null_limits_and_pins_read_as_absent`                    | A scenario with `limits: null` and `pins: ~` resolves without error (`resolve_scenario` now also takes an `empty_ok` callback; every test here passes an always-true `empty_ok`).                                                                                                                                                                                                                                                                                                                                             |
 
-## `crates/kaanal-core/tests/pins.rs` — pins, layers and the pin delay
+## `crates/kaanal-core/tests/pins/` — pins, layers and the pin delay
+
+One test target (`cargo test -p kaanal-core --test pins`), one module per topic in `tests/pins/` (R3.8):
+
+| Module      | What it covers                             |
+| ----------- | ------------------------------------------ |
+| `common.rs` | Base config and builders.                  |
+| `layers.rs` | Resolution, layering, validation, loading. |
+| `delay.rs`  | The pin delay and its sweep.               |
 
 The pin model in [source](files/kaanal-core/pin.md): cycle order, ranges, precedence, layering, scenario resolution, `states:`, and the `pin_delay` in the plan ([exec](files/kaanal-core/exec.md)).
 
@@ -370,7 +423,19 @@ The pin model in [source](files/kaanal-core/pin.md): cycle order, ranges, preced
 | `response_example_beats_schema_examples`                          | A media-type `example` or `examples` replaces the schema's own `example`/`examples`, so the generator serves it first (D1.8).                                            |
 | `a_dangling_ref_in_media_examples_fails_the_load_with_a_position` | `examples: { one: { $ref: ... } }` naming a missing component fails the load at `/paths/~1a/get` with "not found".                                                       |
 
-## `crates/kaanal-data/tests/generate.rs` — data generation
+## `crates/kaanal-data/tests/generate/` — data generation
+
+One test target (`cargo test -p kaanal-data --test generate`), one module per topic in `tests/generate/` (R3.8):
+
+| Module       | What it covers                                                   |
+| ------------ | ---------------------------------------------------------------- |
+| `common.rs`  | The rich schema.                                                 |
+| `basics.rs`  | Seeds, validation, allOf, write-only.                            |
+| `fields.rs`  | Formats, examples, heuristics, urls, params, odd schemas.        |
+| `numbers.rs` | Floats, integers, counts, bounds, lat/lng, lengths.              |
+| `people.rs`  | Cities, addresses, emails, names, `fit_length`.                  |
+| `formats.rs` | Examples by seed, newer formats, nullable, additionalProperties. |
+| `one_of.rs`  | `oneOf`, `anyOf` and discriminators.                             |
 
 | Test                                                                      | What it proves                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -522,17 +587,17 @@ Parsing, matching and fit rules of `data.yaml` and the built-in dictionary ([sou
 
 ## `crates/kaanal-data/src/warn.rs` (unit) + `tests/warnings.rs` — ignored-keyword warnings
 
-| Test                                                   | What it proves                                                                                                                                                                            |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flags_ignored_keywords_but_not_property_names`        | A _property called_ `pattern` is not flagged; a real `pattern:` keyword and `uniqueItems` are, with locations.                                                                            |
-| `walks_items_and_combinators`                          | `not` nested inside `items → allOf` is found.                                                                                                                                             |
-| `flags_max_length_that_cannot_fit_the_format`          | `format: uuid` + `maxLength: 10` warns (the format wins); `maxLength: 36` does not.                                                                                                       |
-| `flags_min_length_over_the_cap_or_the_format`          | (unit) `minLength: 20000` warns "capped at 10000"; `uuid` + `minLength: 50` warns (the format wins); `minLength: 10000` and `email` + `minLength` do not.                                 |
-| `allof_type_conflict_warns_once_per_endpoint`          | (unit) Two properties with `allOf: [{type: string}, {type: integer}]` give exactly one "allOf types conflict; first wins" warning; matching types give none.                              |
-| `clean_schema_has_no_warnings`                         | No ignored keywords → no warnings.                                                                                                                                                        |
-| `too_deep_schema_warns_once_and_matches_the_generator` | (unit) 16 levels: no warning and a filled leaf; 17 levels on two branches: one warning per endpoint, and the generator returns `null` at that depth.                                      |
-| `api_model_collects_warnings_per_endpoint`             | End-to-end from a spec string: `ApiModel::warnings()` prefixes warnings with `GET /things`.                                                                                               |
-| `max_length_below_a_new_format_warns`                  | (unit) `maxLength` too small for `ipv4` (5), `byte` (8) or `duration` (4) warns; `ipv4` at 11 does not. The discriminator warnings are tested in `tests/generate.rs` (`discriminator_*`). |
+| Test                                                   | What it proves                                                                                                                                                                                        |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flags_ignored_keywords_but_not_property_names`        | A _property called_ `pattern` is not flagged; a real `pattern:` keyword and `uniqueItems` are, with locations.                                                                                        |
+| `walks_items_and_combinators`                          | `not` nested inside `items → allOf` is found.                                                                                                                                                         |
+| `flags_max_length_that_cannot_fit_the_format`          | `format: uuid` + `maxLength: 10` warns (the format wins); `maxLength: 36` does not.                                                                                                                   |
+| `flags_min_length_over_the_cap_or_the_format`          | (unit) `minLength: 20000` warns "capped at 10000"; `uuid` + `minLength: 50` warns (the format wins); `minLength: 10000` and `email` + `minLength` do not.                                             |
+| `allof_type_conflict_warns_once_per_endpoint`          | (unit) Two properties with `allOf: [{type: string}, {type: integer}]` give exactly one "allOf types conflict; first wins" warning; matching types give none.                                          |
+| `clean_schema_has_no_warnings`                         | No ignored keywords → no warnings.                                                                                                                                                                    |
+| `too_deep_schema_warns_once_and_matches_the_generator` | (unit) 16 levels: no warning and a filled leaf; 17 levels on two branches: one warning per endpoint, and the generator returns `null` at that depth.                                                  |
+| `api_model_collects_warnings_per_endpoint`             | End-to-end from a spec string: `ApiModel::warnings()` prefixes warnings with `GET /things`.                                                                                                           |
+| `max_length_below_a_new_format_warns`                  | (unit) `maxLength` too small for `ipv4` (5), `byte` (8) or `duration` (4) warns; `ipv4` at 11 does not. The discriminator warnings are tested in `tests/generate/` (`one_of.rs`) (`discriminator_*`). |
 
 ## `crates/kaanal-data/tests/empty.rs` — empty bodies
 
@@ -1513,7 +1578,19 @@ Golden strings; no network. See [logview](files/kaanal/logview.md).
 | `kaanal-server/src/control/tests.rs` | `hosts` (Host guard incl. attack spellings), `constant_time_eq`, `token_comes_only_from_the_token_parameter`; on the paused clock: `lease_task_expires_on_the_paused_clock` (a 5 s lease holds at 4 s, is gone at 6 s with one `expire` event), `lease_survives_a_poisoned_lock` (a lease set after a thread panicked holding the lock still expires and clears), `two_leases_expire_in_order_with_one_event_each` (a 2 s and a 1 s lease expire in deadline order, one event each, and `expire_due` then finds nothing), `two_leases_due_in_one_call_expire_in_order` (two leases past due at one `expire_due` call: it returns 2, both are deactivated and the events come in deadline order, ties by name); chaos leases on the same timer: `chaos_ttl_expires_and_clears_only_its_unit` (permanent latency 200 plus `down` for 30 s: at 31 s `down` is gone, the latency stays, and Control, the snapshot and the effective chaos agree), `expiry_removes_an_entry_left_empty`, `a_24h_scenario_lease_does_not_delay_a_1s_chaos_lease` (the task asleep on a 24 h scenario lease is woken by the chaos PUT and fires at 1 s; the scenario stays), `a_reput_just_before_the_deadline_wins` (re-PUT at 29 s: still down at 31 s, `expire_due` does nothing, gone at the new deadline), `plain_put_just_before_the_deadline_makes_it_permanent`, `expiry_after_the_entry_was_deleted_emits_nothing_and_does_not_spin` (no event, `next_deadline` is `None`; a stale lease with no entry is dropped silently too), `expire_event_names_the_chaos_key` (`expire`, `name: None`, `chaos_key` `{"node":"db"}`, and for an endpoint and a node@endpoint key `{"endpoint":"GET /x"}` and `{"node":"db","endpoint":"GET /x"}`; the SSE data carries `chaos_key` only when set), `two_units_of_one_key_expiring_together_publish_once_and_emit_once` (two keys, three units: `expire_due` returns 2, one event per key), `failed_expiry_drops_the_lease_and_keeps_the_chaos` (an out-of-range entry stored without a publish makes the recompile fail: the chaos stays, no event, no lease left to spin on). |
 | `kaanal-data/src/generate.rs`        | `stable_hash_matches_core_algorithm` (pins the duplicated hash to core's vectors, incl. the non-empty `["a","bc"]` known answer), `merge_all_of_unions_properties_and_keeps_the_first_type` (siblings first-wins, later property wins, `required` unioned, nested `allOf` expanded, one type conflict), `civil_dates` (epoch, BASE_EPOCH, leap day).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
-## `crates/kaanal-sim/tests/sim.rs` — simulator engine
+## `crates/kaanal-sim/tests/sim/` — simulator engine
+
+One test target (`cargo test -p kaanal-sim --test sim`), one module per topic in `tests/sim/` (R3.8):
+
+| Module         | What it covers                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| `common.rs`    | Shared helpers and the compared configs (`tests/common/mod.rs` is included as `shared`). |
+| `zero_load.rs` | Zero-load equality against `execute` and live.                                           |
+| `behaviour.rs` | Lindley, FIFO, determinism, overload, utilization, warmup.                               |
+| `config.rs`    | Config validation, counters, absurd values, bounded queues.                              |
+| `streams.rs`   | Streams named by compiled endpoints, the hop budget.                                     |
+| `forks.rs`     | Fork and join: ties, cancelled siblings, slots.                                          |
+| `auth.rs`      | Login and JWKS as stream keys.                                                           |
 
 | Test                                                            | What it pins                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1554,7 +1631,7 @@ Golden strings; no network. See [logview](files/kaanal/logview.md).
 
 `tests/common/mod.rs` holds the `CHAINS` config, its `CHAIN_ROUTES` and `compiled(yaml, routes)`, shared by `sim.rs` and `distribution.rs`.
 
-## `crates/kaanal-core/tests/replay.rs` — replay engine
+## `crates/kaanal-core/tests/replay/` — replay engine
 
 | Test                                                                             | What it pins                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
