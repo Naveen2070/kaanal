@@ -1,0 +1,205 @@
+//! `Compiler` methods that compile one step: `call`, `cache`, `parallel`, `repeat`.
+
+use super::{
+    Arc, CacheStep, Call, CallStep, Compiler, Edge, Keys, Located, MAX_BRANCHES, MAX_NESTING,
+    MAX_REPEAT, MAX_STEPS, NodeId, NodeKind, Place, Seq, Step, StepConfig, normalize,
+};
+
+impl Compiler<'_> {
+    pub(super) fn steps(
+        &mut self,
+        list: &[StepConfig],
+        runner: NodeId,
+        at: &Place,
+        depth: usize,
+        keys: &mut Keys,
+    ) -> Result<Vec<Step>, Located> {
+        if list.is_empty() {
+            return Err(at.err("a chain needs at least one step"));
+        }
+        if list.len() > MAX_STEPS {
+            return Err(at.err(format!(
+                "a chain allows at most {MAX_STEPS} steps (got {})",
+                list.len()
+            )));
+        }
+        list.iter()
+            .enumerate()
+            .map(|(i, s)| self.step(s, runner, &at.index(i), depth, keys))
+            .collect()
+    }
+
+    pub(super) fn step(
+        &mut self,
+        s: &StepConfig,
+        runner: NodeId,
+        at: &Place,
+        depth: usize,
+        keys: &mut Keys,
+    ) -> Result<Step, Located> {
+        if depth > MAX_NESTING {
+            return Err(at.err(format!("chains nest at most {MAX_NESTING} levels deep")));
+        }
+        match s {
+            StepConfig::Call(c) => self.call(c, runner, at, depth, keys).map(Step::Call),
+            StepConfig::Cache { node } => {
+                let at = at.key("cache");
+                let to = self
+                    .topo
+                    .id(node)
+                    .ok_or_else(|| at.bad(format!("unknown node '{node}'")))?;
+                let kind = self.topo.nodes[to].kind;
+                if kind != NodeKind::Cache {
+                    return Err(at.bad(format!("cache: '{node}' is a {kind}, not a cache")));
+                }
+                let net = self.edge(runner, to, &at)?.net.clone();
+                Ok(Step::Cache(CacheStep {
+                    node: to,
+                    net,
+                    reads_only: false,
+                    repeat: 1,
+                    key: keys.next(to),
+                }))
+            }
+            StepConfig::Parallel(branches) => {
+                let at = at.key("parallel");
+                if branches.len() < 2 {
+                    return Err(at.err("parallel needs at least 2 branches"));
+                }
+                if branches.len() > MAX_BRANCHES {
+                    return Err(at.err(format!(
+                        "parallel allows at most {MAX_BRANCHES} branches (got {})",
+                        branches.len()
+                    )));
+                }
+                let mut seqs = Vec::with_capacity(branches.len());
+                for (b, br) in branches.iter().enumerate() {
+                    let here = at.index(b);
+                    // D8: one counter for the whole block, so it is transparent for occurrences.
+                    let steps = if br.list {
+                        self.steps(&br.steps, runner, &here, depth + 1, keys)?
+                    } else {
+                        let mut one = Vec::with_capacity(1);
+                        for s in &br.steps {
+                            one.push(self.step(s, runner, &here, depth + 1, keys)?);
+                        }
+                        one
+                    };
+                    seqs.push(Seq::new(steps));
+                }
+                Ok(Step::Parallel(seqs))
+            }
+        }
+    }
+
+    /// **Private.** The edge `runner → to`, or the "no edge" error at the target.
+    pub(super) fn edge(&self, runner: NodeId, to: NodeId, at: &Place) -> Result<&Edge, Located> {
+        self.topo.edge(runner, to).ok_or_else(|| {
+            at.bad(format!(
+                "'{}' has no edge to '{}' (add it under edges:)",
+                self.topo.nodes[runner].name, self.topo.nodes[to].name
+            ))
+        })
+    }
+
+    pub(super) fn call(
+        &mut self,
+        c: &CallStep,
+        runner: NodeId,
+        at: &Place,
+        depth: usize,
+        keys: &mut Keys,
+    ) -> Result<Call, Located> {
+        let target = if c.bare { at.clone() } else { at.key("call") };
+        let to = self
+            .topo
+            .id(&c.node)
+            .ok_or_else(|| target.bad(format!("unknown node '{}'", c.node)))?;
+        let (name, kind) = (self.topo.nodes[to].name.clone(), self.topo.nodes[to].kind);
+        if kind == NodeKind::Cache {
+            return Err(target.bad(format!("'{name}' is a cache; use `cache: {name}`")));
+        }
+        let edge = self.edge(runner, to, &target)?;
+        let (net, calls) = (edge.net.clone(), edge.calls.get());
+        let bodies = usize::from(c.chain.is_some())
+            + usize::from(c.with.is_some())
+            + usize::from(c.via.is_some());
+        if bodies > 1 {
+            return Err(at.err("use only one of chain, with and via"));
+        }
+        if bodies == 1 && !matches!(kind, NodeKind::Service | NodeKind::Monolith) {
+            return Err(at.err(format!(
+                "'{name}' ({kind}) has no chains; chain, with and via need a service or monolith"
+            )));
+        }
+        if c.op.is_some() {
+            if c.via.is_some() {
+                return Err(at
+                    .key("op")
+                    .bad("op cannot be used with via (the endpoint's own op is used)"));
+            }
+            let has_ops = kind == NodeKind::Database
+                || (kind == NodeKind::Monolith && self.topo.nodes[to].ops.is_some());
+            if !has_ops {
+                return Err(at.key("op").bad(format!("'{name}' ({kind}) has no ops")));
+            }
+        }
+        let repeat = match c.repeat {
+            None => calls,
+            Some(r) if (1..=MAX_REPEAT).contains(&r) => r,
+            Some(r) => {
+                return Err(at.key("repeat").bad(format!(
+                    "repeat must be between 1 and {MAX_REPEAT} (got {r})"
+                )));
+            }
+        };
+        let (body, op) = if let Some(steps) = &c.chain {
+            let mut s = self.prefix(to);
+            let mut k = Keys::new(self.topo.nodes.len());
+            s.extend(self.steps(steps, to, &at.key("chain"), depth + 1, &mut k)?);
+            (Arc::new(Seq::new(s)), c.op)
+        } else if let Some(w) = &c.with {
+            let Some(b) = self.named.get(&(to, w.clone())) else {
+                return Err(at.key("with").bad(format!(
+                    "with: '{w}' is not a chain of '{name}' ({})",
+                    self.chain_names(to)
+                )));
+            };
+            (Arc::clone(b), c.op)
+        } else if let Some(v) = &c.via {
+            let t = normalize(v)
+                .and_then(|k| self.done.get(&k))
+                .filter(|t| t.owner == Some(to) && !t.synthesized)
+                .cloned();
+            let Some(t) = t else {
+                return Err(at.key("via").bad(format!(
+                    "via: '{v}' is not an endpoint of '{name}' ({})",
+                    self.endpoint_names(to)
+                )));
+            };
+            if !t.error_map.is_empty() {
+                self.warnings.push(format!(
+                    "{}: via '{v}': that endpoint's error_map is ignored here (each endpoint maps its own errors)",
+                    at.ctx
+                ));
+            }
+            if t.response.is_some() {
+                self.warnings.push(format!(
+                    "{}: via '{v}': that endpoint's override is ignored here (via runs its chain, not its fixed response)",
+                    at.ctx
+                ));
+            }
+            (Arc::clone(&t.body), Some(t.op))
+        } else {
+            (Arc::clone(&self.default[to]), c.op)
+        };
+        Ok(Call {
+            node: to,
+            repeat,
+            net,
+            body,
+            op,
+            key: keys.next(to),
+        })
+    }
+}

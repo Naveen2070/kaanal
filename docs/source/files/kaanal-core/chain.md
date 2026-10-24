@@ -1,6 +1,20 @@
-# `crates/kaanal-core/src/chain.rs`
+# `crates/kaanal-core/src/chain/`
 
 Compiles `endpoints:`, node `chains:` and the topology into resolved call trees, once at load. The executor walks the result with no name lookups.
+
+## Modules (R3.8)
+
+`chain` is a folder module. Every public name is re-exported from `mod.rs` (checked name by name against the old file), so `kaanal_core::chain::compile` and the rest are unchanged. The big `impl Compiler` is split by method group into three files.
+
+| File          | What it holds                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`      | The limits (`MAX_*`), the built-in login and JWKS keys, and the re-exports of every public name.                             |
+| `types.rs`    | `Step`, `Call`, `CacheStep`, `Seq`, `Endpoint`, `Endpoints`, `CollectionOp`, `RouteSpec`, `EndpointsInput`, `resolve_error`. |
+| `place.rs`    | `Place` (where a step sits, for positioned errors), `Keys`, `Job`, `Entry`.                                                  |
+| `compiler.rs` | `compile`, `skeleton`, the limits check and the `Compiler` state.                                                            |
+| `entries.rs`  | `Compiler` methods that list the endpoints and their jobs, built-in and user.                                                |
+| `steps.rs`    | `Compiler` methods that compile one step: `call`, `cache`, `parallel`, `repeat`.                                             |
+| `endpoint.rs` | `Compiler` methods that compile a whole endpoint: node chains, state overrides, heads.                                       |
 
 ## What it does
 

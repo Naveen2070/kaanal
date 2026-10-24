@@ -1,5 +1,9 @@
 //! The step-driven replay engine: walks sampled [`Plan`]s against per-node [`Gate`]s on a
 //! caller-supplied clock in integer nanoseconds. See `docs/source/files/kaanal-core/replay.md`.
+//!
+//! File size (R3.8): the data types are in `state.rs`; `impl Engine` stays in this one file (about 650
+//! lines) on purpose. It is one type's hot-path impl whose methods call each other, and keeping
+//! it in one module keeps the optimizer's view of it exactly as before the split.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -12,197 +16,12 @@ use super::gate::{Admit, Gate};
 use crate::chaos::FailKind;
 use crate::exec::{ChainResult, Hop, HopKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
+mod state;
 
-/// **Private.** `starts` value of a hop that never started.
-const NOT_STARTED: u64 = u64::MAX;
-
-/// **Private.** Set on the seq of a deadline event, so it sorts after every other event of the
-/// same instant (Z14) without changing the heap key or the simulator's `(time, seq)` merge.
-const DEADLINE: u64 = 1 << 62;
-
-/// Why the engine stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineError {
-    /// An event time would pass `u64::MAX` ns (about 584 years). The engine stays failed.
-    ClockOverflow,
-}
-
-impl fmt::Display for EngineError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("the replay clock would pass u64::MAX nanoseconds (about 584 years)")
-    }
-}
-
-impl std::error::Error for EngineError {}
-
-/// Why a replayed request failed; carried on [`Finished::cause`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailCause {
-    /// A planned failure from the chaos plan (a hang included).
-    Chaos,
-    /// The node's rate limit refused it (429).
-    RateLimit,
-    /// The node's queue was full.
-    Overflow,
-    /// A `timeout:` span's deadline fired.
-    Deadline,
-}
-
-/// What a finished request experienced.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Finished {
-    /// The caller's key from [`Engine::submit`].
-    pub tag: u64,
-    /// Submit order, starting at 0.
-    pub order: u64,
-    /// Submit time (ns).
-    pub arrival: u64,
-    /// When the client got its answer (ns).
-    pub done: u64,
-    /// Ok, or where and how the request failed.
-    pub result: ChainResult,
-    /// Why it failed; `None` when `result` is Ok.
-    pub cause: Option<FailCause>,
-    /// The hops that ran, in plan order: `start` is the offset from `arrival`; a hop a failure
-    /// cancelled while running is cut at the failure instant; one that had not started is absent.
-    pub hops: Vec<FinishedHop>,
-}
-
-/// One hop of a [`Finished`] request.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FinishedHop {
-    /// Index of the hop in the submitted plan.
-    pub idx: usize,
-    /// The hop with its real `start` and (cut) `dur`.
-    pub hop: Hop,
-    /// Time spent in the node's queue before it started.
-    pub wait: Duration,
-}
-
-/// Per-node totals. `completed`, `wait`, `limited` and `overflowed` count requests
-/// arriving at or after the window's `warmup`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NodeCounters {
-    /// Busy slot-nanoseconds inside the window `[warmup, end]`.
-    pub area: u128,
-    /// Longest queue seen at or after `warmup`.
-    pub max_queue: usize,
-    /// Own hops that started.
-    pub completed: u64,
-    /// Summed queue waits (ns) before those hops.
-    pub wait: u128,
-    /// Hop starts refused by the rate limit (429).
-    pub limited: u64,
-    /// Hop starts refused by a full queue.
-    pub overflowed: u64,
-    /// Requests failed by this node's deadline, counted at the span's node.
-    pub timed_out: u64,
-}
-
-/// **Private.** A walker over one plan range: the whole plan, or one `parallel` branch.
-struct Token {
-    /// Next plan index.
-    at: usize,
-    /// End of the range (exclusive).
-    end: usize,
-    /// The join it reports to at its end; `None` for the root token.
-    join: Option<usize>,
-    /// The node queue it waits in, and since when (ns).
-    queued_at: Option<(NodeId, u64)>,
-    /// Node of the last own hop with no edge hop since: the current visit (Y6).
-    last_own: Option<NodeId>,
-    /// Innermost span this token opened that is still open (`SpanState::parent` chains outward).
-    open_top: Option<usize>,
-}
-
-/// **Private.** A `parallel` block waiting for its branches.
-struct Join {
-    left: usize,
-    parent: usize,
-}
-
-/// **Private.** One span a request has entered.
-struct SpanState {
-    /// The enclosing span still open on the same token when this one was entered.
-    parent: Option<usize>,
-    /// Plan index just past the span; its opener closes it on walking on past this.
-    end: usize,
-    /// Plan index of the `Span` item.
-    idx: usize,
-    /// The node whose `timeout` this is; a timeout is counted and reported here.
-    node: NodeId,
-    /// Seq of its deadline event: identifies the span, so a recycled request slot cannot match.
-    seq: u64,
-    /// When the deadline falls (ns).
-    due: u64,
-    /// Not yet walked past by its opening token; only an open span can time the request out.
-    open: bool,
-}
-
-/// **Private.** The failure that decided a request: instant, plan index (D17), node, status.
-struct Failure {
-    at: u64,
-    idx: usize,
-    node: NodeId,
-    status: u16,
-    kind: FailKind,
-    retry_after: Option<Duration>,
-    /// Set when the engine itself refused the hop and counted it: the node, and whether it was the
-    /// rate limit (`true`) or the queue (`false`). A planned `Fail` that replaces this failure (D17)
-    /// takes the count back, so counters match the answers.
-    refused: Option<(NodeId, bool)>,
-    /// Why it failed. Not derivable from `refused` or `kind`: a fired deadline and a planned hang
-    /// both have kind `Timeout` and `refused: None`.
-    cause: FailCause,
-}
-
-/// **Private.** One request in flight.
-struct Req {
-    tag: u64,
-    order: u64,
-    arrival: u64,
-    plan: Arc<Plan>,
-    starts: Vec<u64>,
-    waits: Vec<u64>,
-    tokens: Vec<Token>,
-    joins: Vec<Join>,
-    spans: Vec<SpanState>,
-    /// Tokens holding a hop or waiting in a queue.
-    busy: usize,
-    fail: Option<Failure>,
-    /// When the client got its answer (ns).
-    done: Option<u64>,
-    /// The `Finished` was produced (or skipped for a pre-warmup request).
-    emitted: bool,
-}
-
-/// **Private.** The per-request buffers of a `Req`, recycled between requests (R6.13).
-#[derive(Default)]
-struct Scratch {
-    starts: Vec<u64>,
-    waits: Vec<u64>,
-    tokens: Vec<Token>,
-    joins: Vec<Join>,
-    spans: Vec<SpanState>,
-}
-
-/// **Private.** Queueing state of one node.
-struct NodeState {
-    gate: Option<Gate>,
-    bucket: Option<Bucket>,
-    /// Last time `busy` changed (ns); `NodeCounters::area` is integrated up to here.
-    since: u64,
-}
-
-/// **Private.** The live request in slot `r`.
-fn live(reqs: &mut [Option<Req>], r: usize) -> &mut Req {
-    reqs[r].as_mut().expect("events only name live requests")
-}
-
-/// **Private.** Duration → nanoseconds; validation keeps durations far below `u64::MAX`.
-fn nanos(d: Duration) -> u64 {
-    u64::try_from(d.as_nanos()).expect("validated durations fit in u64 nanoseconds")
-}
+use state::{
+    DEADLINE, Failure, Join, NOT_STARTED, NodeState, Req, Scratch, SpanState, Token, live, nanos,
+};
+pub use state::{EngineError, FailCause, Finished, FinishedHop, NodeCounters};
 
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].

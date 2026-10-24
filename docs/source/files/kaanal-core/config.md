@@ -1,6 +1,21 @@
-# `crates/kaanal-core/src/config.rs`
+# `crates/kaanal-core/src/config/`
 
 Parsing of `kaanal.yaml` into typed config.
+
+## Modules (R3.8)
+
+`config` is a folder module. Every public item is re-exported from `mod.rs`, so no path changed (checked name by name against the old file). The sections below describe all of it.
+
+| File           | What it holds                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`       | `Config`, `Determinism`, `SeedSource`, `ConfigError`, `Config::from_yaml`; re-exports every public name, so `kaanal_core::config::X` is unchanged. |
+| `nodes.rs`     | The node kinds and the per-kind structs (gateway, service, monolith, database, cache, external API, auth), the flavor enums.                       |
+| `limits.rs`    | Concurrency, pools and rate limits.                                                                                                                |
+| `shared.rs`    | Users, edges, latency distributions (`DistConfig`) and endpoint overrides.                                                                         |
+| `endpoints.rs` | The `endpoints:` map, error maps and the step deserializers (`call`, `cache`, `parallel`, `repeat`).                                               |
+| `scenario.rs`  | Scenario files: `chaos:` entries, `pins:`, `parse_scenario`.                                                                                       |
+| `values.rs`    | Field-level serde helpers (ratios, rates, statuses, URLs, durations, unique names).                                                                |
+| `checks.rs`    | Cross-field checks serde cannot place: auth, capacity, locales.                                                                                    |
 
 ## What it does
 

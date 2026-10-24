@@ -1,6 +1,6 @@
-# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine.rs`)
+# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`)
 
-The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together.
+The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together. `engine` is a folder: `engine/state.rs` holds the data types (errors, finished-request records, per-request and per-node state) and `engine/mod.rs` keeps `impl Engine` whole (about 650 lines, on purpose: one type's hot-path impl, R3.8).
 
 ## What it does
 
