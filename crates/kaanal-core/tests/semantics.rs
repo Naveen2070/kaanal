@@ -8,7 +8,6 @@ use kaanal_core::{
     HopKind, NodeChaos, Plan, Topology, execute, resolve_error, stable_hash,
 };
 use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
 use std::time::Duration;
 
 /// 20 lines; tests append entries under `endpoints:`.
@@ -645,8 +644,11 @@ fn draws_follow_the_r1_34_formula() {
         &0u32.to_le_bytes(),
     ]);
     let draw = |path: u64, node: &str, tag: &[u8], own: bool, d: Dist| {
-        let mut rng =
-            ChaCha8Rng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), node.as_bytes(), tag]));
+        let mut rng = kaanal_core::HopRng::seed_from_u64(stable_hash(&[
+            &path.to_le_bytes(),
+            node.as_bytes(),
+            tag,
+        ]));
         if own {
             let _: f64 = rng.random();
         }
@@ -779,7 +781,8 @@ fn cache_repetitions_draw_from_their_own_paths() {
             &0u32.to_le_bytes(),
             &u32::try_from(rep).unwrap().to_le_bytes(),
         ]);
-        let mut rng = ChaCha8Rng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), b"c", b"net"]));
+        let mut rng =
+            kaanal_core::HopRng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), b"c", b"net"]));
         assert_eq!(
             *got,
             Dist::Exp { mean: ms(1) }.sample(&mut rng),

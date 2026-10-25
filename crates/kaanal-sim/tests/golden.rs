@@ -3,6 +3,11 @@
 //! simulator, so they prove the move changed nothing observable for limit-free
 //! configs and `concurrency: N`. Never re-record a hash to make a test pass (R7.5): a
 //! differing hash is a behaviour change to explain.
+//!
+//! Re-recorded once on 2026-10-25 (developer decision, perf-sim): the per-hop RNG changed from
+//! `ChaCha8Rng` to `HopRng` (`SplitMix64`) to cut seeding cost, which re-pins every sampled value.
+//! "ties" has no random draw and kept its hash. Structure, ordering and the oracle tests are
+//! unchanged.
 
 mod common;
 
@@ -79,12 +84,12 @@ const LOGIN: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  login: { typ
 
 /// (name, hash recorded from the pre-move simulator).
 const GOLDEN: [(&str, u64); 6] = [
-    ("queued", 17_398_734_117_307_395_939),
-    ("tandem", 17_420_912_875_000_209_103),
-    ("forked", 14_894_312_423_357_554_724),
+    ("queued", 10_122_474_828_312_530_245),
+    ("tandem", 5_877_994_622_758_661_944),
+    ("forked", 11_009_132_828_405_713_776),
     ("ties", 12_536_427_626_783_952_910),
-    ("chains", 3_851_126_853_056_243_808),
-    ("login", 10_203_578_349_052_239_446),
+    ("chains", 4_441_420_710_520_412_783),
+    ("login", 4_973_649_437_012_228_117),
 ];
 
 fn case(name: &str) -> SimReport {

@@ -13,13 +13,13 @@ use std::ops::Range;
 use std::time::Duration;
 
 use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::chain::{Endpoint, Seq, Step};
 use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, HANG_CAP};
 use crate::dist::Dist;
+use crate::rng::HopRng;
 use crate::stable_hash;
 use crate::topology::{NodeId, Topology};
 
@@ -423,8 +423,8 @@ fn hang_cap(timeout: Option<Duration>) -> Duration {
 }
 
 /// **Private.** The RNG of one hop's draws (R1.34, D8).
-fn draw_rng(path: u64, node: &str, tag: &[u8]) -> ChaCha8Rng {
-    ChaCha8Rng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), node.as_bytes(), tag]))
+fn draw_rng(path: u64, node: &str, tag: &[u8]) -> HopRng {
+    HopRng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), node.as_bytes(), tag]))
 }
 
 /// **Private.** The path of one `call`/`cache` step repetition (D8).

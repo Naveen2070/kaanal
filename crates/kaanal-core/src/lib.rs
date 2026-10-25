@@ -24,6 +24,7 @@ pub mod exec;
 pub mod pin;
 pub mod presets;
 pub mod replay;
+pub mod rng;
 pub mod scenario;
 pub mod schema;
 pub mod topology;
@@ -50,6 +51,7 @@ pub use pin::{
     ResolvedPin, StateOverride, StateOverrideConfig, StateOverrides, resolve, validate_entry,
 };
 pub use replay::{Engine, EngineError, FailCause, Finished, FinishedHop, NodeCounters};
+pub use rng::HopRng;
 pub use scenario::{
     ChaosStack, MAX_ENTRIES, MAX_SCENARIOS, Scenario, ScenarioError, ScenarioSet, Source,
     endpoint_key, resolve_scenario, valid_name, validate_scenario_shape,

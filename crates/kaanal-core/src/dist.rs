@@ -7,7 +7,6 @@
 use std::time::Duration;
 
 use rand::Rng;
-use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, LogNormal};
 
 use crate::config::DistConfig;
@@ -74,7 +73,7 @@ impl Dist {
     /// Draws one duration from the distribution.
     ///
     /// The RNG is caller-owned: who seeds it controls the outcome (determinism rule R4.1).
-    pub fn sample(&self, rng: &mut ChaCha8Rng) -> Duration {
+    pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Duration {
         match self {
             Dist::Fixed(d) => *d,
             Dist::LogNormal { mu, sigma, cap_ms } => {
