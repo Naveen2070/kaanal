@@ -134,8 +134,13 @@ pub(super) fn number_for(
 
 /// **Private.** Array value: random length in `minItems..=maxItems` (random part capped at
 /// `MAX_RANDOM_ITEMS`), then cut to the remaining value budget.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "private helper, one call site per layer"
+)]
 pub(super) fn array_for(
     s: &Value,
+    field: Option<&str>,
     rng: &mut ChaCha8Rng,
     seed: u64,
     group: u64,
@@ -159,7 +164,7 @@ pub(super) fn array_for(
             .map(|i| {
                 value_for(
                     &items,
-                    None,
+                    field,
                     child_seed(seed, "[]", i),
                     group,
                     depth + 1,

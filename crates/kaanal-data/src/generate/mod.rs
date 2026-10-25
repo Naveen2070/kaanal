@@ -203,11 +203,11 @@ fn value_for(
                     );
                 }
             }
-            // `additionalProperties` with a schema: up to three extra seeded keys (a name
+            // `additionalProperties` with a schema: one to three extra seeded keys (a name
             // that is already a property is skipped); `false`/`true`/absent add none.
             if let Some(ap) = s.get("additionalProperties").filter(|a| a.is_object()) {
                 let extra = child_seed(seed, "additionalProperties", 0);
-                let n = ChaCha8Rng::seed_from_u64(extra).random_range(0..=3usize);
+                let n = ChaCha8Rng::seed_from_u64(extra).random_range(1..=3usize);
                 for i in 0..n {
                     let k = child_seed(extra, "key", i);
                     let name = format!("key{}", k % 10_000);
@@ -220,7 +220,7 @@ fn value_for(
             }
             Value::Object(out)
         }
-        "array" => array_for(s, rng, seed, group, depth, budget, opts),
+        "array" => array_for(s, field, rng, seed, group, depth, budget, opts),
         ty => scalar_for(s, field, ty, rng, group, opts),
     }
 }

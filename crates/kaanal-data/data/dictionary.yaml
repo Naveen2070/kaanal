@@ -197,6 +197,10 @@ fields:
   uri: { gen: url }
   "*uri": { gen: url }
   link: { gen: url }
+  "*urls": { gen: url }
+  "*uris": { gen: url }
+  "*links": { gen: url }
+  "*emails": { gen: email }
   "*link": { gen: url }
   href: { gen: url }
   image: { gen: url }

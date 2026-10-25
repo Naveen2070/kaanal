@@ -229,3 +229,23 @@ fn exclusive_bounds_are_strict() {
         assert!(v > 0.0 && v < 1.0, "{v}");
     }
 }
+
+#[test]
+fn array_items_use_the_array_field_name_and_a_map_is_never_empty() {
+    // petstore `photoUrls`: plural names reach the url generator through the array.
+    let s = json!({ "type": "array", "items": { "type": "string" }, "minItems": 2 });
+    let v = generate(&s, Some("photoUrls"), 5, &Options::default());
+    assert!(
+        v.as_array()
+            .unwrap()
+            .iter()
+            .all(|u| u.as_str().unwrap().starts_with("http")),
+        "{v}"
+    );
+    // petstore `/store/inventory`: `additionalProperties` with a schema gives 1 to 3 keys.
+    let m = json!({ "type": "object", "additionalProperties": { "type": "integer" } });
+    for seed in 0..200 {
+        let n = g1(&m, seed).as_object().unwrap().len();
+        assert!((1..=3).contains(&n), "seed {seed}: {n} keys");
+    }
+}
