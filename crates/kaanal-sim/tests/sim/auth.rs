@@ -7,7 +7,7 @@ use std::time::Duration;
 
 #[test]
 fn login_is_a_stream_key_and_auth_concurrency_queues_logins() {
-    // Spec §6: the built-in route is a compiled endpoint, so it streams with no simulator change.
+    // Spec section 6: the built-in route is a compiled endpoint, so it streams with no simulator change.
     let yaml = "version: 1\nnodes:\n  gw: { type: gateway }\n  login: { type: auth, concurrency: 1, proc: { mean: 10ms } }\n  users: { type: database, flavor: postgres }\nedges:\n  - { from: gw, to: login }\n  - { from: login, to: users }\n";
     let (t, e) = compiled(yaml, &[]);
     let cfg = SimConfig {

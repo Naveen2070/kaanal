@@ -68,7 +68,7 @@ pub(crate) fn served_kid(port: u16) -> serde_json::Value {
 
 #[test]
 fn up_generates_the_key_once_then_reuses_it() {
-    // The one key generation by kaanal itself in this test binary (spec §7).
+    // The one key generation by kaanal itself in this test binary (spec section 7).
     let (dir, cfg) = auth_project("keygen", false);
     let (child, lines) = up_auth(&dir, &cfg);
     let port = port_of(&lines);

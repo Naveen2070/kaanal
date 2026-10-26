@@ -5,7 +5,7 @@
 //! time) → `override`, a `collection:` operation, a built-in responder (login, JWKS), a generated
 //! body, or the `error_map` response → `X-Kaanal-Trace` (+ `Retry-After` on a 429) + an event on
 //! the broadcast bus. A built-in login and a collection add read their body before the chain runs,
-//! so a bad body still costs the full chain latency and a chain failure still wins (spec §5). A
+//! so a bad body still costs the full chain latency and a chain failure still wins (spec section 5). A
 //! collection changes only when the route answers normally, and at most once (see [`answer`]).
 //! A `reset` or `malformed` failure at a wire node (the gateway or the route's owner) is not
 //! JSON: it is a body that breaks off or is cut short (B2a Z7); see [`wire_failure`].
@@ -190,7 +190,7 @@ type Read<'a> = (
     Option<Call<'a>>,
 );
 
-/// **Private.** What a request brings to its answer, read before the chain (spec §5): a built-in
+/// **Private.** What a request brings to its answer, read before the chain (spec section 5): a built-in
 /// login's credentials, or its collection operation with an add's body (read with a hard cap). No
 /// sleep yet, so a bad body still costs the full chain latency and a chain failure still wins. An
 /// `override` replaces the responder, so its body is never read.

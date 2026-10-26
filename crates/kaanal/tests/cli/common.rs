@@ -352,7 +352,7 @@ pub(crate) fn drain_pipes(child: &mut Child) -> std::sync::mpsc::Receiver<(usize
     rx
 }
 
-/// One PKCS#8 key per test binary, pre-seeded where a test needs a key (spec §7: only
+/// One PKCS#8 key per test binary, pre-seeded where a test needs a key (spec section 7: only
 /// `up_generates_the_key_once_then_reuses_it` lets kaanal generate one).
 pub(crate) fn test_pem() -> &'static str {
     static PEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();

@@ -1,5 +1,5 @@
 //! Endpoint chains: compiles `endpoints:`, node `chains:` and the topology into resolved
-//! call trees (spec §5.1–§5.2).
+//! call trees (spec sections 5.1–5.2).
 //!
 //! [`compile`] runs once at load. It resolves every node name, edge, `via:` and `with:`,
 //! gives routes without a custom chain the default chain, checks every limit and returns

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 #[test]
 fn zombie_hop_keeps_the_slot_and_waiters_time_out_in_the_queue() {
-    // spec §1 criterion 2
+    // spec section 1 criterion 2
     let t = topo(POOL1);
     let db = t.id("db").unwrap();
     let mk = || plan(vec![span(db, 500, 1), hop(db, HopKind::Op(Op::Read), 400)]);

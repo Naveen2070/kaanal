@@ -441,7 +441,7 @@ fn step_path(parent: u64, target: &str, occ: u32, rep: u32) -> u64 {
 enum Flow {
     /// It ran to its end at this offset.
     Done(Duration),
-    /// A cache hit ended it at this offset (only this sequence, §5.3).
+    /// A cache hit ended it at this offset (only this sequence, section 5.3).
     Hit(Duration),
     /// A step failed: its instant and the plan index of its `Fail` item.
     Fail { at: Duration, idx: usize },
@@ -491,7 +491,7 @@ impl Walk<'_> {
                     }
                 }
                 Step::Cache(cache) => {
-                    // §5.2: the default chain's cache steps serve reads and scans only.
+                    // Section 5.2: the default chain's cache steps serve reads and scans only.
                     if cache.reads_only && op == Op::Write {
                         continue;
                     }

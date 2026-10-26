@@ -44,7 +44,7 @@ impl Compiler<'_> {
         })
     }
 
-    /// **Private.** §5.2: service/monolith/external-api/auth callees in edge order, then
+    /// **Private.** Section 5.2: service/monolith/external-api/auth callees in edge order, then
     /// caches (reads and scans only), then databases.
     pub(super) fn walk(&self, n: NodeId, keys: &mut Keys) -> Vec<Step> {
         let kind = |e: &&Edge| self.topo.nodes[e.to].kind;
@@ -166,7 +166,7 @@ pub(super) fn limits(s: &Seq, place: &Place) -> Result<(), Located> {
 }
 
 /// Compiles every endpoint: spec `routes` (from the server, which reads the spec files),
-/// `endpoints:` entries and node `chains:` (spec §5.1).
+/// `endpoints:` entries and node `chains:` (spec section 5.1).
 ///
 /// Order (D21): default bodies callees-first; then per node, callees-first, its named
 /// chains and the endpoints it owns; then static endpoints; then HEAD copies (D20). A

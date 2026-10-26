@@ -10,7 +10,7 @@ pub(crate) fn config_err(path: &Path, e: &ConfigError) -> Fail {
 }
 
 /// **Private.** A load error as `file:line:col: msg`: placed in the endpoints file when it
-/// came from there (spec §8), else in `kaanal.yaml` (`src`).
+/// came from there (spec section 8), else in `kaanal.yaml` (`src`).
 pub(crate) fn located_err(config: &Path, src: &str, e: &Located) -> Fail {
     match &e.file {
         Some(f) => {

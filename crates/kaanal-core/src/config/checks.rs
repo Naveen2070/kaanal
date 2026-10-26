@@ -50,7 +50,7 @@ pub(super) fn check_capacity(cfg: &Config) -> Result<(), Located> {
     Ok(())
 }
 
-/// **Private.** The auth rules serde would place at the start of `users:` (spec §3): checked
+/// **Private.** The auth rules serde would place at the start of `users:` (spec section 3): checked
 /// after parsing, each error at its own key or value. Messages never quote a password.
 pub(super) fn check_auth(cfg: &Config) -> Result<(), Located> {
     for (name, node) in &cfg.nodes {

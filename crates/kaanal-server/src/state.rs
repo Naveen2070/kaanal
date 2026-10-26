@@ -379,7 +379,7 @@ fn load_site(cfg: &Config, base_dir: &Path) -> Result<Option<crate::site::Site>,
 
 /// **Private.** Compiles the spec routes with `endpoints:`: the inline map, or the file it
 /// names (relative to `base_dir`). A missing file is placed at the `endpoints:` value;
-/// errors inside the file carry that file (spec §8).
+/// errors inside the file carry that file (spec section 8).
 fn compile_endpoints(
     cfg: &Config,
     base_dir: &Path,

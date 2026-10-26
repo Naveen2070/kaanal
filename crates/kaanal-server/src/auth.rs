@@ -218,7 +218,7 @@ impl Issuer {
     }
 }
 
-/// **Private.** Largest login body Kaanal reads (spec §5).
+/// **Private.** Largest login body Kaanal reads (spec section 5).
 const MAX_LOGIN_BODY: usize = 16 * 1024;
 
 /// The two fields `POST /login` reads. Extra fields (`grant_type`, …) are ignored; serde's
@@ -246,7 +246,7 @@ impl fmt::Debug for Credentials {
 /// code of the body (P10). Never a parser message: those can quote the password.
 pub(crate) type Reject = (u16, &'static str);
 
-/// Reads a `POST /login` body before the chain runs (spec §5). `Content-Type` (case-insensitive,
+/// Reads a `POST /login` body before the chain runs (spec section 5). `Content-Type` (case-insensitive,
 /// parameters ignored) must be `application/json` or `application/x-www-form-urlencoded`, else
 /// 415 (decided from the header alone); a body over 16 KiB is 413; anything serde rejects is 400.
 pub(crate) async fn read_login(req: Request) -> Result<Credentials, Reject> {
@@ -308,7 +308,7 @@ mod tests {
     use std::collections::BTreeSet;
     use std::sync::OnceLock;
 
-    /// One key per test binary: generation is the slow part (spec §7).
+    /// One key per test binary: generation is the slow part (spec section 7).
     fn key() -> &'static AuthKey {
         static KEY: OnceLock<AuthKey> = OnceLock::new();
         KEY.get_or_init(|| AuthKey::generate().unwrap())
@@ -348,7 +348,7 @@ nodes:
 
     #[test]
     fn thumbprint_matches_rfc_7638() {
-        // RFC 7638 §3.1: the example RSA key and its thumbprint.
+        // RFC 7638 section 3.1: the example RSA key and its thumbprint.
         let n = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw";
         assert_eq!(
             thumbprint(n, "AQAB"),

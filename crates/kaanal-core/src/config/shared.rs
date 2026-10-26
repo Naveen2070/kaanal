@@ -28,7 +28,7 @@ pub struct UserConfig {
 
 impl fmt::Debug for UserConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Passwords never reach logs, panic messages or test output (spec §5).
+        // Passwords never reach logs, panic messages or test output (spec section 5).
         f.debug_struct("UserConfig")
             .field("username", &self.username)
             .field("password", &"<redacted>")

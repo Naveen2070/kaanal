@@ -258,7 +258,7 @@ fn gatewayless_walk_starts_at_the_owner() {
 
 #[test]
 fn callees_below_the_entry_are_charged() {
-    // Default chain (spec §5.2): callees in edge order (shop, ext), then the cache (a read).
+    // Default chain (spec section 5.2): callees in edge order (shop, ext), then the cache (a read).
     let (t, e) = build(
         "version: 1
 nodes:

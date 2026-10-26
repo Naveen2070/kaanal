@@ -1,4 +1,4 @@
-//! Envelope detection and page generation (spec §2.4): which array of a response is paged,
+//! Envelope detection and page generation (spec section 2.4): which array of a response is paged,
 //! and the page body with its meta siblings filled consistently with the window.
 
 use super::{PageSpec, Style, Window, encode_cursor, normalise};
@@ -132,7 +132,7 @@ fn siblings(schema: &Value, key: &str) -> Value {
 /// from [`item_seed`], so a record never depends on the page that holds it.
 ///
 /// An object envelope is generated as today with its paged array emptied ([`siblings`]), then
-/// the paged array and the meta siblings (spec §2.4, matched by normalised name and JSON type)
+/// the paged array and the meta siblings (spec section 2.4, matched by normalised name and JSON type)
 /// are overwritten. `path` and `query` are the request's: a string `next`/`prev` of the page
 /// and offset styles is the URL of that page.
 #[must_use]

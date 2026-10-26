@@ -1,4 +1,4 @@
-//! The oracle (spec §7): walking every page equals the record sequence generated one by one.
+//! The oracle (spec section 7): walking every page equals the record sequence generated one by one.
 
 use kaanal_data::{
     Endpoint, Options, PageSpec, QueryParam, Style, generate, generate_page, item_seed,

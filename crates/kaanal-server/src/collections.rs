@@ -1,4 +1,4 @@
-//! `collection:` routes: small in-memory lists of JSON objects (F, spec §5).
+//! `collection:` routes: small in-memory lists of JSON objects (F, spec section 5).
 //!
 //! One store per running server, shared by every scope and every user (C14), emptied by
 //! `POST /__kaanal/reset` and on restart. A route still runs its chain; the operation is applied

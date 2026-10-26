@@ -35,7 +35,7 @@ nodes:
 
 #[test]
 fn reserved_claim_on_a_later_user_points_at_that_claim() {
-    // Spec §7: an error on user #57 points at that key, not at `users:` (serde alone would).
+    // Spec section 7: an error on user #57 points at that key, not at `users:` (serde alone would).
     let mut yaml = String::from("version: 1\nnodes:\n  login:\n    type: auth\n    users:\n");
     for i in 0..58 {
         let extra = if i == 57 { ", claims: { iss: x }" } else { "" };

@@ -92,7 +92,7 @@ fn store(dir: &Path, file: &Path, pem: &str) -> Result<String, Fail> {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     // ponytail: pid + clock names the temp file; a crash may leave one behind, which is
-    // ignored (spec §10 Q4). Add a sweep of old `*.tmp` files if they ever pile up.
+    // ignored (spec section 10 Q4). Add a sweep of old `*.tmp` files if they ever pile up.
     let tmp = dir.join(format!("{stem}.{}-{nanos}.tmp", std::process::id()));
     let linked = write_new(&tmp, pem).and_then(|()| match std::fs::hard_link(&tmp, file) {
         // No hard links here (FAT, some network shares): create the final name directly.

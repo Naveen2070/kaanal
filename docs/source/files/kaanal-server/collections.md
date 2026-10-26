@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/collections.rs`
 
-The `collection:` routes: small in-memory lists of JSON objects (F, spec §5). User page: [../../../web/collections.md](../../../web/collections.md).
+The `collection:` routes: small in-memory lists of JSON objects (F, spec section 5). User page: [../../../web/collections.md](../../../web/collections.md).
 
 ## What it does
 

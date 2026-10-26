@@ -23,7 +23,7 @@ pub(crate) fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-/// One signing key per test binary (spec §7); every server gets a clone.
+/// One signing key per test binary (spec section 7); every server gets a clone.
 pub(crate) fn test_key() -> kaanal_server::AuthKey {
     static KEY: std::sync::OnceLock<kaanal_server::AuthKey> = std::sync::OnceLock::new();
     KEY.get_or_init(|| kaanal_server::AuthKey::generate().unwrap())
