@@ -4,7 +4,7 @@ Warnings for schema keywords the generator does not honour.
 
 ## What it does
 
-The generator ignores some JSON Schema keywords (`not`, `pattern`, `patternProperties`, `uniqueItems`, `multipleOf`) — generated values may violate them. Rather than staying silent, every ignored keyword becomes a one-line warning that `kaanal validate` and `kaanal up` print (rule R4.6).
+The generator ignores some JSON Schema keywords (`not`, `patternProperties`) — generated values may violate them. `pattern` left the list in D2: a supported pattern is honoured, and an unsupported one (lookaround, back-reference, too large) or one no candidate can fit within `minLength`/`maxLength` gets its own line from `generate::pattern::problem` (`GET /x .code: pattern ^(?=a)b is not supported (lookaround, back-reference or too large); generated values may not match`). Rather than staying silent, every ignored keyword becomes a one-line warning that `kaanal validate` and `kaanal up` print (rule R4.6).
 
 ## Items
 
@@ -21,3 +21,5 @@ The generator ignores some JSON Schema keywords (`not`, `pattern`, `patternPrope
 ## Tests
 
 [../tests.md](../../tests.md#crateskaanal-datatestswarningsrs) — keyword-vs-property-name distinction, combinator walk, maxLength/format conflict, per-endpoint collection.
+
+`multipleOf` and `uniqueItems` left the list in D2. A usable one is honoured (see [generate.md](generate.md)); one the generator cannot honour gets its own line: `multipleOf 10 has no multiple between minimum and maximum; generated values ignore it`, `multipleOf 0.5 on an integer field is not supported; generated values may not match`, `uniqueItems is only supported for arrays of strings, numbers, integers and booleans; duplicates may remain`, and `uniqueItems: the items have only 2 distinct values but minItems is 5; arrays are shorter than minItems`.

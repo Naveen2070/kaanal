@@ -52,7 +52,7 @@ Check a file without starting:
 kaanal validate -c kaanal.yaml    # ok / errors with file:line:col, plus warnings
 ```
 
-Warnings flag schema keywords the data generator ignores (like `pattern` or `uniqueItems`) so you're never surprised by generated data that violates them.
+Warnings flag schema keywords the data generator ignores (like `not` or `patternProperties`) so you're never surprised by generated data that violates them.
 
 ## CLI
 
@@ -218,6 +218,8 @@ Precedence, first match wins:
 6. the built-in dictionary;
 7. type and bounds defaults.
 
+A string with a `pattern` matches it: a generated value that already matches (an email under `.+@.+`) is kept, otherwise Kaanal samples one from the regex (ASCII only, open repeats up to 8 extra, `minLength`/`maxLength` respected). Your `example`, `enum`, `const` and `data.yaml` `static`/`pick` values are never replaced. A pattern Kaanal cannot sample (lookaround, back-references, a huge repeat) or cannot fit within the length bounds is a startup warning, and the value may not match it.
+
 The schema's type and bounds always win over a dictionary entry: numbers are clamped to `minimum`/`maximum`, generated strings fitted to `maxLength` and `minLength` (in characters). An entry that cannot fit its field is skipped. A misfit in your `data.yaml` is a warning from `kaanal validate` and `kaanal up` that names the endpoint and field; a misfit built-in entry is skipped silently. Your own `pick`, `static` and `template` strings are never trimmed or padded: they are sent as written, and one that can fall outside the field's `minLength`/`maxLength` is a warning naming the field.
 
 ### Schema keywords
@@ -247,6 +249,8 @@ With `oneOf`/`anyOf` and a `discriminator`, the picked branch's tag property is 
 - `discriminator mapping 'cat' names no oneOf/anyOf branch; it is never generated`
 - `discriminator has no propertyName and is ignored`
 
+It also samples each endpoint's generated response (5 bodies) and checks them against the response schema. A miss is a warning that names the endpoint and the path, for example `GET /orders: 3 of 5 generated samples violate the response schema: /items/*/total: maximum`. It is Kaanal's bug or a contradiction in the spec (an `example` outside its own `maximum`); the mock still starts. `kaanal up` prints these lines a moment after it has started serving, so a big spec never slows startup.
+
 ### Behaviour changes in this release
 
 Kaanal is pre-1.0, and the same version, config, files and seed give the same data, but data may change between `v0.0.x` releases. If you diff generated bodies or commit them as fixtures, expect these differences:
@@ -260,6 +264,9 @@ Kaanal is pre-1.0, and the same version, config, files and seed give the same da
 - `discriminator` is no longer reported as an ignored keyword.
 - A field ending in `Total`/`_total` (`orderTotal`, `grandTotal`) or `subtotal` is money now, number and integer alike. A bare `total` stays a count from 0 to 1000, and is a whole number on a `number` field too.
 - `street` and the street inside `address` are now the same street for one object.
+- Records now agree with themselves (D2): `updatedAt` is never before `createdAt` (and the other timestamp chains), `age` matches `dateOfBirth`, an order's `lineTotal`, `subtotal`, `tax`, `shipping`, `discount` and `total` add up, and a string with a `pattern` matches it. `multipleOf` and `uniqueItems` (scalar items) are honoured. A field you pinned with `example`, `enum`, `const` or a `static`/`pick` entry is never rewritten.
+- Values are spread more like production (D2): prices lean cheap and end in `.99`, `.00`, `.95`, status words favour `paid`/`active`/`delivered`, flags such as `active` are mostly true, `rating` leans positive, `quantity` is mostly 1 to 3, timestamps lean recent, `age` has more people between 33 and 64. Every value stays possible. Fixtures that must never change belong in an `override:` body or an `example`.
+- `kaanal validate` and `kaanal up` now also generate five bodies per endpoint and check them against the response schema; see Warnings above.
 - Built-in packs carry coordinate bounds (`geo:`): `latitude`/`longitude` stay inside India for `en-IN` (unchanged) and inside the continental US for `en-US` (they were India's for every locale); a pack without `geo:` uses the whole globe.
 - `empty` pin bodies use the owning node's locale and your `data.yaml` (they always used `en-IN` and the built-ins), and each field draws from its own seed, so the values change.
 - `en-IN` phone numbers are `+91 9` and nine digits, which can look like a real Indian mobile number. Use them as test data only; never send messages to them.

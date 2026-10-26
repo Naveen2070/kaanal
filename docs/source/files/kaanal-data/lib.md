@@ -14,5 +14,6 @@ Declares private modules and re-exports the public surface:
 | `DataSet`, `Options`, `DEFAULT_LOCALE`, `valid_locale_tag` (hidden)                                   | `dataset`    | The project's data files and what one `generate` call draws from. See [dataset.md](dataset.md). |
 | `Pack`, `Name`, `NameOrder`, `Currency`, `Phone`, `Place`, `DataError`, `builtin_tags`, `pack_schema` | `pack`       | Locale packs and the data-file error. See [pack.md](pack.md).                                   |
 | `Dictionary`, `dictionary_schema`, `dictionary_warnings`                                              | `dictionary` | The field dictionary. See [dictionary.md](dictionary.md).                                       |
+| `selfcheck::{Finding, SAMPLES, check_endpoint, check_model}`                                          | `selfcheck`  | Self-validation of generated responses. See [selfcheck.md](selfcheck.md).                       |
 
 `warn` (ignored-keyword and discriminator warnings, see [warn.md](warn.md)) is private and reached through `ApiModel::warnings()`. `words` (the lorem word list) stays private, see [words.md](words.md).

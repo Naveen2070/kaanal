@@ -1,6 +1,9 @@
-//! Integers, numbers and arrays: bounds, `multipleOf`, counts and rounding.
+//! Integers, numbers and arrays: bounds, counts and rounding (`multipleOf` is `multiple.rs`,
+//! `uniqueItems` is `unique.rs`).
 
-use super::{ChaCha8Rng, MAX_RANDOM_ITEMS, Options, Rng, Value, child_seed, json, value_for};
+use super::{
+    ChaCha8Rng, MAX_RANDOM_ITEMS, Options, Rng, Value, child_seed, json, unique, value_for,
+};
 
 /// **Private.** Integer value: a default range `(lo, hi)` (from a dictionary entry, else
 /// `0..=1000`), bounded by `minimum`/`maximum` and their exclusive variants. Needs `lo <= hi`.
@@ -159,21 +162,23 @@ pub(super) fn array_for(
         .min(u64::try_from(*budget).unwrap_or(u64::MAX));
     let n = usize::try_from(n).expect("length is capped by the value budget");
     let items = s.get("items").cloned().unwrap_or(json!({}));
-    Value::Array(
-        (0..n)
-            .map(|i| {
-                value_for(
-                    &items,
-                    field,
-                    child_seed(seed, "[]", i),
-                    group,
-                    depth + 1,
-                    budget,
-                    opts,
-                )
-            })
-            .collect(),
-    )
+    let out: Vec<Value> = (0..n)
+        .map(|i| {
+            value_for(
+                &items,
+                field,
+                child_seed(seed, "[]", i),
+                group,
+                depth + 1,
+                budget,
+                opts,
+            )
+        })
+        .collect();
+    if unique::handles(s) {
+        return Value::Array(unique::dedupe(out, s, field, (seed, group, depth), opts));
+    }
+    Value::Array(out)
 }
 
 /// **Private.** Rounds to `places` decimal digits.

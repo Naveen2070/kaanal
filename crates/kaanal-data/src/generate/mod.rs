@@ -14,18 +14,27 @@ use rand_chacha::ChaCha8Rng;
 use serde_json::{Map, Value, json};
 
 use crate::dataset::Options;
-use crate::dictionary::{Dictionary, Gen, TextKind, norm, template_key, value_fits};
+use crate::dictionary::{Dictionary, Gen, IntDist, TextKind, norm, template_key, value_fits};
 use crate::pack::{Name, NameOrder, Pack, Place, digit_count, fill};
 use crate::words;
+mod dist;
 mod format;
+pub(crate) mod multiple;
 mod numbers;
+pub(crate) mod pattern;
+#[cfg(test)]
+mod pattern_tests;
+mod reconcile;
 #[cfg(test)]
 mod tests;
-mod text;
+pub(crate) mod text;
+pub(crate) mod unique;
 
 use format::{entry_range, format_value, from_dictionary, numeric};
 pub(crate) use numbers::count;
 use numbers::{array_for, int_for, number_for};
+use pattern::with_pattern;
+pub(crate) use reconcile::reconcile;
 use text::{base64, date_time, email, fit_length, run, uuid};
 
 /// **Private.** Recursion ceiling; deeper nesting yields `null` instead of overflowing.
@@ -43,7 +52,7 @@ pub(crate) const MAX_VALUES: usize = 10_000;
 pub(crate) const MAX_MIN_LENGTH: u64 = 10_000;
 
 /// **Private.** Timestamps are "the last 365 days before 2026-01-01", fixed so output never changes between runs.
-const BASE_EPOCH: i64 = 1_767_225_600;
+pub(crate) const BASE_EPOCH: i64 = 1_767_225_600;
 
 /// Deterministic JSON for an `OpenAPI` 3.0 schema whose `$ref`s are already inlined.
 /// `allOf` is merged first; then example → const/enum → oneOf/anyOf → type (project dictionary →
@@ -158,7 +167,7 @@ fn value_for(
         .and_then(Value::as_array)
         .filter(|e| !e.is_empty())
     {
-        return choices.choose(rng).cloned().unwrap_or(Value::Null);
+        return pick_enum(choices, field, rng, opts);
     }
     if let Some(branches) = ["oneOf", "anyOf"].iter().find_map(|k| {
         s.get(*k)
@@ -203,6 +212,7 @@ fn value_for(
                     );
                 }
             }
+            reconcile(&mut out, s, seed, opts);
             // `additionalProperties` with a schema: one to three extra seeded keys (a name
             // that is already a property is skipped); `false`/`true`/absent add none.
             if let Some(ap) = s.get("additionalProperties").filter(|a| a.is_object()) {
@@ -332,16 +342,56 @@ fn scalar_for(
 ) -> Value {
     let pack = &*opts.pack;
     let project = opts.dictionary_project.as_deref();
-    if let Some(v) = from_dictionary(project, false, s, field, ty, rng, group, pack) {
-        return v;
+    // a project `static` or `pick` is the developer's value (pinned): nothing touches it. Any
+    // other project generator makes a free value, which still has to meet `pattern`/`multipleOf`.
+    let own = from_dictionary(project, false, s, field, ty, rng, group, pack);
+    if let Some((v, Gen::Static { .. } | Gen::Pick { .. })) = &own {
+        return v.clone();
     }
+    let v = match own {
+        Some((v, _)) => v,
+        None => free_scalar(s, field, ty, rng, group, opts),
+    };
+    // a free string that breaks its `pattern` is regenerated from it (D2 section 6.1)
+    let v = match (ty, s.get("pattern").and_then(Value::as_str)) {
+        ("string", Some(p)) => with_pattern(v, p, s, rng),
+        _ => v,
+    };
+    // a free number is moved to the nearest `multipleOf` inside its bounds (D2 section 5.5)
+    match ty {
+        "integer" | "number" => multiple::snap(v, ty, s),
+        _ => v,
+    }
+}
+
+/// **Private.** The part of [`scalar_for`] after the project dictionary: `format` → built-in
+/// dictionary → constraint defaults. Values here are Kaanal's own (free).
+fn free_scalar(
+    s: &Value,
+    field: Option<&str>,
+    ty: &str,
+    rng: &mut ChaCha8Rng,
+    group: u64,
+    opts: &Options,
+) -> Value {
+    let pack = &*opts.pack;
+    // a birth date (`format: date` on `dateOfBirth`, `dob`, ...) is an adult's, not "last year"
+    let birth_date = ty == "string"
+        && s.get("format").and_then(Value::as_str) == Some("date")
+        && field
+            .and_then(|f| opts.dictionary.lookup(f))
+            .and_then(|gens| gens.iter().find(|g| g.fits(s, ty)))
+            .is_some_and(|g| matches!(g, Gen::Date { years: Some(_), .. }));
     if ty == "string"
+        && !birth_date
         && let Some(v) = format_value(s, rng, group, pack)
     {
         // formats beat lengths (R4.5): never truncated or padded
         return json!(v);
     }
-    if let Some(v) = from_dictionary(Some(&opts.dictionary), true, s, field, ty, rng, group, pack) {
+    if let Some((v, _)) =
+        from_dictionary(Some(&opts.dictionary), true, s, field, ty, rng, group, pack)
+    {
         return v;
     }
     match ty {
@@ -399,5 +449,37 @@ fn merge_into(out: &mut Map<String, Value>, s: &Value, conflicts: &mut Vec<Strin
         .flatten()
     {
         merge_into(out, part, conflicts);
+    }
+}
+
+/// **Private.** One of a spec field's `enum` values. A dictionary entry for the field's name that
+/// carries `weights` (the built-in status family, or the project's) weights the draw; every
+/// value stays reachable (unlisted ones weigh 1). A project entry without weights turns that
+/// off (D2 section 5.2).
+fn pick_enum(
+    choices: &[Value],
+    field: Option<&str>,
+    rng: &mut ChaCha8Rng,
+    opts: &Options,
+) -> Value {
+    let weights = field.and_then(|f| {
+        let gens = opts
+            .dictionary_project
+            .as_deref()
+            .and_then(|d| d.lookup(f))
+            .or_else(|| opts.dictionary.lookup(f))?;
+        gens.iter().find_map(|g| match g {
+            Gen::Pick {
+                weights: Some(w), ..
+            } => Some(&w.0),
+            _ => None,
+        })
+    });
+    match weights {
+        Some(w) => {
+            let refs: Vec<&Value> = choices.iter().collect();
+            dist::pick_weighted(&refs, w, rng).clone()
+        }
+        None => choices.choose(rng).cloned().unwrap_or(Value::Null),
     }
 }

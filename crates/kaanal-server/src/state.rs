@@ -269,11 +269,7 @@ fn load_specs(
     for (id, node) in topo.nodes.iter().enumerate() {
         let Some(spec) = &node.spec else { continue };
         let at = keys(&["nodes", node.name.as_str(), "spec"]);
-        let file = base_dir.join(spec);
-        let src = std::fs::read_to_string(&file)
-            .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
-        let api = ApiModel::from_openapi(&src)
-            .map_err(|e| Located::new(at.clone(), format!("{}: {e}", file.display())))?;
+        let (file, api) = read_api(spec, base_dir, &at)?;
         warnings.extend(
             api.warnings()
                 .into_iter()
@@ -310,6 +306,21 @@ fn load_specs(
     Ok(specs)
 }
 
+/// **Private.** Reads and parses one node's spec file; an error is placed at `at` (the
+/// node's `spec:` key) and names the file.
+pub(crate) fn read_api(
+    spec: &str,
+    base_dir: &Path,
+    at: &[PathSeg],
+) -> Result<(PathBuf, ApiModel), Located> {
+    let file = base_dir.join(spec);
+    let src = std::fs::read_to_string(&file)
+        .map_err(|e| Located::new(at.to_vec(), format!("{}: {e}", file.display())))?;
+    let api = ApiModel::from_openapi(&src)
+        .map_err(|e| Located::new(at.to_vec(), format!("{}: {e}", file.display())))?;
+    Ok((file, api))
+}
+
 /// **Private.** A data-file error as a [`Located`]: in its file (parse position, else the
 /// key path), or at the config value it names (`data:`) when it has no file.
 fn data_located(e: DataError) -> Located {
@@ -339,7 +350,7 @@ fn data_located(e: DataError) -> Located {
 /// **Private.** The data files (`locales/`, `data.yaml` or `data:`) and the options of every
 /// node (its `locale`, else the project's, else `en-IN`), plus the project's own. An unknown
 /// locale is placed at the `locale:` that names it (R6.1).
-fn load_data(
+pub(crate) fn load_data(
     cfg: &Config,
     base_dir: &Path,
     topo: &Topology,

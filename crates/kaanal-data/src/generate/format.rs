@@ -1,8 +1,9 @@
 //! `format` strings and dictionary values: picking an entry that fits the type and bounds.
 
+use super::text::DEFAULT_DAYS;
 use super::{
-    ChaCha8Rng, Dictionary, Pack, Rng, Value, base64, date_time, email, fit_length, int_for, json,
-    number_for, run, uuid, words,
+    ChaCha8Rng, Dictionary, Gen, Pack, Rng, Value, base64, date_time, email, fit_length, int_for,
+    json, number_for, run, uuid, words,
 };
 
 /// **Private.** A value for a known string `format`; `None` for an unknown one,
@@ -16,8 +17,8 @@ pub(super) fn format_value(
     Some(match s.get("format").and_then(Value::as_str)? {
         "email" => email(rng, group, pack),
         "uuid" => uuid(rng),
-        "date-time" => date_time(rng),
-        "date" => date_time(rng)[..10].to_string(),
+        "date-time" => date_time(rng, DEFAULT_DAYS),
+        "date" => date_time(rng, DEFAULT_DAYS)[..10].to_string(),
         "uri" | "url" => format!("https://example.com/{}", words::pick(words::WORDS, rng)),
         // RFC 5737 documentation ranges, never a real host
         "ipv4" => format!(
@@ -59,8 +60,8 @@ pub(super) fn format_value(
     clippy::too_many_arguments,
     reason = "private helper, one call site per layer"
 )]
-pub(super) fn from_dictionary(
-    d: Option<&Dictionary>,
+pub(super) fn from_dictionary<'d>(
+    d: Option<&'d Dictionary>,
     builtin: bool,
     s: &Value,
     field: Option<&str>,
@@ -68,13 +69,13 @@ pub(super) fn from_dictionary(
     rng: &mut ChaCha8Rng,
     group: u64,
     pack: &Pack,
-) -> Option<Value> {
+) -> Option<(Value, &'d Gen)> {
     let f = field?;
     let g = d?
         .lookup(f)?
         .iter()
         .find(|g| g.fits(s, ty) && (!builtin || g.length_fits(s, ty)))?;
-    Some(run(g, s, f, ty, rng, group, pack))
+    Some((run(g, s, f, ty, rng, group, pack), g))
 }
 
 /// **Private.** `(min, max)` from optional entry bounds and a default range: a lone bound

@@ -11,13 +11,7 @@ use crate::page::array_props;
 use crate::{ApiModel, Endpoint, Envelope, PageSpec};
 
 /// **Private.** Keywords the generator does not honour; generated values may violate them.
-const IGNORED: [&str; 5] = [
-    "not",
-    "pattern",
-    "patternProperties",
-    "uniqueItems",
-    "multipleOf",
-];
+pub(crate) const IGNORED: [&str; 2] = ["not", "patternProperties"];
 
 /// **Private.** `discriminator` warnings: one per `oneOf`/`anyOf` branch whose tag the
 /// generator cannot set (no `mapping` entry, which `api` turned into an `enum`, and no
@@ -132,6 +126,20 @@ fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
             out.push(format!("{at}: '{k}' is not supported and is ignored"));
         }
     }
+    if let Some(p) = m.get("pattern").and_then(Value::as_str)
+        && let Some(why) = crate::generate::pattern::problem(p, s)
+    {
+        out.push(format!("{at}: {why}"));
+    }
+    for why in [
+        crate::generate::multiple::problem(s),
+        crate::generate::unique::problem(s),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        out.push(format!("{at}: {why}"));
+    }
     discriminator_warnings(m, endpoint, out);
     if let (Some(lo), Some(hi)) = (count(s, "minItems", true), count(s, "maxItems", false))
         && lo > hi
@@ -241,17 +249,14 @@ mod tests {
     #[test]
     fn flags_ignored_keywords_but_not_property_names() {
         let s = json!({ "type": "object", "properties": {
-            "pattern": { "type": "string" },
-            "code": { "type": "string", "pattern": "^[A-Z]+$" },
-            "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+            "not": { "type": "string" },
+            "code": { "type": "string", "not": { "enum": ["x"] } },
+            "tags": { "type": "array", "not": { "maxItems": 0 }, "items": { "type": "string" } }
         }});
         let w = unsupported_keywords(&s, "GET /x");
         assert_eq!(w.len(), 2, "{w:?}");
-        assert!(w[0].contains("'pattern'") && w[0].contains("code"), "{w:?}");
-        assert!(
-            w[1].contains("'uniqueItems'") && w[1].contains("tags"),
-            "{w:?}"
-        );
+        assert!(w[0].contains("'not'") && w[0].contains("code"), "{w:?}");
+        assert!(w[1].contains("'not'") && w[1].contains("tags"), "{w:?}");
     }
 
     #[test]

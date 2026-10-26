@@ -97,7 +97,7 @@ fn unsupported_keywords_become_warnings() {
     let warnings = kaanal_server::check(&cfg, &fixtures()).unwrap();
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(
-        warnings[0].contains("openapi-warn.yaml") && warnings[0].contains("'pattern'"),
+        warnings[0].contains("openapi-warn.yaml") && warnings[0].contains("'not'"),
         "{warnings:?}"
     );
 }

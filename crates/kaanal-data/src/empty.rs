@@ -6,7 +6,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::dataset::Options;
-use crate::generate::{MAX_VALUES, child_seed, property};
+use crate::generate::{MAX_VALUES, child_seed, property, reconcile};
 
 /// **Private.** The fixed value for a pagination-style property name, matched
 /// case-insensitively and exactly. ponytail: a name table, not a model; extend it when a real API misses.
@@ -77,6 +77,8 @@ fn object_of_schema(
         };
         out.insert(name.clone(), v);
     }
+    // scalar-only rules keep the empty form equal to the full body's scalars (R1.53a)
+    reconcile(&mut out, schema, seed, opts);
     Value::Object(out)
 }
 

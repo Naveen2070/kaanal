@@ -7,8 +7,8 @@ use serde_json::Value;
 mod envelope;
 mod links;
 mod window;
-pub(crate) use envelope::array_props;
 pub use envelope::{Envelope, generate_page, item_seed};
+pub(crate) use envelope::{array_props, is_list_name};
 pub use window::{PageError, Window, decode_cursor, encode_cursor};
 
 /// How an endpoint addresses a window of its collection.

@@ -32,12 +32,12 @@ fields:
   handle: { gen: username }
   nickname: { gen: username }
   screen_name: { gen: username }
-  age: { gen: integer, min: 18, max: 80 }
+  age: { gen: integer, min: 18, max: 80, dist: bands }
   gender: { gen: pick, from: [female, male, non-binary] }
-  date_of_birth: { gen: date }
-  dob: { gen: date }
-  birth_date: { gen: date }
-  birthday: { gen: date }
+  date_of_birth: { gen: date, years: [18, 80] }
+  dob: { gen: date, years: [18, 80] }
+  birth_date: { gen: date, years: [18, 80] }
+  birthday: { gen: date, years: [18, 80] }
   role: { gen: pick, from: [admin, editor, viewer] }
   job_title: { gen: pick, from: [Engineer, Designer, Analyst, Manager, Consultant] }
   department: { gen: pick, from: [Sales, Engineering, Support, Finance, Operations] }
@@ -99,15 +99,15 @@ fields:
   "*longitude": { gen: longitude }
 
   # --- money ------------------------------------------------------------------
-  price: { gen: money }
-  "*price": { gen: money }
+  price: { gen: money, style: retail }
+  "*price": { gen: money, style: retail }
   # a bare `total` is a count (pagination); `orderTotal`, `grandTotal` stay money
   total: { gen: integer, min: 0, max: 1000 }
   "*total": { gen: money }
   amount: { gen: money }
   "*amount": { gen: money }
-  cost: { gen: money }
-  "*cost": { gen: money }
+  cost: { gen: money, style: retail }
+  "*cost": { gen: money, style: retail }
   subtotal: { gen: money }
   "*subtotal": { gen: money }
   tax: { gen: money, min: 0, max: 500 }
@@ -140,23 +140,42 @@ fields:
   duration_minutes: { gen: integer, min: 5, max: 240 }
 
   # --- commerce ---------------------------------------------------------------
-  quantity: { gen: integer, min: 1, max: 10 }
-  qty: { gen: integer, min: 1, max: 10 }
+  # mostly one to three of an item; every quantity from 1 to 10 stays possible
+  quantity: &qty
+    gen: pick
+    from: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    weights: { 1: 10, 2: 6, 3: 4, 4: 2, 5: 1 }
+  qty: *qty
   count: { gen: integer, min: 1, max: 10 }
   "*count": { gen: integer, min: 0, max: 500 }
   "*quantity": { gen: integer, min: 1, max: 10 }
   stock: { gen: integer, min: 0, max: 500 }
   inventory: { gen: integer, min: 0, max: 500 }
-  rating: { gen: integer, min: 1, max: 5 }
-  stars: { gen: integer, min: 1, max: 5 }
+  # reviews lean positive
+  rating: &rating { gen: pick, from: [1, 2, 3, 4, 5], weights: { 1: 1, 2: 1, 3: 3, 4: 6, 5: 6 } }
+  stars: *rating
   sku: { gen: template, value: "SKU-{digits:6}" }
   order_number: { gen: template, value: "ORD-{digits:8}" }
   invoice_number: { gen: template, value: "INV-{digits:6}" }
   tracking_number: { gen: template, value: "TRK{letters:2}{digits:10}" }
   coupon_code: { gen: template, value: "{letters:4}{digits:2}" }
-  status: { gen: pick, from: [active, inactive, pending] }
-  order_status: { gen: pick, from: [placed, shipped, delivered, cancelled] }
-  payment_status: { gen: pick, from: [paid, pending, refunded, failed] }
+  # A dominant happy path: 8 for good outcomes, 3 in flight, 1 for bad ones; a word not listed
+  # weighs 1. The weights also apply to a spec's `enum` on a field with this name, so every
+  # enum value stays possible. A plain entry of your own for the same name turns this off.
+  status: &status
+    gen: pick
+    from: [active, inactive, pending]
+    weights: &status_weights
+      { active: 8, enabled: 8, paid: 8, completed: 8, delivered: 8, published: 8, verified: 8, approved: 8, pending: 3, processing: 3, shipped: 3, draft: 3, open: 3, cancelled: 1, failed: 1, refunded: 1, suspended: 1, deleted: 1, rejected: 1, inactive: 1 }
+  order_status: { gen: pick, from: [placed, shipped, delivered, cancelled], weights: *status_weights }
+  payment_status: { gen: pick, from: [paid, pending, refunded, failed], weights: *status_weights }
+  "*status": *status
+  # booleans that are true most of the time
+  is_active: &mostly_true { gen: pick, from: [true, false], weights: { true: 8, false: 2 } }
+  active: *mostly_true
+  enabled: *mostly_true
+  verified: *mostly_true
+  is_verified: *mostly_true
   payment_method: { gen: pick, from: [card, cash, bank_transfer, wallet] }
   category: { gen: pick, from: [electronics, books, clothing, home, sports] }
   color: { gen: pick, from: [red, blue, green, black, white] }
@@ -184,7 +203,8 @@ fields:
   headline: { gen: text }
   review: { gen: text, kind: paragraph }
   tag: { gen: pick, from: [new, popular, sale, featured] }
-  language: { gen: pick, from: [en, hi, ta, es, de] }
+  language: { gen: language }
+  locale: { gen: locale }
 
   # --- tech -------------------------------------------------------------------
   id: [{ gen: uuid }, { gen: integer, min: 1, max: 99999 }]

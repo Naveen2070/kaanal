@@ -49,8 +49,9 @@ One page per source file: what the file does and what each function/type in it d
 | `src/words.rs`            | [kaanal-data/words.md](kaanal-data/words.md)           | The lorem word list (names and places are in packs)                             |
 | `src/page/mod.rs`         | [kaanal-data/page.md](kaanal-data/page.md)             | Paging style detection (`Style`, `PageSpec::detect`)                            |
 | `src/pack.rs`             | [kaanal-data/pack.md](kaanal-data/pack.md)             | Locale packs: names, places, phone, currency, `DataError`                       |
-| `src/dictionary.rs`       | [kaanal-data/dictionary.md](kaanal-data/dictionary.md) | The field dictionary and its generators                                         |
+| `src/dictionary/`         | [kaanal-data/dictionary.md](kaanal-data/dictionary.md) | The field dictionary and its generators                                         |
 | `src/dataset.rs`          | [kaanal-data/dataset.md](kaanal-data/dataset.md)       | `Options` and `DataSet`: loading `locales/` and `data.yaml`                     |
+| `src/selfcheck.rs`        | [kaanal-data/selfcheck.md](kaanal-data/selfcheck.md)   | Self-validation of generated responses against their schema                     |
 
 ## [kaanal-server](kaanal-server/) (HTTP)
 

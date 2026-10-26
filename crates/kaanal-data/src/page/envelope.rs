@@ -21,6 +21,12 @@ pub enum Envelope {
 
 /// Array property names that win over key order (normalised).
 const NAMED: &[&str] = &["items", "data", "results", "content", "records"];
+/// Whether `name` is one of the array names paging prefers (`items`, `data`, `results`,
+/// `content`, `records`; normalised), also used to pick the line items of an order.
+pub(crate) fn is_list_name(name: &str) -> bool {
+    NAMED.contains(&normalise(name).as_str())
+}
+
 /// Sibling names that carry the total item count (normalised).
 const TOTAL: &[&str] = &[
     "total",

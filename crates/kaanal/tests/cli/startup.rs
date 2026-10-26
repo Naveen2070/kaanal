@@ -107,7 +107,7 @@ fn spec_text_cannot_drive_the_terminal() {
     let dir = scratch("esc");
     std::fs::write(
         dir.join("openapi.yaml"),
-        "openapi: 3.0.3\ninfo: { title: t, version: \"1\" }\npaths:\n  /x:\n    get:\n      responses:\n        \"200\":\n          description: ok\n          content:\n            application/json:\n              schema: { type: object, properties: { \"\\x1b[31mx\": { type: string, pattern: \"^a\" } } }\n",
+        "openapi: 3.0.3\ninfo: { title: t, version: \"1\" }\npaths:\n  /x:\n    get:\n      responses:\n        \"200\":\n          description: ok\n          content:\n            application/json:\n              schema: { type: object, properties: { \"\\x1b[31mx\": { type: string, not: { enum: [x] } } } }\n",
     )
     .unwrap();
     let file = dir.join("kaanal.yaml");

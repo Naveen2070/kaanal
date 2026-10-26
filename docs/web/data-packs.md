@@ -127,23 +127,32 @@ An empty `data.yaml` is fine.
 
 An entry is `{ gen: <name>, ...parameters }`. The set is closed: a dictionary cannot run code, and an unknown generator or parameter is an error naming the valid ones.
 
-| `gen`                                  | Output                                                                                           | Parameters                                |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `first_name`, `last_name`, `full_name` | The object's person from the pack (full name follows `name_order`)                               |                                           |
-| `email`, `username`                    | ASCII, built from the same person; emails at `example.com`                                       |                                           |
-| `phone`                                | Pack prefix and one of its formats                                                               |                                           |
-| `city`, `state`, `postcode`, `address` | The object's place; they always agree with each other                                            |                                           |
-| `country`, `currency`, `street`        | From the pack                                                                                    |                                           |
-| `url`, `uuid`                          | `https://example.com/...`, a v4 UUID                                                             |                                           |
-| `timestamp`, `date`                    | RFC 3339 timestamp or date within the 365 days before 2026-01-01                                 |                                           |
-| `integer`                              | A whole number                                                                                   | `min`, `max`                              |
-| `money`, `latitude`, `longitude`       | A number with 2 (money) or 6 decimals; coordinates default to the pack's `geo` range             | `min`, `max`                              |
-| `text`                                 | Lorem text                                                                                       | `kind: sentence` (default) or `paragraph` |
-| `pick`                                 | One of your values, by seed                                                                      | `from` (non-empty list)                   |
-| `template`                             | A string with `{digits:n}` and `{letters:n}` (n from 1 to 20) filled by seed: `"SKU-{digits:6}"` | `value`                                   |
-| `static`                               | Your value, as is                                                                                | `value`                                   |
+| `gen`                                  | Output                                                                                           | Parameters                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `first_name`, `last_name`, `full_name` | The object's person from the pack (full name follows `name_order`)                               |                                                                                                      |
+| `email`, `username`                    | ASCII, built from the same person; emails at `example.com`                                       |                                                                                                      |
+| `phone`                                | Pack prefix and one of its formats                                                               |                                                                                                      |
+| `city`, `state`, `postcode`, `address` | The object's place; they always agree with each other                                            |                                                                                                      |
+| `country`, `currency`, `street`        | From the pack                                                                                    |                                                                                                      |
+| `url`, `uuid`                          | `https://example.com/...`, a v4 UUID                                                             |                                                                                                      |
+| `timestamp`, `date`                    | RFC 3339 timestamp or date before 2026-01-01; two in three fall in the last third of the window  | `days` (window, default 365)                                                                         |
+| `integer`                              | A whole number                                                                                   | `min`, `max`, `dist: uniform` (default) or `bands`                                                   |
+| `money`, `latitude`, `longitude`       | A number with 2 (money) or 6 decimals; coordinates default to the pack's `geo` range             | `min`, `max`; money also `dist: decade` (default) or `uniform`, `style: plain` (default) or `retail` |
+| `text`                                 | Lorem text                                                                                       | `kind: sentence` (default) or `paragraph`                                                            |
+| `pick`                                 | One of your values, by seed                                                                      | `from` (non-empty list), `weights`                                                                   |
+| `template`                             | A string with `{digits:n}` and `{letters:n}` (n from 1 to 20) filled by seed: `"SKU-{digits:6}"` | `value`                                                                                              |
+| `static`                               | Your value, as is                                                                                | `value`                                                                                              |
 
 `min` must not exceed `max`. Both are optional; a lone bound keeps the default range's other end when it can.
+
+### Realistic spread
+
+Real data is lumpy, so the built-in dictionary is too (all of it can be changed in your `data.yaml`):
+
+- **Prices** are skewed cheap (`dist: decade`: most values in the lower decades of the range, a few expensive ones) and `price`, `*price` and `cost` fields end like a shop price (`style: retail`: `.99` half the time, `.00` a quarter, then `.95`, `.49`). A retail ending that would leave `minimum`/`maximum` is dropped for that value, and integer prices are never changed. A range that starts at 0 or below is drawn uniformly. `dist: uniform, style: plain` turns both off.
+- **Weighted choices.** `weights` maps a value to its weight; a value you do not list weighs 1, so every value stays possible. Keys are the value's text (`paid`, `true`, `4`). The built-in `status`, `*status`, `order_status` and `payment_status` favour the happy path (8 for `active`, `paid`, `delivered` and friends, 3 for `pending`, `shipped`, 1 for `cancelled`, `failed`), `active`/`enabled`/`verified` are true 4 times in 5, `rating` and `stars` lean positive and `quantity` is mostly 1 to 3. The weights **also apply to a spec's `enum`** on a field with that name (an `enum: [paid, pending, cancelled]` on `status` is weighted too, never limited). An entry of your own for the same name, without `weights`, turns this off for that name. At least one weight must be above 0.
+- **Timestamps** lean recent: two thirds of values fall in the most recent third of the window (`days`, default 365, back from 2026-01-01).
+- **Ages** (`age`) come from four bands over 18 to 80 weighted 25/30/25/20, so most people are between 33 and 64; the birth date then follows the age (see Records that add up).
 
 ### An entry can be a list
 
@@ -152,6 +161,23 @@ An entry is `{ gen: <name>, ...parameters }`. The set is closed: a dictionary ca
 ```
 
 The generators are tried in order and **the first whose output fits the field's schema type applies**. Here a string `userId` gets a UUID and an integer `userId` gets a number.
+
+### Time chains
+
+Timestamps of one object stay in order, the way a real backend writes them: `createdAt`, then `updatedAt` (or `modifiedAt`), then `deletedAt`; `startAt`/`startDate` before `endAt`/`endDate`; `orderedAt`, `paidAt`, `shippedAt`, `deliveredAt`; `issuedAt` before `dueAt`. Each later member is drawn between the previous one and 2026-01-01, so it is always after it, and adding `updatedAt` to a schema never moves `createdAt`. A member with an `example`, `enum`, `const` or a `static`/`pick` entry of yours is never changed, and later members follow it. A date and a date-time in one chain are left alone.
+
+Add your own chains, or switch built-in ones off, in `data.yaml`:
+
+```yaml
+version: 1
+chains:
+  - [packed_at, sealed_at]   # earliest first, two or more names
+chains_off: [created_at]      # drops every built-in chain that contains this name
+```
+
+### Records that add up
+
+Fields of one record agree where a real system guarantees it. An order that has line items (each with a `price` and a `quantity`, or a line-amount field) gets `lineTotal` = price x quantity, `subtotal` = the sum of the lines, a `tax` that is a fraction of it, `shipping`, a `discount` never above the subtotal and `total` = subtotal + tax + shipping - discount. The sums are exact (cents, never `59.970000000000006`; all-integer schemas stay integers). A bare `total` is summed only next to `subtotal`, `tax`, `shipping` or `discount`, or when it is typed `number`; an integer `total` alone beside the lines is a count. A plain list such as `{ items: [{name, price}], total: 3 }`, or a field you pinned with an `example`, `enum`, `const` or `static`/`pick` entry, is never rewritten. `age` and `dateOfBirth`/`dob`/`birthday` agree to the year (a birth date with no `age` beside it is an adult's, 18 to 80 years before 2026-01-01), and `locale` and `language` follow the node's locale pack (`en-IN` gives `en-IN` and `en`).
 
 ### Precedence and fit
 

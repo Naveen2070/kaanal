@@ -15,6 +15,7 @@ mod empty;
 mod generate;
 mod pack;
 mod page;
+pub mod selfcheck;
 mod warn;
 mod words;
 

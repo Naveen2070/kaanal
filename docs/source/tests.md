@@ -2,7 +2,7 @@
 
 Every test in the workspace, grouped by file. Run all with `cargo test --workspace` (must pass before any task is done — rule R7.1).
 
-Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/fixtures/`: `kaanal.yaml` (gateway `nginx` → service `app` → database `db`, all 1 ms costs, seed 42, two `endpoints:` overrides), `openapi.yaml` (users/orders spec), `openapi-warn.yaml` (spec containing an ignored `pattern` keyword). The shipped examples `examples/nginx-server` and `examples/gatewayless` (no gateway) are validated separately.
+Fixtures shared by the server and CLI tests live in `crates/kaanal-server/tests/fixtures/`: `kaanal.yaml` (gateway `nginx` → service `app` → database `db`, all 1 ms costs, seed 42, two `endpoints:` overrides), `openapi.yaml` (users/orders spec), `openapi-warn.yaml` (spec containing an ignored `not` keyword). The shipped examples `examples/nginx-server` and `examples/gatewayless` (no gateway) are validated separately.
 
 ---
 
@@ -443,15 +443,16 @@ The pin model in [source](files/kaanal-core/pin.md): cycle order, ranges, preced
 
 One test target (`cargo test -p kaanal-data --test generate`), one module per topic in `tests/generate/` (R3.8):
 
-| Module       | What it covers                                                   |
-| ------------ | ---------------------------------------------------------------- |
-| `common.rs`  | The rich schema.                                                 |
-| `basics.rs`  | Seeds, validation, allOf, write-only.                            |
-| `fields.rs`  | Formats, examples, heuristics, urls, params, odd schemas.        |
-| `numbers.rs` | Floats, integers, counts, bounds, lat/lng, lengths.              |
-| `people.rs`  | Cities, addresses, emails, names, `fit_length`.                  |
-| `formats.rs` | Examples by seed, newer formats, nullable, additionalProperties. |
-| `one_of.rs`  | `oneOf`, `anyOf` and discriminators.                             |
+| Module       | What it covers                                                                          |
+| ------------ | --------------------------------------------------------------------------------------- |
+| `common.rs`  | The rich schema.                                                                        |
+| `basics.rs`  | Seeds, validation, allOf, write-only.                                                   |
+| `fields.rs`  | Formats, examples, heuristics, urls, params, odd schemas.                               |
+| `numbers.rs` | Floats, integers, counts, bounds, lat/lng, lengths.                                     |
+| `people.rs`  | Cities, addresses, emails, names, `fit_length`.                                         |
+| `pattern.rs` | `pattern`: matches over 1000 seeds, kept email, pinned values, length bounds, warnings. |
+| `formats.rs` | Examples by seed, newer formats, nullable, additionalProperties.                        |
+| `one_of.rs`  | `oneOf`, `anyOf` and discriminators.                                                    |
 
 | Test                                                                      | What it proves                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -567,6 +568,191 @@ Parsing, matching and fit rules of `data.yaml` and the built-in dictionary ([sou
 | `non_postal_addresses_and_states_are_not_places`                   | `ipAddress` is an IPv4 documentation address, `macAddress` a locally administered MAC, `walletAddress` is no place, `shippingAddress` ends in the object's city, `orderState` and `connectionState` are not regions.                                         |
 | `integer_fields_never_get_floats_or_out_of_range_values`           | A `pick` of `[2.0, 3]` gives 3 for an integer field, and a `u64::MAX` `static` never lands in one.                                                                                                                                                           |
 
+## `crates/kaanal-data/tests/selfcheck.rs` — self-validation (D2)
+
+Generated responses checked against their schema ([source](files/kaanal-data/selfcheck.md)).
+
+| Test                                                               | What it proves                                                                                                  |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `valid_schema_has_no_findings`                                     | A plain object with bounded integer, string and array has no findings over 5 samples.                           |
+| `reports_violation_with_path_and_keyword`                          | A pinned `example` over `maximum` is reported once per sample at `/total` with keyword `maximum`.               |
+| `draft4_boolean_exclusive_minimum_is_accepted`                     | The OpenAPI 3.0 boolean `exclusiveMinimum` builds and validates.                                                |
+| `required_empty_array_does_not_fail_build`                         | `required: []`, which Draft 4 rejects, is dropped before building.                                              |
+| `format_violation_is_reported`                                     | A pinned non-email under `format: email` is reported (format checking is on).                                   |
+| `write_only_property_is_not_required`                              | A `writeOnly` property that is also `required` is not a finding.                                                |
+| `nullable_accepts_null_type`                                       | `nullable: true` accepts `null`.                                                                                |
+| `budget_null_is_classified_not_violation`                          | Values cut by the body budget (and the `minItems` miss they cause) have `budget: true`.                         |
+| `endpoint_without_schema_has_no_findings`                          | No response schema, no findings.                                                                                |
+| `lines_are_deduplicated_and_worded_per_spec`                       | One line per endpoint, `GET /x: 5 of 5 generated samples violate the response schema: /items/*/total: maximum`. |
+| `paged_route_is_checked_as_the_client_sees_it`                     | A paged envelope route generates through `generate_page` and has no findings.                                   |
+| `unsupported_pattern_is_not_reported_again`                        | A lookahead `pattern` (refused by the sampler, warned at startup) is not reported as a violation.               |
+| `ignored_keywords_are_not_reported_again`                          | `not` (still ignored) is removed from the validator's copy.                                                     |
+| `a_pinned_value_that_breaks_multiple_of_is_reported`               | An `example` of 7 under `multipleOf: 5` is a finding (the spec contradicts itself).                             |
+| `a_multiple_of_that_cannot_fit_is_left_to_its_own_warning`         | `multipleOf: 10` between 1 and 9 is not reported again by the self-check.                                       |
+| `a_paged_route_is_not_blamed_for_min_items_beyond_one_page`        | `minItems: 45` on a paged array is not a finding (a page holds one page size).                                  |
+| `a_pattern_that_cannot_meet_its_length_is_left_to_its_own_warning` | `^[A-Z]{8}$` with `maxLength: 4` is not reported again.                                                         |
+| `unique_items_on_objects_is_left_to_its_own_warning`               | `uniqueItems` on an array of objects (unsupported) is not reported again.                                       |
+
+## `crates/kaanal-data/tests/repo_specs.rs` — bundled specs generate valid data (D2)
+
+Invalid output is a bug (FR-DATA-05) ([source](files/kaanal-data/selfcheck.md)).
+
+| Test                                     | What it proves                                                                                                                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bundled_specs_generate_valid_responses` | The demo spec, the CLI and server fixtures, the examples and (when present locally) the petstore acceptance spec: 256 seeds per endpoint, no schema violation (body-budget cuts excepted). |
+
+## `crates/kaanal-data/src/generate/pattern_tests.rs` (unit) — the pattern sampler (D2)
+
+Strings sampled from a regex ([source](files/kaanal-data/generate.md#patternrs-d2-task-4)).
+
+| Test                                                     | What it proves                                                                                           |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `sample_matches_every_supported_construct`               | Seven patterns (classes, alternation, optional, repeats, groups, `(?i)`, dot) match over 500 seeds each. |
+| `classes_are_ascii`                                      | `\w`, `\d`, `[[:alpha:]]`, `\S` only ever draw ASCII.                                                    |
+| `dot_and_negated_class_give_printable_characters`        | `.` and `[^a]` give printable ASCII, never control characters, never the excluded `a`.                   |
+| `anchors_are_stripped_at_the_edges_and_empty_elsewhere`  | `^abc$` gives `abc`; a mid-pattern `\b` is empty.                                                        |
+| `empty_ascii_intersection_uses_the_original_class`       | `\p{Han}{3}` gives three non-ASCII characters.                                                           |
+| `open_repeat_is_capped_by_the_length_budget`             | `a+` under a budget of 3 stays within it, `[a-z]*` under 0 is empty, `a*` adds at most 8.                |
+| `an_open_repeat_reaches_the_minimum_length`              | `^[A-Za-z0-9]+$` aimed at 10 to 12 characters gives 10 to 12.                                            |
+| `hostile_nested_repeat_is_unsupported`                   | `(a{1000}){1000}` and `a{100000}` are refused.                                                           |
+| `lookaround_and_backreference_are_unsupported`           | `(?=a)b`, `(a)\1` and `[` are refused.                                                                   |
+| `is_match_agrees_with_the_validator_not_the_regex_crate` | `Müller` does not match `^\w+$` (ASCII `\w`).                                                            |
+| `compiled_patterns_are_cached`                           | The same pattern text gives the same `Arc`; an unsupported one is cached as an error.                    |
+| `same_seed_same_output_and_golden`                       | Five patterns x three seeds repeat and equal `tests/snapshots/pattern.json`.                             |
+
+## `crates/kaanal-data/tests/generate/reconcile.rs` — time chains (D2)
+
+The reconcile pass ([source](files/kaanal-data/generate.md#reconcile-d2)).
+
+| Test                                                                 | What it proves                                                                                                |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `updated_not_before_created_over_1000_seeds`                         | created <= updated <= deleted < 2026-01-01 for 1000 seeds.                                                    |
+| `every_builtin_chain_is_ordered`                                     | start/end, ordered/paid, paid/shipped, shipped/delivered and issued/due are ordered.                          |
+| `adding_updated_at_does_not_change_created_at`                       | The earlier member is identical with and without the later one.                                               |
+| `adding_an_unrelated_property_changes_nothing_else`                  | An extra `name` property leaves both timestamps unchanged.                                                    |
+| `date_only_chain_is_ordered_and_stays_a_date`                        | `startDate`/`endDate` stay 10-character dates in order.                                                       |
+| `a_date_and_a_date_time_are_left_alone`                              | A mixed-shape chain is skipped; the date equals its value without the other member.                           |
+| `a_pinned_earlier_member_is_kept_and_later_ones_derive_from_it`      | An `example` creation time stays; `updatedAt` is after it and before the base date.                           |
+| `a_pinned_later_member_is_never_changed`                             | An `enum` on `updatedAt` is never rewritten.                                                                  |
+| `project_static_entry_pins_a_member`                                 | A `static` entry in `data.yaml` pins `createdAt`.                                                             |
+| `project_chains_append_and_chains_off_removes`                       | A project chain orders its names; `chains_off` removes the built-in chain.                                    |
+| `chains_need_two_names_and_non_empty_keys`                           | One name is a load warning; an empty name is an error.                                                        |
+| `the_empty_form_keeps_the_ordered_scalars_of_the_full_body`          | `empty` equals the full body for a timestamps-only object.                                                    |
+| `a_project_suffix_static_entry_pins_members`                         | A `"*at"` `static` entry (a suffix key) pins `createdAt` and `updatedAt`: neither is rewritten.               |
+| `a_project_generator_that_is_not_static_or_pick_is_not_pinned`       | A project `timestamp` entry for `created_at` still lets the chain order the fields.                           |
+| `a_project_chain_overlapping_a_builtin_one_keeps_the_builtin_order`  | `chains: [[created_at, deleted_at]]` next to the built-in chain leaves `createdAt <= updatedAt <= deletedAt`. |
+| `an_impossible_pinned_date_is_not_chained`                           | A pinned `2025-13-45T99:00:00Z` is not parsed, so the chain leaves the other member alone.                    |
+| `a_member_whose_pattern_the_derived_value_would_break_is_left_alone` | `updatedAt` with a `pattern` keeps a value that matches it.                                                   |
+| `reconcile_is_idempotent` (unit, `reconcile/mod.rs`)                 | Running the pass on its own output changes nothing, 500 seeds.                                                |
+
+## `crates/kaanal-data/tests/generate/reconcile_money.rs` — money sums (D2)
+
+Line amounts, subtotal, tax, shipping, discount and total ([source](files/kaanal-data/generate.md#reconcile-d2)).
+
+| Test                                                                                                                                                                          | What it proves                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `total_equals_sum_of_lines_exactly`                                                                                                                                           | 500 seeds: every line is price x quantity in cents, `subtotal` is their sum, `total` is subtotal + tax + shipping - capped discount, no value has more than two decimals. |
+| `tax_is_a_fraction_of_the_subtotal`                                                                                                                                           | A free `tax` is at most about 20 percent of the subtotal.                                                                                                                 |
+| `integer_money_uses_integer_math`                                                                                                                                             | All-integer money: the subtotal is the exact integer sum and `total` stays an integer.                                                                                    |
+| `mixed_integer_and_number_skips`                                                                                                                                              | An integer price with a number subtotal leaves the subtotal as generated.                                                                                                 |
+| `plain_listing_total_untouched`                                                                                                                                               | `items: [{name, price}]` with an integer `total` keeps the count.                                                                                                         |
+| `bare_total_without_line_items_untouched`                                                                                                                                     | `subtotal` + `total` without lines: nothing derived.                                                                                                                      |
+| `paged_envelope_total_stays_the_item_count`                                                                                                                                   | A page of line-item records reports `total` = the window total.                                                                                                           |
+| `discount_is_capped_at_the_subtotal_and_the_total_never_negative`                                                                                                             | A free discount never exceeds the subtotal; the cap applies at least once in 300 seeds.                                                                                   |
+| `a_pinned_discount_is_kept_and_total_still_never_negative`                                                                                                                    | An `example` discount stays; the total is not negative.                                                                                                                   |
+| `overflow_skips_the_object`                                                                                                                                                   | `i64::MAX` x `i64::MAX` leaves the object as generated.                                                                                                                   |
+| `bounds_win`                                                                                                                                                                  | A subtotal bound the sum would break keeps the generated value inside it.                                                                                                 |
+| `a_pinned_line_amount_is_counted_not_rewritten`                                                                                                                               | An `example` line amount stays and is what the subtotal adds.                                                                                                             |
+| `adding_an_unrelated_property_changes_no_money_field`                                                                                                                         | An extra `note` leaves every other field identical.                                                                                                                       |
+| `an_integer_total_beside_line_items_alone_is_a_count`                                                                                                                         | Line items plus an integer `total` and no other money field: `total` is the generated count.                                                                              |
+| `a_float_total_beside_line_items_alone_is_summed`                                                                                                                             | The same with a `number` total is the sum of the lines.                                                                                                                   |
+| `a_non_numeric_pinned_field_skips_the_object_before_anything_is_written`                                                                                                      | A pinned `tax: "n/a"` leaves the subtotal and every line amount as generated.                                                                                             |
+| `a_total_that_must_be_a_multiple_is_left_alone_when_the_sum_is_not_one`                                                                                                       | A `total` with `multipleOf: 7919` stays a multiple.                                                                                                                       |
+| unit, `reconcile/mod.rs`: `a_budget_null_element_skips_the_sum`, `several_arrays_use_the_preferred_name_or_skip`, `an_empty_array_is_not_summed`, `money_sums_are_idempotent` | The skip rules and idempotence on hand-built objects.                                                                                                                     |
+
+## `crates/kaanal-data/tests/generate/reconcile_person.rs` — age, birth date, locale facts (D2)
+
+| Test                                                                             | What it proves                                                                                        |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `age_matches_dob_over_1000_seeds`                                                | Whole years from the date to 2026-01-01 equal `age`.                                                  |
+| `age_stays_the_value_it_would_have_alone`                                        | The date follows the age; `age` is the value it has without a date.                                   |
+| `a_pinned_age_derives_the_date`                                                  | `age: 33` (example) gives a date exactly 33 years back.                                               |
+| `a_pinned_date_derives_the_age`                                                  | `1990-05-17` gives 35.                                                                                |
+| `the_age_rule_is_skipped_when_its_bounds_would_break`                            | A 2020 date with `minimum: 18` keeps the age inside 18..80.                                           |
+| `both_pinned_are_left_alone`                                                     | Two examples stay as written.                                                                         |
+| `a_date_time_birth_date_keeps_its_shape` / `a_format_less_birth_date_is_handled` | A 20-character date-time stays one; a schema with no `format` works.                                  |
+| `a_birth_date_alone_is_not_touched` / `an_age_alone_is_not_touched`              | One of the two present: nothing is derived.                                                           |
+| `a_date_time_on_the_edge_day_is_exact_to_the_second`                             | A date-time born on the base date's birthday is at midnight, so the age is exact.                     |
+| `a_birth_date_under_a_dictionary_entry_is_an_adult`                              | A `birthday` field with no `format` is 18 to 80 years before 2026-01-01.                              |
+| `an_object_never_mixes_countries_across_locale_facts`                            | For five packs, `country`, `currency`, `locale`, `language` and `city` all come from the node's pack. |
+
+## `crates/kaanal-data/tests/generate/multiple.rs` and `unique.rs` — `multipleOf`, `uniqueItems` (D2)
+
+Numbers on a grid and arrays without duplicates ([source](files/kaanal-data/generate.md#multipleof-and-uniqueitems-d2)).
+
+| Test                                                                        | What it proves                                                                                        |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `money_multiple_of_a_cent_is_exact`                                         | `multipleOf: 0.01` over 1000 seeds gives whole cents inside 0..1000, no float modulo.                 |
+| `a_quarter_step_gives_only_quarters`                                        | `0.25` gives multiples of a quarter within the bounds.                                                |
+| `integer_multiple_of_five_within_bounds`                                    | `5` between 7 and 93 gives multiples of 5 inside the bounds.                                          |
+| `exclusive_bounds_are_respected`                                            | `exclusiveMinimum`/`exclusiveMaximum` (3.0 booleans) keep the multiple strictly inside.               |
+| `a_pinned_value_is_not_moved`                                               | `example` and `enum` values are kept even when not a multiple.                                        |
+| `no_multiple_that_fits_warns_and_skips`                                     | `multipleOf: 10` between 1 and 9: a startup warning, the value stays in bounds.                       |
+| `a_fractional_step_on_an_integer_field_warns_unless_every_integer_meets_it` | `multipleOf: 0.5` on an integer is a warning.                                                         |
+| `bounds_with_float_error_still_admit_their_multiple`                        | `minimum: 1.1` (110.00000000000001 cents) and `0.57` (56.99999999999999) still allow their own value. |
+| `bounds_beyond_the_counting_range_do_not_panic`                             | `minimum: 1e300` with `multipleOf: 2` warns and generates without overflow.                           |
+| `a_usable_multiple_of_has_no_warning`                                       | A fitting `0.01` has no warning.                                                                      |
+| `adding_a_sibling_property_does_not_change_the_snapped_value`               | R4.4 for a snapped number.                                                                            |
+| `unique_scalar_enum_array_has_no_duplicates`                                | A unique enum array of 3..5 has no duplicates over 500 seeds and keeps its length.                    |
+| `unique_strings_and_integers_have_no_duplicates`                            | Six unique strings or integers (1..8) never repeat.                                                   |
+| `too_few_distinct_values_emit_what_is_possible_and_warn`                    | Two enum values with `minItems: 5`: warned, and the array has at most 2 unique items.                 |
+| `a_redraw_under_a_one_of_never_becomes_null`                                | Duplicates among `oneOf` scalar items are redrawn to a real value, never `null`.                      |
+| `unique_items_without_an_items_schema_still_dedupes`                        | No `items` means plain strings, deduped and not warned.                                               |
+| `unique_items_on_objects_still_warns`                                       | An array of objects keeps a (new) specific warning.                                                   |
+| `unique_scalars_have_no_warning_when_enough_values_exist`                   | Three enum values with `minItems: 2`: no warning.                                                     |
+| `an_array_without_unique_items_is_unchanged`                                | `uniqueItems: false` equals the plain array, seed for seed.                                           |
+| `adding_a_property_elsewhere_does_not_change_the_unique_array`              | R4.4 for a unique array.                                                                              |
+
+## `crates/kaanal-data/tests/generate/dist.rs` — distributions and weighted choices (D2)
+
+([source](files/kaanal-data/generate.md#distrs-d2)).
+
+| Test                                                 | What it proves                                                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `weights_are_validated_when_the_dictionary_loads`    | All-zero weights, negative weights, the list form and `days: 0` are errors; unquoted `true`/`false` keys load. |
+| `enum_weights_keep_every_value_reachable`            | A `status` enum over 10 000 seeds: paid > pending > cancelled, and the unlisted value still appears.           |
+| `weights_on_pick_and_enum_share_one_shape`           | One `weights` map skews a project `pick` and a spec `enum` alike (about 90 percent `a`).                       |
+| `a_project_plain_entry_turns_weights_off`            | A project `status` entry without weights makes the enum uniform.                                               |
+| `booleans_are_mostly_true_for_active_flags`          | `active` is true about 80 percent of the time.                                                                 |
+| `ratings_lean_positive_and_every_star_is_possible`   | Over 60 percent are 4 or 5 and all five values occur.                                                          |
+| `quantity_is_mostly_one_to_three`                    | Over 65 percent are at most 3 and a value of 6 or more still occurs.                                           |
+| `money_is_skewed_cheap_and_stays_in_bounds`          | 1 to 5000: over 60 percent below 1000 (uniform: 20), always inside the bounds, some above 2500.                |
+| `a_range_from_zero_is_drawn_uniformly`               | `tax` 0 to 500: about 20 percent below 100.                                                                    |
+| `retail_prices_end_in_99_and_00`                     | About half end in .99 and a quarter in .00.                                                                    |
+| `retail_never_breaks_a_bound`                        | A price in 10.2 to 10.5 never leaves it.                                                                       |
+| `retail_is_ignored_on_an_integer_field`              | Integer prices stay integers.                                                                                  |
+| `a_project_entry_can_make_money_uniform_and_plain`   | `dist: uniform, style: plain` gives a flat spread.                                                             |
+| `timestamps_lean_recent_inside_the_window`           | About two thirds fall in the last third of 365 days, none at or after the base date, the whole window is used. |
+| `a_days_key_narrows_the_window`                      | `days: 7` keeps every value within a week.                                                                     |
+| `days_and_years_have_sane_limits`                    | `days` over 36500 and unordered `years` are load errors.                                                       |
+| `birth_dates_without_an_age_are_adults`              | A `format: date` `dateOfBirth` alone is 18 to 80 years before 2026-01-01.                                      |
+| `whole_float_enum_values_match_whole_number_weights` | An enum of `1.0`/`2.0` is weighted by a `{ 1: 9, 2: 1 }` map.                                                  |
+| `a_huge_money_range_and_a_tiny_minimum_still_draw`   | `0.01..1e12` can reach above 1e10; a subnormal minimum falls back to uniform instead of hanging.               |
+| `ages_follow_the_four_weighted_bands`                | 18 to 80 only; the bands hold about 25/30/25/20 percent.                                                       |
+| `same_seed_same_output_for_every_distribution`       | Repeatable for price, enum, timestamp and age.                                                                 |
+
+## `crates/kaanal-data/tests/golden_cross_os.rs` — D2 output is the same on every OS
+
+| Test                                      | What it proves                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `d2_output_matches_the_checked_in_golden` | Five seeds of a schema using every D2 feature (time chains, age and birth date, weighted enum and flags, skewed and retail prices, recency, `pattern`, `multipleOf`, `uniqueItems`, a full order) equal `tests/snapshots/d2_golden.json`. `cargo test --workspace` runs it on Linux, Windows and macOS in CI, so a platform-dependent draw fails there. Re-record with `KAANAL_RECORD=1`. |
+
+## `crates/kaanal-data/tests/snapshot_plain.rs` — fields D2 does not touch keep their values
+
+| Test                            | What it proves                                                                                                                                                                                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plain_schema_output_is_stable` | Twenty seeds of a schema with no D2 feature (name, email, uuid, title, a bounded integer, an unweighted flag, an address, tags) equal `tests/snapshots/plain.json`, which was checked against the pre-D2 recording: every field except the renamed flag is identical. |
+
 ## `crates/kaanal-data/tests/dataset.rs` — loading data files
 
 `DataSet::load`, `options_for` and the editor schemas ([source](files/kaanal-data/dataset.md)).
@@ -605,7 +791,7 @@ Parsing, matching and fit rules of `data.yaml` and the built-in dictionary ([sou
 
 | Test                                                   | What it proves                                                                                                                                                                                        |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flags_ignored_keywords_but_not_property_names`        | A _property called_ `pattern` is not flagged; a real `pattern:` keyword and `uniqueItems` are, with locations.                                                                                        |
+| `flags_ignored_keywords_but_not_property_names`        | A _property called_ `pattern` is not flagged; a real `not:` keyword is, with locations.                                                                                                               |
 | `walks_items_and_combinators`                          | `not` nested inside `items → allOf` is found.                                                                                                                                                         |
 | `flags_max_length_that_cannot_fit_the_format`          | `format: uuid` + `maxLength: 10` warns (the format wins); `maxLength: 36` does not.                                                                                                                   |
 | `flags_min_length_over_the_cap_or_the_format`          | (unit) `minLength: 20000` warns "capped at 10000"; `uuid` + `minLength: 50` warns (the format wins); `minLength: 10000` and `email` + `minLength` do not.                                             |
@@ -647,7 +833,7 @@ The `empty` / `empty_of_value` rules behind the `empty` pin state ([source](file
 | `malformed_route_key_is_rejected`                             | An `endpoints:` key without `"METHOD /path"` shape fails.                                                                                                                                                                 |
 | `topology_errors_surface`                                     | Two gateways surface through `check` with "at most one gateway".                                                                                                                                                          |
 | `spec_on_non_service_is_rejected`                             | `spec` on a gateway is an unknown-field parse error.                                                                                                                                                                      |
-| `unsupported_keywords_become_warnings`                        | The `pattern` keyword in `openapi-warn.yaml` becomes exactly one warning naming the file.                                                                                                                                 |
+| `unsupported_keywords_become_warnings`                        | The `not` keyword in `openapi-warn.yaml` becomes exactly one warning naming the file.                                                                                                                                     |
 | `clean_config_has_no_warnings`                                | The clean fixture produces zero warnings.                                                                                                                                                                                 |
 | `concurrency_no_longer_warns_in_live_mode`                    | `concurrency` on a gateway and a service produces no warning mentioning it: live mode enforces it through the engine actor.                                                                                               |
 | `token_is_64_hex_and_random`                                  | `new_token`: 64 hex chars, two calls differ.                                                                                                                                                                              |
@@ -1429,31 +1615,33 @@ The template tests write `FILES` (included from `src/commands/demo/files.rs`) to
 
 Spawns the real compiled binary; `Up` starts `kaanal up --port 0` in a temp dir and kills it on drop. One test target (`cargo test -p kaanal --test cli`), one module per topic in `tests/cli/` (R3.8), with `main.rs` only declaring them:
 
-| Module         | What it covers                                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `common.rs`    | Shared helpers: the binary, scratch folders, the `Up` child process, and the helpers used by more than one module. |
-| `validate.rs`  | `kaanal validate`: valid, cyclic and malformed configs.                                                            |
-| `status.rs`    | `status` and `chaos` against a live instance, and stale run files.                                                 |
-| `scenario.rs`  | `scenario` commands: activate, load, save, reset and the `--json` client commands.                                 |
-| `startup.rs`   | Startup races and run-file permissions: killed instances, simultaneous `up`s, bad arguments.                       |
-| `project.rs`   | Whole-project checks: the sample project, the schema, the seed line, dictionaries and locales.                     |
-| `endpoints.rs` | `kaanal endpoints` and the endpoints file.                                                                         |
-| `keys.rs`      | The auth signing key: generation, reuse, corruption, permissions.                                                  |
-| `pins.rs`      | Scenario `ttl`, `cycle` and `pins` commands.                                                                       |
-| `logs.rs`      | `kaanal logs` and `trace`, including `--follow`.                                                                   |
-| `usage.rs`     | Exit code 64 for every kind of bad argument.                                                                       |
-| `lifecycle.rs` | Stale state, the startup window and the stop paths.                                                                |
-| `down.rs`      | `kaanal down`.                                                                                                     |
-| `detached.rs`  | `kaanal up -d`.                                                                                                    |
-| `json.rs`      | The global `--json` switch.                                                                                        |
-| `remote.rs`    | `--endpoint` and `--token`, remote `down` and completions.                                                         |
-| `node.rs`      | `kaanal node down                                                                                                  |
+| Module         | What it covers                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common.rs`    | Shared helpers: the binary, scratch folders, the `Up` child process, and the helpers used by more than one module.                                                   |
+| `validate.rs`  | `kaanal validate`: valid, cyclic and malformed configs; self-check lines for a response that breaks its schema, on `validate` and on `up` (after the port is bound). |
+| `status.rs`    | `status` and `chaos` against a live instance, and stale run files.                                                                                                   |
+| `scenario.rs`  | `scenario` commands: activate, load, save, reset and the `--json` client commands.                                                                                   |
+| `startup.rs`   | Startup races and run-file permissions: killed instances, simultaneous `up`s, bad arguments.                                                                         |
+| `project.rs`   | Whole-project checks: the sample project, the schema, the seed line, dictionaries and locales.                                                                       |
+| `endpoints.rs` | `kaanal endpoints` and the endpoints file.                                                                                                                           |
+| `keys.rs`      | The auth signing key: generation, reuse, corruption, permissions.                                                                                                    |
+| `pins.rs`      | Scenario `ttl`, `cycle` and `pins` commands.                                                                                                                         |
+| `logs.rs`      | `kaanal logs` and `trace`, including `--follow`.                                                                                                                     |
+| `usage.rs`     | Exit code 64 for every kind of bad argument.                                                                                                                         |
+| `lifecycle.rs` | Stale state, the startup window and the stop paths.                                                                                                                  |
+| `down.rs`      | `kaanal down`.                                                                                                                                                       |
+| `detached.rs`  | `kaanal up -d`.                                                                                                                                                      |
+| `json.rs`      | The global `--json` switch.                                                                                                                                          |
+| `remote.rs`    | `--endpoint` and `--token`, remote `down` and completions.                                                                                                           |
+| `node.rs`      | `kaanal node down                                                                                                                                                    |
 
 | Test                                                              | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `validate_places_errors_in_later_nodes_and_edges`                 | `validate` prints `file:line:col` for an unknown field in the second node and for the edge that closes a cycle.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `validate_ok`                                                     | Fixture config → exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `validate_cycle_fails_with_message`                               | A cycle config → exit 1 with "cycle" on stderr.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `validate_reports_generated_responses_that_break_their_schema`    | A spec whose `example` is over its own `maximum` exits 0 and prints `GET /orders: 5 of 5 generated samples violate the response schema: /total: maximum`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `up_serves_first_then_reports_schema_violations`                  | `up` writes `run.json` and answers `/__kaanal/health` before the same line appears on its stderr (the check runs on a thread after the banner).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `validate_bad_yaml_shows_file_line_col`                           | `kaanal.yaml:2:` prefix in the error (rule R6.1).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `validate_prints_unsupported_keyword_warnings`                    | Warnings on stderr, `ok:` on stdout, exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `status_without_running_instance_exits_2`                         | No `run.json` → exit 2 "not running".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |

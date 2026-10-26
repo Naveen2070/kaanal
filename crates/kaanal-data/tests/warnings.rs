@@ -13,7 +13,7 @@ paths:
           description: ok
           content:
             application/json:
-              schema: { type: object, properties: { code: { type: string, pattern: "^A" } } }
+              schema: { type: object, properties: { code: { type: string, not: { enum: [x] } } } }
 "#;
     let w = ApiModel::from_openapi(spec).unwrap().warnings();
     assert_eq!(w.len(), 1, "{w:?}");

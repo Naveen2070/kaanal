@@ -124,6 +124,15 @@ pub(crate) fn serve_locked(
             seed: server.drawn_seed.unwrap_or(cfg.seed),
             warnings: &server.warnings,
         });
+        // After the port is bound, the banner is out and off the serving path, so a big spec never
+        // slows startup and its lines never interleave with the banner.
+        // A plain thread: a blocking task would make the runtime wait for it on shutdown.
+        let (check_cfg, check_dir) = (cfg.clone(), dir.clone());
+        std::thread::spawn(move || {
+            for w in kaanal_server::selfcheck(&check_cfg, &check_dir).unwrap_or_default() {
+                eprintln!("warning: {}", clean(&w));
+            }
+        });
         // A stop signal (or POST /__kaanal/shutdown, which ends `wait` by itself) drains for up
         // to 5s, then cuts what is left; either way the run file goes below.
         let stop = server.stopper();

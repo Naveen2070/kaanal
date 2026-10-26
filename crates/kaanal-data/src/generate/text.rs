@@ -1,9 +1,10 @@
 //! Text values: names, addresses, phones, emails, ids, base64, dates and the sentence builder.
 
+use super::dist::{bands, money, pick_weighted, recency_secs};
 use super::{
-    BASE_EPOCH, ChaCha8Rng, Gen, IndexedRandom, MAX_MIN_LENGTH, Name, NameOrder, Pack, Place, Rng,
-    SeedableRng, TextKind, Value, count, digit_count, entry_range, fill, int_for, json, norm,
-    number_for, numeric, stable_hash, template_key, value_fits, words,
+    BASE_EPOCH, ChaCha8Rng, Gen, IndexedRandom, IntDist, MAX_MIN_LENGTH, Name, NameOrder, Pack,
+    Place, Rng, SeedableRng, TextKind, Value, count, digit_count, entry_range, fill, int_for, json,
+    norm, number_for, numeric, stable_hash, template_key, value_fits, words,
 };
 
 /// **Private.** Runs one dictionary generator for field `f` of scalar type `ty` (it fits).
@@ -20,7 +21,7 @@ pub(super) fn run(
 ) -> Value {
     let (up, down) = (|x: f64| x + 1000.0, |x: f64| x - 1000.0);
     let v = match g {
-        Gen::Integer { min, max } => {
+        Gen::Integer { min, max, dist } => {
             let (lo, hi) = entry_range(
                 *min,
                 *max,
@@ -28,7 +29,11 @@ pub(super) fn run(
                 |x: i64| x.saturating_add(1000),
                 |x: i64| x.saturating_sub(1000),
             );
-            let n = json!(int_for(s, rng, (lo, hi)));
+            let n = if *dist == IntDist::Bands {
+                json!(banded(s, rng, (lo, hi)))
+            } else {
+                json!(int_for(s, rng, (lo, hi)))
+            };
             // a `number` field may have bounds no whole number fits (0.1..0.9): then a float
             if ty == "number" && !value_fits(&n, s, ty) {
                 #[expect(clippy::cast_precision_loss, reason = "a default range only")]
@@ -36,14 +41,14 @@ pub(super) fn run(
             }
             return n;
         }
-        Gen::Money { min, max } => {
-            return numeric(
-                s,
-                ty,
-                rng,
-                entry_range(*min, *max, (99.0, 4999.0), up, down),
-                2,
-            );
+        Gen::Money {
+            min,
+            max,
+            dist,
+            style,
+        } => {
+            let range = entry_range(*min, *max, (99.0, 4999.0), up, down);
+            return money(s, ty, rng, range, (*dist, *style));
         }
         Gen::Latitude { min, max } | Gen::Longitude { min, max } => {
             let range = geo_range(pack, matches!(g, Gen::Latitude { .. }));
@@ -51,9 +56,12 @@ pub(super) fn run(
         }
         // user-written values are sent as written, never cut or padded (R5.7); a project
         // value outside the lengths is warned at startup, a built-in one never chosen
-        Gen::Pick { from } => {
+        Gen::Pick { from, weights } => {
             let fit: Vec<&Value> = from.iter().filter(|v| value_fits(v, s, ty)).collect();
-            return (*fit.choose(rng).expect("`fits` found one")).clone();
+            return match weights {
+                Some(w) => pick_weighted(&fit, &w.0, rng).clone(),
+                None => (*fit.choose(rng).expect("`fits` found one")).clone(),
+            };
         }
         Gen::Static { value } => return value.clone(),
         // well-formed: no length fitting (R4.5)
@@ -61,8 +69,15 @@ pub(super) fn run(
         Gen::Phone {} => return json!(phone(rng, pack)),
         Gen::Url {} => return json!(url(f, rng)),
         Gen::Uuid {} => return json!(uuid(rng)),
-        Gen::Timestamp {} => return json!(date_time(rng)),
-        Gen::Date {} => return json!(date_time(rng)[..10].to_string()),
+        Gen::Timestamp { days } => return json!(date_time(rng, days.unwrap_or(DEFAULT_DAYS))),
+        Gen::Date { days, years } => {
+            if let Some([lo, hi]) = years {
+                // a birth date: an age from the weighted bands, then a day inside that year
+                let age = bands(i64::from(*lo), i64::from(*hi), rng);
+                return json!(day_text(birth_day(age, rng)));
+            }
+            return json!(date_time(rng, days.unwrap_or(DEFAULT_DAYS))[..10].to_string());
+        }
         Gen::FirstName {} => person(group, pack).0.name.clone(),
         Gen::LastName {} => person(group, pack).1.name.clone(),
         Gen::FullName {} => {
@@ -84,6 +99,8 @@ pub(super) fn run(
         Gen::Street {} => street(group, pack).to_string(),
         Gen::Address {} => address(rng, group, pack),
         Gen::Currency {} => pack.currency.code.clone(),
+        Gen::Locale {} => pack.tag.clone(),
+        Gen::Language {} => pack.tag.split('-').next().unwrap_or(&pack.tag).to_string(),
         Gen::Text { kind } => match kind {
             TextKind::Sentence => sentence(rng),
             TextKind::Paragraph => {
@@ -272,9 +289,13 @@ pub(super) fn sentence(rng: &mut ChaCha8Rng) -> String {
     format!("{first}{}.", s.join(" "))
 }
 
-/// **Private.** An RFC 3339 UTC timestamp within the 365 days before [`BASE_EPOCH`].
-pub(super) fn date_time(rng: &mut ChaCha8Rng) -> String {
-    let t = BASE_EPOCH - rng.random_range(0..365 * 86_400i64);
+/// **Private.** The window of a timestamp or date, in days before [`BASE_EPOCH`].
+pub(super) const DEFAULT_DAYS: u32 = 365;
+
+/// **Private.** An RFC 3339 UTC timestamp within the `days` before [`BASE_EPOCH`], leaning
+/// recent: two in three fall in the last third of the window.
+pub(super) fn date_time(rng: &mut ChaCha8Rng, days: u32) -> String {
+    let t = BASE_EPOCH - recency_secs(i64::from(days.max(1)) * 86_400, rng);
     let (days, secs) = (t.div_euclid(86_400), t.rem_euclid(86_400));
     let (y, m, d) = civil_from_days(days);
     format!(
@@ -286,7 +307,7 @@ pub(super) fn date_time(rng: &mut ChaCha8Rng) -> String {
 }
 
 /// **Private.** Days since 1970-01-01 → (year, month, day). Howard Hinnant's algorithm.
-pub(super) fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -314,4 +335,44 @@ pub(super) fn fit_length(mut v: String, s: &Value) -> String {
         v.extend(std::iter::repeat_n('x', pad));
     }
     v
+}
+
+/// **Private.** (year, month, day) → days since 1970-01-01. The inverse of [`civil_from_days`].
+pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = y - i64::from(m <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = i64::from((m + 9) % 12);
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// **Private.** An integer from [`bands`](super::dist::bands) inside the schema's bounds (the
+/// entry's range where the schema has none); plain `int_for` when the bounds leave no range.
+fn banded(s: &Value, rng: &mut ChaCha8Rng, (lo, hi): (i64, i64)) -> i64 {
+    let lo2 = super::numbers::int_bound(s, "minimum", true).unwrap_or(lo);
+    let hi2 = super::numbers::int_bound(s, "maximum", false).unwrap_or(hi);
+    if lo2 <= hi2 {
+        super::dist::bands(lo2, hi2, rng)
+    } else {
+        int_for(s, rng, (lo, hi))
+    }
+}
+
+/// **Private.** Days since 1970-01-01 of a birthday that makes someone exactly `age` whole years
+/// old on the base date: a day in (base - (age + 1) years, base - age years], from `rng`.
+pub(crate) fn birth_day(age: i64, rng: &mut ChaCha8Rng) -> i64 {
+    let year = civil_from_days(BASE_EPOCH.div_euclid(86_400)).0;
+    let (from, to) = (
+        days_from_civil(year - age - 1, 1, 1),
+        days_from_civil(year - age, 1, 1),
+    );
+    from + 1 + rng.random_range(0..to - from)
+}
+
+/// **Private.** `YYYY-MM-DD` for a count of days since 1970-01-01.
+fn day_text(days: i64) -> String {
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
 }

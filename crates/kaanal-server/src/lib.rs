@@ -21,6 +21,7 @@ mod pins;
 mod record;
 mod scenarios;
 mod scope;
+mod selfcheck;
 mod shutdown;
 mod site;
 mod state;
@@ -114,6 +115,16 @@ impl BoundServer {
 /// with its place in `kaanal.yaml` (see [`Located::in_source`]).
 pub fn check(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, Located> {
     state::AppState::build(cfg, base_dir, String::new(), 0).map(|st| st.warnings)
+}
+
+/// Samples every spec endpoint's generated response and validates it against its schema
+/// (FR-DATA-05). Findings are warnings, one line per endpoint, naming the spec file. Slower than
+/// [`check`] on a big spec, so `kaanal up` runs it after the port is bound.
+///
+/// # Errors
+/// The same load errors as [`check`].
+pub fn selfcheck(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, Located> {
+    selfcheck::run(cfg, base_dir)
 }
 
 /// The spec routes of `cfg` (key, owner, inferred op) and its topology, for

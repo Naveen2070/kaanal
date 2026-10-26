@@ -128,7 +128,9 @@ fn run(cli: Cli) -> Result<(), Fail> {
             let (cfg, dir, src) = load(&config)?;
             let warnings =
                 kaanal_server::check(&cfg, &dir).map_err(|e| located_err(&config, &src, &e))?;
-            for w in warnings {
+            let sampled =
+                kaanal_server::selfcheck(&cfg, &dir).map_err(|e| located_err(&config, &src, &e))?;
+            for w in warnings.into_iter().chain(sampled) {
                 eprintln!("warning: {}", clean(&w));
             }
             println!("ok: {}", config.display());

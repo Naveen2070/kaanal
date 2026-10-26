@@ -8,4 +8,4 @@ paths:
           description: ok
           content:
             application/json:
-              schema: { type: object, properties: { code: { type: string, pattern: "^A" } } }
+              schema: { type: object, properties: { code: { type: string, not: { enum: [x] } } } }
