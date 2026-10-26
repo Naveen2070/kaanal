@@ -225,6 +225,64 @@ fn value_for(
     }
 }
 
+/// **Private.** The most values [`generate`] can spend on `s`, capped at `MAX_VALUES`: the same
+/// walk as `value_for`, with every array at its longest draw, every `oneOf`/`anyOf` at its
+/// dearest branch and `additionalProperties` at three keys. A worst case, so it may overcount
+/// (`examples` are walked as their schema); paging sizes a page with it (R1.62).
+pub(crate) fn value_bound(s: &Value, depth: usize) -> usize {
+    if s.get("allOf").is_some() {
+        return value_bound(&merge_all_of(s).0, depth);
+    }
+    if depth > MAX_DEPTH {
+        return 0;
+    }
+    let enum_ = s.get("enum").and_then(Value::as_array);
+    if s.get("example").is_some()
+        || s.get("const").is_some()
+        || enum_.is_some_and(|e| !e.is_empty())
+    {
+        return 1;
+    }
+    let child = |c: &Value| value_bound(c, depth + 1);
+    let branches = ["oneOf", "anyOf"].iter().find_map(|k| {
+        s.get(*k)
+            .and_then(Value::as_array)
+            .filter(|a| !a.is_empty())
+    });
+    let inner = if let Some(b) = branches {
+        b.iter().map(child).max().unwrap_or(0)
+    } else {
+        match scalar_type(s) {
+            "object" => {
+                let props = s.get("properties").and_then(Value::as_object);
+                let own = props
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, ps)| ps.get("writeOnly").and_then(Value::as_bool) != Some(true))
+                    .fold(0usize, |n, (_, ps)| n.saturating_add(child(ps)));
+                let extra = s
+                    .get("additionalProperties")
+                    .filter(|a| a.is_object())
+                    .map_or(0, |ap| child(ap).saturating_mul(3));
+                own.saturating_add(extra)
+            }
+            "array" => {
+                // the longest length `array_for` can draw
+                let max_items = count(s, "maxItems", false);
+                let min =
+                    count(s, "minItems", true).unwrap_or_else(|| max_items.map_or(1, |m| m.min(1)));
+                let n = max_items.unwrap_or(5).min(MAX_RANDOM_ITEMS).max(min);
+                let items = s.get("items").cloned().unwrap_or(json!({}));
+                usize::try_from(n)
+                    .unwrap_or(usize::MAX)
+                    .saturating_mul(child(&items))
+            }
+            _ => 0,
+        }
+    };
+    inner.saturating_add(1).min(MAX_VALUES)
+}
+
 /// **Private.** One entry of `examples` (an array, or an `OpenAPI` map of `{ value }`),
 /// chosen from the field's own rng; `None` when absent or empty.
 fn pick_example(s: &Value, rng: &mut ChaCha8Rng) -> Option<Value> {

@@ -14,14 +14,19 @@ mod dictionary;
 mod empty;
 mod generate;
 mod pack;
+mod page;
 mod warn;
 mod words;
 
-pub use api::{ApiModel, Endpoint};
+pub use api::{ApiModel, Endpoint, QueryParam};
 pub use dataset::{DEFAULT_LOCALE, DataSet, Options, valid_locale_tag};
 pub use dictionary::{Dictionary, dictionary_schema, dictionary_warnings};
 pub use empty::{empty, empty_of_value};
 pub use generate::{apply_params, generate};
 pub use pack::{
     Currency, DataError, Geo, Name, NameOrder, Pack, Phone, Place, builtin_tags, pack_schema,
+};
+pub use page::{
+    Envelope, PageError, PageSpec, Style, Window, decode_cursor, encode_cursor, generate_page,
+    item_seed,
 };

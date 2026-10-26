@@ -429,6 +429,15 @@ The pin model in [source](files/kaanal-core/pin.md): cycle order, ranges, preced
 | `a_variable_without_a_default_is_an_error`                        | `url: "/{ver}"` with no `variables` fails, naming `ver` and "default".                                                                                                   |
 | `a_prefix_that_is_still_a_template_is_an_error`                   | A default that is itself `{x}` is refused.                                                                                                                               |
 | `a_dangling_ref_in_media_examples_fails_the_load_with_a_position` | `examples: { one: { $ref: ... } }` naming a missing component fails the load at `/paths/~1a/get` with "not found".                                                       |
+| `query_params_come_from_operation_and_path_item`                  | Query parameters of the operation and of its path item are both read.                                                                                                    |
+| `query_params_follow_component_refs`                              | A parameter that is a `$ref` to a component is followed.                                                                                                                 |
+| `non_query_and_non_integer_params_are_skipped`                    | Header/path params and object-typed query params are skipped; a string is kept with `numeric` false.                                                                     |
+| `schema_ref_params_are_resolved`                                  | A query parameter whose `schema` is a `$ref` is resolved before its type is read.                                                                                        |
+| `integer_bounds_are_read`                                         | `minimum`, `maximum` and `default` of a parameter are read.                                                                                                              |
+| `non_query_params_with_unresolvable_schema_refs_still_load`       | A header/path/cookie parameter with an external or dangling schema `$ref` does not fail the load (review regression, fixed in 1cb501f).                                  |
+| `query_param_with_dangling_schema_ref_is_skipped`                 | A query parameter with a dangling schema `$ref` is skipped, not an error.                                                                                                |
+| `unresolvable_parameter_entries_are_skipped_not_fatal`            | A parameter entry that is an external or dangling `$ref`, on a `POST` and a `GET`, is skipped: the spec loads and the `GET` is still paged by its other parameters.      |
+| `date_after_param_is_not_a_cursor`                                | A string `after` of format date, date-time or time is skipped; a plain string `after` is still a cursor.                                                                 |
 
 ## `crates/kaanal-data/tests/generate/` — data generation
 
@@ -605,6 +614,7 @@ Parsing, matching and fit rules of `data.yaml` and the built-in dictionary ([sou
 | `too_deep_schema_warns_once_and_matches_the_generator` | (unit) 16 levels: no warning and a filled leaf; 17 levels on two branches: one warning per endpoint, and the generator returns `null` at that depth.                                                  |
 | `api_model_collects_warnings_per_endpoint`             | End-to-end from a spec string: `ApiModel::warnings()` prefixes warnings with `GET /things`.                                                                                                           |
 | `max_length_below_a_new_format_warns`                  | (unit) `maxLength` too small for `ipv4` (5), `byte` (8) or `duration` (4) warns; `ipv4` at 11 does not. The discriminator warnings are tested in `tests/generate/` (`one_of.rs`) (`discriminator_*`). |
+| `two_array_properties_warn_once`                       | A paged object with several arrays gives one warning naming the paged one; one array, or an unpaged route, gives none.                                                                                |
 
 ## `crates/kaanal-data/tests/empty.rs` — empty bodies
 
@@ -1034,6 +1044,164 @@ The `site:` key through `check`, then a real server (a gateway, a service with t
 | `a_head_of_a_missing_id_is_404_with_no_body`         | `HEAD /notes/1` on an empty collection is 404 with an empty body.                                                                                                                                                                                                                                                      |
 | `a_pinned_loading_post_persists_once`                | Under a `loading` pin a `POST` answers 201 with id 1 and is stored exactly once.                                                                                                                                                                                                                                       |
 | `get_of_an_empty_collection_is_an_empty_array`       | `GET /notes` is `[]`, `HEAD` 200 with no body; get by id `1`, a huge id and `%FF` are 404 `{"error":"not found"}`; a `HEAD` by id reads and changes nothing.                                                                                                                                                           |
+
+## `crates/kaanal-data/tests/page/` — paging (D3)
+
+See [page](files/kaanal-data/page.md).
+
+### `detect.rs` — style and bounds from an endpoint
+
+| Test                                                | What it proves                                                                                                               |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `page_param_gives_page_style`                       | `page` is the page style.                                                                                                    |
+| `offset_and_skip_give_offset_style`                 | `offset` and `skip` are the offset style.                                                                                    |
+| `cursor_after_pagetoken_give_cursor_style`          | `cursor`, `after`, `pageToken` are the cursor style.                                                                         |
+| `names_are_normalised`                              | Case, `_` and `-` are ignored in names.                                                                                      |
+| `offset_beats_page_when_both_declared`              | Offset wins over page.                                                                                                       |
+| `cursor_beats_offset_and_page`                      | Cursor wins over offset and page.                                                                                            |
+| `index_and_offset_aliases_are_normalised`           | `Page`, `page_number`, `PageNumber`, `Skip` are recognised.                                                                  |
+| `size_aliases_are_recognised`                       | `size`, `count`, `maxResults` are size parameters.                                                                           |
+| `no_recognised_param_is_none`                       | No paging parameter: not paged.                                                                                              |
+| `size_defaults_and_bounds`                          | Default 20 or the spec's, max 100 or the spec's, min 1 or the spec's.                                                        |
+| `non_get_is_none`                                   | Only `GET` is paged.                                                                                                         |
+| `lowercase_get_is_detected`                         | A lower-case method is still `GET`.                                                                                          |
+| `array_min_max_items_set_total_bounds`              | `minItems`/`maxItems` become the total bounds.                                                                               |
+| `min_items_only_raises_both_bounds`                 | `minItems` alone: 200 gives (200, 200), 50 gives (50, 137).                                                                  |
+| `max_items_only_lowers_both_bounds`                 | `maxItems` alone: 10 gives (10, 10), 100 gives (23, 100).                                                                    |
+| `min_items_above_max_items_wins_like_the_generator` | `minItems` 5 with `maxItems` 2 gives a total of 5.                                                                           |
+| `object_without_array_property_is_none`             | An object with no array is not paged.                                                                                        |
+| `typeless_object_with_properties_is_paged`          | An object with `properties` and no `type` counts as an object.                                                               |
+| `all_of_envelope_is_paged`                          | An `allOf` envelope is merged first.                                                                                         |
+| `array_schema_has_array_envelope`                   | An array schema is the array envelope.                                                                                       |
+| `scalar_schema_is_none`                             | A scalar response is not paged.                                                                                              |
+| `string_cursor_gives_cursor_style`                  | A string-typed cursor is accepted.                                                                                           |
+| `string_page_param_is_not_page_style`               | A string page, offset or size is not recognised.                                                                             |
+| `page_base_follows_the_declared_minimum_or_default` | `minimum: 0`, or `default: 0` with no minimum above 0, makes the page 0-based; otherwise, and for the other styles, 1-based. |
+| `record_cap_keeps_a_page_within_the_value_budget`   | A record of up to 102 values caps a page at 98 records (97 after an object envelope's own 3); light records keep 10 000.     |
+
+### `window.rs` — query and seed to a window
+
+| Test                                            | What it proves                                                                                                               |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `absent_params_give_first_page_default_size`    | No parameters: offset 0, default size.                                                                                       |
+| `page_n_maps_to_offset`                         | Page n is offset (n - 1) * size.                                                                                             |
+| `size_above_maximum_is_clamped`                 | A size over the maximum is clamped.                                                                                          |
+| `size_zero_is_400`                              | `limit=0` is a 400.                                                                                                          |
+| `size_below_spec_minimum_is_400`                | A size under the spec minimum is a 400.                                                                                      |
+| `page_zero_is_400`                              | `page=0` is a 400.                                                                                                           |
+| `negative_offset_is_400`                        | A negative offset is a 400.                                                                                                  |
+| `non_integer_is_400`                            | A non-integer is a 400.                                                                                                      |
+| `only_ascii_digits_are_accepted`                | `+5`, a space and non-ASCII digits are 400s.                                                                                 |
+| `page_past_end_is_empty_window`                 | A page past the end is a window, not an error.                                                                               |
+| `huge_page_does_not_overflow`                   | A huge page saturates.                                                                                                       |
+| `offset_wins_over_page`                         | Offset style ignores a page value.                                                                                           |
+| `cursor_round_trip`                             | An encoded cursor decodes to its offset.                                                                                     |
+| `forged_cursor_is_400`                          | An unknown token is a 400.                                                                                                   |
+| `non_canonical_cursor_is_400`                   | Stray trailing bits and leading zeros in a cursor are 400s.                                                                  |
+| `repeated_query_key_takes_the_first`            | The first of a repeated key counts.                                                                                          |
+| `total_is_stable_and_in_bounds`                 | The total is the same for a seed and inside its bounds.                                                                      |
+| `total_override_wins_and_is_capped_at_10000`    | `total:` wins and is capped at 10 000.                                                                                       |
+| `total_respects_min_max_items`                  | The total honours `minItems`/`maxItems`.                                                                                     |
+| `size_bounds_are_normalised`                    | min >= 1, max >= min, default within both.                                                                                   |
+| `offset_above_u32_says_it_is_too_large`         | Digits past `u32::MAX` are a 400 saying "exceeds the maximum supported value"; a sign is still "not a non-negative integer". |
+| `zero_based_page_maps_page_zero_to_offset_zero` | 0-based: page 0, 1, 3 are offsets 0, 10, 30; `page=-1` is a 400; a 1-based route refuses `page=0`.                           |
+| `record_cap_shrinks_the_page_size`              | A size above `record_cap` (asked or default) is shrunk to it, never below 1.                                                 |
+
+### `envelope.rs` — the page body
+
+| Test                                                           | What it proves                                                                                                              |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `array_schema_returns_the_slice`                               | An array response is the slice.                                                                                             |
+| `object_envelope_fills_meta`                                   | Total, page, size, pages and `hasMore` agree with the window.                                                               |
+| `cursor_envelope_fills_next`                                   | A string `nextCursor` is a cursor token, `null` on the last page.                                                           |
+| `count_is_the_total_like_drf`                                  | `count` is the total (DRF).                                                                                                 |
+| `count_and_a_total_sibling_both_carry_the_total`               | `count` and `totalCount` both carry the total.                                                                              |
+| `unknown_siblings_are_generated_as_today`                      | Other fields are generated as without paging.                                                                               |
+| `nested_arrays_inside_items_are_untouched`                     | Arrays inside records are not paged.                                                                                        |
+| `two_array_props_pages_the_first`                              | Two arrays: one is paged.                                                                                                   |
+| `named_array_beats_unnamed`                                    | A list-named array wins over an earlier unnamed one.                                                                        |
+| `unnamed_arrays_page_the_first_in_key_order`                   | Without a list name the first in key order is paged.                                                                        |
+| `preview_field_is_not_a_prev_meta_field`                       | `preview`/`previewUrl` are generated; `prevCursor` and `prev_page_token` are filled.                                        |
+| `min_items_does_not_cost_extra_generation`                     | A big `minItems` does not use up the value budget of the siblings.                                                          |
+| `total_pages_when_size_exceeds_total`                          | `totalPages` is 1 when the size exceeds the total.                                                                          |
+| `numeric_next_and_prev_are_page_numbers`                       | A numeric next/prev is a page number.                                                                                       |
+| `huge_offset_meta_does_not_overflow`                           | An offset of `u32::MAX` does not overflow the page number.                                                                  |
+| `string_next_and_previous_are_urls_for_offset_and_page_styles` | DRF style: a string `next`/`previous` is that page's relative URL in the offset and page styles, `null` when there is none. |
+| `zero_based_page_numbers_in_meta`                              | 0-based (`minimum: 0`): `page`, `nextPage`, `prevPage` count from 0; `totalPages` is unchanged.                             |
+
+### `links.rs` — `X-Total-Count` and `Link`
+
+| Test                                                   | What it proves                                         |
+| ------------------------------------------------------ | ------------------------------------------------------ |
+| `link_has_first_prev_next_last_for_a_middle_page`      | A middle page has all four relations.                  |
+| `no_prev_on_first_and_no_next_on_last`                 | Exact links on the first and last pages.               |
+| `other_query_params_are_kept_and_paging_ones_replaced` | Other pairs are kept; the index parameter is replaced. |
+| `cursor_style_links_use_the_cursor_param`              | Cursor style: only `next`, with a token.               |
+| `values_are_percent_encoded`                           | Query values are percent-encoded.                      |
+| `empty_dataset_has_first_only_and_total_zero`          | Empty: `first` only, total 0.                          |
+| `past_the_end_links_point_back_to_real_pages`          | Past the end: `prev` is clamped, no `next`.            |
+| `offset_style_links`                                   | Offset style links.                                    |
+| `u32_max_does_not_overflow`                            | `u32::MAX` offsets in every style.                     |
+| `offset_style_prev_past_the_end_is_clamped_to_last`    | Offset 95, size 20, total 100: `prev` is offset 80.    |
+| `duplicated_index_param_is_replaced_once`              | A repeated index parameter is replaced once.           |
+| `size_zero_is_treated_as_one`                          | A size of 0 is treated as 1.                           |
+| `cursor_style_with_total_zero_has_no_link`             | Cursor with total 0: no relation, no `link`.           |
+| `zero_based_page_links_start_at_page_zero`             | 0-based: `first` is page 0, `last` is pages - 1.       |
+
+### `walk.rs` — the oracle
+
+| Test                                                  | What it proves                                                                                                                                                                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `walking_all_pages_equals_the_sequence`               | Walking every page equals records `0..N` generated one by one, for each style and several sizes.                                                                                                                |
+| `record_i_is_identical_across_sizes_and_styles`       | Record `i` is the same at any size and style.                                                                                                                                                                   |
+| `heavy_records_shrink_the_page_and_walk_without_gaps` | Records of up to 102 values with `limit=10000`: the page shrinks to 98 records, stays within 10 000 values, and following `rel="next"` (offset and page styles) walks all 250 records with no gap or duplicate. |
+
+## `crates/kaanal-server/tests/paging_http/` — paged routes over HTTP (D3)
+
+A server loaded from `tests/fixtures/paging.yaml` (list routes of each style, Spring- and DRF-shaped routes, a path-parameterised envelope, a `total:` route, and `/rows` with a `head` of its own). See [mock](files/kaanal-server/mock.md).
+
+| Test                                                | What it proves                                                                                                                                                                                                               |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `first_page_has_default_size_and_headers`           | No query: default size, `x-total-count` and `link`.                                                                                                                                                                          |
+| `x_total_count_and_link_are_exposed_to_browsers`    | Both are in `Access-Control-Expose-Headers`.                                                                                                                                                                                 |
+| `link_uses_the_raw_request_path`                    | Links use the still-encoded request path.                                                                                                                                                                                    |
+| `head_matches_get_without_body`                     | A `HEAD` has the `GET`'s status and headers and no body.                                                                                                                                                                     |
+| `a_spec_head_without_paging_params_is_not_paged`    | A spec `head` operation without paging parameters is not paged.                                                                                                                                                              |
+| `total_key_overrides_the_total`                     | `total:` sets `x-total-count`.                                                                                                                                                                                               |
+| `a_head_entry_without_total_inherits_the_get_total` | A `HEAD` entry with no `total:` reports its `GET` entry's total and the same `link`.                                                                                                                                         |
+| `total_on_an_unpaged_route_warns`                   | `total:` on an unpaged route warns at load; on a paged one it does not.                                                                                                                                                      |
+| `offset_page_two_matches_slice_of_full_walk`        | A page equals the matching slice of a full walk.                                                                                                                                                                             |
+| `invalid_limit_is_400_with_body`                    | `limit=0` is 400 with the exact error body.                                                                                                                                                                                  |
+| `page_past_end_is_200_empty`                        | Past the end: 200, an empty list.                                                                                                                                                                                            |
+| `cursor_walk_reaches_the_end`                       | Following the cursor ends, in at most N/10 + 2 steps.                                                                                                                                                                        |
+| `unpaged_route_body_is_unchanged`                   | An unpaged route answers as before, with no paging headers.                                                                                                                                                                  |
+| `zero_and_one_based_page_walks_reach_the_end`       | Spring (`page` minimum 0, `size`, `{content, totalElements, totalPages}`) walks from `page=0`, links start at page 0, `page=-1` is 400; the 1-based `/orders` refuses `page=0` and walks to `hasMore: false`; no duplicates. |
+| `drf_next_urls_walk_to_the_end`                     | DRF (`{count, next, previous, results}`): following the body's `next` URL reaches every record; it equals the `link` next.                                                                                                   |
+| `path_parameters_seed_and_fill_a_paged_route`       | `/shelves/{shelf}/stock`: each path has its own records, the path parameter fills `shelf`, pages stay slices of one dataset.                                                                                                 |
+| `chaos_error_wins_over_paging`                      | A chaos 503 wins over a bad query and has no paging headers.                                                                                                                                                                 |
+| `pinned_empty_state_returns_the_empty_form`         | An `empty` pin answers `[]` with no paging headers.                                                                                                                                                                          |
+| `scoped_requests_page_the_same`                     | A scenario scope does not change the page.                                                                                                                                                                                   |
+| `wire_chaos_on_a_paged_route_has_no_paging_headers` | `malformed` and `reset` carry no paging headers.                                                                                                                                                                             |
+| `success_and_slow_pins_keep_the_paging_headers`     | `success` and `slow` pins still page and keep the headers.                                                                                                                                                                   |
+
+## `crates/kaanal-data/tests/generate/arrays.rs` — array lengths (D3)
+
+| Test                                          | What it proves                                               |
+| --------------------------------------------- | ------------------------------------------------------------ |
+| `min_items_greater_than_max_items_is_clamped` | `minItems` 5 with `maxItems` 2 gives 5 items for every seed. |
+| `max_items_zero_is_empty`                     | `maxItems: 0` gives an empty array.                          |
+| `huge_max_items_is_capped`                    | A huge `maxItems` gives at most 20 items.                    |
+| `min_items_is_honoured_for_nested_arrays`     | `minItems` holds for arrays nested in records.               |
+
+## `crates/kaanal-core/tests/chain/collections.rs` and `schema.rs` — the `total:` key (D3)
+
+| Test                                     | What it proves                                         |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `total_is_parsed_and_compiled`           | `total: 250` reaches the compiled endpoint.            |
+| `total_over_10000_is_a_positioned_error` | A `total` over 10 000 is an error with a position.     |
+| `total_with_override_is_an_error`        | `total` with `override` is refused.                    |
+| `total_with_collection_is_an_error`      | `total` with `collection` is refused.                  |
+| `total_appears_in_the_json_schema`       | (`schema.rs`) `total` is in the published JSON schema. |
 
 ## `crates/kaanal-server/src/chaos_lease.rs` (unit) — the chaos lease table
 

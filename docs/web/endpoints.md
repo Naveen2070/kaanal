@@ -28,14 +28,15 @@ Each key is `"METHOD /path"` as in the spec (`"GET /orders/{id}"`). Every field 
   error_map: { orders-db: 503, "5xx": 502, pay-api: { status: 502, body: { error: upstream } } }
 ```
 
-| Field        | Meaning                                                                                         |
-| ------------ | ----------------------------------------------------------------------------------------------- |
-| `op`         | The operation database steps use unless a step sets its own: `read`, `write` or `scan`          |
-| `chain`      | The steps that run after the owner's own work. Absent = the default chain                       |
-| `override`   | A fixed response (`status`, default 200, and `body`). On success it replaces the generated body |
-| `error_map`  | What a failure becomes for the client (see below)                                               |
-| `collection` | Name of an in-memory collection the route reads or writes; not with `override`                  |
-| `states`     | What a [pinned state](pins.md) answers on this endpoint (see below)                             |
+| Field        | Meaning                                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `op`         | The operation database steps use unless a step sets its own: `read`, `write` or `scan`                                                |
+| `chain`      | The steps that run after the owner's own work. Absent = the default chain                                                             |
+| `override`   | A fixed response (`status`, default 200, and `body`). On success it replaces the generated body                                       |
+| `error_map`  | What a failure becomes for the client (see below)                                                                                     |
+| `collection` | Name of an in-memory collection the route reads or writes; not with `override`                                                        |
+| `total`      | How many records a [paged](paging.md) list route reports, 0 to 10000 (default: seeded per route); not with `override` or `collection` |
+| `states`     | What a [pinned state](pins.md) answers on this endpoint (see below)                                                                   |
 
 A `HEAD` request with no entry of its own follows the `GET` entry.
 

@@ -19,6 +19,25 @@ pub struct Endpoint {
     pub status: u16,
     /// application/json response schema with every local `$ref` inlined. `None` = no JSON body.
     pub schema: Option<Value>,
+    /// Primitive (integer, number, string, boolean) query parameters of the operation, in
+    /// document order (path-item ones first; an operation parameter replaces a same-named
+    /// path-item one).
+    pub query_params: Vec<QueryParam>,
+}
+
+/// One primitive query parameter, with the bounds its schema declares.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryParam {
+    /// Parameter name.
+    pub name: String,
+    /// Schema `minimum`, if an integer.
+    pub minimum: Option<i64>,
+    /// Schema `maximum`, if an integer.
+    pub maximum: Option<i64>,
+    /// Schema `default`, if an integer.
+    pub default: Option<i64>,
+    /// `true` when the schema type is `integer` or `number`.
+    pub numeric: bool,
 }
 
 /// A parsed `OpenAPI` document.
@@ -75,11 +94,13 @@ impl ApiModel {
                 let Some(op) = item.get(m) else { continue };
                 let ptr = format!("{item_ptr}/{m}");
                 let (status, schema) = pick_response(op, &doc, &ptr)?;
+                let query_params = query_params(item, op, &doc, &ptr);
                 endpoints.push(Endpoint {
                     method: m.to_uppercase(),
                     path: format!("{base}{path}"),
                     status,
                     schema,
+                    query_params,
                 });
             }
         }
@@ -150,6 +171,53 @@ fn fill_variables(url: &str, server: &Value) -> Result<String, String> {
     }
     out.push_str(rest);
     Ok(out)
+}
+
+/// **Private.** The `in: query` parameters of an operation whose schema type is a primitive
+/// (`integer`, `number`, `string`, `boolean`). Path-item parameters come first; an operation
+/// parameter with the same name replaces it in place. Entries may be `$ref`s, and so may a query
+/// parameter's `schema`; one that does not resolve (external, dangling or cyclic) is skipped, never
+/// an error, so a spec that loaded before paging still loads. Other locations' schemas are never
+/// resolved, and everything else is skipped silently. A string with a `date`, `date-time` or
+/// `time` format is a filter, never a cursor, so it is skipped.
+fn query_params(item: &Value, op: &Value, doc: &Value, ptr: &str) -> Vec<QueryParam> {
+    let mut out: Vec<QueryParam> = Vec::new();
+    for list in [item.get("parameters"), op.get("parameters")] {
+        for p in list.and_then(Value::as_array).into_iter().flatten() {
+            let Ok(p) = deref(p, doc, ptr) else { continue };
+            if p.get("in").and_then(Value::as_str) != Some("query") {
+                continue;
+            }
+            let name = p.get("name").and_then(Value::as_str);
+            let schema = p.get("schema").and_then(|s| deref(s, doc, ptr).ok());
+            let ty = schema.and_then(|s| s.get("type")).and_then(Value::as_str);
+            let (
+                Some(name),
+                Some(schema),
+                Some(ty @ ("integer" | "number" | "string" | "boolean")),
+            ) = (name, schema, ty)
+            else {
+                continue;
+            };
+            let format = schema.get("format").and_then(Value::as_str);
+            if ty == "string" && matches!(format, Some("date" | "date-time" | "time")) {
+                continue;
+            }
+            let int = |k: &str| schema.get(k).and_then(Value::as_i64);
+            let q = QueryParam {
+                name: name.to_string(),
+                minimum: int("minimum"),
+                maximum: int("maximum"),
+                default: int("default"),
+                numeric: matches!(ty, "integer" | "number"),
+            };
+            match out.iter_mut().find(|e| e.name == q.name) {
+                Some(e) => *e = q,
+                None => out.push(q),
+            }
+        }
+    }
+    out
 }
 
 /// **Private.** Lowest 2xx response, and its application/json schema if it has one.

@@ -21,6 +21,7 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | [data-packs.md](data-packs.md)       | Everyone                      | Locale packs, the field dictionary, `kaanal schema` and the contributor rule |
 | [static-site.md](static-site.md)     | Frontend developers           | `site:`: serve your built frontend from the mock's own origin                |
 | [collections.md](collections.md)     | Frontend developers           | `collection:`: in-memory routes that remember what you `POST`                |
+| [paging.md](paging.md)               | Frontend developers           | Paged list routes: styles, headers, total, envelopes and limits              |
 | [init.md](init.md)                   | Everyone                      | `kaanal init`: a starter project from an OpenAPI file                        |
 | [demo.md](demo.md)                   | Everyone                      | `kaanal demo`: a demo shop with a chaos bar, no project needed               |
 

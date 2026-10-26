@@ -32,6 +32,7 @@ This documentation has three parts.
 | [web/scenarios.md](web/scenarios.md)     | Named chaos scenarios: YAML, stacking, CLI, API, test recipes   |
 | [web/concepts.md](web/concepts.md)       | Topology, call chains, chaos, determinism — explained for users |
 | [web/web-ui.md](web/web-ui.md)           | Embedded status page guide, live counters, security rules       |
+| [web/paging.md](web/paging.md)           | Paged list routes: styles, headers, `total:`, envelopes, limits |
 
 ## The 30-second version
 

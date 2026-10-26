@@ -73,6 +73,7 @@ impl Compiler<'_> {
                     ));
                 }
             }
+            Self::total_conflict(cfg, &place)?;
             let mut error_map = IndexMap::new();
             let mut written_keys: BTreeMap<String, String> = BTreeMap::new();
             for (k, v) in &cfg.error_map {
@@ -107,6 +108,23 @@ impl Compiler<'_> {
             );
         }
         Ok(entries)
+    }
+
+    /// **Private.** `total:` sets the size of a generated list, so it cannot meet a fixed
+    /// response or a collection.
+    fn total_conflict(cfg: &crate::config::EndpointConfig, place: &Place) -> Result<(), Located> {
+        if cfg.total.is_none() {
+            return Ok(());
+        }
+        for (other, set) in [
+            ("override", cfg.response.is_some()),
+            ("collection", cfg.collection.is_some()),
+        ] {
+            if set {
+                return Err(place.err(format!("`total` cannot be combined with `{other}`")));
+            }
+        }
+        Ok(())
     }
 
     /// **Private.** Lists the endpoints to compile: spec routes in order (with their entry,

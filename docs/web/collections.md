@@ -42,7 +42,7 @@ $ curl -s -X DELETE localhost:8080/cart/1 -o /dev/null -w '%{http_code}\n'
 - The `id` is a whole number given by Kaanal, counting from 1 in each collection. An `id` you send is replaced. A removed id is never handed out again (until a reset).
 - An id in the URL must be written plainly (`7`, not `007` or `+7`); anything else, or an unknown id, is a 404.
 - A stored item comes back with its keys in alphabetical order, as the example above shows, not in the order you sent them.
-- There is no update (`PUT`/`PATCH`), filter or paging.
+- There is no update (`PUT`/`PATCH`), filter or paging. (Routes that _generate_ a list from your spec can be paged: see [paging](paging.md).)
 
 ## Limits
 

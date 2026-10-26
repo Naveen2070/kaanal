@@ -156,6 +156,7 @@ impl Compiler<'_> {
             states: Self::states(j.cfg, &j.place)?,
             responder: j.responder,
             collection: j.cfg.and_then(|c| c.collection.clone()),
+            total: j.cfg.and_then(|c| c.total),
             entry: j.cfg.map(|_| (j.place.path.clone(), j.place.file.clone())),
         };
         self.done.insert(j.key.clone(), Arc::new(ep));

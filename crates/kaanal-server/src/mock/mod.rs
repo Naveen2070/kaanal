@@ -37,6 +37,7 @@ use crate::state::{AppState, BusEvent, Route};
 use crate::wire::Cut;
 
 mod flight;
+mod paging;
 mod reply;
 #[cfg(test)]
 mod tests;
@@ -110,6 +111,12 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         // Invalid escapes are kept as typed; invalid UTF-8 becomes U+FFFD.
         .map(|(k, v)| (k.to_string(), percent_decode_str(v).decode_utf8_lossy().into_owned()))
         .collect();
+    // Read before `read_body` takes the request; only paging reads it (an unpaged route skips
+    // the parse), the link keeps the raw path.
+    let query = route
+        .paging
+        .as_ref()
+        .map_or_else(Vec::new, |_| query_pairs(req.uri()));
 
     debug_assert_eq!(
         route.key, route.endpoint.key,
@@ -157,6 +164,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
             method,
             path,
             params: &params,
+            query: &query,
             scope: scope.as_ref().map(|s| s.0.as_str()),
             chaos,
             plan: &plan,
@@ -165,6 +173,14 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         },
     );
     cors(resp)
+}
+
+/// **Private.** The decoded query pairs of `uri`, in order (`+` is a space; invalid escapes are
+/// kept as typed and invalid UTF-8 becomes U+FFFD, like path parameters).
+fn query_pairs(uri: &axum::http::Uri) -> Vec<(String, String)> {
+    uri.query()
+        .and_then(|q| serde_urlencoded::from_str(q).ok())
+        .unwrap_or_default()
 }
 
 /// **Private.** What [`read_body`] read: a built-in login's credentials, or a collection operation.

@@ -6,8 +6,9 @@
 
 use serde_json::Value;
 
-use crate::ApiModel;
 use crate::generate::{MAX_DEPTH, MAX_MIN_LENGTH, count, merge_all_of};
+use crate::page::array_props;
+use crate::{ApiModel, Endpoint, Envelope, PageSpec};
 
 /// **Private.** Keywords the generator does not honour; generated values may violate them.
 const IGNORED: [&str; 5] = [
@@ -132,6 +133,16 @@ fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
         }
     }
     discriminator_warnings(m, endpoint, out);
+    if let (Some(lo), Some(hi)) = (count(s, "minItems", true), count(s, "maxItems", false))
+        && lo > hi
+    {
+        let msg = format!(
+            "{at}: minItems {lo} is larger than maxItems {hi}; minItems wins (arrays, and a paged list's total, get {lo} items)"
+        );
+        if !out.contains(&msg) {
+            out.push(msg);
+        }
+    }
     let (min, max) = (count(s, "minLength", true), count(s, "maxLength", false));
     if let Some(min) = min.filter(|m| *m > MAX_MIN_LENGTH) {
         out.push(format!(
@@ -181,16 +192,44 @@ fn walk(s: &Value, at: &str, out: &mut Vec<String>, depth: usize) {
     }
 }
 
+/// **Private.** One line for a paged object response with several array properties: which one
+/// is paged and why (a list name, else the first in key order; `serde_json` sorts keys).
+fn paged_array_warning(e: &Endpoint, at: &str) -> Option<String> {
+    let spec = PageSpec::detect(e)?;
+    let Envelope::Object { items } = &spec.envelope else {
+        return None;
+    };
+    let arrays = array_props(e.schema.as_ref()?);
+    if arrays.len() < 2 {
+        return None;
+    }
+    let why = if arrays.first() == Some(items) {
+        "the first in key order"
+    } else {
+        "a list name wins over key order"
+    };
+    Some(format!(
+        "{at}: response has {} array properties; paging uses '{items}' ({why})",
+        arrays.len()
+    ))
+}
+
 impl ApiModel {
-    /// Ignored-keyword warnings for every endpoint's response schema.
+    /// Ignored-keyword warnings for every endpoint's response schema, and the paged array of a
+    /// response with several.
     pub fn warnings(&self) -> Vec<String> {
         self.endpoints
             .iter()
-            .filter_map(|e| {
+            .flat_map(|e| {
                 let at = format!("{} {}", e.method, e.path);
-                e.schema.as_ref().map(|s| unsupported_keywords(s, &at))
+                let mut out = e
+                    .schema
+                    .as_ref()
+                    .map(|s| unsupported_keywords(s, &at))
+                    .unwrap_or_default();
+                out.extend(paged_array_warning(e, &at));
+                out
             })
-            .flatten()
             .collect()
     }
 }

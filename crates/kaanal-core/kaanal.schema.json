@@ -281,6 +281,17 @@
           "default": {},
           "description": "Overrides for the UI states a pin can force, keyed `loading`, `empty`, `error` or\n`slow`: a `status`, a `body` and a `delay` each.",
           "type": "object"
+        },
+        "total": {
+          "default": null,
+          "description": "Records a paged list route reports in total, 0 to 10000 (default: seeded per route);\ncannot be combined with `override` or `collection`.",
+          "format": "uint32",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"

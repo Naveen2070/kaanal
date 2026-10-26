@@ -333,3 +333,201 @@ fn a_prefix_that_is_still_a_template_is_an_error() {
     let err = ApiModel::from_openapi(&with_servers(servers)).unwrap_err();
     assert!(err.contains("servers"), "{err}");
 }
+
+fn qp_spec(path_item: &str, op: &str) -> String {
+    format!(
+        r#"
+openapi: 3.0.3
+info: {{ title: t, version: "1" }}
+paths:
+  /items:
+{path_item}
+    get:
+{op}
+      responses:
+        "200": {{ description: ok }}
+components:
+  parameters:
+    Limit: {{ name: limit, in: query, schema: {{ type: integer, maximum: 50 }} }}
+"#
+    )
+}
+
+fn qp_names(src: &str) -> Vec<String> {
+    let m = ApiModel::from_openapi(src).unwrap();
+    m.endpoints[0]
+        .query_params
+        .iter()
+        .map(|p| p.name.clone())
+        .collect()
+}
+
+#[test]
+fn query_params_come_from_operation_and_path_item() {
+    let src = qp_spec(
+        "    parameters:\n      - { name: limit, in: query, schema: { type: integer, maximum: 5 } }",
+        "      parameters:\n        - { name: page, in: query, schema: { type: integer } }\n        - { name: limit, in: query, schema: { type: integer, maximum: 9 } }",
+    );
+    assert_eq!(qp_names(&src), ["limit", "page"]);
+    let m = ApiModel::from_openapi(&src).unwrap();
+    assert_eq!(
+        m.endpoints[0].query_params[0].maximum,
+        Some(9),
+        "operation wins"
+    );
+}
+
+#[test]
+fn query_params_follow_component_refs() {
+    let src = qp_spec(
+        "",
+        "      parameters:\n        - $ref: '#/components/parameters/Limit'",
+    );
+    let m = ApiModel::from_openapi(&src).unwrap();
+    assert_eq!(m.endpoints[0].query_params[0].name, "limit");
+    assert_eq!(m.endpoints[0].query_params[0].maximum, Some(50));
+}
+
+#[test]
+fn non_query_and_non_integer_params_are_skipped() {
+    let src = qp_spec(
+        "",
+        "      parameters:\n        - { name: h, in: header, schema: { type: integer } }\n        - { name: p, in: path, required: true, schema: { type: integer } }\n        - { name: s, in: query, schema: { type: string } }\n        - { name: n, in: query, schema: { type: number } }\n        - { name: o, in: query, schema: { type: object } }",
+    );
+    // header/path and non-primitive params are skipped; a string query param is kept
+    assert_eq!(qp_names(&src), ["s", "n"]);
+    let m = ApiModel::from_openapi(&src).unwrap();
+    let numeric: Vec<bool> = m.endpoints[0]
+        .query_params
+        .iter()
+        .map(|p| p.numeric)
+        .collect();
+    assert_eq!(numeric, [false, true]);
+}
+
+#[test]
+fn schema_ref_params_are_resolved() {
+    let src = format!(
+        "{}  schemas:\n    Size: {{ type: integer, maximum: 40, default: 7 }}\n",
+        qp_spec(
+            "",
+            "      parameters:\n        - { name: limit, in: query, schema: { $ref: '#/components/schemas/Size' } }",
+        )
+    );
+    let m = ApiModel::from_openapi(&src).unwrap();
+    let p = &m.endpoints[0].query_params[0];
+    assert_eq!(p.name, "limit");
+    assert!(p.numeric);
+    assert_eq!((p.maximum, p.default), (Some(40), Some(7)));
+}
+
+#[test]
+fn integer_bounds_are_read() {
+    let src = qp_spec(
+        "",
+        "      parameters:\n        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }",
+    );
+    let m = ApiModel::from_openapi(&src).unwrap();
+    let p = &m.endpoints[0].query_params[0];
+    assert_eq!(
+        (p.minimum, p.maximum, p.default),
+        (Some(1), Some(50), Some(10))
+    );
+}
+
+#[test]
+fn non_query_params_with_unresolvable_schema_refs_still_load() {
+    let src = qp_spec(
+        "",
+        "      parameters:\n        - { name: h, in: header, schema: { $ref: 'other.yaml#/X' } }\n        - { name: c, in: cookie, schema: { $ref: '#/components/schemas/Missing' } }\n        - { name: page, in: query, schema: { type: integer } }",
+    );
+    assert_eq!(qp_names(&src), ["page"]);
+}
+
+#[test]
+fn query_param_with_dangling_schema_ref_is_skipped() {
+    let src = qp_spec(
+        "",
+        "      parameters:\n        - { name: limit, in: query, schema: { $ref: '#/components/schemas/Missing' } }\n        - { name: x, in: query, schema: { $ref: 'other.yaml#/X' } }\n        - { name: page, in: query, schema: { type: integer } }",
+    );
+    assert_eq!(qp_names(&src), ["page"]);
+}
+
+#[test]
+fn unresolvable_parameter_entries_are_skipped_not_fatal() {
+    // An entry that is itself a `$ref` (external, or dangling) loaded before D3: skip it.
+    let bad = "        - $ref: 'other.yaml#/components/parameters/X'\n        - $ref: '#/components/parameters/Missing'";
+    let src = format!(
+        r#"
+openapi: 3.0.3
+info: {{ title: t, version: "1" }}
+paths:
+  /items:
+    post:
+      parameters:
+{bad}
+      responses:
+        "201": {{ description: ok }}
+    get:
+      parameters:
+{bad}
+        - {{ name: page, in: query, schema: {{ type: integer }} }}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {{ type: array, items: {{ type: string }} }}
+components:
+  parameters:
+    Limit: {{ name: limit, in: query, schema: {{ type: integer, maximum: 50 }} }}
+"#
+    );
+    let m = ApiModel::from_openapi(&src).unwrap();
+    let get = m.endpoints.iter().find(|e| e.method == "GET").unwrap();
+    let post = m.endpoints.iter().find(|e| e.method == "POST").unwrap();
+    assert_eq!(post.query_params, []);
+    let names: Vec<&str> = get.query_params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["page", "limit"]);
+    let spec = kaanal_data::PageSpec::detect(get).unwrap();
+    assert_eq!(spec.style, kaanal_data::Style::Page);
+    assert_eq!(spec.size_max, 50);
+}
+
+fn list_with(param: &str) -> kaanal_data::Endpoint {
+    let src = format!(
+        r#"
+openapi: 3.0.3
+info: {{ title: t, version: "1" }}
+paths:
+  /items:
+    get:
+      parameters:
+        - {param}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {{ type: array, items: {{ type: string }} }}
+"#
+    );
+    ApiModel::from_openapi(&src).unwrap().endpoints.remove(0)
+}
+
+#[test]
+fn date_after_param_is_not_a_cursor() {
+    for f in ["date", "date-time", "time"] {
+        let ep = list_with(&format!(
+            "{{ name: after, in: query, schema: {{ type: string, format: {f} }} }}"
+        ));
+        assert!(kaanal_data::PageSpec::detect(&ep).is_none(), "{f}");
+    }
+    // a plain string `after` is still a cursor
+    let ep = list_with("{ name: after, in: query, schema: { type: string } }");
+    assert_eq!(
+        kaanal_data::PageSpec::detect(&ep).unwrap().style,
+        kaanal_data::Style::Cursor
+    );
+}

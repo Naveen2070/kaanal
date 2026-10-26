@@ -63,7 +63,7 @@ An `allOf` is first merged into one schema (`merge_all_of`), then generated once
 
 - `MAX_DEPTH = 16`: pathological nesting returns `null` instead of recursing forever. Shared with `warn.rs`, which warns at startup when a schema nests deeper (R6.2). `oneOf` nesting counts too.
 - `MAX_RANDOM_ITEMS = 20`: `maxItems: 1000000` cannot build a huge array (`minItems` is still honoured).
-- `MAX_VALUES = 10_000`: values per body. Nested arrays multiply and `minItems` is honoured, so only a per-body budget bounds the size; past it, values are `null`. `const`, `additionalProperties` keys and `oneOf` branches each spend from the same budget.
+- `MAX_VALUES = 10_000`: values per body. Nested arrays multiply and `minItems` is honoured, so only a per-body budget bounds the size; past it, values are `null`. `const`, `additionalProperties` keys and `oneOf` branches each spend from the same budget. `value_bound(s, depth)` is the worst case `generate` can spend on `s` (the same walk with every array at its longest draw, the dearest `oneOf`/`anyOf` branch and three `additionalProperties` keys; capped at `MAX_VALUES`); paging divides `MAX_VALUES` by it to cap the records of one page (R1.62).
 - `MAX_MIN_LENGTH = 10_000`: longest string a `minLength` can ask for (R6.10d). A larger `minLength` is capped and `warn.rs` warns at startup.
 - Length limits are skipped only for formats the generator builds (`email`, `uuid`, `date-time`, `date`, `uri`, `url`, `ipv4`, `ipv6`, `hostname`, `byte`, `duration`); `password` is plain text and is fitted. Dictionary `pick`, `static` and `template` strings are never fitted either (R1.56).
 

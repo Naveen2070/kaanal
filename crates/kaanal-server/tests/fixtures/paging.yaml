@@ -1,0 +1,145 @@
+openapi: 3.0.3
+info: { title: Paging app, version: "1.0" }
+paths:
+  /items:
+    get:
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Item" } }
+  /shelves/{name}/items:
+    get:
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Items on a shelf
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Item" } }
+  /orders:
+    get:
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer, default: 10 } }
+      responses:
+        "200":
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total, page, pageSize, totalPages, hasMore]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Item" } }
+                  total: { type: integer }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  totalPages: { type: integer }
+                  hasMore: { type: boolean }
+  /feed:
+    get:
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Feed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+                  nextCursor: { type: string, nullable: true }
+  /rows:
+    # Its own HEAD declares no paging parameter, so HEAD /rows is not paged.
+    get:
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Rows
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Item" } }
+    head:
+      responses:
+        "200": { description: Rows }
+  /spring:
+    # Spring Data: a 0-based `page` (minimum 0) and `size`.
+    get:
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        "200":
+          description: Spring page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content: { type: array, items: { $ref: "#/components/schemas/Item" } }
+                  totalElements: { type: integer }
+                  totalPages: { type: integer }
+  /drf:
+    # Django REST framework: `next`/`previous` are page URLs.
+    get:
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: DRF page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  next: { type: string, format: uri, nullable: true }
+                  previous: { type: string, format: uri, nullable: true }
+                  results: { type: array, items: { $ref: "#/components/schemas/Item" } }
+  /shelves/{shelf}/stock:
+    get:
+      parameters:
+        - { name: shelf, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: A shelf's stock
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shelf: { type: string }
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+  /plain:
+    get:
+      responses:
+        "200":
+          description: Not paged
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Item" } }
+components:
+  schemas:
+    Item:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }

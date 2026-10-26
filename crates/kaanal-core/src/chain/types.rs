@@ -179,6 +179,8 @@ pub struct Endpoint {
     pub responder: Option<Responder>,
     /// The in-memory collection this route reads or writes; see [`collection_op`].
     pub collection: Option<String>,
+    /// Records a paged list route reports in total (0 to 10000); `None` = seeded by the route.
+    pub total: Option<u32>,
     /// **Private.** Where the `endpoints:` entry sits (path and file), if there is one.
     pub(super) entry: Option<(Vec<PathSeg>, Option<PathBuf>)>,
 }

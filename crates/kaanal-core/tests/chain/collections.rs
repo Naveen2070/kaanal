@@ -1,7 +1,7 @@
 //! Collection routes: operation shapes, names and the compiled entry.
 
 use crate::common::*;
-use kaanal_core::{CollectionOp, collection_op};
+use kaanal_core::{CollectionOp, Config, collection_op};
 
 #[test]
 fn collection_op_maps_the_four_shapes_and_rejects_the_rest() {
@@ -91,4 +91,61 @@ fn a_collection_entry_compiles_and_exposes_its_name() {
         Some("notes")
     );
     assert_eq!(eps.get("GET /users/{id}").unwrap().collection, None);
+}
+
+#[test]
+fn total_is_parsed_and_compiled() {
+    let src = format!(
+        "{BASE}  \"GET /x\": {{ total: 250 }}\n  \"GET /y\": {{ total: 0 }}\n  \"GET /z\": {{ total: 10000 }}\n"
+    );
+    let routes = [
+        ("GET /x", "app"),
+        ("GET /y", "app"),
+        ("GET /z", "app"),
+        ROUTES[0],
+    ];
+    let eps = build(&src, &routes).1.unwrap();
+    assert_eq!(eps.get("GET /x").unwrap().total, Some(250));
+    assert_eq!(eps.get("GET /y").unwrap().total, Some(0));
+    assert_eq!(eps.get("GET /z").unwrap().total, Some(10000));
+    assert_eq!(eps.get("GET /users/{id}").unwrap().total, None);
+}
+
+#[test]
+fn total_over_10000_is_a_positioned_error() {
+    for v in ["10001", "-1", "1.5", "abc"] {
+        let e = Config::from_yaml(&format!("{BASE}  \"GET /x\": {{ total: {v} }}\n")).unwrap_err();
+        assert_eq!((e.line, e.col), (Some(23), Some(22)), "{v}: {}", e.msg);
+        assert!(e.msg.contains("total must be 0 to 10000"), "{v}: {}", e.msg);
+    }
+}
+
+#[test]
+fn total_with_override_is_an_error() {
+    let e = err(&format!(
+        "{BASE}  \"GET /x\": {{ total: 5, override: {{ status: 200 }} }}\n"
+    ));
+    assert_eq!(
+        (e.line, e.col, e.msg.as_str()),
+        (
+            Some(23),
+            Some(3),
+            "endpoint 'GET /x': `total` cannot be combined with `override`"
+        )
+    );
+}
+
+#[test]
+fn total_with_collection_is_an_error() {
+    let e = err(&format!(
+        "{BASE}  \"GET /x\": {{ total: 5, collection: x }}\n"
+    ));
+    assert_eq!(
+        (e.line, e.col, e.msg.as_str()),
+        (
+            Some(23),
+            Some(3),
+            "endpoint 'GET /x': `total` cannot be combined with `collection`"
+        )
+    );
 }

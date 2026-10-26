@@ -210,3 +210,24 @@ fn schema_rejects_rates_the_loader_rejects() {
     );
     assert!(!v.is_valid(&doc("0")), "rps must be above 0");
 }
+
+#[test]
+fn total_appears_in_the_json_schema() {
+    let s = config_schema();
+    let t = &s["$defs"]["EndpointConfig"]["properties"]["total"];
+    assert_eq!(
+        (&t["minimum"], &t["maximum"]),
+        (&0.into(), &10000.into()),
+        "{t}"
+    );
+    let v = jsonschema::validator_for(&s).unwrap();
+    let doc = |n: &str| -> Value {
+        serde_yaml_ng::from_str(&format!(
+            "version: 1\nnodes: {{}}\nendpoints:\n  \"GET /x\": {{ total: {n} }}\n"
+        ))
+        .unwrap()
+    };
+    assert!(v.is_valid(&doc("250")));
+    assert!(!v.is_valid(&doc("10001")));
+    assert!(!v.is_valid(&doc("-1")));
+}

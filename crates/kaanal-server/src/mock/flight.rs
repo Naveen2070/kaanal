@@ -2,9 +2,10 @@
 
 use super::{
     Answer, AppState, Arc, Ask, BusEvent, ChainResult, Duration, EffectiveChaos, Endpoint, Facts,
-    Finished, HeaderValue, Instant, IntoResponse, Json, LogEntry, Outcome, Plan, Read, Reply,
-    Request, Responder, Response, Route, Run, StatusCode, SystemTime, TraceParts, UNIX_EPOCH,
-    Value, chaos_reply, header, json, log, no_store, pinned_reply, record, scope, touched_nodes,
+    Finished, HeaderValue, Instant, IntoResponse, Json, LogEntry, Outcome, PinState, Plan, Read,
+    Reply, Request, Responder, Response, Route, Run, StatusCode, SystemTime, TraceParts,
+    UNIX_EPOCH, Value, chaos_reply, header, json, log, no_store, pinned_reply, record, scope,
+    touched_nodes,
 };
 
 /// **Private.** A mock request in flight. If the handler future is dropped (the client went away)
@@ -64,6 +65,7 @@ pub(super) struct Served<'a> {
     pub(super) method: &'a str,
     pub(super) path: &'a str,
     pub(super) params: &'a [(String, String)],
+    pub(super) query: &'a [(String, String)],
     pub(super) scope: Option<&'a str>,
     pub(super) chaos: &'a EffectiveChaos,
     pub(super) plan: &'a Plan,
@@ -79,6 +81,7 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
         method,
         path,
         params,
+        query,
         scope,
         chaos,
         plan,
@@ -93,6 +96,7 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
         method,
         path,
         params,
+        query,
     };
     // P2: a pin wins over whatever the chain did; the chain still ran (its hops and delay are real).
     let Reply {
@@ -106,7 +110,16 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
         None => chaos_reply(st, route, &fin.result, &ask, read, &header),
     };
 
+    // D3: only a normal success of a paged route carries `X-Total-Count` and `Link`; a failure,
+    // a wire break, a pinned `empty` or `error` and the 400 of a bad query do not.
+    let paged = failed.is_none()
+        && wire.is_none()
+        && status == route.status
+        && pin.is_none_or(|o| !matches!(o.state, PinState::Empty | PinState::Error));
     let mut resp = wire.unwrap_or_else(|| response(status, body, &header, retry));
+    if paged {
+        super::paging::add_headers(st, route, &ask, &mut resp);
+    }
     if ep.responder == Some(Responder::Login) {
         no_store(&mut resp);
     }

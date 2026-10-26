@@ -20,7 +20,7 @@ use kaanal_core::{
 };
 
 use crate::scenarios;
-use kaanal_data::{ApiModel, DEFAULT_LOCALE, DataError, DataSet, Options};
+use kaanal_data::{ApiModel, DEFAULT_LOCALE, DataError, DataSet, Options, PageSpec};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -39,6 +39,12 @@ pub struct Route {
     pub schema: Option<Value>,
     /// Requests seen so far; becomes `ChainRequest.n`.
     pub counter: Arc<AtomicU64>,
+    /// D3: the paging contract of a generated list route; `None` for every other route
+    /// (unpaged, `override`, `collection:` or a built-in responder), which answers as before.
+    pub paging: Option<Arc<PageSpec>>,
+    /// D3: the `total:` of the route's entry; a `HEAD` that follows its `GET` and sets none takes
+    /// the `GET`'s. `None` = seeded by the route.
+    pub total: Option<u32>,
 }
 
 /// One finished request, broadcast to `/__kaanal/events` subscribers.
@@ -227,10 +233,11 @@ fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), S
 }
 
 /// **Private.** What the spec files define: one [`RouteSpec`] per route, plus its success
-/// status and response schema by key.
+/// status and response schema by key, and the paging contract of the paged ones.
 struct Specs {
     routes: Vec<RouteSpec>,
     info: BTreeMap<String, (u16, Option<Value>)>,
+    paging: BTreeMap<String, Arc<PageSpec>>,
 }
 
 /// The topology and its spec routes, read exactly as [`AppState::build`] reads them.
@@ -256,6 +263,7 @@ fn load_specs(
     let mut specs = Specs {
         routes: Vec::new(),
         info: BTreeMap::new(),
+        paging: BTreeMap::new(),
     };
     let mut owners: BTreeMap<String, NodeId> = BTreeMap::new();
     for (id, node) in topo.nodes.iter().enumerate() {
@@ -293,6 +301,9 @@ fn load_specs(
             }
             owners.insert(key.clone(), id);
             specs.routes.push(RouteSpec::inferred(&key, id));
+            if let Some(p) = PageSpec::detect(&ep) {
+                specs.paging.insert(key.clone(), Arc::new(p));
+            }
             specs.info.insert(key, (ep.status, ep.schema));
         }
     }
@@ -546,6 +557,32 @@ impl AppState {
                 }
             });
             let (status, schema) = spec.cloned().unwrap_or((200, None));
+            // A HEAD takes its GET's paging only when the spec has no HEAD entry of its own (a
+            // declared HEAD is paged by its own parameters, which `detect` never pages); a route
+            // that does not generate its body is never paged.
+            let generated =
+                ep.response.is_none() && ep.collection.is_none() && ep.responder.is_none();
+            let get = format!("GET {path}");
+            let follows_get = method == "HEAD" && !specs.info.contains_key(&ep.key);
+            let paging = specs
+                .paging
+                .get(&ep.key)
+                .or_else(|| specs.paging.get(&get).filter(|_| follows_get))
+                .filter(|_| generated)
+                .cloned();
+            // Such a HEAD with an entry of its own but no `total:` reports its GET's total.
+            let total = ep.total.or_else(|| {
+                endpoints
+                    .get(&get)
+                    .filter(|_| follows_get)
+                    .and_then(|g| g.total)
+            });
+            if ep.total.is_some() && paging.is_none() && !ep.synthesized {
+                warnings.push(format!(
+                    "endpoint '{}': `total` has no effect: the route is not paged (no paging query parameter, or no list in its response, or the route does not generate its body: override, collection or built-in responder)",
+                    ep.key
+                ));
+            }
             let counter = Arc::new(AtomicU64::new(0));
             counters.push(Arc::clone(&counter));
             by_path.entry(path.to_string()).or_default().push(Route {
@@ -555,6 +592,8 @@ impl AppState {
                 status,
                 schema,
                 counter,
+                paging,
+                total,
             });
         }
         let route_keys: Vec<String> = endpoints

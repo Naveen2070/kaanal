@@ -35,6 +35,46 @@ pub struct EndpointConfig {
     /// Name of an in-memory collection this route reads or writes (`GET /x` lists, `GET /x/{id}`
     /// gets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`.
     pub collection: Option<String>,
+    /// Records a paged list route reports in total, 0 to 10000 (default: seeded per route);
+    /// cannot be combined with `override` or `collection`.
+    #[serde(default, deserialize_with = "total")]
+    #[schemars(extend("minimum" = 0, "maximum" = 10000))]
+    pub total: Option<u32>,
+}
+
+/// **Private.** `total:` is an integer 0 to 10000; anything else gets one message.
+fn total<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    /// **Private.** Accepts only integers in range.
+    struct V;
+    const MSG: &str = "total must be 0 to 10000";
+    impl Visitor<'_> for V {
+        type Value = Option<u32>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(MSG)
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            u32::try_from(v)
+                .ok()
+                .filter(|v| *v <= 10_000)
+                .map(Some)
+                .ok_or_else(|| E::custom(MSG))
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            u64::try_from(v)
+                .map_err(|_| E::custom(MSG))
+                .and_then(|v| self.visit_u64(v))
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Err(E::custom(MSG))
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Err(E::custom(MSG))
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+    }
+    d.deserialize_any(V)
 }
 
 /// An `error_map` value: the status to answer with and an optional body.

@@ -21,6 +21,8 @@ pub(super) struct Ask<'a> {
     pub(super) method: &'a str,
     pub(super) path: &'a str,
     pub(super) params: &'a [(String, String)],
+    /// The decoded query pairs (D3 paging reads them).
+    pub(super) query: &'a [(String, String)],
 }
 
 /// **Private.** The reply of a request with no pin: the chain's verdict decides. Only `Ok` applies
@@ -180,19 +182,21 @@ pub(super) fn default_error_body(node: &str, kind: FailKind) -> Value {
     }
 }
 
-/// **Private.** What a route answers when nothing fails: the `override`, else the generated body.
-pub(super) fn success(
-    st: &AppState,
-    route: &Route,
-    path: &str,
-    params: &[(String, String)],
-) -> (u16, Value) {
+/// **Private.** What a route answers when nothing fails: the `override`, else the generated body
+/// (one page of it, or a 400 for a bad paging parameter, on a paged route).
+pub(super) fn success(st: &AppState, route: &Route, ask: &Ask) -> (u16, Value) {
     let ep = &route.endpoint;
     if let Some(ov) = &ep.response {
         return (ov.status, ov.body.clone());
     }
     let owner = ep.owner.map_or("", |id| st.topo.nodes[id].name.as_str());
-    (route.status, generated_body(st, route, owner, path, params))
+    if let Some(spec) = &route.paging {
+        return super::paging::page(st, route, spec, owner, ask);
+    }
+    (
+        route.status,
+        generated_body(st, route, owner, ask.path, ask.params),
+    )
 }
 
 /// **Private.** What the route answers when nothing fails: its collection operation (applied here
@@ -205,7 +209,7 @@ pub(super) fn answer(st: &AppState, route: &Route, ask: &Ask, (login, coll): Rea
     let ep = &route.endpoint;
     match ep.responder.filter(|_| ep.response.is_none()) {
         Some(r) => auth::respond(r, st.auth.as_ref(), login),
-        None => success(st, route, ask.path, ask.params),
+        None => success(st, route, ask),
     }
 }
 
@@ -332,7 +336,9 @@ pub(super) fn with_cors(mut r: Response) -> Response {
     );
     h.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("x-kaanal-trace, x-kaanal-scope, x-request-id, retry-after"),
+        HeaderValue::from_static(
+            "x-kaanal-trace, x-kaanal-scope, x-request-id, retry-after, x-total-count, link",
+        ),
     );
     r
 }
