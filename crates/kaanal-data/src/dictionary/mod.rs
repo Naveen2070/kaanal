@@ -159,7 +159,27 @@ impl Dictionary {
     }
 
     /// **Private.** The entry for `field`: an exact key, else the longest whole-word suffix key.
+    /// A short ASCII name (nearly all of them) is matched on the stack without allocating:
+    /// this runs for every field of every generated body.
     pub(crate) fn lookup(&self, field: &str) -> Option<&[Gen]> {
+        let mut buf = [0u8; STACK_NAME];
+        let mut starts = [0u8; STACK_NAME];
+        let Some((len, nwords)) = split_ascii(field, &mut buf, &mut starts) else {
+            return self.lookup_alloc(field);
+        };
+        // `buf` holds lower-case ASCII only
+        let key = |from: usize| std::str::from_utf8(&buf[from..len]).unwrap_or("");
+        if let Some(g) = self.exact.get(key(0)) {
+            return Some(g);
+        }
+        (1..=nwords)
+            .rev()
+            .find_map(|k| self.suffix.get(key(usize::from(starts[nwords - k]))))
+            .map(Vec::as_slice)
+    }
+
+    /// **Private.** [`Dictionary::lookup`] for a name the stack path cannot take (non-ASCII or long).
+    fn lookup_alloc(&self, field: &str) -> Option<&[Gen]> {
         if let Some(g) = self.exact.get(&norm(field)) {
             return Some(g);
         }
@@ -168,5 +188,87 @@ impl Dictionary {
             .rev()
             .find_map(|k| self.suffix.get(&w[w.len() - k..].concat()))
             .map(Vec::as_slice)
+    }
+}
+
+/// **Private.** The longest field name [`split_ascii`] takes.
+const STACK_NAME: usize = 64;
+
+/// **Private.** [`norm`] and [`words`] in one pass for an ASCII `field` of at most `STACK_NAME`
+/// bytes: the normalised name goes into `buf`, the offset in `buf` where each word starts into
+/// `starts`; returns `(length, word count)`. `None` when the name does not qualify. The splitting
+/// rule is `words`' (checked against it in the tests).
+fn split_ascii(
+    field: &str,
+    buf: &mut [u8; STACK_NAME],
+    starts: &mut [u8; STACK_NAME],
+) -> Option<(usize, usize)> {
+    let b = field.as_bytes();
+    if !field.is_ascii() || b.len() > STACK_NAME {
+        return None;
+    }
+    let (mut len, mut nwords, mut in_word) = (0usize, 0usize, false);
+    for (i, &c) in b.iter().enumerate() {
+        if c == b'_' || c == b'-' {
+            in_word = false;
+            continue;
+        }
+        if c.is_ascii_uppercase() && in_word {
+            let prev = b[i - 1];
+            let next_lower = b.get(i + 1).is_some_and(u8::is_ascii_lowercase);
+            if prev.is_ascii_lowercase()
+                || prev.is_ascii_digit()
+                || (prev.is_ascii_uppercase() && next_lower)
+            {
+                in_word = false;
+            }
+        }
+        if !in_word {
+            starts[nwords] = u8::try_from(len).unwrap_or(0);
+            nwords += 1;
+            in_word = true;
+        }
+        buf[len] = c.to_ascii_lowercase();
+        len += 1;
+    }
+    Some((len, nwords))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Dictionary;
+
+    /// The stack path and the allocating path agree on every kind of name.
+    #[test]
+    fn stack_lookup_matches_the_allocating_one() {
+        let d = Dictionary::builtin();
+        for name in [
+            "id",
+            "ID",
+            "userId",
+            "user_id",
+            "user-id",
+            "IDCard",
+            "lastOrderID",
+            "createdAt",
+            "created_at",
+            "photoUrls",
+            "firstName",
+            "FIRST_NAME",
+            "__x__",
+            "a1B",
+            "v2Url",
+            "",
+            "-",
+            "zzzUnknownField",
+            "HTTPServerURL",
+            "naïveName",
+        ] {
+            assert_eq!(
+                d.lookup(name).map(<[_]>::len),
+                d.lookup_alloc(name).map(<[_]>::len),
+                "{name}"
+            );
+        }
     }
 }

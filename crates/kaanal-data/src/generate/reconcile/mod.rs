@@ -14,7 +14,7 @@ mod time;
 use serde_json::{Map, Value};
 
 use crate::dataset::Options;
-use crate::dictionary::{Gen, norm, value_fits};
+use crate::dictionary::{Gen, value_fits};
 use crate::generate::pattern::cached;
 use crate::generate::{count, multiple, scalar_type};
 
@@ -26,14 +26,21 @@ pub(crate) fn reconcile(obj: &mut Map<String, Value>, schema: &Value, seed: u64,
     };
     // One pass decides which rules can apply at all, so an object that names none of the fields
     // they look for (the common case) costs one normalised name per key and nothing more.
-    let (mut chain, mut age, mut dob) = (false, false, false);
+    // a chain needs two members, so one chain-named key cannot start a rule
+    let (mut chain_names, mut age, mut dob) = (0usize, false, false);
+    let mut n = String::new();
     for k in obj.keys() {
-        let n = norm(k);
-        chain |= time::is_chain_name(&n, opts);
+        n.clear();
+        n.extend(
+            k.chars()
+                .filter(|c| *c != '_' && *c != '-')
+                .flat_map(char::to_lowercase),
+        );
+        chain_names += usize::from(time::is_chain_name(&n, opts));
         age |= n == "age";
         dob |= person::is_dob_name(&n);
     }
-    if chain {
+    if chain_names >= 2 {
         time::chains(obj, props, seed, opts);
     }
     if age && dob {
