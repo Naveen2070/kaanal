@@ -136,6 +136,7 @@ impl Compiler<'_> {
                     net,
                     body: Arc::clone(&body),
                     op: None,
+                    prob: 1.0,
                     key,
                 }));
                 Arc::new(Seq::new(steps))

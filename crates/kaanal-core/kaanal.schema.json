@@ -213,6 +213,17 @@
           ],
           "description": "Network latency on this edge; absent means zero."
         },
+        "prob": {
+          "default": null,
+          "description": "Share of requests that take this edge, above 0 and at most 1 (default 1). The default for\nevery `call:` step over this edge; a step's own `prob` wins. Not for caches (they keep\ntheir hit ratio) or edges out of a gateway.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "maximum": 1,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "to": {
           "description": "Name of the node it calls.",
           "type": "string"
@@ -1257,6 +1268,12 @@
                 "scan"
               ],
               "type": "string"
+            },
+            "prob": {
+              "description": "Share of requests that take this call; default is the edge's `prob`. One draw covers every `repeat`.",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "type": "number"
             },
             "repeat": {
               "description": "Sequential calls; default is the edge's `calls`.",

@@ -1,5 +1,7 @@
 //! `Compiler` methods that compile one step: `call`, `cache`, `parallel`, `repeat`.
 
+use crate::config::prob_ok;
+
 use super::{
     Arc, CacheStep, Call, CallStep, Compiler, Edge, Keys, Located, MAX_BRANCHES, MAX_NESTING,
     MAX_REPEAT, MAX_STEPS, NodeId, NodeKind, Place, Seq, Step, StepConfig, normalize,
@@ -120,7 +122,7 @@ impl Compiler<'_> {
             return Err(target.bad(format!("'{name}' is a cache; use `cache: {name}`")));
         }
         let edge = self.edge(runner, to, &target)?;
-        let (net, calls) = (edge.net.clone(), edge.calls.get());
+        let (net, calls, edge_prob) = (edge.net.clone(), edge.calls.get(), edge.prob);
         let bodies = usize::from(c.chain.is_some())
             + usize::from(c.with.is_some())
             + usize::from(c.via.is_some());
@@ -153,6 +155,7 @@ impl Compiler<'_> {
                 )));
             }
         };
+        let prob = step_prob(c.prob, edge_prob, at)?;
         let (body, op) = if let Some(steps) = &c.chain {
             let mut s = self.prefix(to);
             let mut k = Keys::new(self.topo.nodes.len());
@@ -199,7 +202,19 @@ impl Compiler<'_> {
             net,
             body,
             op,
+            prob,
             key: keys.next(to),
         })
+    }
+}
+
+/// **Private.** A call's `prob`: its own, else the edge's; the step's own must be above 0, at most 1.
+fn step_prob(own: Option<f64>, edge: f64, at: &Place) -> Result<f64, Located> {
+    match own {
+        None => Ok(edge),
+        Some(p) if prob_ok(p) => Ok(p),
+        Some(p) => Err(at
+            .key("prob")
+            .bad(format!("prob must be above 0 and at most 1 (got {p})"))),
     }
 }

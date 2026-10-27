@@ -137,7 +137,7 @@ login:
 
 ## Edges: who may call whom
 
-An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). No cycles, no self edges, no duplicate edges.
+An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). `prob` (above 0, at most 1, default 1) is the share of requests that take the edge; see [Endpoints](endpoints.md#steps). No cycles, no self edges, no duplicate edges.
 
 | From                                | May call                                                           |
 | ----------------------------------- | ------------------------------------------------------------------ |

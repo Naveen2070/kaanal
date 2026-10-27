@@ -54,6 +54,12 @@ pub struct EdgeConfig {
     /// chains land.
     #[serde(default = "default_calls")]
     pub calls: NonZeroU32,
+    /// Share of requests that take this edge, above 0 and at most 1 (default 1). The default for
+    /// every `call:` step over this edge; a step's own `prob` wins. Not for caches (they keep
+    /// their hit ratio) or edges out of a gateway.
+    #[serde(default)]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 1))]
+    pub prob: Option<f64>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

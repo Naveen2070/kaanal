@@ -61,6 +61,13 @@ One test target (`cargo test -p kaanal-core --test config`), one module per topi
 | `node_locale_and_project_locale_parse_and_default`           | Top-level `locale:` and `data:` and a per-node `locale:` parse (every node kind); an absent one is `None` (the server applies `en-IN`); the topology node carries it.                                                      |
 | `locale_tags_must_match_the_pattern_before_any_path_use`     | `valid_locale_tag` accepts `en`, `en-IN`, `zh-Hant-TW`, `gsw-CH` and rejects `../../x`, `a/b`, `en_IN`, the empty tag and a trailing or leading hyphen (D1.4).                                                             |
 | `a_bad_locale_tag_is_an_error_at_its_value`                  | A bad project or node `locale:` fails at the value's line and column, naming the node when it is one.                                                                                                                      |
+| `prob_parses_on_a_step_and_an_edge` | (`prob.rs`) `prob: 0.5` on an edge and `{ call: db, prob: 0.2 }` on a step parse into `EdgeConfig::prob` and `CallStep::prob`. |
+| `an_edge_without_prob_has_none` | An edge with no `prob` reads as `None` (1.0 once built). |
+| `prob_must_be_in_0_exclusive_to_1` | `0`, `-0.5`, `1.5` and `.nan` fail at the value's line; `1` loads. |
+| `prob_on_an_edge_to_a_cache_is_rejected` | The message says a cache keeps its own hit ratio. |
+| `prob_on_a_gateway_edge_is_rejected` | The message says the gateway routes by endpoint. |
+| `a_cache_step_rejects_prob` | `{ cache: c, prob: 0.5 }` fails: a cache step takes no other fields. |
+
 
 ## `crates/kaanal-core/tests/diagnostics.rs` — error positions
 
@@ -92,6 +99,7 @@ One test target (`cargo test -p kaanal-core --test config`), one module per topi
 | `schema_describes_endpoints_and_steps`        | `routes` is gone; `endpoints`, `determinism`, `Step` and service `chains` exist; sample endpoints (inline and file path) validate.      |
 | `schema_describes_auth_claims_and_scopes`     | Auth `claims` is an object of string/number/boolean values; `UserConfig` has `scopes` and `claims`; a sample with them validates.       |
 | `schema_rejects_rates_the_loader_rejects`     | The published schema accepts `rate_limit.rps` of 1000000000 and rejects 2000000000 and 0, matching the loader.                          |
+| `schema_bounds_prob_like_the_loader` | The schema accepts `prob` of 0.5 and 1 and rejects 0 and above 1, on an edge and on a `call:` step, matching the loader. |
 
 ## `crates/kaanal-core/tests/presets.rs` — flavor presets
 
@@ -158,6 +166,7 @@ One test target (`cargo test -p kaanal-core --test replay`), one module per topi
 | `services_may_call_services`                              | `service → service` is allowed (R1.24); the caller has two out-edges.                                                                                           |
 | `errors_display_human_text`                               | Error `Display` is human prose (`cycle: a -> b -> a`).                                                                                                          |
 | `rejects_duplicate_edge`                                  | The same from→to pair twice is `DuplicateEdge` with its edge number.                                                                                            |
+| `a_code_built_config_with_a_bad_edge_prob_is_rejected` | An edge `prob` of NaN, 0, -1, 2 or infinity set on a `Config` built in code is `BadProb` at that edge (the loader check does not run for it). |
 | `rejects_edges_the_executor_would_ignore`                 | `gateway → database` is `ForbiddenEdge` naming the caller.                                                                                                      |
 | `a_long_chain_of_services_does_not_overflow_the_stack`    | R6.12: 20 000 services in a line load and closing the chain reports a 20 001-name cycle, on a 256 KiB thread stack (a recursive check would overflow it).       |
 | `cycle_path_starts_at_the_loop_not_the_dfs_root`          | `x → y → z → y` reports `y -> z -> y`, not a path from the DFS root.                                                                                            |
@@ -185,6 +194,7 @@ One test target (`cargo test -p kaanal-core --test exec`), one module per topic 
 | `endpoint.rs`  | Endpoint and node-at-endpoint chaos, cache timeouts.   |
 | `deadlines.rs` | Ties, earliest deadline, parallel branches, repeats.   |
 | `layers.rs`    | Stacked layers and banded failures.                    |
+| `prob.rs`       | Branch probability: one draw per step, skipped calls leave nothing. |
 
 | Test                                                                  | What it proves                                                                                                                                                                                                                                         |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -227,6 +237,28 @@ One test target (`cargo test -p kaanal-core --test exec`), one module per topic 
 | `a_banded_mix_fails_with_each_kind_at_its_share`                      | Through `execute`: 30% `reset` (502) over 30% 503 over 2000 requests gives about 30% resets and 21% 503s, nothing else (S8).                                                                                                                           |
 | `a_stack_is_deterministic_and_a_single_layer_ignores_the_stack`       | The same two-layer stack compiled twice gives identical outcomes for 500 requests; for each failure kind a 50% layer alone and the same layer wrapped in empty layers give identical outcomes request by request, and between 150 and 350 of 500 fail. |
 | `stacked_latency_adds_up_and_clamps`                                  | 10 s + 20 s of stacked node latency is 30 s; 200 s + 200 s clamps to `MAX_LATENCY_ADD` (S9).                                                                                                                                                           |
+| `prob_one_changes_no_plan` | (`prob.rs`) `prob: 1` on a step and on the edge plans exactly as no `prob`, for 200 requests: no draw is made. |
+| `prob_half_takes_about_half` | `prob: 0.5` takes the call in 45 to 55% of 4000 requests. |
+| `an_edge_prob_is_the_default_and_a_step_prob_wins` | An edge `prob` of 0.25 is the default of a call over it (20 to 30%); a step's `prob: 1` overrides it (always taken). |
+| `one_draw_covers_all_repeats` | `repeat: 3, prob: 0.5` gives 0 or 3 network hops to the callee, never 1 or 2. |
+| `a_skipped_call_leaves_nothing_and_shifts_no_other_draw` | When the first of two calls to `db` is skipped there is one `db` span and the surviving call's durations equal the same request with `prob: 1` (occurrences do not shift); when it is taken the plan equals the `prob: 1` plan. |
+| `a_prob_call_in_a_parallel_branch_keeps_the_plan_consistent` | A skipped call inside a `parallel` branch leaves the `Fork` and `Branch` sizes consistent with the items, and over 300 requests the branch is both skipped (one database call) and taken (two). |
+
+
+## `crates/kaanal-core/tests/visits.rs` — expected visits per node
+
+| Test | What it proves |
+| ---- | -------------- |
+| `a_plain_chain_counts_one_per_call` | Gateway, service and database each 1; an unused cache 0. |
+| `calls_3_and_prob_multiply` | An edge with `calls: 3, prob: 0.5` gives the database 1.5 visits. |
+| `a_cache_hit_scales_later_steps` | A cache with hit ratio 0.8 is visited once and the database after it 0.2. |
+| `repeated_lookups_stop_at_the_first_hit` | Two lookups visit the cache 1.2 times and let 0.04 through. |
+| `default_cache_lookups_skip_writes` | The default chain's cache lookup counts for a `GET` and not for a `POST`; the database sees 0.2 and 1. |
+| `parallel_branches_add` | Two database calls in one `parallel` block count 2. |
+| `a_hit_in_one_branch_does_not_scale_the_other_or_what_follows` | A hit inside one branch scales only that branch (0.2 + 1 + 1 = 2.2). |
+| `the_entry_node_counts_once_without_a_gateway` | With no gateway the owning service is the entry node: 1. |
+| `an_auth_node_validating_locally_is_visited_inline` | With no gateway-to-auth edge, `POST /login` visits the gateway and the auth node once each (the auth `proc` sits inline in the gateway's sequence). |
+| `an_auth_request_edge_visits_the_auth_node_once` | With the edge, auth is visited once by `POST /login` and once by an ordinary route. |
 
 ## `crates/kaanal-core/tests/semantics.rs` — the A2 decisions as timelines
 
@@ -300,6 +332,10 @@ One test target (`cargo test -p kaanal-core --test chain`), one module per topic
 | `error_map_resolves_node_then_kind_then_status_then_class`        | `resolve_error` order is node, kind (`reset`, `malformed`, `timeout`), exact status, class (Z8); a reset or malformed with no matching key answers 502, a timeout 504.                                                  |
 | `error_map_accepts_the_kind_keys`                                 | `reset`, `malformed` and `timeout` (any case) are valid `error_map` keys at load.                                                                                                                                       |
 | `wire_nodes_are_the_gateway_and_the_owner`                        | `Endpoint::is_wire_node` is true for the gateway and the owner only; `entry_node` is the gateway, else the owner.                                                                                                       |
+| `an_edge_prob_is_the_default_call_prob` | (`prob.rs`) An edge `prob` becomes `Call::prob` of the default-chain call over it. |
+| `no_prob_means_one` | Without a `prob` the compiled call has 1.0. |
+| `a_step_prob_overrides_the_edge` | A step's own `prob` wins over the edge's. |
+| `a_step_prob_out_of_range_is_a_positioned_error` | A step `prob` of 0, 1.2 or -1 fails at the step (line 23) with `prob must be above 0`. |
 
 ## `crates/kaanal-core/tests/chaos.rs` — layers, compile and banding
 
@@ -917,6 +953,7 @@ _Control API & security:_
 | `unknown_node_is_404_with_message`                             | Chaos on `redis` → 404 `unknown node 'redis'`.                                                                                                                                                               |
 | `bad_chaos_values_are_4xx_with_json_errors`                    | rate 1.5, status 418, latency 300 001 ms, negative latency, unknown keys — all 4xx with a JSON `error` field; range errors are exactly 400; a rejected patch stores nothing; exactly 300 000 ms is accepted. |
 | `topology_lists_nodes_edges_routes`                            | `/topology` returns the fixture's nodes, edges and the 4 sorted route keys.                                                                                                                                  |
+| `topology_reports_expected_visits_per_endpoint` | `/topology` lists `endpoints[].visits`: with `calls: 3, prob: 0.5` on app to db, `GET /users/{id}` shows nginx 1, app 1, db 1.5; HEAD copies are not listed. |
 | `events_stream_reports_requests`                               | SSE: a request to `/users/7` appears as `event: request` with the ordered node list `["nginx","app","db"]`, measured `ms` ≥ 5 and `endpoint` `GET /users/{id}` (the route template, not the URL).            |
 | `events_without_token_is_401`                                  | SSE needs the token too.                                                                                                                                                                                     |
 
@@ -1957,7 +1994,7 @@ One test target (`cargo test -p kaanal-sim --test sim`), one module per topic in
 
 | Test                                                            | What it pins                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `zero_load_equals_live_exactly`                                 | Fixture, sample, a gateway-less topology and the `CHAINS` config (every step type), with and without 50% errors on `db`/`pay`/`c`: hops, latency and result equal `execute()` for the same `n`; no waits; failures inside `parallel` occur (> 100 cut).                                                                                                                                                                          |
+| `zero_load_equals_live_exactly`                                 | Fixture, sample, a gateway-less topology, the `CHAINS` config (every step type) and a `prob` config (edge defaults, a step override, a call inside `parallel`), with and without 50% errors on `db`/`pay`/`c`: hops, latency and result equal `execute()` for the same `n`; no waits; failures inside `parallel` occur (> 100 cut).                                                                                                                                                                          |
 | `engine_matches_lindley_recursion`                              | Single-slot M/M/1 at ρ = 0.8: every wait equals Lindley's recursion exactly, in ns; more than 1 000 requests queued.                                                                                                                                                                                                                                                                                                             |
 | `simultaneous_events_keep_fifo_order`                           | 1e6 req/s with an 800 ns service: hundreds of arrivals tie at the same nanosecond, yet every wait still equals the Lindley recursion (FIFO under ties).                                                                                                                                                                                                                                                                          |
 | `hand_edited_absurd_service_time_is_rejected_not_a_panic`       | A built `Topology` edited to a `Duration::MAX` service time (or exponential mean) returns `Err` naming the node and "10h", not a panic (the same guard catches a YAML `p50` above `p99`, which core turns into an uncapped fixed `p50`).                                                                                                                                                                                         |
@@ -1991,6 +2028,7 @@ One test target (`cargo test -p kaanal-sim --test sim`), one module per topic in
 | `zero_load_equals_execute_for_a_deadline_in_a_parallel_branch`  | Same guard for a deadline inside a `parallel` branch (cut siblings).                                                                                                                                                                                                                                                                                                                                                             |
 | `zero_load_equals_execute_for_endpoint_chaos`                   | Same guard for endpoint-wide chaos (`Delay` hop, offset-0 failure).                                                                                                                                                                                                                                                                                                                                                              |
 | `zero_load_equals_execute_for_a_scenario_stack`                 | R7.5 drift guard for B2b-1: two stacked scenarios plus a live +3 ms layer compiled once, at 1 req/s: each of the four kinds (status, reset, hang as timeout, malformed) fires and matches `execute`; a banded 30% 503 / 30% reset yields both kinds; a node@endpoint entry, an endpoint entry with latency, and a live `replace` that calms db (no errors at all) all equal `execute` record for record through `run_effective`. |
+| `visits_match_sim_completed_counts` | (`visits.rs`) 200 000 simulated requests over a chain with a cache, `repeat`, `prob` and a `parallel` block: each node's completed hops per request match `expected_visits` within 5%. |
 
 `tests/common/mod.rs` holds the `CHAINS` config, its `CHAIN_ROUTES` and `compiled(yaml, routes)`, shared by `sim.rs` and `distribution.rs`.
 

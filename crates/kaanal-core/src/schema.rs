@@ -117,6 +117,7 @@ impl JsonSchema for StepConfig {
                         "call": { "type": "string", "description": "Node to call; an edge from the running node to it must exist." },
                         "op": { "type": "string", "enum": ["read", "write", "scan"], "description": "Op for this step (database or monolith with inline ops)." },
                         "repeat": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Sequential calls; default is the edge's `calls`." },
+                        "prob": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "Share of requests that take this call; default is the edge's `prob`. One draw covers every `repeat`." },
                         "chain": { "type": "array", "items": step, "description": "Inline body for a service or monolith callee." },
                         "with": { "type": "string", "description": "A named chain of the callee (its `chains:`)." },
                         "via": { "type": "string", "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op." }

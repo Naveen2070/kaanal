@@ -437,6 +437,17 @@ fn step_path(parent: u64, target: &str, occ: u32, rep: u32) -> u64 {
     ])
 }
 
+/// **Private.** Whether a request takes a `call` step with branch probability `prob`: always
+/// when `prob` is 1 (no draw, so the plan is as before `prob` existed), else a Bernoulli draw
+/// from the step's own stream under the new tag `prob`, so no existing draw moves.
+fn takes_branch(prob: f64, path: u64, target: &str, occ: u32) -> bool {
+    if prob >= 1.0 {
+        return true;
+    }
+    let roll: f64 = draw_rng(step_path(path, target, occ, 0), target, b"prob").random();
+    roll < prob
+}
+
 /// **Private.** How a sequence ended.
 enum Flow {
     /// It ran to its end at this offset.
@@ -477,6 +488,10 @@ impl Walk<'_> {
                 }
                 Step::Call(call) => {
                     let target = topo.nodes[call.node].name.as_str();
+                    // One draw per step: a skipped call has no hop, span or repeat.
+                    if !takes_branch(call.prob, path, target, call.key.occ) {
+                        continue;
+                    }
                     let op = call.op.unwrap_or(op);
                     for rep in 0..call.repeat {
                         let rep_path = step_path(path, target, call.key.occ, rep);

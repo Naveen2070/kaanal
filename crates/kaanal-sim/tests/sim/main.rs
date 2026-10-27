@@ -9,4 +9,5 @@ mod common;
 mod config;
 mod forks;
 mod streams;
+mod visits;
 mod zero_load;

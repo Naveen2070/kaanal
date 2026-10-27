@@ -28,6 +28,7 @@ pub mod rng;
 pub mod scenario;
 pub mod schema;
 pub mod topology;
+pub mod visits;
 
 pub use chain::{
     CollectionOp, Endpoint, Endpoints, EndpointsInput, JWKS_KEY, LOGIN_KEY, Responder, RouteSpec,
@@ -58,6 +59,7 @@ pub use scenario::{
 };
 pub use schema::config_schema;
 pub use topology::{Admission, CacheModel, Edge, Node, NodeId, RateLimit, Topology, TopologyError};
+pub use visits::{expected_visits, visits_per_s};
 
 /// FNV-1a 64 over the parts, with a separator byte between parts.
 /// Stable across platforms and Rust versions (std hashers are not).

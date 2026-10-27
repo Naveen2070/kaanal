@@ -1,5 +1,7 @@
 //! The chaos handlers: read and patch live chaos per node, endpoint or node at endpoint, and the topology view.
 
+use kaanal_core::expected_visits;
+
 use super::*;
 
 /// **Private.** The public JSON shape of one chaos entry. `mode` shows only for an override.
@@ -260,7 +262,23 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
         .iter()
         .map(|e| json!({ "from": t.nodes[e.from].name, "to": t.nodes[e.to].name }))
         .collect();
-    Json(json!({ "nodes": nodes, "edges": edges, "routes": st.route_keys }))
+    // Expected entries per request to each endpoint, per node (zero entries left out): what a
+    // `prob`, a `repeat` or a cache hit does to the traffic a node sees.
+    let endpoints: Vec<Value> = st
+        .endpoints
+        .iter()
+        .filter(|ep| !ep.synthesized)
+        .map(|ep| {
+            let visits: Map<String, Value> = expected_visits(t, ep)
+                .into_iter()
+                .zip(&t.nodes)
+                .filter(|(v, _)| *v > 0.0)
+                .map(|(v, n)| (n.name.clone(), json!(v)))
+                .collect();
+            json!({ "key": ep.key, "visits": visits })
+        })
+        .collect();
+    Json(json!({ "nodes": nodes, "edges": edges, "routes": st.route_keys, "endpoints": endpoints }))
 }
 
 /// `PUT /__kaanal/chaos/{node}` — merges a [`ChaosPatch`] into the node's live settings

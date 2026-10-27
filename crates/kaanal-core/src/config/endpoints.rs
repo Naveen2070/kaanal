@@ -109,6 +109,9 @@ pub struct CallStep {
     pub op: Option<Op>,
     /// Sequential invocations; default = the edge's `calls`.
     pub repeat: Option<u32>,
+    /// Share of requests that take this call, above 0 and at most 1; absent = the edge's `prob`.
+    /// One draw covers every `repeat`.
+    pub prob: Option<f64>,
     /// An inline body for a service or monolith callee.
     pub chain: Option<Vec<StepConfig>>,
     /// A key of the callee's `chains:`.
@@ -129,7 +132,7 @@ pub struct Branch {
 }
 
 /// **Private.** Field names a step may have, for messages.
-pub(super) const STEP_FIELDS: &str = "call, op, repeat, chain, with, via, cache, parallel";
+pub(super) const STEP_FIELDS: &str = "call, op, repeat, prob, chain, with, via, cache, parallel";
 
 impl<'de> Deserialize<'de> for StepConfig {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -183,6 +186,7 @@ impl<'de> Visitor<'de> for StepVisitor {
                 }
                 "op" => call.op = Some(m.next_value()?),
                 "repeat" => call.repeat = Some(m.next_value()?),
+                "prob" => call.prob = Some(m.next_value()?),
                 "chain" => call.chain = Some(m.next_value()?),
                 "with" => call.with = Some(m.next_value()?),
                 "via" => call.via = Some(m.next_value()?),

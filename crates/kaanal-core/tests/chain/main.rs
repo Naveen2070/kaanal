@@ -5,3 +5,4 @@ mod collections;
 mod common;
 mod compile;
 mod maps;
+mod prob;

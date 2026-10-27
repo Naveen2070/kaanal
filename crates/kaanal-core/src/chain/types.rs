@@ -67,6 +67,8 @@ pub struct Call {
     pub body: Arc<Seq>,
     /// A fixed op for this step (database or inline-ops monolith callee), else inherited.
     pub op: Option<Op>,
+    /// Share of requests that take this call; 1.0 always takes it, with no draw.
+    pub prob: f64,
     /// Which call this is, for seeding.
     pub key: StepKey,
 }

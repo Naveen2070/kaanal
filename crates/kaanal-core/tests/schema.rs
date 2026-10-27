@@ -231,3 +231,24 @@ fn total_appears_in_the_json_schema() {
     assert!(!v.is_valid(&doc("10001")));
     assert!(!v.is_valid(&doc("-1")));
 }
+
+#[test]
+fn schema_bounds_prob_like_the_loader() {
+    let v = jsonschema::validator_for(&config_schema()).unwrap();
+    let edge = |p: &str| -> Value {
+        serde_yaml_ng::from_str(&format!(
+            "version: 1\nnodes: {{}}\nedges:\n  - {{ from: a, to: b, prob: {p} }}\n"
+        ))
+        .unwrap()
+    };
+    assert!(v.is_valid(&edge("0.5")) && v.is_valid(&edge("1")));
+    assert!(!v.is_valid(&edge("0")) && !v.is_valid(&edge("1.5")));
+    let step = |p: &str| -> Value {
+        serde_yaml_ng::from_str(&format!(
+            "version: 1\nnodes: {{}}\nendpoints:\n  \"GET /x\": {{ chain: [ {{ call: b, prob: {p} }} ] }}\n"
+        ))
+        .unwrap()
+    };
+    assert!(v.is_valid(&step("0.5")));
+    assert!(!v.is_valid(&step("0")) && !v.is_valid(&step("2")));
+}

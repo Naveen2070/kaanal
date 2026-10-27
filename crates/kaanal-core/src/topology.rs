@@ -129,6 +129,9 @@ pub struct Edge {
     pub net: Dist,
     /// Calls per request along this edge (FR-TOP-02); used by chains from A2.
     pub calls: NonZeroU32,
+    /// Share of requests that take this edge (above 0, at most 1, default 1): the default of the
+    /// `call:` steps over it.
+    pub prob: f64,
 }
 
 /// A validated topology graph.
@@ -179,6 +182,13 @@ pub enum TopologyError {
         /// Dependency name.
         to: String,
     },
+    /// An edge `prob` outside 0 (exclusive) to 1: a config built in code skips the loader check.
+    BadProb {
+        /// 0-based index of the offending edge.
+        edge: usize,
+        /// The value.
+        prob: f64,
+    },
     /// The graph is not a DAG; carries the cycle as node names (`a -> b -> a`).
     Cycle(Vec<String>),
     /// A caller → dependency pair outside the R1.24 table.
@@ -223,6 +233,10 @@ impl fmt::Display for TopologyError {
             TopologyError::DuplicateEdge { edge, from, to } => {
                 write!(f, "edge #{edge}: duplicate edge '{from}' -> '{to}'")
             }
+            TopologyError::BadProb { edge, prob } => write!(
+                f,
+                "edge #{edge}: prob must be above 0 and at most 1 (got {prob})"
+            ),
             TopologyError::Cycle(path) => write!(f, "cycle: {}", path.join(" -> ")),
             TopologyError::ForbiddenEdge {
                 edge,
@@ -282,6 +296,7 @@ impl TopologyError {
             }
             TopologyError::SelfLoop { edge: i, .. }
             | TopologyError::DuplicateEdge { edge: i, .. }
+            | TopologyError::BadProb { edge: i, .. }
             | TopologyError::ForbiddenEdge { edge: i, .. } => edge(*i),
             TopologyError::Cycle(names) => match names.as_slice() {
                 [.., from, to] => cfg
@@ -448,11 +463,16 @@ impl Topology {
                     to: e.to.clone(),
                 });
             }
+            let prob = e.prob.unwrap_or(1.0);
+            if !crate::config::prob_ok(prob) {
+                return Err(TopologyError::BadProb { edge: i, prob });
+            }
             edges.push(Edge {
                 from,
                 to,
                 net: Dist::from_config(e.net.as_ref()),
                 calls: e.calls,
+                prob,
             });
         }
 

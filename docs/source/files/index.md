@@ -20,6 +20,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/schema.rs`           | [kaanal-core/schema.md](kaanal-core/schema.md)           | JSON Schema of `kaanal.yaml` (schemars)                                                                                     |
 | `src/topology.rs`         | [kaanal-core/topology.md](kaanal-core/topology.md)       | Graph build + validation (optional gateway, edge table, DAG, presets)                                                       |
 | `src/replay/`             | [kaanal-core/replay.md](kaanal-core/replay.md)           | Token bucket (GCRA) and slot gate with FIFO hand-over                                                                       |
+| `src/visits.rs`           | [kaanal-core/visits.md](kaanal-core/visits.md)           | Expected visits per node from the compiled chains (branch `prob`, `repeat`, cache hits)                         |
 | `src/rng.rs`              | [kaanal-core/rng.md](kaanal-core/rng.md)                 | `HopRng`, the cheap per-hop RNG (SplitMix64)                                                                                |
 | `src/dist.rs`             | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                                                                                     |
 | `src/chaos.rs`            | [kaanal-core/chaos.md](kaanal-core/chaos.md)             | Chaos layers, `ChaosState`, compiled `EffectiveChaos` / `Resolved`                                                          |

@@ -40,6 +40,7 @@ impl Compiler<'_> {
             net: e.net.clone(),
             body: Arc::clone(&self.default[e.to]),
             op: None,
+            prob: e.prob,
             key: keys.next(e.to),
         })
     }

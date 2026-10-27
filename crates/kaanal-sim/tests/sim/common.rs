@@ -48,6 +48,9 @@ pub(crate) fn nanos(d: Duration) -> i128 {
 /// postgres preset.
 pub(crate) const GATEWAYLESS: &str = "version: 1\nseed: 7\nnodes:\n  app: { type: service, proc: { p50: 5ms, p99: 20ms } }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }\n";
 
+/// Branch probabilities (an edge default, a step override, inside `parallel`) for the drift tests.
+pub(crate) const PROB: &str = "version: 1\nseed: 13\nnodes:\n  gw: { type: gateway, proc: { mean: 1ms } }\n  app: { type: service, proc: { mean: 2ms } }\n  db: { type: database, flavor: postgres, timeout: 2s }\n  pay: { type: external-api, proc: { p50: 5ms, p99: 30ms } }\nedges:\n  - { from: gw, to: app, net: 1ms }\n  - { from: app, to: db, net: { mean: 1ms }, prob: 0.6 }\n  - { from: app, to: pay, net: 1ms, prob: 0.3 }\nendpoints:\n  \"GET /users/{id}\": { chain: [ { call: db, repeat: 2, prob: 0.5 }, { parallel: [ pay, { call: db, prob: 0.4 } ] }, pay ] }\n";
+
 /// (name, YAML, the `(key, owner)` routes it streams).
 pub(crate) type Sample = (&'static str, String, Vec<(&'static str, &'static str)>);
 
@@ -68,6 +71,7 @@ pub(crate) fn sample_configs() -> Vec<Sample> {
         ),
         ("gatewayless", GATEWAYLESS.to_string(), APP_ROUTES.to_vec()),
         ("chains", CHAINS.to_string(), CHAIN_ROUTES.to_vec()),
+        ("prob", PROB.to_string(), APP_ROUTES.to_vec()),
     ]
 }
 

@@ -446,3 +446,23 @@ fn fractional_rps_rounds_to_the_nearest_nanosecond() {
     let t = Topology::build(&Config::from_yaml("version: 1\nnodes:\n  g: { type: gateway, rate_limit: { rps: 1000000000, burst: 1 } }\n").unwrap()).unwrap();
     assert_eq!(t.nodes[0].rate_limit.unwrap().interval_ns, 1);
 }
+
+#[test]
+fn a_code_built_config_with_a_bad_edge_prob_is_rejected() {
+    for bad in [f64::NAN, 0.0, -1.0, 2.0, f64::INFINITY] {
+        let mut cfg = Config::from_yaml(
+            "version: 1\nnodes:\n  a: { type: service }\n  b: { type: database, flavor: postgres }\nedges:\n  - { from: a, to: b }\n",
+        )
+        .unwrap();
+        cfg.edges[0].prob = Some(bad);
+        let err = Topology::build(&cfg).unwrap_err();
+        assert!(
+            matches!(err, TopologyError::BadProb { edge: 0, .. }),
+            "{bad}"
+        );
+        assert!(
+            err.to_string().contains("prob must be above 0"),
+            "{bad}: {err}"
+        );
+    }
+}

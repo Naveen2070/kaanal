@@ -185,3 +185,29 @@ async fn ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counte
     // node names are used as Map keys, never as plain object keys
     assert!(!html.contains("stats[") && html.contains("new Map()"));
 }
+
+#[tokio::test]
+async fn topology_reports_expected_visits_per_endpoint() {
+    let src = GW_APP_DB.replace(
+        "{ from: app, to: db, net: 1ms }",
+        "{ from: app, to: db, net: 1ms, calls: 3, prob: 0.5 }",
+    );
+    let s = start_yaml(&src).await;
+    let t: Value = s
+        .get_authed("/__kaanal/topology")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let eps = t["endpoints"].as_array().unwrap();
+    let get = eps.iter().find(|e| e["key"] == "GET /users/{id}").unwrap();
+    assert_eq!(
+        get["visits"],
+        json!({ "nginx": 1.0, "app": 1.0, "db": 1.5 })
+    );
+    assert!(
+        eps.iter()
+            .all(|e| !e["key"].as_str().unwrap().starts_with("HEAD ")),
+        "synthesized HEAD copies are not listed"
+    );
+}

@@ -28,9 +28,11 @@ The running topology.
 {
   "nodes": [ { "name": "nginx", "type": "gateway", "flavor": "nginx" } ],
   "edges": [ { "from": "nginx", "to": "app" } ],
-  "routes": [ "GET /health", "GET /users", "GET /users/{id}", "POST /orders" ]
+  "routes": [ "GET /health", "GET /users", "GET /users/{id}", "POST /orders" ],
+  "endpoints": [ { "key": "GET /users/{id}", "visits": { "nginx": 1.0, "app": 1.0, "db": 1.0 } } ]
 }
 ```
+`endpoints[].visits` is how many times one request to that endpoint is expected to enter each node (zero entries are left out; HEAD copies are not listed). It follows the chains: `calls`, `repeat` and `prob` multiply, and a cache hit ends the rest of its sequence, so a database behind a cache with an 80% hit ratio shows 0.2. Chaos is ignored.
 
 ### `GET /__kaanal/chaos`
 

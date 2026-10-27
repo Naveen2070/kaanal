@@ -1,6 +1,8 @@
 //! Cross-field checks that serde cannot place: auth, capacity and locales, reported at their own key.
 
-use super::{Config, IndexMap, Located, MAX_BURST_WINDOW_S, NOT_TEXT, NodeConfig, PathSeg, keys};
+use super::{
+    Config, IndexMap, Located, MAX_BURST_WINDOW_S, NOT_TEXT, NodeConfig, NodeKind, PathSeg, keys,
+};
 
 /// **Private.** Claim names Kaanal sets in every token (X3).
 pub(super) const RESERVED_CLAIMS: [&str; 7] = ["sub", "iss", "exp", "iat", "jti", "roles", "scope"];
@@ -223,6 +225,41 @@ pub(super) fn check_locales(cfg: &Config) -> Result<(), Located> {
                 format!("{ctx}locale: `{tag}` is not a locale tag (like en-IN or de-DE)"),
             ));
         }
+    }
+    Ok(())
+}
+
+/// **Private.** A branch probability: above 0, at most 1.
+pub(crate) fn prob_ok(p: f64) -> bool {
+    p > 0.0 && p <= 1.0
+}
+
+/// **Private.** Edge `prob` rules serde cannot place: the range, and where an edge may carry one.
+/// A cache keeps its own hit ratio, and the gateway routes by endpoint, so neither takes a share.
+pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
+    for (i, e) in cfg.edges.iter().enumerate() {
+        let Some(p) = e.prob else { continue };
+        let at = vec![
+            PathSeg::Key("edges".into()),
+            PathSeg::Index(i),
+            PathSeg::Key("prob".into()),
+        ];
+        let msg = if !prob_ok(p) {
+            format!("edge #{i}: prob must be above 0 and at most 1 (got {p})")
+        } else if cfg.nodes.get(&e.to).map(NodeConfig::kind) == Some(NodeKind::Cache) {
+            format!(
+                "edge #{i}: a cache keeps its own hit ratio, so an edge to '{}' takes no prob",
+                e.to
+            )
+        } else if cfg.nodes.get(&e.from).map(NodeConfig::kind) == Some(NodeKind::Gateway) {
+            format!(
+                "edge #{i}: the gateway routes by endpoint, so an edge out of '{}' takes no prob (split a service with balance)",
+                e.from
+            )
+        } else {
+            continue;
+        };
+        return Err(Located::at_value(at, msg));
     }
     Ok(())
 }
