@@ -272,3 +272,41 @@ fn a_rate_limit_under_overload_passes_exactly_its_rps() {
         "accepted rate",
     );
 }
+
+/// `app` with `replicas` copies of one slot each and exponential 10 ms service.
+fn replicated(replicas: u16, balance: &str) -> Topology {
+    topo(&format!(
+        "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, concurrency: 1, replicas: {replicas}, balance: {balance}, proc: {{ mean: 10ms }} }}\nedges:\n  - {{ from: gw, to: app }}\n"
+    ))
+}
+
+#[test]
+fn replicated_node_under_random_routing_is_independent_mm1_queues() {
+    // Random routing splits a Poisson stream into independent Poisson streams: 3 replicas at a
+    // total 180 req/s are three M/M/1 queues at 60 req/s each (rho 0.6), so the mean wait is
+    // rho / (mu - lambda) = 0.6 / 40 = 15 ms. 600k requests: ρ = 0.6 is autocorrelated (R7.5).
+    let t = replicated(3, "random");
+    let lam = 60.0;
+    let rep = sim(&t, 3.0 * lam, 600_000.0);
+    assert_close(
+        app_wait(&t, &rep),
+        (lam / MU) / (MU - lam),
+        "3 random replicas, per-replica M/M/1 wait at ρ = 0.6",
+    );
+}
+
+#[test]
+fn round_robin_waits_less_than_random_at_the_same_load() {
+    // Round-robin hands each replica every third arrival: Erlang-3 gaps, less bursty than the
+    // Poisson gaps random routing leaves, so by Kingman's approximation the wait drops by about
+    // a third ((1/3 + 1) / 2 against (1 + 1) / 2). A sanity bound, not a closed form: 15% less.
+    let lam = 180.0;
+    let random = app_wait(
+        &replicated(3, "random"),
+        &sim(&replicated(3, "random"), lam, 300_000.0),
+    );
+    let rr_topo = replicated(3, "round-robin");
+    let round_robin = app_wait(&rr_topo, &sim(&rr_topo, lam, 300_000.0));
+    eprintln!("random {random:.6} s, round-robin {round_robin:.6} s");
+    assert!(round_robin < random * 0.85, "{round_robin} vs {random}");
+}

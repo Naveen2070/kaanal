@@ -26,6 +26,7 @@ pub(crate) fn topo(yaml: &str) -> Topology {
 pub(crate) fn hop(node: NodeId, kind: HopKind, ms: u64) -> PlanItem {
     PlanItem::Hop(Hop {
         node,
+        replica: 0,
         kind,
         start: Duration::ZERO,
         dur: Duration::from_millis(ms),

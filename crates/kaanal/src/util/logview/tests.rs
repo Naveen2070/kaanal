@@ -521,3 +521,14 @@ fn an_sse_message_over_the_cap_comes_out_as_one_missed_request() {
     p.overflow();
     assert_eq!(p.push(""), Some(("lagged".into(), "1".into())));
 }
+
+#[test]
+fn waterfall_names_the_replica_of_a_replicated_hop() {
+    let e = with(entry(), |e| {
+        e["hops"] = json!([hop("app", "proc", 0.0, 5.0), hop("db", "op", 5.0, 4.0)]);
+        e["hops"][1]["replica"] = json!(2);
+    });
+    let w = waterfall(&e);
+    assert!(w.contains("db#2.op"), "{w}");
+    assert!(w.contains("app.proc") && !w.contains("app#"), "{w}");
+}

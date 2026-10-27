@@ -163,7 +163,12 @@ pub fn waterfall(e: &Value) -> String {
         .and_then(|n| failed_hop(hops, n));
     let label = |h: &Value| {
         let what = h["op"].as_str().or(h["kind"].as_str()).unwrap_or("");
-        clean(&format!("{}.{what}", h["node"].as_str().unwrap_or("")))
+        let node = h["node"].as_str().unwrap_or("");
+        // `db#2` for a hop on one copy of a replicated node
+        let at = h["replica"]
+            .as_u64()
+            .map_or_else(|| node.to_string(), |r| format!("{node}#{r}"));
+        clean(&format!("{at}.{what}"))
     };
     let width = hops
         .iter()

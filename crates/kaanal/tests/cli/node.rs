@@ -158,3 +158,90 @@ fn old_endpoint_spelling_still_names_a_route() {
     let help = stdout(&out);
     assert!(help.contains("--route"), "{help}");
 }
+
+/// A project whose `app` has three replicas.
+fn replicated_up(name: &str) -> (Up, std::path::PathBuf) {
+    let dir = scratch(name);
+    std::fs::write(
+        dir.join("kaanal.yaml"),
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, replicas: 3 }\nedges:\n  - { from: gw, to: app }\n",
+    )
+    .unwrap();
+    (Up::start_in(dir.clone()), dir)
+}
+
+#[test]
+fn a_replica_goes_down_and_up_and_is_named_as_node_hash_index() {
+    let (up, _dir) = replicated_up("replica-down-up");
+    let out = ok(
+        &up,
+        &["node", "down", "app", "--replica", "1", "--for", "30s"],
+    );
+    assert!(
+        out.contains("app#1: down") && out.contains("(reverts in 30s)"),
+        "{out}"
+    );
+    let live = ok(
+        &up,
+        &[
+            "--json",
+            "chaos",
+            "set",
+            "app",
+            "--replica",
+            "2",
+            "--latency",
+            "50ms",
+        ],
+    );
+    assert!(live.contains("latency_ms") || live.contains("50"), "{live}");
+    assert!(ok(&up, &["node", "up", "app", "--replica", "1"]).contains("app#1: up"));
+    ok(&up, &["chaos", "clear", "app", "--replica", "2"]);
+}
+
+#[test]
+fn a_replica_out_of_range_is_exit_1_with_the_range() {
+    let (up, _dir) = replicated_up("replica-range");
+    let e = fails(&up, &["node", "down", "app", "--replica", "9"]);
+    assert!(e.contains("node 'app' has 3 replicas (0 to 2)"), "{e}");
+    let e = fails(&up, &["chaos", "clear", "app", "--replica", "3"]);
+    assert!(e.contains("node 'app' has 3 replicas (0 to 2)"), "{e}");
+}
+
+#[test]
+fn replica_needs_a_node_and_excludes_route() {
+    let (up, _dir) = replicated_up("replica-usage");
+    let out = up.run(&["chaos", "set", "--replica", "1", "--down"]);
+    assert_eq!(out.status.code(), Some(64), "{}", stderr(&out));
+    let out = up.run(&[
+        "chaos",
+        "set",
+        "app",
+        "--replica",
+        "1",
+        "--route",
+        "GET /x",
+        "--down",
+    ]);
+    assert_eq!(out.status.code(), Some(64), "{}", stderr(&out));
+}
+
+#[test]
+fn node_list_shows_the_replica_count_of_a_replicated_node() {
+    let (up, _dir) = replicated_up("replica-list");
+    let table = ok(&up, &["node", "list"]);
+    assert!(table.contains("app x3"), "{table}");
+    assert!(!table.contains("gw x"), "{table}");
+    let rows: serde_json::Value =
+        serde_json::from_str(&ok(&up, &["--json", "node", "list"])).unwrap();
+    let find = |n: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["node"] == n)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(find("app")["replicas"], 3);
+    assert!(find("gw").get("replicas").is_none());
+}

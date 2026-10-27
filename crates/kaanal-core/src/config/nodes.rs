@@ -1,6 +1,7 @@
 //! The node kinds and their per-kind config structs (gateway, service, monolith, database, cache, external API, auth) with the flavor enums.
 
 use super::*;
+use crate::balance::Balance;
 
 /// The kind of a topology node (`type:` in YAML).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,6 +155,33 @@ impl NodeConfig {
         }
     }
 
+    /// Copies of this node as written (`replicas:`); 1 when absent. Range-checked at load.
+    pub fn replicas(&self) -> u16 {
+        match self {
+            NodeConfig::Gateway(n) => n.replicas,
+            NodeConfig::Service(n) => n.replicas,
+            NodeConfig::Monolith(n) => n.replicas,
+            NodeConfig::Database(n) => n.replicas,
+            NodeConfig::Cache(n) => n.replicas,
+            NodeConfig::ExternalApi(n) => n.replicas,
+            NodeConfig::Auth(n) => n.replicas,
+        }
+        .unwrap_or(1)
+    }
+
+    /// How traffic entering this node picks a replica, if the node sets one.
+    pub fn balance(&self) -> Option<&Balance> {
+        match self {
+            NodeConfig::Gateway(n) => n.balance.as_ref(),
+            NodeConfig::Service(n) => n.balance.as_ref(),
+            NodeConfig::Monolith(n) => n.balance.as_ref(),
+            NodeConfig::Database(n) => n.balance.as_ref(),
+            NodeConfig::Cache(n) => n.balance.as_ref(),
+            NodeConfig::ExternalApi(n) => n.balance.as_ref(),
+            NodeConfig::Auth(n) => n.balance.as_ref(),
+        }
+    }
+
     /// The node's own `locale:` tag, if set.
     pub fn locale(&self) -> Option<&str> {
         match self {
@@ -204,6 +232,15 @@ pub struct GatewayConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -237,6 +274,15 @@ pub struct ServiceConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -277,6 +323,15 @@ pub struct MonolithConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -311,6 +366,15 @@ pub struct DatabaseConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -351,6 +415,15 @@ pub struct CacheConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -391,6 +464,15 @@ pub struct ExternalApiConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -432,6 +514,15 @@ pub struct AuthConfig {
     #[serde(default, deserialize_with = "call_timeout")]
     #[schemars(schema_with = "crate::schema::duration_text")]
     pub timeout: Option<Duration>,
+    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
+    /// limit; `balance` picks one per request.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1, "maximum" = 64))]
+    pub replicas: Option<u16>,
+    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
+    /// may override it.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]

@@ -53,6 +53,14 @@ pub fn trace_parts(
     pin: Option<&str>,
 ) -> TraceParts {
     let name = |id: usize| topo.nodes[id].name.as_str();
+    // `db#2` for a hop on one copy of a replicated node (human text only; the API keeps `replica` apart)
+    let at = |id: usize, replica: u16| {
+        if topo.nodes[id].replicas > 1 {
+            format!("{}#{replica}", name(id))
+        } else {
+            name(id).to_string()
+        }
+    };
     let fmt_ms = |d: Duration| format!("{:.1}ms", d.as_secs_f64() * 1000.0);
     let mut pieces = Vec::new();
     // (end of the fork's items, index of its first branch marker) per open fork.
@@ -80,18 +88,18 @@ pub fn trace_parts(
                 if !fh.wait.is_zero() {
                     pieces.push(Piece::Hop(format!(
                         "{}.wait={}",
-                        name(h.node),
+                        at(h.node, h.replica),
                         fmt_ms(fh.wait)
                     )));
                 }
                 let d = fmt_ms(h.dur);
                 pieces.push(Piece::Hop(match h.kind {
                     HopKind::Net => format!("net={d}"),
-                    HopKind::Proc => format!("{}.proc={d}", name(h.node)),
-                    HopKind::Op(op) => format!("{}.{}={d}", name(h.node), op.name()),
-                    HopKind::CacheHit => format!("{}.hit={d}", name(h.node)),
-                    HopKind::CacheMiss => format!("{}.miss={d}", name(h.node)),
-                    HopKind::Delay => format!("{}.delay={d}", name(h.node)),
+                    HopKind::Proc => format!("{}.proc={d}", at(h.node, h.replica)),
+                    HopKind::Op(op) => format!("{}.{}={d}", at(h.node, h.replica), op.name()),
+                    HopKind::CacheHit => format!("{}.hit={d}", at(h.node, h.replica)),
+                    HopKind::CacheMiss => format!("{}.miss={d}", at(h.node, h.replica)),
+                    HopKind::Delay => format!("{}.delay={d}", at(h.node, h.replica)),
                 }));
             }
             PlanItem::Hop(_) | PlanItem::Fail { .. } | PlanItem::Span { .. } => {}
@@ -428,7 +436,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                     let c = match h.kind {
                         HopKind::Delay => run.chaos.endpoint(key),
                         HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss => {
-                            run.chaos.visit(h.node, key)
+                            run.chaos.visit_replica(h.node, key, h.replica)
                         }
                         HopKind::Net => None,
                     };
@@ -463,6 +471,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                 let top = forks.last();
                 recs.push(HopRec {
                     node: name(h.node),
+                    replica: (run.topo.nodes[h.node].replicas > 1).then_some(h.replica),
                     op: match h.kind {
                         HopKind::Op(op) => Some(op.name()),
                         _ => None,

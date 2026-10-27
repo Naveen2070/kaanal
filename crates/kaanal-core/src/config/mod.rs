@@ -29,9 +29,12 @@ mod scenario;
 mod shared;
 mod values;
 
+use crate::balance::{Balance, MAX_REPLICAS};
 pub(crate) use checks::prob_ok;
 pub use checks::valid_locale_tag;
-use checks::{LOCALE_PATTERN, check_auth, check_capacity, check_edges, check_locales};
+use checks::{
+    LOCALE_PATTERN, check_auth, check_capacity, check_edges, check_locales, check_replicas,
+};
 use endpoints::default_calls;
 pub use endpoints::{
     Branch, CallStep, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig, parse_endpoints,
@@ -219,6 +222,7 @@ impl Config {
         check_auth(&cfg).map_err(|e| e.in_source(src))?;
         check_capacity(&cfg).map_err(|e| e.in_source(src))?;
         check_edges(&cfg).map_err(|e| e.in_source(src))?;
+        check_replicas(&cfg).map_err(|e| e.in_source(src))?;
         check_locales(&cfg).map_err(|e| e.in_source(src))?;
         Ok(cfg)
     }

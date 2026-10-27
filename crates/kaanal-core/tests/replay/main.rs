@@ -6,4 +6,5 @@ mod common;
 mod engine;
 mod limits;
 mod reference;
+mod replicas;
 mod spans;

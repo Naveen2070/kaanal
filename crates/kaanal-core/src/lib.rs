@@ -15,6 +15,7 @@
 
 #![warn(missing_docs)]
 
+pub mod balance;
 pub mod chain;
 pub mod chaos;
 pub mod config;
@@ -30,6 +31,7 @@ pub mod schema;
 pub mod topology;
 pub mod visits;
 
+pub use balance::{Balance, MAX_REPLICAS, pick_replica};
 pub use chain::{
     CollectionOp, Endpoint, Endpoints, EndpointsInput, JWKS_KEY, LOGIN_KEY, Responder, RouteSpec,
     collection_op, compile, resolve_error, skeleton,

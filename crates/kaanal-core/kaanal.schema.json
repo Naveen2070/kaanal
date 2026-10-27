@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "Balance": {
+      "anyOf": [
+        {
+          "enum": [
+            "round-robin",
+            "random"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "weighted": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "weighted"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "How traffic picks a replica: `round-robin` (default), `random`, or `{ weighted: [..] }` with one weight per replica (at least one above 0)."
+    },
     "BoundedConcurrency": {
       "additionalProperties": false,
       "description": "The map form of `concurrency`: the same queue and overflow defaults as `pool`.",
@@ -99,9 +129,19 @@
           ]
         },
         "node": {
-          "description": "A node name. With `endpoint`: only when visited through that endpoint.",
+          "description": "A node name. With `endpoint`: only when visited through that endpoint; with `replica`:\none copy of the node.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "replica": {
+          "description": "With `node`: one replica of it (0-based), whatever the endpoint. Needs the node to have\nthat many `replicas`.",
+          "format": "uint16",
+          "maximum": 63,
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         }
@@ -191,6 +231,17 @@
       "additionalProperties": false,
       "description": "One entry in `edges:` (caller → dependency).",
       "properties": {
+        "balance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Balance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How calls over this edge pick a replica of the callee; overrides the callee's own\n`balance`."
+        },
         "calls": {
           "default": 1,
           "description": "Calls per request along this edge (call ratio), at least 1. Used once endpoint\nchains land.",
@@ -358,6 +409,17 @@
           "additionalProperties": false,
           "description": "A reverse proxy / API gateway / load balancer.",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "concurrency": {
               "anyOf": [
                 {
@@ -408,6 +470,17 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "timeout": {
               "default": null,
               "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
@@ -428,6 +501,17 @@
           "additionalProperties": false,
           "description": "A backend service with an optional `OpenAPI` spec; never has `ops`.",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "chains": {
               "additionalProperties": {
                 "items": {
@@ -481,6 +565,17 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "spec": {
               "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
               "type": [
@@ -508,6 +603,17 @@
           "additionalProperties": false,
           "description": "A service that may also run its own read/write/scan (`ops`), or call databases.",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "chains": {
               "additionalProperties": {
                 "items": {
@@ -583,6 +689,17 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "spec": {
               "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
               "type": [
@@ -610,6 +727,17 @@
           "additionalProperties": false,
           "description": "A data store with read/write/scan costs.",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "concurrency": {
               "anyOf": [
                 {
@@ -675,6 +803,17 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "timeout": {
               "default": null,
               "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
@@ -695,6 +834,17 @@
           "additionalProperties": false,
           "description": "A cache with a hit ratio and hit/miss costs.",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "concurrency": {
               "anyOf": [
                 {
@@ -771,6 +921,17 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "timeout": {
               "default": null,
               "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
@@ -797,6 +958,17 @@
           "additionalProperties": false,
           "description": "A third-party HTTP API (payments, email, …).",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "concurrency": {
               "anyOf": [
                 {
@@ -871,6 +1043,17 @@
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
             },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "timeout": {
               "default": null,
               "description": "Deadline for a call to this node: queue wait plus its own work plus everything it calls\ndownstream. When it passes, the caller gets a 504 (`timeout`) while the work already\nrunning keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.",
@@ -891,6 +1074,17 @@
           "additionalProperties": false,
           "description": "An identity provider: login and token issue.",
           "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
             "claims": {
               "additionalProperties": {
                 "type": [
@@ -946,6 +1140,17 @@
                 }
               ],
               "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+            },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate\nlimit; `balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "timeout": {
               "default": null,

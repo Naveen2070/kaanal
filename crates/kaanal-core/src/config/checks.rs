@@ -1,7 +1,8 @@
 //! Cross-field checks that serde cannot place: auth, capacity and locales, reported at their own key.
 
 use super::{
-    Config, IndexMap, Located, MAX_BURST_WINDOW_S, NOT_TEXT, NodeConfig, NodeKind, PathSeg, keys,
+    Balance, Config, IndexMap, Located, MAX_BURST_WINDOW_S, MAX_REPLICAS, NOT_TEXT, NodeConfig,
+    NodeKind, PathSeg, keys,
 };
 
 /// **Private.** Claim names Kaanal sets in every token (X3).
@@ -260,6 +261,55 @@ pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
             continue;
         };
         return Err(Located::at_value(at, msg));
+    }
+    Ok(())
+}
+
+/// **Private.** The weights of a `weighted` balance must name every replica and give at least one
+/// a share; `None` when `b` is not weighted or is fine, else the problem.
+fn weights_problem(b: &Balance, replicas: u16) -> Option<String> {
+    let Balance::Weighted(w) = b else { return None };
+    if w.len() != usize::from(replicas) {
+        return Some(format!("{} weights for {replicas} replicas", w.len()));
+    }
+    if w.iter().all(|x| *x == 0) {
+        return Some("weighted needs at least one weight above 0".into());
+    }
+    None
+}
+
+/// **Private.** Replica rules serde cannot place: the count's range, and a `weighted` balance on a
+/// node or an edge (checked against the callee's count), each at its own key.
+pub(super) fn check_replicas(cfg: &Config) -> Result<(), Located> {
+    for (name, node) in &cfg.nodes {
+        let r = node.replicas();
+        if !(1..=MAX_REPLICAS).contains(&r) {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "replicas"]),
+                format!("node '{name}': replicas must be between 1 and {MAX_REPLICAS} (got {r})"),
+            ));
+        }
+        if let Some(p) = node.balance().and_then(|b| weights_problem(b, r)) {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "balance"]),
+                format!("node '{name}': {p}"),
+            ));
+        }
+    }
+    for (i, e) in cfg.edges.iter().enumerate() {
+        let (Some(b), Some(to)) = (&e.balance, cfg.nodes.get(&e.to)) else {
+            continue;
+        };
+        if let Some(p) = weights_problem(b, to.replicas()) {
+            return Err(Located::at_value(
+                vec![
+                    PathSeg::Key("edges".into()),
+                    PathSeg::Index(i),
+                    PathSeg::Key("balance".into()),
+                ],
+                format!("edge #{i}: {p} of '{}'", e.to),
+            ));
+        }
     }
     Ok(())
 }

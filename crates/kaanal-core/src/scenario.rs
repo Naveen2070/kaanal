@@ -307,11 +307,15 @@ fn missing(path: Vec<PathSeg>, message: String) -> ScenarioError {
     }
 }
 
+/// **Private.** What makes two chaos entries of one scenario the same key.
+type EntryKey = (Option<String>, Option<String>, Option<u16>);
+
 /// **Private.** One entry after the topology-free checks: where it points (the node as
 /// written, the endpoint normalized) and the layer it sets.
 struct Shaped {
     node: Option<String>,
     endpoint: Option<String>,
+    replica: Option<u16>,
     layer: ChaosLayer,
 }
 
@@ -326,6 +330,16 @@ fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
     };
     if e.node.is_none() && e.endpoint.is_none() {
         return Err(err(item(), false, "entry needs a node or endpoint".into()));
+    }
+    if e.replica.is_some() && e.node.is_none() {
+        return Err(err(field("replica"), true, "replica needs a node".into()));
+    }
+    if e.replica.is_some() && e.endpoint.is_some() {
+        return Err(err(
+            field("replica"),
+            true,
+            "a replica entry takes no endpoint (it applies whatever the endpoint)".into(),
+        ));
     }
     let endpoint = match &e.endpoint {
         None => None,
@@ -374,6 +388,7 @@ fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
     Ok(Shaped {
         node: e.node.clone(),
         endpoint,
+        replica: e.replica,
         layer,
     })
 }
@@ -416,10 +431,10 @@ fn shape(cfg: &ScenarioConfig) -> Result<(Vec<Shaped>, Vec<ShapedPin>), Scenario
         ));
     }
     let mut out = Vec::with_capacity(cfg.chaos.len());
-    let mut first_at: HashMap<(Option<String>, Option<String>), usize> = HashMap::new();
+    let mut first_at: HashMap<EntryKey, usize> = HashMap::new();
     for (i, e) in cfg.chaos.iter().enumerate() {
         let s = shape_entry(i, e)?;
-        if let Some(j) = first_at.insert((s.node.clone(), s.endpoint.clone()), i) {
+        if let Some(j) = first_at.insert((s.node.clone(), s.endpoint.clone(), s.replica), i) {
             let at = vec![PathSeg::Key("chaos".into()), PathSeg::Index(i)];
             return Err(err(
                 at,
@@ -520,12 +535,27 @@ fn resolve_entry(
             Some((key, ep))
         }
     };
+    if let (Some(r), Some(n)) = (s.replica, node) {
+        let count = topo.nodes[n].replicas;
+        if r >= count {
+            return Err(err(
+                field("replica"),
+                true,
+                format!(
+                    "node '{}' has {count} replicas (0 to {})",
+                    s.node.as_deref().unwrap_or_default(),
+                    count - 1
+                ),
+            ));
+        }
+    }
     if s.layer.has_orphan_fault_fields() {
         warnings.push(format!(
             "scenario '{name}': chaos[{i}]: error_kind/error_status have no effect without error_rate"
         ));
     }
     let key = match (node, endpoint) {
+        (Some(n), None) if s.replica.is_some() => ChaosKey::Replica(n, s.replica.unwrap_or(0)),
         (Some(n), Some((k, ep))) => {
             if !visits(ep, n) {
                 warnings.push(format!(

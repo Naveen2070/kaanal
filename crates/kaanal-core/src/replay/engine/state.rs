@@ -96,8 +96,8 @@ pub(super) struct Token {
     pub(super) end: usize,
     /// The join it reports to at its end; `None` for the root token.
     pub(super) join: Option<usize>,
-    /// The node queue it waits in, and since when (ns).
-    pub(super) queued_at: Option<(NodeId, u64)>,
+    /// The replica queue it waits in (node, replica), and since when (ns).
+    pub(super) queued_at: Option<(NodeId, u16, u64)>,
     /// Node of the last own hop with no edge hop since: the current visit (Y6).
     pub(super) last_own: Option<NodeId>,
     /// Innermost span this token opened that is still open (`SpanState::parent` chains outward).
@@ -136,10 +136,10 @@ pub(super) struct Failure {
     pub(super) status: u16,
     pub(super) kind: FailKind,
     pub(super) retry_after: Option<Duration>,
-    /// Set when the engine itself refused the hop and counted it: the node, and whether it was the
+    /// Set when the engine itself refused the hop and counted it: the node and replica, and whether it was the
     /// rate limit (`true`) or the queue (`false`). A planned `Fail` that replaces this failure (D17)
     /// takes the count back, so counters match the answers.
-    pub(super) refused: Option<(NodeId, bool)>,
+    pub(super) refused: Option<(NodeId, u16, bool)>,
     /// Why it failed. Not derivable from `refused` or `kind`: a fired deadline and a planned hang
     /// both have kind `Timeout` and `refused: None`.
     pub(super) cause: FailCause,

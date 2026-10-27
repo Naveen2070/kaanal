@@ -54,11 +54,13 @@ impl Compiler<'_> {
                 if kind != NodeKind::Cache {
                     return Err(at.bad(format!("cache: '{node}' is a {kind}, not a cache")));
                 }
-                let net = self.edge(runner, to, &at)?.net.clone();
+                let edge = self.edge(runner, to, &at)?;
+                let (net, balance) = (edge.net.clone(), edge.balance.clone());
                 Ok(Step::Cache(CacheStep {
                     node: to,
                     net,
                     reads_only: false,
+                    balance,
                     repeat: 1,
                     key: keys.next(to),
                 }))
@@ -122,7 +124,12 @@ impl Compiler<'_> {
             return Err(target.bad(format!("'{name}' is a cache; use `cache: {name}`")));
         }
         let edge = self.edge(runner, to, &target)?;
-        let (net, calls, edge_prob) = (edge.net.clone(), edge.calls.get(), edge.prob);
+        let (net, calls, edge_prob, balance) = (
+            edge.net.clone(),
+            edge.calls.get(),
+            edge.prob,
+            edge.balance.clone(),
+        );
         let bodies = usize::from(c.chain.is_some())
             + usize::from(c.with.is_some())
             + usize::from(c.via.is_some());
@@ -203,6 +210,7 @@ impl Compiler<'_> {
             body,
             op,
             prob,
+            balance,
             key: keys.next(to),
         })
     }

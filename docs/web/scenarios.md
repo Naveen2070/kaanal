@@ -35,6 +35,7 @@ Each entry names **where** it applies and sets **at least one** of the fields:
 
 | Field          | Rules                                                                                  |
 | -------------- | -------------------------------------------------------------------------------------- |
+| `replica`      | integer, 0 to 63, with `node` only: one copy of a replicated node (no `endpoint`). The node must have that many `replicas`. |
 | `latency_ms`   | integer, 0 to 300 000. Added to every visit.                                           |
 | `error_rate`   | number 0.0 to 1.0. The chance each visit fails.                                        |
 | `error_kind`   | `status` (default), `reset`, `hang` or `malformed`. See [concepts](concepts.md#chaos). |

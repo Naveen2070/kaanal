@@ -9,6 +9,7 @@ use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde_json::Value;
 
+use crate::balance::Balance;
 use crate::config::{
     BoundedConcurrency, Config, DistConfig, EndpointConfig, EndpointsConfig, ErrorMapping,
     StepConfig,
@@ -186,6 +187,34 @@ impl JsonSchema for EndpointsConfig {
             "oneOf": [
                 { "type": "string", "description": "Path relative to this file, e.g. `kaanal.endpoints.yaml`." },
                 { "type": "object", "description": "Endpoints keyed by `\"METHOD /path\"`.", "additionalProperties": entry }
+            ]
+        })
+    }
+}
+
+impl JsonSchema for Balance {
+    fn schema_name() -> Cow<'static, str> {
+        "Balance".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "How traffic picks a replica: `round-robin` (default), `random`, or `{ weighted: [..] }` with one weight per replica (at least one above 0).",
+            "anyOf": [
+                { "type": "string", "enum": ["round-robin", "random"] },
+                {
+                    "type": "object",
+                    "properties": {
+                        "weighted": {
+                            "type": "array",
+                            "items": { "type": "integer", "minimum": 0 },
+                            "minItems": 1,
+                            "maxItems": 64
+                        }
+                    },
+                    "required": ["weighted"],
+                    "additionalProperties": false
+                }
             ]
         })
     }

@@ -127,7 +127,10 @@ impl Compiler<'_> {
                 Arc::new(Seq::new(steps))
             }
             (Some(gw), Some(o)) => {
-                let net = self.edge(gw, o, &j.place)?.net.clone();
+                let (net, balance) = {
+                    let e = self.edge(gw, o, &j.place)?;
+                    (e.net.clone(), e.balance.clone())
+                };
                 let mut steps = self.default[gw].steps.clone();
                 let key = Keys::after(&steps, n).next(o);
                 steps.push(Step::Call(Call {
@@ -137,6 +140,7 @@ impl Compiler<'_> {
                     body: Arc::clone(&body),
                     op: None,
                     prob: 1.0,
+                    balance,
                     key,
                 }));
                 Arc::new(Seq::new(steps))

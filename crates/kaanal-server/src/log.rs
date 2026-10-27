@@ -93,6 +93,9 @@ pub fn client_id(raw: &str) -> Option<String> {
 pub struct HopRec {
     /// Node name.
     pub node: String,
+    /// Which copy of the node ran the hop; only for a node with more than one replica.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replica: Option<u16>,
     /// `net`, `proc`, `op`, `hit`, `miss` or `delay`.
     pub kind: &'static str,
     /// The database operation (`read`, `write`, `scan`) of an `op` hop.

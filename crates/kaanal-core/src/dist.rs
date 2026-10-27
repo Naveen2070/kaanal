@@ -60,6 +60,16 @@ impl Dist {
         }
     }
 
+    /// The median duration (an estimate for warnings; sampling never uses it): the fixed value,
+    /// `p50` of a lognormal, `mean * ln 2` of an exponential.
+    pub fn median(&self) -> Duration {
+        match self {
+            Dist::Fixed(d) => *d,
+            Dist::LogNormal { mu, .. } => Duration::from_secs_f64(mu.exp() / 1000.0),
+            Dist::Exp { mean } => mean.mul_f64(std::f64::consts::LN_2),
+        }
+    }
+
     /// Maps a parsed YAML distribution; `None` means "no cost" → [`Dist::ZERO`].
     pub fn from_config(c: Option<&DistConfig>) -> Dist {
         match c {

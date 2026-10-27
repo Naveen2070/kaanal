@@ -45,6 +45,7 @@ fn engine_matches_the_reference_queue_with_patience() {
             span(db, d / MS, 1),
             PlanItem::Hop(Hop {
                 node: db,
+                replica: 0,
                 kind: HopKind::Op(Op::Read),
                 start: Duration::ZERO,
                 dur: Duration::from_nanos(s),

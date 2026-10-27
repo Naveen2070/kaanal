@@ -363,3 +363,35 @@ async fn ttl_without_a_field_to_lease_is_400() {
         assert_eq!(s.put_chaos("db", body).await.status(), 200);
     }
 }
+
+#[tokio::test]
+async fn a_saved_replica_entry_round_trips() {
+    let yaml = BASE.replace(
+        "db:    { type: database,",
+        "db:    { type: database, replicas: 3,",
+    );
+    let s = start_full(new_dir(&[]), &yaml).await;
+    let r = s
+        .put(
+            "/__kaanal/chaos",
+            json!({ "node": "db", "replica": 1, "down": true }),
+        )
+        .await;
+    assert_eq!(r.status(), 200);
+    let r = s
+        .post_json("/__kaanal/scenarios/save", json!({ "name": "r1" }))
+        .await;
+    assert_eq!(r.status(), 200);
+    let text = std::fs::read_to_string(s.dir.join("scenarios/r1.yaml")).unwrap();
+    assert!(
+        text.contains(r#""replica":1"#) && text.contains(r#""down":true"#),
+        "{text}"
+    );
+    // the saved file loads: a fresh server with the file in place resolves its replica entry
+    let dir = new_dir(&[("r1.yaml", &text)]);
+    let t = start_full(dir, &yaml).await;
+    let active = t.post("/__kaanal/scenarios/r1/activate").await;
+    assert_eq!(active.status(), 200, "{}", active.text().await.unwrap());
+    let eff = t.active().await;
+    assert_eq!(eff["effective"]["replicas"][0]["replica"], 1);
+}

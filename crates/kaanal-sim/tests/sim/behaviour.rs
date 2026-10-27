@@ -131,3 +131,20 @@ fn warmup_requests_are_not_reported() {
         "counters keep running through warmup"
     );
 }
+
+#[test]
+fn replicated_node_utilization_is_per_slot_of_every_replica() {
+    // 10 ms fixed work on 2 replicas of one slot each; 100 req/s round-robin gives each replica
+    // 50 req/s, so each is busy half the time and the node's utilization is 0.5 (not 1.0).
+    let yaml = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, concurrency: 1, replicas: 2, proc: 10ms }\nedges:\n  - { from: gw, to: app }\n";
+    let (t, e) = topo(yaml);
+    let rep = kaanal_sim::run(
+        &t,
+        &e,
+        &kaanal_core::ChaosState::default(),
+        &one_stream(100.0, 400),
+    )
+    .unwrap();
+    let util = rep.nodes[t.id("app").unwrap()].utilization;
+    assert!((util - 0.5).abs() < 0.03, "utilization {util}");
+}

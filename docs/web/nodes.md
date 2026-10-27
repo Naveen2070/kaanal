@@ -92,6 +92,8 @@ cache: { type: cache, flavor: redis, hit_ratio: 0.8 }
 | `ttl`         | Entry lifetime                                                                                                                                                                                                                                 | none        | accepted and checked, not active yet |
 | `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited   | active now                           |
 | `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none        | active now                           |
+
+A lookup slower than the cache's `timeout` counts as a miss. If `timeout` is below the `hit` cost (its median, for a distribution), most hits are cut, and loading prints a warning naming the cache.
 | `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none        | active now                           |
 
 ## `external-api`
@@ -150,6 +152,24 @@ An edge that breaks the table is rejected with a message listing what that kind 
 
 An edge `gateway -> auth` makes every request pay an auth check; logins run inside it.
 
+## Replicas and balancing
+
+Any node can have copies: `replicas: 3` (1 to 64, default 1). Each replica has its own slots, queue, pool and rate limit, so three replicas of a service with `concurrency: 4` serve twelve requests at once. `balance` says how traffic entering the node picks a replica:
+
+| `balance`                 | Picks                                                             |
+| ------------------------- | ----------------------------------------------------------------- |
+| `round-robin` (default)   | The next live replica in turn                                     |
+| `random`                  | A uniformly random live replica                                   |
+| `{ weighted: [3, 1, 1] }` | A random live replica, weighted: one weight per replica, at least one above 0 |
+
+A node sets `balance` for traffic entering it, and an edge may override it for calls over that edge: `{ from: app, to: db, balance: random }`. A weighted list must have exactly one weight per replica of the callee. Without `replicas`, `balance` does nothing. Database replicas all take every request: there is no read/write split yet, so a write is not sent to a primary only.
+
+Chaos can target one replica: `kaanal node down app --replica 1`, `kaanal chaos set app --replica 2 --latency 50ms`, `kaanal chaos clear app --replica 2` (scenario entries and the API take `replica` next to `node`). A downed replica is skipped by the balancer; the other copies keep serving, and a node with every replica down answers 503. Output names a replica `app#1`.
+
+A request's trace names the copy that served each hop (`db#2.read=4.1ms`, and `db#2.read` in `kaanal logs` waterfalls), the logged hop carries `replica`, `GET /__kaanal/topology` lists `replicas` on a replicated node, and `kaanal node list` shows `db x3`. Chaos latency is attributed to the replica it hit.
+
+Two details. A cache never fails a request, so a cache with every replica down is a miss, as a down cache already was. And when a node is down, a call to it with more than one replica fails at the call start (no network hop, no timeout span), while a call to a one-replica node fails at the callee's own hop, after the network hop: the same 503, a different trace.
+
 ## The gateway is optional
 
 With no gateway, a request enters at the `service` or `monolith` that owns the route in its `spec`. With a gateway, every node that has a `spec` needs an edge from the gateway. Static endpoints (an `endpoints:` entry with `override` and no owning service) need a gateway.
@@ -174,7 +194,7 @@ A `flavor` fills the values you do not write; anything you write wins. **All num
 ## Every error names file, line, column, node and field
 
 ```text
-kaanal.yaml:12:5: node 'orders-db': unknown field 'bogus' (expected: concurrency, flavor, ops, pool, rate_limit)
+kaanal.yaml:12:5: node 'orders-db': unknown field 'bogus' (expected: balance, concurrency, flavor, locale, ops, pool, rate_limit, replicas, timeout)
 ```
 
 Run `kaanal schema` to print a JSON Schema of the whole file for editor autocomplete.

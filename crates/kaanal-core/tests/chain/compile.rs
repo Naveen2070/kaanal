@@ -284,3 +284,42 @@ fn errors_name_the_endpoint_and_point_at_the_step() {
         )
     );
 }
+
+/// `BASE` with the cache node's fields replaced by `fields`.
+fn with_cache(fields: &str) -> Vec<String> {
+    let src = BASE.replace(
+        "cache: { type: cache, flavor: redis }",
+        &format!("cache: {{ type: cache, {fields} }}"),
+    );
+    let (_, r) = build(&src, &ROUTES);
+    r.unwrap().warnings
+}
+
+#[test]
+fn a_cache_timeout_below_the_hit_p50_warns() {
+    let w = with_cache("hit_ratio: 0.8, hit: 5ms, miss: 5ms, timeout: 2ms");
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(
+        w[0].contains("cache") && w[0].contains("cut to misses"),
+        "{w:?}"
+    );
+    // a percentile pair uses its p50
+    let w = with_cache("hit_ratio: 0.8, hit: { p50: 5ms, p99: 9ms }, miss: 1ms, timeout: 4ms");
+    assert_eq!(w.len(), 1, "{w:?}");
+}
+
+#[test]
+fn a_cache_timeout_at_or_above_the_hit_p50_or_none_is_quiet() {
+    assert_eq!(
+        with_cache("hit_ratio: 0.8, hit: 5ms, miss: 5ms, timeout: 20ms"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        with_cache("hit_ratio: 0.8, hit: 5ms, miss: 5ms, timeout: 5ms"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        with_cache("hit_ratio: 0.8, hit: 5ms, miss: 5ms"),
+        Vec::<String>::new()
+    );
+}

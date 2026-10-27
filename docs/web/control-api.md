@@ -87,6 +87,8 @@ In the live layer `down: false` means "unset": it clears a `down` you set earlie
 
 Like the per-node route, but the body also names where the chaos applies: `node`, `endpoint` (for example `"GET /orders"`; the method is case-insensitive) or both (the node only while it serves that endpoint). One of them is required (`400` otherwise); an unknown node or endpoint is `404`; an endpoint that is not `METHOD /path` is `400`. Entries from different layers stack: a node entry and a node-at-endpoint entry, or a live entry and a scenario, all apply (latencies add, `down` is an OR, error rates combine as independent chances). **A higher layer wins over a lower one** for the same field, whatever the key; inside one layer the node-at-endpoint entry goes before the node's. An endpoint entry is a separate roll at the front door, before the chain, and is not merged into the nodes behind it (see [chaos internals](../source/chaos.md#endpoint-chaos-and-keys)). Answers like the per-node route.
 
+To act on one copy of a replicated node, add `"replica": N` (0-based) next to `node`: `{ "node": "db", "replica": 1, "down": true }`. A replica needs a node, takes no `endpoint` (it applies whatever the endpoint) and must exist (`400` otherwise: `node 'db' has 3 replicas (0 to 2)`). A downed replica is skipped by the balancer from the request's arrival on; if every replica is down the call fails with a 503. A replica entry also carries the node's own entry and its node-at-endpoint entries. `GET /__kaanal/chaos` lists them under `replicas: [{ node, replica, ... }]` (the group is left out when there are none), `DELETE /__kaanal/chaos?node=db&replica=1` removes one.
+
 ```json
 { "endpoint": "GET /orders", "error_rate": 1.0, "error_kind": "reset" }
 ```
@@ -233,7 +235,7 @@ The request log: the last finished mock requests, oldest completion first. What 
 
 - `entries` are ordered by completion (`done`), not by id: a slow request that started first comes after the fast ones that overtook it.
 - `oldest` and `newest` are the ids with the lowest and highest number **in the ring** (both `null` when it is empty). `cap` is the ring size, 1000, and `evicted` counts the entries pushed out since start (a `POST /reset` does not change it).
-- A hop is `{ node, kind, op?, start_ms, dur_ms, wait_ms, lane, fork, cut, why }`; `kind` is `net`, `proc`, `op` (then `op` is `read`, `write` or `scan`), `hit`, `miss` or `delay`. `chain_error` is `{ node, status, kind, cause }`.
+- A hop is `{ node, replica?, kind, op?, start_ms, dur_ms, wait_ms, lane, fork, cut, why }`; `kind` is `net`, `proc`, `op` (then `op` is `read`, `write` or `scan`), `hit`, `miss` or `delay`. `replica` (0-based) is present only for a node with more than one replica, and the trace text names that hop `db#2`. `chain_error` is `{ node, status, kind, cause }`.
 - Nothing is applied partly: an unknown, repeated, empty (except `scope`) or malformed parameter answers `400 { "error": "parameter 'limit': expected an integer from 1 to 1000" }`, naming the parameter. `limit` takes plain digits only (no sign, no space).
 - `POST /__kaanal/reset` empties the ring. Request ids keep counting.
 

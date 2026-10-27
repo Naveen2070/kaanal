@@ -20,6 +20,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/schema.rs`           | [kaanal-core/schema.md](kaanal-core/schema.md)           | JSON Schema of `kaanal.yaml` (schemars)                                                                                     |
 | `src/topology.rs`         | [kaanal-core/topology.md](kaanal-core/topology.md)       | Graph build + validation (optional gateway, edge table, DAG, presets)                                                       |
 | `src/replay/`             | [kaanal-core/replay.md](kaanal-core/replay.md)           | Token bucket (GCRA) and slot gate with FIFO hand-over                                                                       |
+| `src/balance.rs`          | [kaanal-core/balance.md](kaanal-core/balance.md)         | Replica count and balance policy (`round-robin`, `random`, `weighted`)                                          |
 | `src/visits.rs`           | [kaanal-core/visits.md](kaanal-core/visits.md)           | Expected visits per node from the compiled chains (branch `prob`, `repeat`, cache hits)                         |
 | `src/rng.rs`              | [kaanal-core/rng.md](kaanal-core/rng.md)                 | `HopRng`, the cheap per-hop RNG (SplitMix64)                                                                                |
 | `src/dist.rs`             | [kaanal-core/dist.md](kaanal-core/dist.md)               | Fixed & lognormal latency distributions                                                                                     |
@@ -32,7 +33,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/chain/entries.rs`    | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Compiler` methods that list the endpoints and their jobs, built-in and user                                                |
 | `src/chain/steps.rs`      | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Compiler` methods that compile one step: `call`, `cache`, `parallel`, `repeat`                                             |
 | `src/chain/endpoint.rs`   | [kaanal-core/chain.md](kaanal-core/chain.md)             | `Compiler` methods that compile a whole endpoint: node chains, state overrides, heads                                       |
-| `src/exec.rs`             | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, spans, determinism                                                               |
+| `src/exec/`               | [kaanal-core/exec.md](kaanal-core/exec.md)               | The chain executor (`execute`), ops, hops, spans, determinism                                                               |
 | `src/pin.rs`              | [kaanal-core/pin.md](kaanal-core/pin.md)                 | UI-state pins: `PinState`, layers, `states:` overrides, `resolve`                                                           |
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)

@@ -119,6 +119,7 @@ impl ChaosPatch {
 pub struct KeyedPatch {
     pub(super) node: Option<String>,
     pub(super) endpoint: Option<String>,
+    pub(super) replica: Option<u16>,
     pub(super) latency_ms: Option<u64>,
     pub(super) error_rate: Option<f64>,
     pub(super) error_kind: Option<String>,
@@ -134,6 +135,7 @@ pub struct KeyedPatch {
 pub struct ClearQuery {
     pub(super) node: Option<String>,
     pub(super) endpoint: Option<String>,
+    pub(super) replica: Option<u16>,
 }
 
 /// `GET /__kaanal/chaos` — the live layer
@@ -250,11 +252,16 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
         .nodes
         .iter()
         .map(|n| {
-            json!({
+            let mut v = json!({
                 "name": n.name,
                 "type": n.kind.as_str(),
                 "flavor": n.flavor,
-            })
+            });
+            // only a replicated node says so, so a topology without replicas reads as before
+            if n.replicas > 1 {
+                v["replicas"] = json!(n.replicas);
+            }
+            v
         })
         .collect();
     let edges: Vec<Value> = t
@@ -300,6 +307,33 @@ pub async fn set_chaos(
     apply_patch(&st, &ChaosKey::Node(id), &p)
 }
 
+/// **Private.** The key of a `replica` request, or `None` when none was named: a replica needs a
+/// node, takes no endpoint (it applies whatever the endpoint) and must exist (400 otherwise).
+fn replica_key(
+    st: &AppState,
+    node: Option<usize>,
+    has_endpoint: bool,
+    replica: Option<u16>,
+) -> Result<Option<ChaosKey>, Reject> {
+    let Some(r) = replica else { return Ok(None) };
+    let bad = |m: &str| reject(StatusCode::BAD_REQUEST, m);
+    let n = node.ok_or_else(|| bad("replica needs a node"))?;
+    if has_endpoint {
+        return Err(bad(
+            "a replica takes no endpoint (it applies whatever the endpoint)",
+        ));
+    }
+    let count = st.topo.nodes[n].replicas;
+    if r >= count {
+        return Err(bad(&format!(
+            "node '{}' has {count} replicas (0 to {})",
+            st.topo.nodes[n].name,
+            count - 1
+        )));
+    }
+    Ok(Some(ChaosKey::Replica(n, r)))
+}
+
 /// `PUT /__kaanal/chaos` — like [`set_chaos`] but keyed by `node`, `endpoint` or both (the node
 /// only when visited through that endpoint). At least one is required; an unknown node or
 /// endpoint → 404; a malformed endpoint (not `METHOD /path`) → 400; an endpoint with no entry
@@ -329,15 +363,19 @@ pub async fn set_chaos_keyed(
             Some(key)
         }
     };
-    let key = match (node, endpoint) {
-        (Some(n), Some(e)) => ChaosKey::NodeAt(n, e),
-        (Some(n), None) => ChaosKey::Node(n),
-        (None, Some(e)) => ChaosKey::Endpoint(e),
-        (None, None) => {
-            return Err(reject(
-                StatusCode::BAD_REQUEST,
-                "set node, endpoint or both",
-            ));
+    let key = if let Some(k) = replica_key(&st, node, p.endpoint.is_some(), p.replica)? {
+        k
+    } else {
+        match (node, endpoint) {
+            (Some(n), Some(e)) => ChaosKey::NodeAt(n, e),
+            (Some(n), None) => ChaosKey::Node(n),
+            (None, Some(e)) => ChaosKey::Endpoint(e),
+            (None, None) => {
+                return Err(reject(
+                    StatusCode::BAD_REQUEST,
+                    "set node, endpoint or both",
+                ));
+            }
         }
     };
     let patch = ChaosPatch {
@@ -386,11 +424,15 @@ pub async fn clear_keyed(
         .map(endpoint_key)
         .transpose()
         .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
-    let key = match (node, endpoint) {
-        (Some(n), Some(e)) => Some(ChaosKey::NodeAt(n, e)),
-        (Some(n), None) => Some(ChaosKey::Node(n)),
-        (None, Some(e)) => Some(ChaosKey::Endpoint(e)),
-        (None, None) => None,
+    let key = if let Some(k) = replica_key(&st, node, q.endpoint.is_some(), q.replica)? {
+        Some(k)
+    } else {
+        match (node, endpoint) {
+            (Some(n), Some(e)) => Some(ChaosKey::NodeAt(n, e)),
+            (Some(n), None) => Some(ChaosKey::Node(n)),
+            (None, Some(e)) => Some(ChaosKey::Endpoint(e)),
+            (None, None) => None,
+        }
     };
     let mut c = lock(&st);
     commit(&st, &mut c, |c| {

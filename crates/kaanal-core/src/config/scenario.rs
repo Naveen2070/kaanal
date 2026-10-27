@@ -53,12 +53,18 @@ impl ScenarioConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChaosEntry {
-    /// A node name. With `endpoint`: only when visited through that endpoint.
+    /// A node name. With `endpoint`: only when visited through that endpoint; with `replica`:
+    /// one copy of the node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<String>,
     /// `METHOD /path`: the front door of that endpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    /// With `node`: one replica of it (0-based), whatever the endpoint. Needs the node to have
+    /// that many `replicas`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0, "maximum" = 63))]
+    pub replica: Option<u16>,
     /// Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc
     /// attribute cannot compute it, so keep the two in step).
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -57,13 +57,26 @@ pub fn node_rows(topo: &Value, active: &Value, live: &Value) -> Vec<Value> {
             let expires = live["nodes"][name]["expires_in_ms"]
                 .as_object()
                 .and_then(|m| m.values().filter_map(Value::as_u64).min());
-            serde_json::json!({
+            let mut row = serde_json::json!({
                 "node": n["name"], "type": n["type"], "flavor": n["flavor"],
                 "state": if c["down"] == true { "down" } else { "up" },
                 "chaos": c, "expires_in_ms": expires,
-            })
+            });
+            // only a replicated node carries a count, so other rows are unchanged
+            if n["replicas"].is_u64() {
+                row["replicas"] = n["replicas"].clone();
+            }
+            row
         })
         .collect()
+}
+
+/// **Private.** The node name, with ` x3` after a node that has replicas.
+fn node_cell(r: &Value) -> String {
+    let name = r["node"].as_str().unwrap_or("");
+    r["replicas"]
+        .as_u64()
+        .map_or_else(|| name.to_string(), |n| format!("{name} x{n}"))
 }
 
 /// **Private.** The node table shared by `status` and `node list`.
@@ -83,7 +96,7 @@ pub fn print_node_table(rows: &[Value]) {
         }
         let line = format!(
             "{:<12} {:<12} {:<10} {:<6} {}",
-            r["node"].as_str().unwrap_or(""),
+            node_cell(r),
             r["type"].as_str().unwrap_or(""),
             r["flavor"].as_str().unwrap_or("-"),
             r["state"].as_str().unwrap_or(""),

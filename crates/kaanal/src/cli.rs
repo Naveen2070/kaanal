@@ -135,6 +135,9 @@ pub(crate) enum NodeCmd {
     /// Take a node down (503 for every request), e.g. `kaanal node down db --for 30s`
     Down {
         node: String,
+        /// Only this replica (0-based) of the node
+        #[arg(long)]
+        replica: Option<u16>,
         /// Bring it back after this long (100ms to 24h, e.g. 30s)
         #[arg(long = "for", value_name = "DURATION")]
         for_: Option<String>,
@@ -142,7 +145,12 @@ pub(crate) enum NodeCmd {
     /// List nodes with their up/down state and chaos
     List,
     /// Clear a node's down flag (other chaos stays); fails if a scenario or override still holds it down
-    Up { node: String },
+    Up {
+        node: String,
+        /// Only this replica (0-based) of the node
+        #[arg(long)]
+        replica: Option<u16>,
+    },
 }
 
 /// **Private.** Flags of `kaanal logs`.
@@ -182,6 +190,9 @@ pub(crate) enum ChaosCmd {
         /// Endpoint key, e.g. "GET /orders"; with a node: that node, only through this endpoint
         #[arg(long)]
         route: Option<String>,
+        /// One replica (0-based) of the node, whatever the endpoint
+        #[arg(long, requires = "node", conflicts_with = "route")]
+        replica: Option<u16>,
         /// How failures show up: status, reset, hang or malformed
         #[arg(long)]
         kind: Option<String>,
@@ -207,6 +218,9 @@ pub(crate) enum ChaosCmd {
         /// Endpoint key, e.g. "GET /orders"
         #[arg(long)]
         route: Option<String>,
+        /// One replica (0-based) of the node
+        #[arg(long, requires = "node", conflicts_with = "route")]
+        replica: Option<u16>,
     },
 }
 

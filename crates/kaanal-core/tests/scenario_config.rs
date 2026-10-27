@@ -193,3 +193,67 @@ fn null_limits_and_pins_read_as_absent() {
             .unwrap();
     resolve_scenario("x", &cfg, &topo, &eps, &|_| true).unwrap();
 }
+
+/// `fixture()` with `db` given 3 replicas.
+fn replicated() -> (Topology, Endpoints) {
+    let cfg = Config::from_yaml(&BASE.replace(
+        "db:    { type: database,",
+        "db:    { type: database, replicas: 3,",
+    ))
+    .unwrap();
+    let t = Topology::build(&cfg).unwrap();
+    let routes = [RouteSpec::inferred("GET /users/{id}", t.id("app").unwrap())];
+    let e = compile(&t, &routes, EndpointsInput::inline(&cfg)).unwrap();
+    (t, e)
+}
+
+#[test]
+fn a_replica_entry_resolves_to_a_replica_layer() {
+    let (topo, eps) = replicated();
+    let cfg: ScenarioConfig = serde_yaml_ng::from_str(
+        "chaos:\n  - { node: db, replica: 1, down: true }\n  - { node: db, replica: 2, latency_ms: 50 }\n",
+    )
+    .unwrap();
+    let (s, warns) = resolve_scenario("rep", &cfg, &topo, &eps, &|_| true).unwrap();
+    assert!(warns.is_empty(), "{warns:?}");
+    let db = topo.id("db").unwrap();
+    assert_eq!(s.layers.entry_count(), 2);
+    let e = s.layers.compile();
+    assert!(e.replica_down(db, "GET /users/{id}", 1));
+    assert!(!e.replica_down(db, "GET /users/{id}", 0));
+    assert_eq!(
+        e.visit_replica(db, "GET /users/{id}", 2)
+            .unwrap()
+            .latency_add
+            .as_millis(),
+        50
+    );
+}
+
+#[test]
+fn bad_replica_entries_are_rejected_at_their_field() {
+    let (topo, eps) = replicated();
+    let run = |entry: &str| {
+        let cfg: ScenarioConfig =
+            serde_yaml_ng::from_str(&format!("chaos:\n  - {entry}\n")).unwrap();
+        resolve_scenario("r", &cfg, &topo, &eps, &|_| true).unwrap_err()
+    };
+    let e = run("{ node: db, replica: 3, down: true }");
+    assert!(
+        e.message.contains("node 'db' has 3 replicas (0 to 2)"),
+        "{}",
+        e.message
+    );
+    assert_eq!(
+        e.path,
+        vec![
+            PathSeg::Key("chaos".into()),
+            PathSeg::Index(0),
+            PathSeg::Key("replica".into())
+        ]
+    );
+    let e = run("{ replica: 0, endpoint: \"GET /users/{id}\", down: true }");
+    assert!(e.message.contains("replica needs a node"), "{}", e.message);
+    let e = run("{ node: db, replica: 0, endpoint: \"GET /users/{id}\", down: true }");
+    assert!(e.message.contains("takes no endpoint"), "{}", e.message);
+}

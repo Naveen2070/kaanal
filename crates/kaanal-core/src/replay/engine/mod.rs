@@ -16,17 +16,17 @@ use super::gate::{Admit, Gate};
 use crate::chaos::FailKind;
 use crate::exec::{ChainResult, Hop, HopKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
+mod replicas;
 mod state;
 
-use state::{
-    DEADLINE, Failure, Join, NOT_STARTED, NodeState, Req, Scratch, SpanState, Token, live, nanos,
-};
+use replicas::Units;
+use state::{DEADLINE, Failure, Join, NOT_STARTED, Req, Scratch, SpanState, Token, live, nanos};
 pub use state::{EngineError, FailCause, Finished, FinishedHop, NodeCounters};
 
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].
 pub struct Engine {
-    nodes: Vec<NodeState>,
+    units: Units,
     counters: Vec<NodeCounters>,
     /// Hop-end events ordered by `(time, seq)`: (time, seq, request slot, token).
     heap: BinaryHeap<Reverse<(u64, u64, usize, usize)>>,
@@ -48,15 +48,7 @@ impl Engine {
     /// An engine with every gate free. The window is `[0, u64::MAX]` until [`Engine::set_window`].
     pub fn new(topo: &Topology) -> Engine {
         Engine {
-            nodes: topo
-                .nodes
-                .iter()
-                .map(|n| NodeState {
-                    gate: n.admission.as_ref().map(Gate::new),
-                    bucket: n.rate_limit.as_ref().map(Bucket::new),
-                    since: 0,
-                })
-                .collect(),
+            units: Units::new(topo),
             counters: vec![NodeCounters::default(); topo.nodes.len()],
             heap: BinaryHeap::new(),
             seq: 0,
@@ -78,7 +70,7 @@ impl Engine {
     /// pools are **not** touched: they hold in-flight requests, and each frees its own as it
     /// finishes, so after the last in-flight request ends they are idle again.
     pub fn refill_buckets(&mut self) {
-        for n in &mut self.nodes {
+        for n in &mut self.units.states {
             if let Some(b) = &mut n.bucket {
                 b.refill();
             }
@@ -256,17 +248,6 @@ impl Engine {
         self.heap.push(Reverse((at, seq, r, k)));
     }
 
-    /// **Private.** Adds `busy × (time since the last change, clipped to the window)` to the
-    /// node's `area`. Call just before `busy` changes; extra calls change nothing (additive).
-    fn mark(&mut self, node: NodeId, now: u64) {
-        let (warmup, end) = (self.warmup, self.end);
-        let ns = &mut self.nodes[node];
-        let busy = ns.gate.as_ref().map_or(0, Gate::busy);
-        let (from, to) = (ns.since.max(warmup), now.min(end));
-        self.counters[node].area += u128::from(busy) * u128::from(to.saturating_sub(from));
-        ns.since = now;
-    }
-
     /// **Private.** Runs token `k` from its position until it starts a hop, parks at a fork,
     /// fails, or ends. A request that has failed starts nothing new; only a `Fail` reached at
     /// the same instant with a lower plan index can still replace the winner (D17).
@@ -313,8 +294,7 @@ impl Engine {
                         h.dur.is_zero()
                             && (h.kind == HopKind::Net
                                 || h.kind == HopKind::Delay
-                                || (self.nodes[h.node].gate.is_none()
-                                    && self.nodes[h.node].bucket.is_none()))
+                                || self.units.unconstrained(h.node, h.replica))
                     }
                     _ => false,
                 };
@@ -435,16 +415,16 @@ impl Engine {
             req.tokens[k].last_own = None;
             req.busy += 1;
         } else {
-            let node = h.node;
+            let (node, rep) = (h.node, h.replica);
             let tok = &mut live(&mut self.reqs, r).tokens[k];
             let new_visit = tok.last_own != Some(node);
             tok.last_own = Some(node);
             if new_visit
-                && let Some(b) = self.nodes[node].bucket.as_mut()
+                && let Some(b) = self.units.state(node, rep).bucket.as_mut()
                 && let Err(wait) = b.take(now)
             {
                 if counted {
-                    self.counters[node].limited += 1;
+                    self.count(node, rep, |c| c.limited += 1);
                 }
                 let retry_after = Some(Duration::from_nanos(wait));
                 self.fail(
@@ -456,32 +436,31 @@ impl Engine {
                         status: 429,
                         kind: FailKind::Status,
                         retry_after,
-                        refused: counted.then_some((node, true)),
+                        refused: counted.then_some((node, rep, true)),
                         cause: FailCause::RateLimit,
                     },
                 );
                 return;
             }
-            if self.nodes[node].gate.is_some() {
+            if self.units.state(node, rep).gate.is_some() {
                 self.mark(node, now);
-                let gate = self.nodes[node].gate.as_mut().expect("checked");
+                let gate = self.units.state(node, rep).gate.as_mut().expect("checked");
                 match gate.arrive((r, k)) {
                     Admit::Run => {}
                     Admit::Queued => {
                         let len = gate.queued();
                         if now >= self.warmup {
-                            let c = &mut self.counters[node];
-                            c.max_queue = c.max_queue.max(len);
+                            self.count(node, rep, |c| c.max_queue = c.max_queue.max(len));
                         }
                         let req = live(&mut self.reqs, r);
                         req.busy += 1;
-                        req.tokens[k].queued_at = Some((node, now));
+                        req.tokens[k].queued_at = Some((node, rep, now));
                         return;
                     }
                     Admit::Overflow => {
                         let status = gate.overflow_status();
                         if counted {
-                            self.counters[node].overflowed += 1;
+                            self.count(node, rep, |c| c.overflowed += 1);
                         }
                         self.fail(
                             r,
@@ -492,7 +471,7 @@ impl Engine {
                                 status,
                                 kind: FailKind::Status,
                                 retry_after: None,
-                                refused: counted.then_some((node, false)),
+                                refused: counted.then_some((node, rep, false)),
                                 cause: FailCause::Overflow,
                             },
                         );
@@ -502,7 +481,7 @@ impl Engine {
             }
             live(&mut self.reqs, r).busy += 1;
             if counted {
-                self.counters[node].completed += 1;
+                self.count(node, rep, |c| c.completed += 1);
             }
         }
         live(&mut self.reqs, r).starts[idx] = now;
@@ -514,18 +493,27 @@ impl Engine {
     /// then move the token on.
     fn hop_done(&mut self, r: usize, k: usize) {
         let now = self.now;
-        let (node, kind) = {
+        let (node, rep, kind) = {
             let req = live(&mut self.reqs, r);
             let at = req.tokens[k].at;
             let PlanItem::Hop(h) = &req.plan.items[at] else {
                 unreachable!("HopDone names a hop")
             };
-            (h.node, h.kind)
+            (h.node, h.replica, h.kind)
         };
-        if kind != HopKind::Net && kind != HopKind::Delay && self.nodes[node].gate.is_some() {
+        if kind != HopKind::Net
+            && kind != HopKind::Delay
+            && self.units.state(node, rep).gate.is_some()
+        {
             self.mark(node, now);
             // FIFO hand-over at this instant: the slot never looks free to a later arrival.
-            let next = self.nodes[node].gate.as_mut().expect("checked").release();
+            let next = self
+                .units
+                .state(node, rep)
+                .gate
+                .as_mut()
+                .expect("checked")
+                .release();
             if let Some((qr, qk)) = next {
                 self.start_queued(qr, qk);
             }
@@ -542,7 +530,7 @@ impl Engine {
         let (now, warmup) = (self.now, self.warmup);
         let waiter = live(&mut self.reqs, qr);
         let i = waiter.tokens[qk].at;
-        let (node, since) = waiter.tokens[qk]
+        let (node, rep, since) = waiter.tokens[qk]
             .queued_at
             .take()
             .expect("a token in a node queue has queued_at set");
@@ -555,9 +543,10 @@ impl Engine {
         };
         let dur = nanos(qh.dur);
         if counted {
-            let c = &mut self.counters[node];
-            c.completed += 1;
-            c.wait += u128::from(wait);
+            self.count(node, rep, |c| {
+                c.completed += 1;
+                c.wait += u128::from(wait);
+            });
         }
         let done = self.after(dur);
         self.push(done, qr, qk);
@@ -615,27 +604,32 @@ impl Engine {
         let old = req.fail.replace(f);
         req.done = Some(now);
         if let Some(Failure {
-            refused: Some((node, limited)),
+            refused: Some((node, rep, limited)),
             ..
         }) = old
         {
-            let c = &mut self.counters[node];
-            if limited {
-                c.limited -= 1;
-            } else {
-                c.overflowed -= 1;
+            for c in [
+                &mut self.counters[node],
+                &mut self.units.counters[node][usize::from(rep)],
+            ] {
+                if limited {
+                    c.limited -= 1;
+                } else {
+                    c.overflowed -= 1;
+                }
             }
         }
-        let queued: Vec<(usize, NodeId)> = req
+        let queued: Vec<(usize, NodeId, u16)> = req
             .tokens
             .iter()
             .enumerate()
-            .filter_map(|(k, t)| t.queued_at.map(|(n, _)| (k, n)))
+            .filter_map(|(k, t)| t.queued_at.map(|(n, rep, _)| (k, n, rep)))
             .collect();
-        for (k, node) in queued {
+        for (k, node, rep) in queued {
             // ponytail: linear scan of that node's queue; keep a per-token handle if long
             // queues of failing requests ever show up in a profile.
-            self.nodes[node]
+            self.units
+                .state(node, rep)
                 .gate
                 .as_mut()
                 .expect("queued implies a gate")

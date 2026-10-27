@@ -17,6 +17,12 @@ A request's `Plan` is walked against per-node limits: a slot limit ([`Gate`](#ga
 - `refill()` sets `tat = 0`, a full bucket as at startup. `POST /__kaanal/reset` uses it (through `Engine::refill_buckets`) so a rate-limited run can repeat.
 - `tat` is a `u128`. With `now < 2^64`, `interval < 2^64` and `burst < 2^32` it cannot overflow, so `take` needs no checked arithmetic and cannot fail (decision Q5; the spec said `u64`). An `Err` wait larger than `u64::MAX` saturates.
 
+## Replicas
+
+A node with `replicas: N` has N independent copies of its queueing state: its own `Gate` (slots, queue, pool), its own `Bucket` (rate limit) and its own busy clock. `replicas.rs` holds them in one flat table (`Units`, indexed by `first[node] + replica`), so a node with one replica costs what it always did. A hop picks its unit from `(Hop::node, Hop::replica)`: the rate-limit token, the slot, the queue place and the FIFO hand-over all belong to that replica, and a request that fails leaves the queue of the replica it waited in.
+
+Counters are kept twice. `node_counters()` is per node, summed over its replicas, and is what `NodeStats` reports (frozen, R1.48(5)): `max_queue` is the longest queue of any replica and `area` the busy slot-time of all of them. `replica_counters()[node][replica]` is the same fields per replica, for the Studio report. A deadline belongs to a call, not a replica, so `timed_out` is per node only. The simulator divides `area` by `slots x replicas x window`, so a replicated node's utilization is per slot of every replica.
+
 ## Gate
 
 `Gate::new(&Admission)` makes a gate with every slot free. Waiters are `(request slot, token index)` pairs (`Waiter`).
@@ -40,7 +46,7 @@ The old simulator loop, moved here so live mode can run the same machine. It doe
 | `stamp()`, `peek()`, `next_due()` | A caller with its own event queue (the simulator's arrivals) takes sequence numbers from `stamp()` and merges `(time, seq)` with `peek()`, so ties order exactly as they did with one heap.                                                                                                                                                    |
 | `drain_finished()`                | (also `drain_finished_iter()`, which keeps the buffer's capacity so a driver that drains after every event allocates nothing per answer.) The answers decided so far, as `Finished` (tag, submit order, arrival, `done`, result, `cause`, hops with `start` relative to arrival, cut `dur` and queue `wait`).                                  |
 | `refill_buckets()`                | Refills every rate-limit bucket (`Bucket::refill`). Safe at any moment: a bucket is read only when a hop starts and holds no per-request state. **Gates (slots, queues) and pools are not touched**: they hold in-flight requests and each frees its own as it finishes, so an idle engine is already clean.                                   |
-| `node_counters()`, `table_len()`  | Per-node `area`, `max_queue`, `completed`, `wait`; the request table length (it is reused, R6.13).                                                                                                                                                                                                                                             |
+| `node_counters()`, `replica_counters()`, `table_len()` | Per-node `area`, `max_queue`, `completed`, `wait`; the request table length (it is reused, R6.13).                                                                                                                                                                                                                                             |
 
 **Answer at the end of the instant (Q3).** A request is answered when it fails or completes, at the end of that instant (no other event is scheduled at the same time, so a same-instant `Fail` with a lower plan index can still replace the winner, D17). It is not delayed until its cancelled siblings' hops end, so live replies at the failure instant. The table slot is freed once the answer was emitted and no token is busy.
 

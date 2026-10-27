@@ -10,12 +10,45 @@ use crate::{
     Duration, Fail, PIN_STATES, call, clean, encode_segment, err, output, ttl_body, warn_all,
 };
 
+/// **Private.** `db#2` for a replica (human output only: the API takes `node` and `replica` apart).
+fn node_label(node: &str, replica: Option<u16>) -> String {
+    replica.map_or_else(|| node.to_string(), |r| format!("{node}#{r}"))
+}
+
+/// **Private.** `PUT`s `patch` to one node, or to one replica of it (the keyed route).
+fn put_node(
+    node: &str,
+    replica: Option<u16>,
+    mut patch: Map<String, Value>,
+) -> Result<Value, Fail> {
+    match replica {
+        None => call("PUT", &node_path(node), Some(Value::Object(patch))),
+        Some(r) => {
+            patch.insert("node".into(), json!(node));
+            patch.insert("replica".into(), json!(r));
+            call("PUT", "/__kaanal/chaos", Some(Value::Object(patch)))
+        }
+    }
+}
+
+/// **Private.** Whether the effective chaos of `v` still holds `node` (or its `replica`) down.
+fn still_down(v: &Value, node: &str, replica: Option<u16>) -> bool {
+    match replica {
+        None => v["effective"]["nodes"][node]["down"] == true,
+        Some(r) => v["effective"]["replicas"].as_array().is_some_and(|a| {
+            a.iter()
+                .any(|e| e["node"] == node && e["replica"] == r && e["down"] == true)
+        }),
+    }
+}
+
 /// **Private.** `kaanal chaos set|clear`.
 pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
     match cmd {
         ChaosCmd::Set {
             node,
             route,
+            replica,
             kind,
             latency,
             error_rate,
@@ -27,7 +60,7 @@ pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
             let revert = for_set(&mut patch, for_)?;
             let label = match (&node, &route) {
                 (Some(n), Some(e)) => format!("{n} @ {e}"),
-                (Some(n), None) => n.clone(),
+                (Some(n), None) => node_label(n, replica),
                 (None, e) => e.clone().unwrap_or_default(),
             };
             let v = if route.is_some() {
@@ -36,11 +69,7 @@ pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
                 call("PUT", "/__kaanal/chaos", Some(Value::Object(patch)))?
             } else {
                 // clap guarantees a node when there is no endpoint
-                let path = format!(
-                    "/__kaanal/chaos/{}",
-                    encode_segment(&node.unwrap_or_default())
-                );
-                call("PUT", &path, Some(Value::Object(patch)))?
+                put_node(&node.unwrap_or_default(), replica, patch)?
             };
             output::emit(&v, || {
                 println!("{}", clean(&format!("{label}: {v}{revert}")));
@@ -48,8 +77,12 @@ pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
             warn_all(&v);
             Ok(())
         }
-        ChaosCmd::Clear { node, route } => {
-            let path = chaos_clear_path(node, route);
+        ChaosCmd::Clear {
+            node,
+            route,
+            replica,
+        } => {
+            let path = chaos_clear_path(node, route, replica);
             let v = call("DELETE", &path, None)?;
             output::emit(&v, || println!("cleared"));
             Ok(())
@@ -109,11 +142,17 @@ pub(crate) fn for_set(patch: &mut Map<String, Value>, d: Option<String>) -> Resu
 /// **Private.** `kaanal node down|up`: `PUT /chaos/NODE` with only the down flag.
 pub(crate) fn node(cmd: NodeCmd) -> Result<(), Fail> {
     match cmd {
-        NodeCmd::Down { node, for_ } => {
+        NodeCmd::Down {
+            node,
+            replica,
+            for_,
+        } => {
             let mut patch = Map::from_iter([("down".to_string(), json!(true))]);
             let revert = for_set(&mut patch, for_)?;
-            let v = call("PUT", &node_path(&node), Some(Value::Object(patch)))?;
-            output::emit(&v, || println!("{}: down{revert}", clean(&node)));
+            let v = put_node(&node, replica, patch)?;
+            output::emit(&v, || {
+                println!("{}: down{revert}", clean(&node_label(&node, replica)));
+            });
         }
         NodeCmd::List => {
             let topo = call("GET", "/__kaanal/topology", None)?;
@@ -124,16 +163,20 @@ pub(crate) fn node(cmd: NodeCmd) -> Result<(), Fail> {
                 output::print_node_table(&rows);
             });
         }
-        NodeCmd::Up { node } => {
-            let v = call("PUT", &node_path(&node), Some(json!({ "down": false })))?;
+        NodeCmd::Up { node, replica } => {
+            let patch = Map::from_iter([("down".to_string(), json!(false))]);
+            let v = put_node(&node, replica, patch)?;
             // The server leaves calm keys out of `effective`, so a missing entry means "not down";
             // a present entry always carries a bool `down` (resolved_json).
-            if v["effective"]["nodes"][&node]["down"] == true {
+            if still_down(&v, &node, replica) {
                 return Err(err(format!(
-                    "{node} is still down: held by an active scenario or override (see kaanal scenario active)"
+                    "{} is still down: held by an active scenario or override (see kaanal scenario active)",
+                    node_label(&node, replica)
                 )));
             }
-            output::emit(&v, || println!("{}: up", clean(&node)));
+            output::emit(&v, || {
+                println!("{}: up", clean(&node_label(&node, replica)));
+            });
         }
     }
     Ok(())
@@ -144,12 +187,20 @@ pub(crate) fn node_path(node: &str) -> String {
     format!("/__kaanal/chaos/{}", encode_segment(node))
 }
 
-/// **Private.** The `DELETE` path of `chaos clear` for a node, an endpoint or both.
-pub(crate) fn chaos_clear_path(node: Option<String>, endpoint: Option<String>) -> String {
-    match (node, endpoint) {
-        (None, None) => "/__kaanal/chaos".to_string(),
-        (Some(n), None) => format!("/__kaanal/chaos/{}", encode_segment(&n)),
-        (n, Some(e)) => {
+/// **Private.** The `DELETE` path of `chaos clear` for a node (or one replica of it), an endpoint
+/// or both.
+pub(crate) fn chaos_clear_path(
+    node: Option<String>,
+    endpoint: Option<String>,
+    replica: Option<u16>,
+) -> String {
+    match (node, endpoint, replica) {
+        (None, None, _) => "/__kaanal/chaos".to_string(),
+        (Some(n), None, Some(r)) => {
+            format!("/__kaanal/chaos?node={}&replica={r}", encode_segment(&n))
+        }
+        (Some(n), None, None) => format!("/__kaanal/chaos/{}", encode_segment(&n)),
+        (n, Some(e), _) => {
             let node = n.map_or(String::new(), |n| format!("node={}&", encode_segment(&n)));
             format!("/__kaanal/chaos?{node}endpoint={}", encode_segment(&e))
         }

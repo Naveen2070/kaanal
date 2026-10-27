@@ -4,7 +4,8 @@ use super::*;
 
 /// **Private.** Places each view under its key: `{ nodes, endpoints, node_at }`.
 pub(super) fn keyed_json(st: &AppState, items: Vec<(ChaosKey, Value)>) -> Map<String, Value> {
-    let (mut nodes, mut endpoints, mut node_at) = (Map::new(), Map::new(), Vec::new());
+    let (mut nodes, mut endpoints, mut node_at, mut replicas) =
+        (Map::new(), Map::new(), Vec::new(), Vec::new());
     for (k, view) in items {
         match k {
             ChaosKey::Node(id) => {
@@ -19,12 +20,22 @@ pub(super) fn keyed_json(st: &AppState, items: Vec<(ChaosKey, Value)>) -> Map<St
                 o.insert("endpoint".into(), json!(e));
                 node_at.push(Value::Object(o));
             }
+            ChaosKey::Replica(id, r) => {
+                let Value::Object(mut o) = view else { continue };
+                o.insert("node".into(), json!(st.topo.nodes[id].name));
+                o.insert("replica".into(), json!(r));
+                replicas.push(Value::Object(o));
+            }
         }
     }
     let mut out = Map::new();
     out.insert("nodes".into(), Value::Object(nodes));
     out.insert("endpoints".into(), Value::Object(endpoints));
     out.insert("node_at".into(), Value::Array(node_at));
+    // only when there is one, so a topology without replica chaos reads as before
+    if !replicas.is_empty() {
+        out.insert("replicas".into(), Value::Array(replicas));
+    }
     out
 }
 
@@ -95,6 +106,10 @@ pub(super) fn key_fields(st: &AppState, k: &ChaosKey, o: &mut Map<String, Value>
             o.insert("node".into(), json!(st.topo.nodes[*id].name));
             o.insert("endpoint".into(), json!(e));
         }
+        ChaosKey::Replica(id, r) => {
+            o.insert("node".into(), json!(st.topo.nodes[*id].name));
+            o.insert("replica".into(), json!(r));
+        }
     }
 }
 
@@ -104,6 +119,7 @@ pub(super) fn key_label(st: &AppState, k: &ChaosKey) -> String {
         ChaosKey::Node(id) => format!("node '{}'", st.topo.nodes[*id].name),
         ChaosKey::Endpoint(e) => format!("endpoint '{e}'"),
         ChaosKey::NodeAt(id, e) => format!("node '{}' at endpoint '{e}'", st.topo.nodes[*id].name),
+        ChaosKey::Replica(id, r) => format!("node '{}' replica {r}", st.topo.nodes[*id].name),
     }
 }
 
@@ -161,7 +177,7 @@ pub(super) fn effective_entries(st: &AppState, e: &EffectiveChaos) -> Result<Vec
         .collect();
     let mut out = Vec::new();
     for (k, r) in all {
-        if let ChaosKey::NodeAt(id, _) = &k
+        if let ChaosKey::NodeAt(id, _) | ChaosKey::Replica(id, _) = &k
             && let Some(own) = nodes.get(id)
         {
             if r == *own {

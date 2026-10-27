@@ -1,5 +1,7 @@
 //! The compiled endpoint types: steps, `Endpoint`, `Endpoints`, collection operations, route specs and error resolution.
 
+use crate::balance::Balance;
+
 use super::{
     Arc, BTreeMap, Config, Dist, EndpointConfig, EndpointsConfig, ErrorMapping, FailKind, IndexMap,
     Located, NodeId, Op, Override, Path, PathBuf, PathSeg, StateOverrides, Topology, Value,
@@ -69,6 +71,8 @@ pub struct Call {
     pub op: Option<Op>,
     /// Share of requests that take this call; 1.0 always takes it, with no draw.
     pub prob: f64,
+    /// The edge's `balance`, which overrides the callee's own for this call.
+    pub balance: Option<Balance>,
     /// Which call this is, for seeding.
     pub key: StepKey,
 }
@@ -82,6 +86,8 @@ pub struct CacheStep {
     pub net: Dist,
     /// Default-chain lookups run for reads and scans only; written `cache:` steps always run.
     pub reads_only: bool,
+    /// The edge's `balance`, which overrides the cache node's own for this lookup.
+    pub balance: Option<Balance>,
     /// Lookups in sequence (an edge's `calls`); a hit stops the rest. A stored count, not
     /// that many steps, so a large `calls` costs nothing at compile time.
     pub repeat: u32,

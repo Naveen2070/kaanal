@@ -60,6 +60,10 @@ pub struct EdgeConfig {
     #[serde(default)]
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 1))]
     pub prob: Option<f64>,
+    /// How calls over this edge pick a replica of the callee; overrides the callee's own
+    /// `balance`.
+    #[serde(default)]
+    pub balance: Option<crate::balance::Balance>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

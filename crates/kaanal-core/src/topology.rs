@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 
+use crate::balance::Balance;
 use crate::config::{ConcurrencyConfig, Config, NodeConfig, NodeKind, RateLimitConfig, StepConfig};
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::dist::Dist;
@@ -45,6 +46,10 @@ pub struct Node {
     pub rate_limit: Option<RateLimit>,
     /// Per-call deadline (B2a Z2): queue wait, own work and everything downstream; `None` = none.
     pub timeout: Option<Duration>,
+    /// Copies of this node (1 to 64); each has its own slots, queue, pool and rate limit.
+    pub replicas: u16,
+    /// How traffic entering this node picks a replica (an edge may override it).
+    pub balance: Balance,
     /// Named chains of a service or monolith (`chains:`), compiled by [`crate::chain::compile`].
     pub chains: IndexMap<String, Vec<StepConfig>>,
     /// The node's own `locale:` tag (shape checked at parse); the server resolves the pack.
@@ -132,6 +137,8 @@ pub struct Edge {
     /// Share of requests that take this edge (above 0, at most 1, default 1): the default of the
     /// `call:` steps over it.
     pub prob: f64,
+    /// How calls over this edge pick a replica of the callee; overrides the callee's own.
+    pub balance: Option<Balance>,
 }
 
 /// A validated topology graph.
@@ -424,6 +431,8 @@ impl Topology {
                 admission: admission_of(n),
                 rate_limit: n.rate_limit().map(rate_limit_of),
                 timeout: n.timeout(),
+                replicas: n.replicas(),
+                balance: n.balance().cloned().unwrap_or_default(),
                 chains: n.chains().cloned().unwrap_or_default(),
                 locale: n.locale().map(str::to_string),
             });
@@ -473,6 +482,7 @@ impl Topology {
                 net: Dist::from_config(e.net.as_ref()),
                 calls: e.calls,
                 prob,
+                balance: e.balance.clone(),
             });
         }
 

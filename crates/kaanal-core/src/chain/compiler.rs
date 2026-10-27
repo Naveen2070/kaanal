@@ -41,6 +41,7 @@ impl Compiler<'_> {
             body: Arc::clone(&self.default[e.to]),
             op: None,
             prob: e.prob,
+            balance: e.balance.clone(),
             key: keys.next(e.to),
         })
     }
@@ -67,6 +68,7 @@ impl Compiler<'_> {
                 node: e.to,
                 net: e.net.clone(),
                 reads_only: true,
+                balance: e.balance.clone(),
                 repeat: e.calls.get(),
                 key: keys.next(e.to),
             }));
@@ -118,6 +120,25 @@ impl Compiler<'_> {
             self.default[n] = Arc::new(Seq::new(steps));
         }
         Ok(())
+    }
+}
+
+impl Compiler<'_> {
+    /// **Private.** Warns about a cache whose `timeout` is below its hit cost's median: the
+    /// executor turns a lookup slower than the timeout into a miss, so most hits are cut (R1.64).
+    pub(super) fn cache_timeout_warnings(&mut self) {
+        for n in &self.topo.nodes {
+            let (Some(t), Some(m)) = (n.timeout, n.cache.as_ref()) else {
+                continue;
+            };
+            let hit = m.hit.median();
+            if hit > t {
+                self.warnings.push(format!(
+                    "cache '{}': timeout {t:?} is below its hit cost (about {hit:?}), so most lookups are cut to misses",
+                    n.name
+                ));
+            }
+        }
     }
 }
 
@@ -202,6 +223,7 @@ pub fn compile(
         warnings: Vec::new(),
     };
     c.defaults(&order)?;
+    c.cache_timeout_warnings();
     let jobs = c.jobs(routes, input)?;
     for &n in &order {
         if matches!(topo.nodes[n].kind, NodeKind::Service | NodeKind::Monolith) {

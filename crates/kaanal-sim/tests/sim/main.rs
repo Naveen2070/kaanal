@@ -8,6 +8,7 @@ mod behaviour;
 mod common;
 mod config;
 mod forks;
+mod replicas;
 mod streams;
 mod visits;
 mod zero_load;

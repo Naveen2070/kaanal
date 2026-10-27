@@ -20,6 +20,7 @@ fn node(t: &Topology, n: &str) -> usize {
 fn hop(node: usize, kind: HopKind, start_ms: u64, dur_ms: u64) -> Hop {
     Hop {
         node,
+        replica: 0,
         kind,
         start: Duration::from_millis(start_ms),
         dur: Duration::from_millis(dur_ms),
@@ -354,6 +355,7 @@ fn a_cache_hang_is_a_fault_not_injected_delay() {
         idx: 0,
         hop: Hop {
             node,
+            replica: 0,
             kind: HopKind::CacheMiss,
             start: Duration::ZERO,
             dur,

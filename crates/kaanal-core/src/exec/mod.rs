@@ -9,17 +9,21 @@
 //! (R1.34), so editing one step never changes another step's draws. Pure: no sleeping, no
 //! IO; live mode sleeps [`ChainOutcome::total`], the simulator advances virtual time (R2.5).
 
+mod walk;
+
+pub(crate) use walk::draw_rng;
+use walk::{Flow, Walk};
+
 use std::ops::Range;
 use std::time::Duration;
 
-use rand::{Rng, SeedableRng};
+use rand::Rng;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::chain::{Endpoint, Seq, Step};
+use crate::chain::Endpoint;
 use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, HANG_CAP};
-use crate::dist::Dist;
-use crate::rng::HopRng;
+
 use crate::stable_hash;
 use crate::topology::{NodeId, Topology};
 
@@ -78,6 +82,8 @@ pub enum HopKind {
 pub struct Hop {
     /// The node the cost belongs to (for `Net` hops, the edge's target).
     pub node: NodeId,
+    /// Which replica of the node ran the hop (0 for a node with one replica).
+    pub replica: u16,
     /// Net, proc, op, cache hit or miss, or an endpoint-chaos delay.
     pub kind: HopKind,
     /// Offset from the request's start at zero load.
@@ -343,9 +349,14 @@ pub fn sample_plan(
         topo,
         chaos,
         ep_key: ep.key.as_str(),
+        n: req.n,
+        picks: vec![0; topo.nodes.len()],
         items: Vec::new(),
     };
     let entry = ep.entry_node;
+    // The entry node has no calling edge, so its own balance picks its replica.
+    let entry_pick = entry.map_or(Some(0), |e| w.pick(e, None, root));
+    let er = entry_pick.unwrap_or(0);
     // A pin's delay runs before the root span opens, so no `timeout:` counts it.
     let base = req.pin_delay;
     debug_assert!(
@@ -355,6 +366,7 @@ pub fn sample_plan(
     if let Some(n) = entry.filter(|_| !base.is_zero()) {
         w.items.push(PlanItem::Hop(Hop {
             node: n,
+            replica: er,
             kind: HopKind::Delay,
             start: Duration::ZERO,
             dur: base,
@@ -363,7 +375,10 @@ pub fn sample_plan(
     let root_span = entry.and_then(|n| w.open_span(n, base));
     let mut start = base;
     let mut flow = None;
-    if let (Some(entry), Some(c)) = (entry, chaos.endpoint(&ep.key)) {
+    if entry_pick.is_none() {
+        flow = entry.map(|e| w.no_replica(e, base));
+    }
+    if let (Some(entry), Some(c), true) = (entry, chaos.endpoint(&ep.key), flow.is_none()) {
         let name = &topo.nodes[entry].name;
         let roll: f64 = draw_rng(root, name, b"endpoint").random();
         if let Some((k, s)) = c.hit(roll) {
@@ -374,6 +389,7 @@ pub fn sample_plan(
                 at = base + cap;
                 w.items.push(PlanItem::Hop(Hop {
                     node: entry,
+                    replica: er,
                     kind: HopKind::Delay,
                     start: base,
                     dur: cap,
@@ -390,6 +406,7 @@ pub fn sample_plan(
         } else if !c.latency_add.is_zero() {
             w.items.push(PlanItem::Hop(Hop {
                 node: entry,
+                replica: er,
                 kind: HopKind::Delay,
                 start: base,
                 dur: c.latency_add,
@@ -397,7 +414,15 @@ pub fn sample_plan(
             start = base + c.latency_add;
         }
     }
-    let flow = flow.unwrap_or_else(|| w.seq(&ep.chain, root, ep.op, start));
+    let flow = flow.unwrap_or_else(|| {
+        w.seq(
+            &ep.chain,
+            root,
+            ep.op,
+            start,
+            (entry.unwrap_or_default(), er),
+        )
+    });
     w.close_span(root_span);
     let fail = match flow {
         Flow::Fail { at, idx } => Some((idx, at)),
@@ -420,286 +445,4 @@ fn fail_of(kind: ErrorKind, status: u16) -> (FailKind, u16) {
 /// **Private.** How long a hang lasts: the node's `timeout`, else [`HANG_CAP`].
 fn hang_cap(timeout: Option<Duration>) -> Duration {
     timeout.unwrap_or(HANG_CAP)
-}
-
-/// **Private.** The RNG of one hop's draws (R1.34, D8).
-fn draw_rng(path: u64, node: &str, tag: &[u8]) -> HopRng {
-    HopRng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), node.as_bytes(), tag]))
-}
-
-/// **Private.** The path of one `call`/`cache` step repetition (D8).
-fn step_path(parent: u64, target: &str, occ: u32, rep: u32) -> u64 {
-    stable_hash(&[
-        &parent.to_le_bytes(),
-        target.as_bytes(),
-        &occ.to_le_bytes(),
-        &rep.to_le_bytes(),
-    ])
-}
-
-/// **Private.** Whether a request takes a `call` step with branch probability `prob`: always
-/// when `prob` is 1 (no draw, so the plan is as before `prob` existed), else a Bernoulli draw
-/// from the step's own stream under the new tag `prob`, so no existing draw moves.
-fn takes_branch(prob: f64, path: u64, target: &str, occ: u32) -> bool {
-    if prob >= 1.0 {
-        return true;
-    }
-    let roll: f64 = draw_rng(step_path(path, target, occ, 0), target, b"prob").random();
-    roll < prob
-}
-
-/// **Private.** How a sequence ended.
-enum Flow {
-    /// It ran to its end at this offset.
-    Done(Duration),
-    /// A cache hit ended it at this offset (only this sequence, section 5.3).
-    Hit(Duration),
-    /// A step failed: its instant and the plan index of its `Fail` item.
-    Fail { at: Duration, idx: usize },
-}
-
-/// **Private.** One walk in progress: borrowed inputs plus the plan so far.
-struct Walk<'a> {
-    topo: &'a Topology,
-    chaos: &'a EffectiveChaos,
-    /// Key of the endpoint being walked, for endpoint-scoped chaos.
-    ep_key: &'a str,
-    items: Vec<PlanItem>,
-}
-
-impl Walk<'_> {
-    /// **Private.** Runs `body` from offset `at` with the inherited `op` (E10).
-    fn seq(&mut self, body: &Seq, path: u64, op: Op, at: Duration) -> Flow {
-        // A copy of the reference, so node names can be held across `&mut self` calls.
-        let topo = self.topo;
-        let mut now = at;
-        for step in &body.steps {
-            match step {
-                Step::Proc { node } => match self.own(*node, HopKind::Proc, path, b"proc", now) {
-                    Ok(dur) => now += dur,
-                    Err(fail) => return fail,
-                },
-                Step::Op { node, op: own } => {
-                    let kind = HopKind::Op(own.unwrap_or(op));
-                    match self.own(*node, kind, path, b"op", now) {
-                        Ok(dur) => now += dur,
-                        Err(fail) => return fail,
-                    }
-                }
-                Step::Call(call) => {
-                    let target = topo.nodes[call.node].name.as_str();
-                    // One draw per step: a skipped call has no hop, span or repeat.
-                    if !takes_branch(call.prob, path, target, call.key.occ) {
-                        continue;
-                    }
-                    let op = call.op.unwrap_or(op);
-                    for rep in 0..call.repeat {
-                        let rep_path = step_path(path, target, call.key.occ, rep);
-                        let span = self.open_span(call.node, now);
-                        now += self.net(call.node, &call.net, rep_path, now);
-                        let flow = self.seq(&call.body, rep_path, op, now);
-                        self.close_span(span);
-                        match flow {
-                            Flow::Done(end) | Flow::Hit(end) => now = end,
-                            fail @ Flow::Fail { .. } => return fail,
-                        }
-                    }
-                }
-                Step::Cache(cache) => {
-                    // Section 5.2: the default chain's cache steps serve reads and scans only.
-                    if cache.reads_only && op == Op::Write {
-                        continue;
-                    }
-                    let target = topo.nodes[cache.node].name.as_str();
-                    for rep in 0..cache.repeat {
-                        let rep_path = step_path(path, target, cache.key.occ, rep);
-                        now += self.net(cache.node, &cache.net, rep_path, now);
-                        let (hit, dur) = self.lookup(cache.node, rep_path, now);
-                        now += dur;
-                        if hit {
-                            return Flow::Hit(now);
-                        }
-                    }
-                }
-                Step::Parallel(branches) => match self.fork(branches, path, op, now) {
-                    Ok(end) => now = end,
-                    Err(fail) => return fail,
-                },
-            }
-        }
-        Flow::Done(now)
-    }
-
-    /// **Private.** Opens a span for a call to `node` when it has a `timeout`; returns its plan index.
-    fn open_span(&mut self, node: NodeId, at: Duration) -> Option<usize> {
-        let timeout = self.topo.nodes[node].timeout?;
-        self.items.push(PlanItem::Span {
-            node,
-            timeout,
-            at,
-            size: 0,
-        });
-        Some(self.items.len() - 1)
-    }
-
-    /// **Private.** Fixes the size of the span opened at `span` (call after its body is walked,
-    /// also when the body failed).
-    fn close_span(&mut self, span: Option<usize>) {
-        if let Some(i) = span {
-            let size = self.items.len() - i - 1;
-            if let PlanItem::Span { size: s, .. } = &mut self.items[i] {
-                *s = size;
-            }
-        }
-    }
-
-    /// **Private.** An edge's latency as a `Net` hop (no chaos on edges, as in A1).
-    fn net(&mut self, to: NodeId, d: &Dist, path: u64, start: Duration) -> Duration {
-        let dur = d.sample(&mut draw_rng(path, &self.topo.nodes[to].name, b"net"));
-        self.items.push(PlanItem::Hop(Hop {
-            node: to,
-            kind: HopKind::Net,
-            start,
-            dur,
-        }));
-        dur
-    }
-
-    /// **Private.** A node's own hop (proc or op): chaos roll, then the duration. A failing
-    /// node fails at its hop start (E14) and records a `Fail` instead of a hop; a hang records a
-    /// hop of the node's `timeout` (else [`HANG_CAP`]) and then a 504 `Fail` at its end (Z6).
-    fn own(
-        &mut self,
-        node: NodeId,
-        kind: HopKind,
-        path: u64,
-        tag: &[u8],
-        start: Duration,
-    ) -> Result<Duration, Flow> {
-        let topo = self.topo;
-        let n = &topo.nodes[node];
-        let mut rng = draw_rng(path, &n.name, tag);
-        let roll: f64 = rng.random();
-        let c = (!self.chaos.is_empty())
-            .then(|| self.chaos.visit(node, self.ep_key))
-            .flatten();
-        let hit = c.and_then(|c| c.hit(roll));
-        if let Some((k, s)) = hit {
-            let (fk, status) = fail_of(k, s);
-            let mut at = start;
-            if k == ErrorKind::Hang {
-                // A hang holds the node for its whole cap, then times out (Z6).
-                let cap = hang_cap(n.timeout);
-                self.items.push(PlanItem::Hop(Hop {
-                    node,
-                    kind,
-                    start,
-                    dur: cap,
-                }));
-                at += cap;
-            }
-            let idx = self.items.len();
-            self.items.push(PlanItem::Fail {
-                node,
-                status,
-                kind: fk,
-                at,
-            });
-            return Err(Flow::Fail { at, idx });
-        }
-        let dist = match kind {
-            HopKind::Op(op) => n.ops.as_ref().map_or(&Dist::ZERO, |o| &o[op as usize]),
-            _ => &n.proc,
-        };
-        let dur = dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add);
-        self.items.push(PlanItem::Hop(Hop {
-            node,
-            kind,
-            start,
-            dur,
-        }));
-        Ok(dur)
-    }
-
-    /// **Private.** A cache lookup (E9, D12): chaos roll and hit roll are always drawn; a
-    /// down or failing cache is a miss, charged its `miss` cost plus `latency_add`. The node's
-    /// `timeout` caps the charge (a slower lookup is a miss costing exactly the timeout); a hang
-    /// is a miss charged the timeout, else [`HANG_CAP`] (Z17).
-    fn lookup(&mut self, node: NodeId, path: u64, start: Duration) -> (bool, Duration) {
-        let topo = self.topo;
-        let n = &topo.nodes[node];
-        let mut rng = draw_rng(path, &n.name, b"cache");
-        let (roll, hit_roll): (f64, f64) = (rng.random(), rng.random());
-        let c = (!self.chaos.is_empty())
-            .then(|| self.chaos.visit(node, self.ep_key))
-            .flatten();
-        let fault = c.and_then(|c| c.hit(roll));
-        let failing = fault.is_some();
-        let model = n.cache.as_ref();
-        // A hanging cache is a miss charged its cap; a cache never fails the request (Z17).
-        let hang = fault.is_some_and(|(k, _)| k == ErrorKind::Hang);
-        let mut hit = !failing && model.is_some_and(|m| hit_roll < m.hit_ratio);
-        let mut dur = if hang {
-            hang_cap(n.timeout)
-        } else {
-            let dist = model.map_or(&Dist::ZERO, |m| if hit { &m.hit } else { &m.miss });
-            dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add)
-        };
-        if let Some(t) = n.timeout
-            && dur > t
-        {
-            hit = false;
-            dur = t;
-        }
-        let kind = if hit {
-            HopKind::CacheHit
-        } else {
-            HopKind::CacheMiss
-        };
-        self.items.push(PlanItem::Hop(Hop {
-            node,
-            kind,
-            start,
-            dur,
-        }));
-        (hit, dur)
-    }
-
-    /// **Private.** E14: branches start together at `t`. The block ends with its slowest
-    /// branch, or fails at the earliest failure; equal instants keep the lower branch (and
-    /// so the lower plan index). Branches are transparent for the path (D8): their steps'
-    /// keys already count occurrences across the block.
-    fn fork(&mut self, branches: &[Seq], path: u64, op: Op, t: Duration) -> Result<Duration, Flow> {
-        let at = self.items.len();
-        self.items.push(PlanItem::Fork {
-            branches: branches.len(),
-            size: 0,
-        });
-        let (mut end, mut first): (Duration, Option<Flow>) = (t, None);
-        for b in branches {
-            let bi = self.items.len();
-            self.items.push(PlanItem::Branch { size: 0 });
-            let flow = self.seq(b, path, op, t);
-            self.items[bi] = PlanItem::Branch {
-                size: self.items.len() - bi - 1,
-            };
-            match flow {
-                Flow::Done(e) | Flow::Hit(e) => end = end.max(e),
-                Flow::Fail { at: f, .. } => {
-                    let earlier = match &first {
-                        Some(Flow::Fail { at: g, .. }) => f < *g,
-                        _ => true,
-                    };
-                    if earlier {
-                        first = Some(flow);
-                    }
-                }
-            }
-        }
-        self.items[at] = PlanItem::Fork {
-            branches: branches.len(),
-            size: self.items.len() - at - 1,
-        };
-        first.map_or(Ok(end), Err)
-    }
 }

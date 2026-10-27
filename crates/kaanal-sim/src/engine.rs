@@ -162,10 +162,9 @@ fn report(
                 0 => Duration::ZERO,
                 k => Duration::from_nanos(u64::try_from(c.wait / k).unwrap_or(u64::MAX)),
             },
-            utilization: n
-                .admission
-                .as_ref()
-                .map_or(0.0, |a| c.area as f64 / (f64::from(a.slots) * window)),
+            utilization: n.admission.as_ref().map_or(0.0, |a| {
+                c.area as f64 / (f64::from(a.slots) * f64::from(n.replicas.max(1)) * window)
+            }),
             max_queue: c.max_queue,
             limited: c.limited,
             overflowed: c.overflowed,
