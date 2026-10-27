@@ -77,6 +77,8 @@ fn an_inline_auth_route_on_a_replicated_gateway_runs_without_a_bad_replica() {
         streams: vec![kaanal_sim::Stream {
             endpoint_key: "POST /login".into(),
             rate_per_s: 50.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(20),
         warmup: Duration::ZERO,

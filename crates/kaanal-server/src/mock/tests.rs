@@ -42,8 +42,12 @@ type Req<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
 /// The server state of `YAML` with a live engine, driven by calling [`handle`] directly: the
 /// ring is read through `st.log`, which no route serves yet.
 fn app() -> Arc<AppState> {
+    app_with(YAML)
+}
+
+fn app_with(yaml: &str) -> Arc<AppState> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let cfg = Config::from_yaml(YAML).unwrap();
+    let cfg = Config::from_yaml(yaml).unwrap();
     let mut st = AppState::build(&cfg, &dir, "t".into(), 0).unwrap();
     st.engine = Some(crate::actor::spawn(Engine::new(&st.topo)));
     Arc::new(st)
@@ -400,4 +404,53 @@ async fn a_hang_on_a_node_without_a_timeout_is_fault_injection() {
     assert!(e.hops.iter().all(|h| h.why.is_none()), "{:?}", e.hops);
     let c = e.chain_error.as_ref().unwrap();
     assert_eq!((c.kind, c.cause), ("timeout", "chaos"));
+}
+
+/// `YAML` with a 1000 B/s link between `app` and `db`.
+fn narrow() -> Arc<AppState> {
+    app_with(&YAML.replace(
+        "- { from: app, to: db, net: 1ms }",
+        "- { from: app, to: db, net: 1ms, bandwidth: 1000 }",
+    ))
+}
+
+#[tokio::test]
+async fn a_mock_with_a_narrow_link_delays_the_response() {
+    let st = narrow();
+    call(&st, "GET", "/users/1", &[("content-length", "50")]).await;
+    let e = &entries(&st)[0];
+    let links: Vec<_> = e
+        .hops
+        .iter()
+        .filter(|h| h.kind.starts_with("link"))
+        .collect();
+    // 50 B over 1000 B/s is 50 ms on the way in; the generated body comes back over the same link
+    assert_eq!((links[0].kind, links[0].dur_ms), ("link", 50.0));
+    assert_eq!(links[1].kind, "link-resp");
+    assert!(links[1].dur_ms > 0.0, "the response has a size");
+    assert!(e.trace.contains("db.link=50"), "{}", e.trace);
+    assert!(e.ms >= 50, "the client waited the transfer: {} ms", e.ms);
+}
+
+#[tokio::test]
+async fn no_payload_costs_means_no_link_hops_whatever_the_body() {
+    let st = app();
+    assert!(!st.topo.payload_costs());
+    call(&st, "GET", "/users/1", &[("content-length", "5000")]).await;
+    let e = &entries(&st)[0];
+    assert!(e.hops.iter().all(|h| !h.kind.starts_with("link")));
+}
+
+#[tokio::test]
+async fn a_head_response_carries_no_response_transfer() {
+    let st = narrow();
+    call(&st, "HEAD", "/users/1", &[("content-length", "50")]).await;
+    let e = &entries(&st)[0];
+    let kinds: Vec<_> = e
+        .hops
+        .iter()
+        .map(|h| h.kind)
+        .filter(|k| k.starts_with("link"))
+        .collect();
+    assert_eq!(kinds, ["link"], "hyper strips a HEAD body");
 }

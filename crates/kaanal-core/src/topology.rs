@@ -50,6 +50,9 @@ pub struct Node {
     pub replicas: u16,
     /// How traffic entering this node picks a replica (an edge may override it).
     pub balance: Balance,
+    /// Extra processing time per KB of payload, request and response each, once per body
+    /// (zero when unconfigured).
+    pub per_kb: Dist,
     /// Named chains of a service or monolith (`chains:`), compiled by [`crate::chain::compile`].
     pub chains: IndexMap<String, Vec<StepConfig>>,
     /// The node's own `locale:` tag (shape checked at parse); the server resolves the pack.
@@ -123,6 +126,9 @@ pub struct CacheModel {
     pub miss: Dist,
 }
 
+/// The id of an edge: its index in [`Topology::edges`] (the config order).
+pub type EdgeId = usize;
+
 /// A dependency between two nodes, caller → dependency.
 #[derive(Debug, Clone)]
 pub struct Edge {
@@ -139,6 +145,8 @@ pub struct Edge {
     pub prob: f64,
     /// How calls over this edge pick a replica of the callee; overrides the callee's own.
     pub balance: Option<Balance>,
+    /// Link capacity in bytes per second; `None` = unlimited (and no link hop).
+    pub bandwidth: Option<u64>,
 }
 
 /// A validated topology graph.
@@ -433,6 +441,7 @@ impl Topology {
                 timeout: n.timeout(),
                 replicas: n.replicas(),
                 balance: n.balance().cloned().unwrap_or_default(),
+                per_kb: Dist::from_config(n.per_kb()),
                 chains: n.chains().cloned().unwrap_or_default(),
                 locale: n.locale().map(str::to_string),
             });
@@ -483,6 +492,7 @@ impl Topology {
                 calls: e.calls,
                 prob,
                 balance: e.balance.clone(),
+                bandwidth: e.bandwidth,
             });
         }
 
@@ -526,6 +536,18 @@ impl Topology {
     /// Iterates over the edges leaving a node, in config order.
     pub fn out_edges(&self, id: NodeId) -> impl Iterator<Item = &Edge> {
         self.edges.iter().filter(move |e| e.from == id)
+    }
+
+    /// The id of the edge between two nodes: its index in `edges`, which is the config order.
+    pub fn edge_id(&self, from: NodeId, to: NodeId) -> Option<EdgeId> {
+        self.edges.iter().position(|e| e.from == from && e.to == to)
+    }
+
+    /// Whether any edge has a `bandwidth` or any node a `per_kb`: only then does a payload size
+    /// change a plan. False by default, so existing configs plan exactly as before.
+    pub fn payload_costs(&self) -> bool {
+        self.edges.iter().any(|e| e.bandwidth.is_some())
+            || self.nodes.iter().any(|n| n.per_kb != Dist::ZERO)
     }
 
     /// Finds the edge between two specific nodes, if any.

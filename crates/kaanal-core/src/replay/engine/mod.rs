@@ -49,7 +49,7 @@ impl Engine {
     pub fn new(topo: &Topology) -> Engine {
         Engine {
             units: Units::new(topo),
-            counters: vec![NodeCounters::default(); topo.nodes.len()],
+            counters: vec![NodeCounters::default(); topo.nodes.len() + topo.edges.len()],
             heap: BinaryHeap::new(),
             seq: 0,
             now: 0,
@@ -108,7 +108,7 @@ impl Engine {
 
     /// Per-node totals, indexed by [`NodeId`].
     pub fn node_counters(&self) -> &[NodeCounters] {
-        &self.counters
+        &self.counters[..self.units.nodes]
     }
 
     /// Takes the answers produced so far, in the order they were decided.
@@ -294,7 +294,7 @@ impl Engine {
                         h.dur.is_zero()
                             && (h.kind == HopKind::Net
                                 || h.kind == HopKind::Delay
-                                || self.units.unconstrained(h.node, h.replica))
+                                || self.units.unconstrained(h))
                     }
                     _ => false,
                 };
@@ -415,7 +415,7 @@ impl Engine {
             req.tokens[k].last_own = None;
             req.busy += 1;
         } else {
-            let (node, rep) = (h.node, h.replica);
+            let (node, rep) = self.units.target(h);
             let tok = &mut live(&mut self.reqs, r).tokens[k];
             let new_visit = tok.last_own != Some(node);
             tok.last_own = Some(node);
@@ -493,13 +493,13 @@ impl Engine {
     /// then move the token on.
     fn hop_done(&mut self, r: usize, k: usize) {
         let now = self.now;
-        let (node, rep, kind) = {
+        let ((node, rep), kind) = {
             let req = live(&mut self.reqs, r);
             let at = req.tokens[k].at;
             let PlanItem::Hop(h) = &req.plan.items[at] else {
                 unreachable!("HopDone names a hop")
             };
-            (h.node, h.replica, h.kind)
+            (self.units.target(h), h.kind)
         };
         if kind != HopKind::Net
             && kind != HopKind::Delay

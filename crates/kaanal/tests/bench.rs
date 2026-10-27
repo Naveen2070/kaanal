@@ -108,6 +108,8 @@ fn core(rows: &mut Vec<Row>) {
         n,
         seed: 1,
         pin_delay: Duration::ZERO,
+        req_bytes: 0,
+        resp_bytes: 0,
     };
     rows.push(row(
         "core/execute",
@@ -134,6 +136,8 @@ fn sim(rows: &mut Vec<Row>) {
         streams: vec![Stream {
             endpoint_key: "GET /users/{id}".into(),
             rate_per_s: 1_000.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(1_000),
         warmup: Duration::ZERO,

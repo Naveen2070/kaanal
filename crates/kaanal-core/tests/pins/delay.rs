@@ -12,6 +12,8 @@ pub(crate) fn req(ep: &kaanal_core::Endpoint, n: u64, seed: u64, d: Duration) ->
         n,
         seed,
         pin_delay: d,
+        req_bytes: 0,
+        resp_bytes: 0,
     }
 }
 

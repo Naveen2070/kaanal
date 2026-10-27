@@ -100,6 +100,9 @@ pub fn trace_parts(
                     HopKind::CacheHit => format!("{}.hit={d}", at(h.node, h.replica)),
                     HopKind::CacheMiss => format!("{}.miss={d}", at(h.node, h.replica)),
                     HopKind::Delay => format!("{}.delay={d}", at(h.node, h.replica)),
+                    HopKind::Link { resp, .. } => {
+                        format!("{}.{}={d}", at(h.node, h.replica), link_name(resp))
+                    }
                 }));
             }
             PlanItem::Hop(_) | PlanItem::Fail { .. } | PlanItem::Span { .. } => {}
@@ -273,6 +276,11 @@ pub struct Run<'a> {
     pub pin_delay: bool,
 }
 
+/// **Private.** The trace and log name of a link hop's direction.
+fn link_name(resp: bool) -> &'static str {
+    if resp { "link-resp" } else { "link" }
+}
+
 fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
@@ -438,7 +446,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                         HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss => {
                             run.chaos.visit_replica(h.node, key, h.replica)
                         }
-                        HopKind::Net => None,
+                        HopKind::Net | HopKind::Link { .. } => None,
                     };
                     // A cache lookup never emits a `Fail`: a hang is a hop charged the node's
                     // `timeout` (else HANG_CAP) with no latency, and a slow lookup is cut to the
@@ -483,6 +491,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                         HopKind::CacheHit => "hit",
                         HopKind::CacheMiss => "miss",
                         HopKind::Delay => "delay",
+                        HopKind::Link { resp, .. } => link_name(resp),
                     },
                     start_ms: ms(h.start),
                     dur_ms: ms(h.dur),

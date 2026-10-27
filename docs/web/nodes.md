@@ -139,7 +139,7 @@ login:
 
 ## Edges: who may call whom
 
-An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). `prob` (above 0, at most 1, default 1) is the share of requests that take the edge; see [Endpoints](endpoints.md#steps). No cycles, no self edges, no duplicate edges.
+An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). `prob` (above 0, at most 1, default 1) is the share of requests that take the edge; see [Endpoints](endpoints.md#steps). `bandwidth` (bytes per second, at least 1) limits the link: with a payload size a transfer takes `bytes / bandwidth` on a FIFO link, and without it the link costs nothing and adds no hop. No cycles, no self edges, no duplicate edges.
 
 | From                                | May call                                                           |
 | ----------------------------------- | ------------------------------------------------------------------ |
@@ -151,6 +151,10 @@ An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net`
 An edge that breaks the table is rejected with a message listing what that kind may call.
 
 An edge `gateway -> auth` makes every request pay an auth check; logins run inside it.
+
+## Payload cost
+
+Off by default. `per_kb` on any node (a duration like `proc`, e.g. `per_kb: 50us`) adds that much processing time for every KB of the request and of the response, once per body. `bandwidth` on an edge (bytes per second) makes the link a FIFO queue with one server at that speed. Payload sizes come from the traffic (a stream's `req_bytes` and `resp_bytes` in the simulator; in the live mock, the request's `Content-Length` and the size of the JSON body the route would answer). A route with a collection or a built-in login or JWKS counts its response as 0 bytes. With no sizes, neither field changes anything. In a trace a transfer shows as `db.link=50.0ms` (request) and `db.link-resp=12.0ms` (response), the node being the edge's target. A cache takes `bandwidth` on its edge but no `per_kb` (a load error). The live mock sizes the request from `Content-Length` only (a chunked upload counts 0), counts a HEAD response and a collection or built-in responder as 0 bytes, and sizes the normal success body even when a pin replaces it.
 
 ## Replicas and balancing
 
@@ -194,7 +198,7 @@ A `flavor` fills the values you do not write; anything you write wins. **All num
 ## Every error names file, line, column, node and field
 
 ```text
-kaanal.yaml:12:5: node 'orders-db': unknown field 'bogus' (expected: balance, concurrency, flavor, locale, ops, pool, rate_limit, replicas, timeout)
+kaanal.yaml:12:5: node 'orders-db': unknown field 'bogus' (expected: balance, concurrency, flavor, locale, ops, per_kb, pool, rate_limit, replicas, timeout)
 ```
 
 Run `kaanal schema` to print a JSON Schema of the whole file for editor autocomplete.

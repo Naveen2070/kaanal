@@ -33,6 +33,8 @@ fn sim_with(t: &Topology, e: &Endpoints, rate: f64, requests: f64) -> SimReport 
         streams: vec![Stream {
             endpoint_key: "GET /x/{id}".into(),
             rate_per_s: rate,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs_f64(duration),
         warmup: Duration::from_secs_f64(duration * 0.1),
@@ -124,6 +126,37 @@ fn md1_matches_pollaczek_khinchine() {
         rho / (2.0 * MU * (1.0 - rho)),
         "M/D/1 wait at ρ = 0.7",
     );
+}
+
+#[test]
+fn a_bandwidth_link_is_an_md1_queue() {
+    // 1000 B over 100 kB/s: 10 ms of deterministic transfer on a FIFO link, so M/D/1.
+    let t = topo(
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n",
+    );
+    let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
+    let (lam, rho, requests) = (70.0, 0.7, 400_000.0);
+    let duration = requests / lam / 0.9;
+    let cfg = SimConfig {
+        streams: vec![Stream {
+            endpoint_key: "GET /x/{id}".into(),
+            rate_per_s: lam,
+            req_bytes: 1000,
+            resp_bytes: 0,
+        }],
+        duration: Duration::from_secs_f64(duration),
+        warmup: Duration::from_secs_f64(duration * 0.1),
+        seed: 7,
+    };
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+    let wait = mean_secs(rep.requests.iter().flat_map(|r| {
+        r.hops
+            .iter()
+            .filter(|(h, _)| matches!(h.kind, HopKind::Link { .. }))
+            .map(|(_, w)| *w)
+    }));
+    assert_close(wait, rho / (2.0 * MU * (1.0 - rho)), "link wait at ρ = 0.7");
 }
 
 #[test]

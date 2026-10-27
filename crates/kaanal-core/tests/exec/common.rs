@@ -48,6 +48,8 @@ pub(crate) fn run_key(
             n,
             seed: 42,
             pin_delay: std::time::Duration::ZERO,
+            req_bytes: 0,
+            resp_bytes: 0,
         },
     )
 }

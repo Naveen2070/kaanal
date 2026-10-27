@@ -43,6 +43,8 @@ fn zero_cost_failure_ties_go_to_the_first_branch() {
                 n: r.n,
                 seed: cfg.seed,
                 pin_delay: std::time::Duration::ZERO,
+                req_bytes: 0,
+                resp_bytes: 0,
             },
         );
         assert_eq!(
@@ -72,6 +74,8 @@ pub(crate) fn rare() -> SimConfig {
         streams: vec![Stream {
             endpoint_key: "GET /x".into(),
             rate_per_s: 0.01,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(10_000),
         warmup: Duration::ZERO,
@@ -234,6 +238,8 @@ fn failure_ties_go_to_the_lowest_branch_like_live() {
                 n: r.n,
                 seed: cfg.seed,
                 pin_delay: std::time::Duration::ZERO,
+                req_bytes: 0,
+                resp_bytes: 0,
             },
         );
         let hops: Vec<_> = r.hops.iter().map(|(h, _)| h.clone()).collect();
@@ -252,6 +258,8 @@ fn branch_waits_under_load() {
         streams: vec![Stream {
             endpoint_key: "GET /x".into(),
             rate_per_s: 30.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(100),
         warmup: Duration::from_secs(10),

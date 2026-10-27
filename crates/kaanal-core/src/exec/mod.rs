@@ -75,6 +75,14 @@ pub enum HopKind {
     CacheMiss,
     /// A fault-injection delay before the entry node: holds no slot and no rate-limit token.
     Delay,
+    /// A payload crossing a bandwidth-limited edge (`resp`: the response direction). It belongs
+    /// to the edge's target and queues FIFO behind other transfers on the same edge.
+    Link {
+        /// The edge crossed.
+        edge: crate::topology::EdgeId,
+        /// False for the request body, true for the response body.
+        resp: bool,
+    },
 }
 
 /// One timed step of a request.
@@ -201,6 +209,11 @@ pub struct ChainRequest<'a> {
     /// A pin's delay: a pre-chain `Delay` hop outside every `timeout:` span, after which the
     /// chain starts. Zero (always, in the simulator) plans exactly as without a pin.
     pub pin_delay: Duration,
+    /// Bytes of the request body, for link and `per_kb` costs. 0 (always, unless a driver sets
+    /// it) plans exactly as before payload costs existed.
+    pub req_bytes: u64,
+    /// Bytes of the response body, likewise.
+    pub resp_bytes: u64,
 }
 
 impl Plan {
@@ -351,6 +364,7 @@ pub fn sample_plan(
         ep_key: ep.key.as_str(),
         n: req.n,
         picks: vec![0; topo.nodes.len()],
+        bytes: (req.req_bytes, req.resp_bytes),
         items: Vec::new(),
     };
     let entry = ep.entry_node;

@@ -16,6 +16,8 @@ fn streams_name_compiled_endpoints() {
         streams: vec![Stream {
             endpoint_key: key.into(),
             rate_per_s: 10.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(10),
         warmup: Duration::ZERO,
@@ -52,6 +54,8 @@ fn hop_budget_counts_chain_length() {
         streams: vec![Stream {
             endpoint_key: "GET /x".into(),
             rate_per_s: 1.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(1_000),
         warmup: Duration::ZERO,
@@ -79,6 +83,8 @@ fn hop_budget_sums_streams_and_skips_warmup() {
     let stream = |key: &str, rate_per_s| Stream {
         endpoint_key: key.into(),
         rate_per_s,
+        req_bytes: 0,
+        resp_bytes: 0,
     };
     let cfg = |streams, warmup| SimConfig {
         streams,

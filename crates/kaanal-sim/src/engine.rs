@@ -111,6 +111,8 @@ pub(crate) fn simulate(
                     n,
                     seed: cfg.seed,
                     pin_delay: std::time::Duration::ZERO,
+                    req_bytes: cfg.streams[s].req_bytes,
+                    resp_bytes: cfg.streams[s].resp_bytes,
                 },
             );
             schedule(&mut engine, &mut arrivals, &mut pending, s, at, end)?;
@@ -201,6 +203,8 @@ mod tests {
             streams: vec![Stream {
                 endpoint_key: "GET /x/{id}".into(),
                 rate_per_s: 50.0,
+                req_bytes: 0,
+                resp_bytes: 0,
             }],
             duration: Duration::from_secs(200),
             warmup: Duration::from_secs(190),

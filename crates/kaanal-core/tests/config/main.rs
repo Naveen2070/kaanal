@@ -7,5 +7,6 @@ mod endpoints;
 mod limits;
 mod locale;
 mod nodes;
+mod payload;
 mod prob;
 mod replicas;

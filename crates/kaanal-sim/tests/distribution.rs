@@ -78,6 +78,8 @@ fn zero_load_matches_live_distribution() {
             streams: vec![Stream {
                 endpoint_key: key.into(),
                 rate_per_s: 1.0,
+                req_bytes: 0,
+                resp_bytes: 0,
             }],
             duration: Duration::from_secs(5_000),
             warmup: Duration::ZERO,
@@ -94,6 +96,8 @@ fn zero_load_matches_live_distribution() {
                         n,
                         seed,
                         pin_delay: std::time::Duration::ZERO,
+                        req_bytes: 0,
+                        resp_bytes: 0,
                     },
                 )
             })

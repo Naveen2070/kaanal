@@ -242,6 +242,16 @@
           ],
           "description": "How calls over this edge pick a replica of the callee; overrides the callee's own\n`balance`."
         },
+        "bandwidth": {
+          "default": null,
+          "description": "Link capacity in bytes per second (at least 1). With a payload size, a transfer takes\n`bytes / bandwidth` on a FIFO link that other transfers queue behind. Absent = no limit,\nand no link hop.",
+          "format": "uint64",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "calls": {
           "default": 1,
           "description": "Calls per request along this edge (call ratio), at least 1. Used once endpoint\nchains land.",
@@ -448,6 +458,17 @@
                 "null"
               ]
             },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
+            },
             "proc": {
               "anyOf": [
                 {
@@ -542,6 +563,17 @@
                 "string",
                 "null"
               ]
+            },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
             },
             "proc": {
               "anyOf": [
@@ -667,6 +699,17 @@
               ],
               "description": "Inline read/write/scan costs; any op left out comes from `flavor`. Used once\nendpoint chains land."
             },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
+            },
             "proc": {
               "anyOf": [
                 {
@@ -780,6 +823,17 @@
                 }
               ],
               "description": "Read/write/scan costs. Required in full unless `flavor` fills the gaps."
+            },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
             },
             "pool": {
               "anyOf": [
@@ -910,6 +964,17 @@
               ],
               "description": "Cost of finding out it is a miss."
             },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
+            },
             "rate_limit": {
               "anyOf": [
                 {
@@ -1000,6 +1065,17 @@
                 "string",
                 "null"
               ]
+            },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
             },
             "pool": {
               "anyOf": [
@@ -1118,6 +1194,17 @@
                 "string",
                 "null"
               ]
+            },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body), a\nduration like `proc`. Absent = none."
             },
             "proc": {
               "anyOf": [

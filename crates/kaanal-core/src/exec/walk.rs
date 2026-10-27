@@ -12,7 +12,11 @@ use crate::chaos::{EffectiveChaos, ErrorKind, FailKind};
 use crate::dist::Dist;
 use crate::rng::HopRng;
 use crate::stable_hash;
-use crate::topology::{NodeId, Topology};
+use crate::topology::{EdgeId, NodeId, Topology};
+
+/// **Private.** Longest single payload cost (a transfer or a `per_kb` surcharge): 10 h, like a
+/// sampled hop, so a chain's sum stays far from `Duration`'s limit.
+const MAX_HOP: Duration = Duration::from_hours(10);
 
 /// **Private.** The RNG of one hop's draws (R1.34, D8).
 pub(crate) fn draw_rng(path: u64, node: &str, tag: &[u8]) -> HopRng {
@@ -60,6 +64,8 @@ pub(super) struct Walk<'a> {
     pub(super) n: u64,
     /// Picks so far per node in this request (round-robin advances per pick).
     pub(super) picks: Vec<u32>,
+    /// Request and response body sizes, for link hops and `per_kb`.
+    pub(super) bytes: (u64, u64),
     pub(super) items: Vec<PlanItem>,
 }
 
@@ -173,11 +179,16 @@ impl Walk<'_> {
                             return self.no_replica(call.node, now);
                         };
                         let span = self.open_span(call.node, now);
+                        let edge = topo.edge_id(run.0, call.node);
+                        now += self.link(edge, call.node, false, now, r);
                         now += self.net(call.node, &call.net, rep_path, now, r);
                         let flow = self.seq(&call.body, rep_path, op, now, (call.node, r));
+                        if let Flow::Done(end) | Flow::Hit(end) = flow {
+                            now = end + self.link(edge, call.node, true, end, r);
+                        }
                         self.close_span(span);
                         match flow {
-                            Flow::Done(end) | Flow::Hit(end) => now = end,
+                            Flow::Done(_) | Flow::Hit(_) => {}
                             fail @ Flow::Fail { .. } => return fail,
                         }
                     }
@@ -195,10 +206,13 @@ impl Walk<'_> {
                         let r = self
                             .pick(cache.node, cache.balance.as_ref(), rep_path)
                             .unwrap_or(0);
+                        let edge = topo.edge_id(run.0, cache.node);
+                        now += self.link(edge, cache.node, false, now, r);
                         now += self.net(cache.node, &cache.net, rep_path, now, r);
                         let (hit, dur) = self.lookup(cache.node, rep_path, now, r);
                         now += dur;
                         if hit {
+                            now += self.link(edge, cache.node, true, now, r);
                             return Flow::Hit(now);
                         }
                     }
@@ -233,6 +247,35 @@ impl Walk<'_> {
                 *s = size;
             }
         }
+    }
+
+    /// **Private.** A payload crossing `edge` as a `Link` hop: `bytes / bandwidth`, capped at 10 h.
+    /// Nothing (zero, no hop) without a bandwidth or without bytes in this direction.
+    fn link(
+        &mut self,
+        edge: Option<EdgeId>,
+        to: NodeId,
+        resp: bool,
+        start: Duration,
+        replica: u16,
+    ) -> Duration {
+        let bytes = if resp { self.bytes.1 } else { self.bytes.0 };
+        let Some((edge, bw)) = edge.and_then(|e| Some((e, self.topo.edges[e].bandwidth?))) else {
+            return Duration::ZERO;
+        };
+        if bytes == 0 {
+            return Duration::ZERO;
+        }
+        let ns = (u128::from(bytes) * 1_000_000_000 / u128::from(bw)).min(MAX_HOP.as_nanos());
+        let dur = Duration::from_nanos(u64::try_from(ns).unwrap_or(u64::MAX));
+        self.items.push(PlanItem::Hop(Hop {
+            node: to,
+            replica,
+            kind: HopKind::Link { edge, resp },
+            start,
+            dur,
+        }));
+        dur
     }
 
     /// **Private.** An edge's latency as a `Net` hop (no chaos on edges, as in A1).
@@ -296,7 +339,16 @@ impl Walk<'_> {
             HopKind::Op(op) => n.ops.as_ref().map_or(&Dist::ZERO, |o| &o[op as usize]),
             _ => &n.proc,
         };
-        let dur = dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add);
+        let mut dur = dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add);
+        let body = self.bytes.0.saturating_add(self.bytes.1);
+        if matches!(kind, HopKind::Proc | HopKind::Op(_)) && body > 0 && n.per_kb != Dist::ZERO {
+            // a draw of its own, so no existing draw moves
+            let per_kb = n.per_kb.sample(&mut draw_rng(path, &n.name, b"perkb"));
+            #[expect(clippy::cast_precision_loss, reason = "a size, not an exact count")]
+            let kb = body as f64 / 1024.0;
+            let secs = per_kb.as_secs_f64() * kb;
+            dur += Duration::from_secs_f64(secs.min(MAX_HOP.as_secs_f64()));
+        }
         self.items.push(PlanItem::Hop(Hop {
             node,
             replica,

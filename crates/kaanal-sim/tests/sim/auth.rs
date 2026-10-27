@@ -14,6 +14,8 @@ fn login_is_a_stream_key_and_auth_concurrency_queues_logins() {
         streams: vec![Stream {
             endpoint_key: "POST /login".into(),
             rate_per_s: 50.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(20),
         warmup: Duration::ZERO,
@@ -86,6 +88,8 @@ fn login_and_jwks_equal_live_at_zero_load() {
                     .map(|k| Stream {
                         endpoint_key: (*k).to_string(),
                         rate_per_s: 1.0,
+                        req_bytes: 0,
+                        resp_bytes: 0,
                     })
                     .collect(),
                 duration: Duration::from_secs(1_000),
@@ -105,6 +109,8 @@ fn login_and_jwks_equal_live_at_zero_load() {
                         n: r.n,
                         seed,
                         pin_delay: std::time::Duration::ZERO,
+                        req_bytes: 0,
+                        resp_bytes: 0,
                     },
                 );
                 let at = format!("{name} {key} n={}", r.n);

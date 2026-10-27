@@ -80,6 +80,8 @@ fn login_without_the_auth_edge_runs_auth_inline() {
             n: 0,
             seed: 1,
             pin_delay: std::time::Duration::ZERO,
+            req_bytes: 0,
+            resp_bytes: 0,
         },
     );
     let hops: Vec<(String, HopKind)> = o

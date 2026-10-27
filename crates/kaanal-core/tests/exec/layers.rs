@@ -54,6 +54,8 @@ fn a_banded_mix_fails_with_each_kind_at_its_share() {
                 n,
                 seed: 42,
                 pin_delay: std::time::Duration::ZERO,
+                req_bytes: 0,
+                resp_bytes: 0,
             },
         );
         match fail_kind(&o) {
@@ -81,6 +83,8 @@ fn a_stack_is_deterministic_and_a_single_layer_ignores_the_stack() {
                 n,
                 seed: 42,
                 pin_delay: std::time::Duration::ZERO,
+                req_bytes: 0,
+                resp_bytes: 0,
             },
         )
     };

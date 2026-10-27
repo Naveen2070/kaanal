@@ -7,6 +7,8 @@
 
 use super::state::{NodeCounters, NodeState};
 use super::{Bucket, Engine, Gate, NodeId, Topology};
+use crate::exec::{Hop, HopKind};
+use crate::topology::Admission;
 
 /// **Private.** The queueing state of every replica of every node.
 pub(super) struct Units {
@@ -18,6 +20,8 @@ pub(super) struct Units {
     pub(super) states: Vec<NodeState>,
     /// Per-replica counters: `counters[node][replica]`.
     pub(super) counters: Vec<Vec<NodeCounters>>,
+    /// Number of real nodes: the units after them are one pseudo-node per edge (the link).
+    pub(super) nodes: usize,
 }
 
 impl Units {
@@ -35,15 +39,33 @@ impl Units {
                 });
             }
         }
+        let mut count: Vec<u16> = topo.nodes.iter().map(|n| n.replicas.max(1)).collect();
+        let mut counters: Vec<Vec<NodeCounters>> = count
+            .iter()
+            .map(|&c| vec![NodeCounters::default(); usize::from(c)])
+            .collect();
+        // One FIFO single-slot unit per edge, with a gate only when the edge has a bandwidth.
+        let link = Admission {
+            slots: 1,
+            queue: None,
+            overflow_status: 503,
+        };
+        for e in &topo.edges {
+            first.push(states.len());
+            states.push(NodeState {
+                gate: e.bandwidth.map(|_| Gate::new(&link)),
+                bucket: None,
+                since: 0,
+            });
+            count.push(1);
+            counters.push(vec![NodeCounters::default()]);
+        }
         Units {
             first,
-            count: topo.nodes.iter().map(|n| n.replicas.max(1)).collect(),
+            nodes: topo.nodes.len(),
+            count,
             states,
-            counters: topo
-                .nodes
-                .iter()
-                .map(|n| vec![NodeCounters::default(); usize::from(n.replicas.max(1))])
-                .collect(),
+            counters,
         }
     }
 
@@ -68,7 +90,14 @@ impl Engine {
     /// Counters of each replica of each node, `[node][replica]`; the node's own totals are
     /// [`Engine::node_counters`] (their sum, `max_queue` the longest queue of any replica).
     pub fn replica_counters(&self) -> &[Vec<NodeCounters>] {
-        &self.units.counters
+        &self.units.counters[..self.units.nodes]
+    }
+
+    /// Counters of each bandwidth-limited link, indexed by [`crate::EdgeId`]: `completed` is
+    /// transfers started, `wait` their summed queueing, `area` the busy time. An edge without a
+    /// `bandwidth` stays zero.
+    pub fn link_counters(&self) -> &[NodeCounters] {
+        &self.counters[self.units.nodes..]
     }
 
     /// **Private.** Applies `f` to the node's totals and to the counters of its `replica`.
@@ -96,8 +125,18 @@ impl Engine {
 }
 
 impl Units {
-    /// Whether `replica` of `node` has neither a gate nor a rate limit (its hops start at once).
-    pub(super) fn unconstrained(&self, node: NodeId, replica: u16) -> bool {
+    /// The unit whose gate, bucket and counters hop `h` uses: its node's replica, or for a link
+    /// hop the edge's pseudo-node (index `nodes + edge`, replica 0).
+    pub(super) fn target(&self, h: &Hop) -> (NodeId, u16) {
+        match h.kind {
+            HopKind::Link { edge, .. } => (self.nodes + edge, 0),
+            _ => (h.node, h.replica),
+        }
+    }
+
+    /// Whether the unit of `h` has neither a gate nor a rate limit (its hops start at once).
+    pub(super) fn unconstrained(&self, h: &Hop) -> bool {
+        let (node, replica) = self.target(h);
         let s = &self.states[self.at(node, replica)];
         s.gate.is_none() && s.bucket.is_none()
     }

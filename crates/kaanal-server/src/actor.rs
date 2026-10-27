@@ -152,6 +152,8 @@ mod tests {
                             n: i,
                             seed: 1,
                             pin_delay: std::time::Duration::ZERO,
+                            req_bytes: 0,
+                            resp_bytes: 0,
                         },
                     )
                     .0,

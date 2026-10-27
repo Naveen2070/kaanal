@@ -182,6 +182,19 @@ impl NodeConfig {
         }
     }
 
+    /// The per-KB payload cost (`per_kb:`), if the node sets one.
+    pub fn per_kb(&self) -> Option<&DistConfig> {
+        match self {
+            NodeConfig::Gateway(n) => n.per_kb.as_ref(),
+            NodeConfig::Service(n) => n.per_kb.as_ref(),
+            NodeConfig::Monolith(n) => n.per_kb.as_ref(),
+            NodeConfig::Database(n) => n.per_kb.as_ref(),
+            NodeConfig::Cache(n) => n.per_kb.as_ref(),
+            NodeConfig::ExternalApi(n) => n.per_kb.as_ref(),
+            NodeConfig::Auth(n) => n.per_kb.as_ref(),
+        }
+    }
+
     /// The node's own `locale:` tag, if set.
     pub fn locale(&self) -> Option<&str> {
         match self {
@@ -241,6 +254,9 @@ pub struct GatewayConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -283,6 +299,9 @@ pub struct ServiceConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -332,6 +351,9 @@ pub struct MonolithConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -375,6 +397,9 @@ pub struct DatabaseConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -424,6 +449,9 @@ pub struct CacheConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -473,6 +501,9 @@ pub struct ExternalApiConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -523,6 +554,9 @@ pub struct AuthConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// Extra processing time per KB of payload (request and response each, once per body), a
+    /// duration like `proc`. Absent = none.
+    pub per_kb: Option<DistConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]

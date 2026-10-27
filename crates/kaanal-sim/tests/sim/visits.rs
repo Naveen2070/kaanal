@@ -18,6 +18,8 @@ fn visits_match_sim_completed_counts() {
         streams: vec![Stream {
             endpoint_key: "GET /x/{id}".into(),
             rate_per_s: 1000.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(200),
         warmup: Duration::ZERO,

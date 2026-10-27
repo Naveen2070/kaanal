@@ -239,6 +239,16 @@ pub(crate) fn prob_ok(p: f64) -> bool {
 /// A cache keeps its own hit ratio, and the gateway routes by endpoint, so neither takes a share.
 pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
     for (i, e) in cfg.edges.iter().enumerate() {
+        if e.bandwidth == Some(0) {
+            return Err(Located::at_value(
+                vec![
+                    PathSeg::Key("edges".into()),
+                    PathSeg::Index(i),
+                    PathSeg::Key("bandwidth".into()),
+                ],
+                format!("edge #{i}: bandwidth must be at least 1 byte per second (got 0)"),
+            ));
+        }
         let Some(p) = e.prob else { continue };
         let at = vec![
             PathSeg::Key("edges".into()),
@@ -279,7 +289,7 @@ fn weights_problem(b: &Balance, replicas: u16) -> Option<String> {
 }
 
 /// **Private.** Replica rules serde cannot place: the count's range, and a `weighted` balance on a
-/// node or an edge (checked against the callee's count), each at its own key.
+/// node or an edge (checked against the callee's count), each at its own key, and `per_kb` on a cache.
 pub(super) fn check_replicas(cfg: &Config) -> Result<(), Located> {
     for (name, node) in &cfg.nodes {
         let r = node.replicas();
@@ -287,6 +297,14 @@ pub(super) fn check_replicas(cfg: &Config) -> Result<(), Located> {
             return Err(Located::at_value(
                 keys(&["nodes", name.as_str(), "replicas"]),
                 format!("node '{name}': replicas must be between 1 and {MAX_REPLICAS} (got {r})"),
+            ));
+        }
+        if matches!(node, NodeConfig::Cache(_)) && node.per_kb().is_some() {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "per_kb"]),
+                format!(
+                    "node '{name}': a cache has no per_kb (it returns a stored value; put bandwidth on its edge instead)"
+                ),
             ));
         }
         if let Some(p) = node.balance().and_then(|b| weights_problem(b, r)) {

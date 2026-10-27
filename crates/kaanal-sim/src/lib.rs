@@ -47,6 +47,10 @@ pub struct Stream {
     pub endpoint_key: String,
     /// Mean arrivals per second (exponential gaps).
     pub rate_per_s: f64,
+    /// Bytes of each request body (0 = none: no link or `per_kb` cost).
+    pub req_bytes: u64,
+    /// Bytes of each response body.
+    pub resp_bytes: u64,
 }
 
 /// What to simulate.

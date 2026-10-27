@@ -68,6 +68,8 @@ fn streams(list: &[(&str, f64)], secs: u64, warmup: u64, seed: u64) -> SimConfig
             .map(|(k, r)| Stream {
                 endpoint_key: (*k).into(),
                 rate_per_s: *r,
+                req_bytes: 0,
+                resp_bytes: 0,
             })
             .collect(),
         duration: Duration::from_secs(secs),

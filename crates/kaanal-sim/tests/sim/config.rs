@@ -184,6 +184,8 @@ fn too_many_streams_are_rejected_not_truncated() {
         .map(|i| Stream {
             endpoint_key: format!("GET /s{i}"),
             rate_per_s: 1.0,
+            req_bytes: 0,
+            resp_bytes: 0,
         })
         .collect();
     let err = run(&t, &e, &ChaosState::default(), &cfg).unwrap_err();

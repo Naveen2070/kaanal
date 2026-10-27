@@ -33,6 +33,8 @@ pub(crate) fn one_stream(rate: f64, secs: u64) -> SimConfig {
         streams: vec![Stream {
             endpoint_key: "GET /users/{id}".into(),
             rate_per_s: rate,
+            req_bytes: 0,
+            resp_bytes: 0,
         }],
         duration: Duration::from_secs(secs),
         warmup: Duration::ZERO,
@@ -119,6 +121,8 @@ pub(crate) fn zero_load_config(keys: &[&str], seed: u64) -> SimConfig {
             .map(|k| Stream {
                 endpoint_key: (*k).to_string(),
                 rate_per_s: 1.0,
+                req_bytes: 0,
+                resp_bytes: 0,
             })
             .collect(),
         duration: Duration::from_secs(2_000),
@@ -147,6 +151,8 @@ pub(crate) fn compare_with_execute(
                 n: r.n,
                 seed,
                 pin_delay: std::time::Duration::ZERO,
+                req_bytes: sc.streams[r.stream].req_bytes,
+                resp_bytes: sc.streams[r.stream].resp_bytes,
             },
         );
         let at = format!("{label} {key} n={}", r.n);

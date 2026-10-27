@@ -117,11 +117,11 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         .paging
         .as_ref()
         .map_or_else(Vec::new, |_| query_pairs(req.uri()));
-
     debug_assert_eq!(
         route.key, route.endpoint.key,
         "a route answers with its own endpoint"
     );
+    let sizes = sizes(&st, route, req.headers(), (method, path, &params, &query));
     let body = read_body(route, &params, req).await;
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     // S10: the scoped stack, or else one snapshot of the live one (the `Arc` is cloned once here
@@ -134,8 +134,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         snap = st.snapshot();
         (&snap.chaos, &snap.pins)
     };
-    let (plan, pin) = plan_of(&st, route, n, chaos, pins);
-    let plan = Arc::new(plan);
+    let (plan, pin) = plan_of(&st, route, n, chaos, pins, sizes);
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
     let Some(fin) = (match &st.engine {
@@ -241,7 +240,8 @@ fn plan_of(
     n: u64,
     chaos: &EffectiveChaos,
     pins: &EffectivePins,
-) -> (Plan, Option<Outcome>) {
+    (req_bytes, resp_bytes): (u64, u64),
+) -> (Arc<Plan>, Option<Outcome>) {
     let ep = &route.endpoint;
     let pin = if pins.is_empty() {
         None
@@ -256,6 +256,74 @@ fn plan_of(
         n,
         seed: st.chain_seed,
         pin_delay: pin.as_ref().map_or(Duration::ZERO, |o| o.delay),
+        req_bytes,
+        resp_bytes,
     };
-    (sample_plan(&st.topo, chaos, &req).0, pin)
+    (Arc::new(sample_plan(&st.topo, chaos, &req).0), pin)
+}
+
+/// **Private.** The request body size from `Content-Length` (0 when absent or not a number).
+fn content_length(headers: &axum::http::HeaderMap) -> u64 {
+    headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+/// **Private.** `(method, path, params, query)` of a request.
+type Parts<'a> = (
+    &'a str,
+    &'a str,
+    &'a [(String, String)],
+    &'a [(String, String)],
+);
+
+/// **Private.** The size of the body this route answers when nothing fails, for link and `per_kb`
+/// costs: the serialized [`reply::success`] body, built before the chain runs (it is pure and
+/// seeded, so it is the body the client will get). A route with a collection or a built-in
+/// responder answers from state that the chain's outcome decides, so it counts 0 here.
+// ponytail: those routes pay no response transfer; size them if a real need shows up.
+// Read before `read_body` takes the request (it needs the headers).
+fn sizes(
+    st: &AppState,
+    route: &Route,
+    headers: &axum::http::HeaderMap,
+    (method, path, params, query): Parts,
+) -> (u64, u64) {
+    // Only a topology with a payload cost looks at sizes at all.
+    if !st.topo.payload_costs() {
+        return (0, 0);
+    }
+    (
+        content_length(headers),
+        resp_bytes(
+            st,
+            route,
+            &Ask {
+                method,
+                path,
+                params,
+                query,
+            },
+        ),
+    )
+}
+
+/// **Private.** The response half of [`sizes`].
+fn resp_bytes(st: &AppState, route: &Route, ask: &Ask) -> u64 {
+    let ep = &route.endpoint;
+    // hyper strips a HEAD body, so the client never receives those bytes
+    if ask.method == "HEAD"
+        || ep.collection.is_some()
+        || (ep.responder.is_some() && ep.response.is_none())
+    {
+        return 0;
+    }
+    let (_, body) = reply::success(st, route, ask);
+    if body.is_null() {
+        0
+    } else {
+        serde_json::to_vec(&body).map_or(0, |b| b.len() as u64)
+    }
 }

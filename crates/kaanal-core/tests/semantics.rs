@@ -87,6 +87,8 @@ fn run(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState) -> ChainOutco
             n: 0,
             seed: 1,
             pin_delay: std::time::Duration::ZERO,
+            req_bytes: 0,
+            resp_bytes: 0,
         },
     )
 }
@@ -103,6 +105,7 @@ fn timeline(t: &Topology, o: &ChainOutcome) -> Vec<String> {
                 HopKind::CacheHit => "hit",
                 HopKind::CacheMiss => "miss",
                 HopKind::Delay => "delay",
+                HopKind::Link { .. } => "link",
             };
             format!(
                 "{}.{kind}@{}+{}",
@@ -632,6 +635,8 @@ fn draws_follow_the_r1_34_formula() {
             n: 3,
             seed: 7,
             pin_delay: std::time::Duration::ZERO,
+            req_bytes: 0,
+            resp_bytes: 0,
         },
     );
     // D8: root = H(seed, key, n); a call's path = H(parent, target, occurrence, repetition);
@@ -678,6 +683,8 @@ fn error_rate_holds_across_seeds() {
                     n: 0,
                     seed,
                     pin_delay: std::time::Duration::ZERO,
+                    req_bytes: 0,
+                    resp_bytes: 0,
                 },
             )
             .result

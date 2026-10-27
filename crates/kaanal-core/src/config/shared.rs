@@ -64,6 +64,12 @@ pub struct EdgeConfig {
     /// `balance`.
     #[serde(default)]
     pub balance: Option<crate::balance::Balance>,
+    /// Link capacity in bytes per second (at least 1). With a payload size, a transfer takes
+    /// `bytes / bandwidth` on a FIFO link that other transfers queue behind. Absent = no limit,
+    /// and no link hop.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1))]
+    pub bandwidth: Option<u64>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

@@ -8,6 +8,7 @@ mod behaviour;
 mod common;
 mod config;
 mod forks;
+mod links;
 mod replicas;
 mod streams;
 mod visits;
