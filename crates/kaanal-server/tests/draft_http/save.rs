@@ -207,7 +207,7 @@ async fn save_refuses_a_draft_that_names_a_file_outside_the_project() {
     let s = start(BASE).await;
     let outside = s.dir.join("openapi.yaml").display().to_string();
     for text in [
-        BASE.replace("nginx: {", &format!("nginx: {{ spec: '{outside}',")),
+        with_spec(&format!("'{outside}'")),
         BASE.replace("nodes:", "data: ../other.yaml\nnodes:"),
         format!("{BASE}endpoints: '/etc/endpoints.yaml'\n"),
     ] {
@@ -224,8 +224,58 @@ async fn save_refuses_a_draft_that_names_a_file_outside_the_project() {
         );
         assert_eq!(on_disk(&s), BASE, "nothing was written");
     }
+    // spellings a leaf walker would skip: an anchor, an alias, a block scalar
+    let named = with_spec("&s '/etc/x.yaml'");
+    for text in [
+        named,
+        with_spec("&s /etc/x.yaml").replace("  db:", "  app2:  { type: service, spec: *s }\n  db:"),
+        BASE.replace("nodes:", "data: |\n  ../other.yaml\nnodes:"),
+        BASE.replace("nodes:", "data: &d ../other.yaml\nnodes:"),
+    ] {
+        s.put(URL, json!({ "text": text })).await;
+        let r = s.send(reqwest::Method::POST, SAVE, None).await;
+        assert_eq!(r.status(), 400, "{text}");
+        assert_eq!(on_disk(&s), BASE, "nothing was written");
+    }
+    // YAML that the loader would reject for another reason must still have its paths checked
+    let other_error = BASE.replace(
+        "app:   { type: service,",
+        "app:   { type: service, bogus: 1, spec: /etc/x.yaml,",
+    );
+    s.put(URL, json!({ "text": other_error })).await;
+    assert_eq!(
+        s.send(reqwest::Method::POST, SAVE, None).await.status(),
+        400
+    );
+    assert_eq!(on_disk(&s), BASE);
+    // a node whose name is not text (the loader reads `1:` as the name "1"), a path that is a
+    // number-like, tagged or list value: checked or refused, never skipped
+    for text in [
+        BASE.replace(
+            "  app:   { type: service,",
+            "  7:   { type: service, spec: /etc/x.yaml,",
+        ),
+        BASE.replace(
+            "  app:   { type: service,",
+            "  true:   { type: service, spec: ../x.yaml,",
+        ),
+        BASE.replace(
+            "  app:   { type: service,",
+            "  app:   { type: service, spec: !tag /etc/x.yaml,",
+        ),
+        BASE.replace(
+            "  app:   { type: service,",
+            "  app:   { type: service, spec: [/etc/x.yaml],",
+        ),
+        BASE.replace("nodes:", "data: { a: b }\nnodes:"),
+    ] {
+        s.put(URL, json!({ "text": text })).await;
+        let r = s.send(reqwest::Method::POST, SAVE, None).await;
+        assert_eq!(r.status(), 400, "{text}");
+        assert_eq!(on_disk(&s), BASE, "nothing was written");
+    }
     // a relative path inside the project and a draft that is not YAML at all can still be saved
-    let ok = BASE.replace("nginx: {", "nginx: { spec: openapi.yaml,");
+    let ok = with_spec("openapi.yaml");
     s.put(URL, json!({ "text": ok })).await;
     assert_eq!(
         s.send(reqwest::Method::POST, SAVE, None).await.status(),
@@ -237,4 +287,12 @@ async fn save_refuses_a_draft_that_names_a_file_outside_the_project() {
         200
     );
     assert_eq!(on_disk(&s), "nodes: [");
+}
+
+/// BASE with `spec:` on the `app` service (the only kind of node in BASE that has one).
+fn with_spec(spec: &str) -> String {
+    BASE.replace(
+        "app:   { type: service,",
+        &format!("app:   {{ type: service, spec: {spec},"),
+    )
 }

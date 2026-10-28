@@ -43,7 +43,7 @@ pub use chaos::{
 };
 pub use config::{
     ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointsConfig, NodeKind,
-    ScenarioConfig, SeedSource, parse_scenario, valid_locale_tag,
+    ScenarioConfig, SeedSource, parse_scenario, strip_bom, valid_locale_tag,
 };
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;

@@ -13,7 +13,7 @@ mod files;
 use files::FILES;
 
 use crate::{
-    Fail, STATE_DIR, Started, err, lifecycle, load, lock_instance, output, private_dir,
+    Fail, Mode, STATE_DIR, Started, err, lifecycle, load, lock_instance, output, private_dir,
     serve_locked,
 };
 
@@ -135,7 +135,7 @@ pub fn demo(a: &DemoArgs) -> Result<(), Fail> {
     let config = dir.join("kaanal.yaml");
     let loaded = load(&config)?;
     let host = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    serve_locked(&config, loaded, a.port, host, false, lock, |s| {
+    serve_locked(&config, loaded, a.port, host, Mode::default(), lock, |s| {
         announce(s, locale, a.open);
     })
 }

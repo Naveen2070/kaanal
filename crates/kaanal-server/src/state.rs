@@ -259,11 +259,39 @@ impl AppState {
             SeedSource::Entropy => Some(rand::random::<u64>()),
         };
         let (g, scenarios) = Generation::build(cfg, base_dir, drawn_seed, Trust::Owner)?;
+        Ok(Self::assemble(
+            Some(g),
+            scenarios,
+            drawn_seed,
+            base_dir,
+            token,
+            port,
+        ))
+    }
+
+    /// A state with no system yet (a blank start): the control API and the Studio draft work,
+    /// the mock answers 404, and the first Apply makes the first generation. The startup seed
+    /// is drawn now, because `drawn_seed` outlives every generation: a realistic config applied
+    /// later must find one (see [`AppState::drawn_seed`]).
+    pub fn blank(base_dir: &Path, token: String, port: u16) -> AppState {
+        let drawn = Some(rand::random::<u64>());
+        Self::assemble(None, ScenarioSet::default(), drawn, base_dir, token, port)
+    }
+
+    /// **Private.** The state around an optional first generation.
+    fn assemble(
+        g: Option<Generation>,
+        scenarios: ScenarioSet,
+        drawn_seed: Option<u64>,
+        base_dir: &Path,
+        token: String,
+        port: u16,
+    ) -> AppState {
         let (events, _) = broadcast::channel(1024);
         let ids = crate::log::IdGen::new();
         let log = Mutex::new(crate::log::LogRing::new(ids.boot()));
-        Ok(AppState {
-            generation: RwLock::new(Some(Arc::new(g))),
+        AppState {
+            generation: RwLock::new(g.map(Arc::new)),
             chaos: RwLock::new(Arc::new(Effective {
                 stack: ChaosStack::default(),
                 chaos: EffectiveChaos::default(),
@@ -293,7 +321,7 @@ impl AppState {
             ids,
             log,
             shutdown: crate::shutdown::Shutdown::new(),
-        })
+        }
     }
 
     /// The generation in force, one `Arc` clone (the lock is gone on return). A request calls

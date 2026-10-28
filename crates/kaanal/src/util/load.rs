@@ -56,6 +56,20 @@ pub(crate) fn load(path: &Path) -> Result<(Config, PathBuf, String), Fail> {
     Ok((cfg, dir, src))
 }
 
+/// **Private.** What a blank start runs on: the default config (for its port and seed), the
+/// folder of `path` (where its draft's spec and data files would resolve), and the blank draft text.
+/// `path` is not read: it is only where Save will write.
+pub(crate) fn blank_loaded(path: &Path) -> Result<(Config, PathBuf, String), Fail> {
+    let src = kaanal_server::BLANK_TEXT.to_string();
+    let cfg = Config::from_yaml(&src).map_err(|e| config_err(path, &e))?;
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    Ok((cfg, dir, src))
+}
+
 /// **Private.** How many users the config's auth node has, or `None` without an auth node.
 pub(crate) fn auth_users(cfg: &Config) -> Option<usize> {
     cfg.nodes.values().find_map(|n| match n {

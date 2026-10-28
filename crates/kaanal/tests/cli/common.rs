@@ -59,9 +59,15 @@ impl Up {
     }
 
     pub(crate) fn launch(dir: PathBuf, extra: &[&str], cfg: &Path) -> Up {
+        let mut args = vec!["up", "--port", "0"];
+        args.extend(extra);
+        Up::launch_args(dir, &args, cfg)
+    }
+
+    /// Starts `kaanal <args> -c <cfg>` in `dir` (`args` starts with the subcommand).
+    pub(crate) fn launch_args(dir: PathBuf, args: &[&str], cfg: &Path) -> Up {
         let child = bin()
-            .args(["up", "--port", "0"])
-            .args(extra)
+            .args(args)
             .arg("-c")
             .arg(cfg)
             .current_dir(&dir)

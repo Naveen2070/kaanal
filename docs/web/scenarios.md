@@ -33,17 +33,17 @@ Each entry names **where** it applies and sets **at least one** of the fields:
 | `endpoint: "GET /orders"`      | Once, at the front door of that endpoint, before its chain. A failure belongs to the entry node. |
 | `node: db` + `endpoint: "..."` | Visits of that node only while it serves that endpoint.                                          |
 
-| Field          | Rules                                                                                  |
-| -------------- | -------------------------------------------------------------------------------------- |
-| `replica`      | integer, 0 to 63, with `node` only: one copy of a replicated node (no `endpoint`). The node must have that many `replicas`. |
-| `edge`         | `{ from, to }`: a link instead of a node (no `node`, `endpoint` or `replica`); the edge must exist. Takes `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`, `down` and `bandwidth_cap`. |
-| `jitter_ms`    | integer, 0 to 300 000, edge entries only: random extra latency of up to this much either way. |
-| `bandwidth_cap`| integer of at least 1, edge entries only: lowers the edge's `bandwidth` (bytes per second); the edge must have one and the cap may not exceed it. |
-| `latency_ms`   | integer, 0 to 300 000. Added to every visit.                                           |
-| `error_rate`   | number 0.0 to 1.0. The chance each visit fails.                                        |
-| `error_kind`   | `status` (default), `reset`, `hang` or `malformed`. See [concepts](concepts.md#chaos). |
-| `error_status` | integer 500 to 504 (default 503). Checked whatever the kind.                           |
-| `down`         | `true`: every visit fails 503.                                                         |
+| Field           | Rules                                                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `replica`       | integer, 0 to 63, with `node` only: one copy of a replicated node (no `endpoint`). The node must have that many `replicas`.                                                                                        |
+| `edge`          | `{ from, to }`: a link instead of a node (no `node`, `endpoint` or `replica`); the edge must exist. Takes `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`, `down` and `bandwidth_cap`. |
+| `jitter_ms`     | integer, 0 to 300 000, edge entries only: random extra latency of up to this much either way.                                                                                                                      |
+| `bandwidth_cap` | integer of at least 1, edge entries only: lowers the edge's `bandwidth` (bytes per second); the edge must have one and the cap may not exceed it.                                                                  |
+| `latency_ms`    | integer, 0 to 300 000. Added to every visit.                                                                                                                                                                       |
+| `error_rate`    | number 0.0 to 1.0. The chance each visit fails.                                                                                                                                                                    |
+| `error_kind`    | `status` (default), `reset`, `hang` or `malformed`. See [concepts](concepts.md#chaos).                                                                                                                             |
+| `error_status`  | integer 500 to 504 (default 503). Checked whatever the kind.                                                                                                                                                       |
+| `down`          | `true`: every visit fails 503.                                                                                                                                                                                     |
 
 `error_kind` and `error_status` belong to the **same entry's `error_rate`**. An entry that sets a kind or a status without a rate does nothing, and Kaanal tells you: `kaanal validate`, `kaanal scenario load` and the control API print a warning (it is not an error).
 

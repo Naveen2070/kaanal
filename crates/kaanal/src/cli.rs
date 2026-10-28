@@ -48,6 +48,23 @@ pub(crate) enum Cmd {
         /// Run as a background child of `up -d`: keep the token out of the output, ignore hangup
         #[arg(long, hide = true)]
         detached: bool,
+        /// Start with no system and an empty draft: build one with `kaanal draft` or in the UI,
+        /// then `draft apply`; `-c` is where `draft save` writes it (the file is not read)
+        #[arg(long, conflicts_with_all = ["detach", "detached"])]
+        blank: bool,
+    },
+    /// Start blank and open the browser: build a system in the UI (same as `up --blank`)
+    Studio {
+        /// Where `draft save` writes the system (the file is not read)
+        #[arg(short, long, default_value = "kaanal.yaml")]
+        config: PathBuf,
+        #[arg(long)]
+        port: Option<u16>,
+        #[arg(long, default_value = "127.0.0.1")]
+        host: IpAddr,
+        /// Only print the URL; do not open the browser
+        #[arg(long)]
+        no_open: bool,
     },
     /// Print a shell completion script (bash, zsh, fish, powershell, elvish) to stdout
     Completions {
@@ -278,7 +295,7 @@ pub(crate) enum DraftCmd {
 /// **Private.** `draft save --fix-scenarios` values.
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub(crate) enum FixScenarios {
-    /// Point them at the renamed node (needs a rename; not available yet)
+    /// Point them at the renamed node (for a rename made since the draft was set)
     Rewrite,
     /// Delete the files
     Remove,

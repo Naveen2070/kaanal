@@ -10,8 +10,8 @@ A node sets `replicas` and `balance` (every kind has both, see [config.md](confi
 
 ## Public surface
 
-| Item           | Kind  | Notes                                              |
-| -------------- | ----- | -------------------------------------------------- |
-| `Balance`      | enum  | `Default` is `RoundRobin`; `Deserialize` and `JsonSchema` by hand |
-| `MAX_REPLICAS` | const | 64                                                 |
-| `pick_replica`  | fn    | `(&Balance, replicas, up, n, offset, path, node) -> Option<u16>`; re-exported from the crate |
+| Item           | Kind  | Notes                                                                                        |
+| -------------- | ----- | -------------------------------------------------------------------------------------------- |
+| `Balance`      | enum  | `Default` is `RoundRobin`; `Deserialize` and `JsonSchema` by hand                            |
+| `MAX_REPLICAS` | const | 64                                                                                           |
+| `pick_replica` | fn    | `(&Balance, replicas, up, n, offset, path, node) -> Option<u16>`; re-exported from the crate |

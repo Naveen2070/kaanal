@@ -56,17 +56,17 @@ An edge may also set `prob` (above 0, at most 1): the share of requests that tak
 
 ## Steps
 
-| Step                    | What it does                                                                           |
-| ----------------------- | -------------------------------------------------------------------------------------- |
-| `call: node`            | Charge the edge's `net`, then the callee's work. The edge must exist                   |
-| `repeat: N`             | On a `call`: N sequential calls, each sampled on its own (default: the edge's `calls`) |
+| Step                    | What it does                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call: node`            | Charge the edge's `net`, then the callee's work. The edge must exist                                                                        |
+| `repeat: N`             | On a `call`: N sequential calls, each sampled on its own (default: the edge's `calls`)                                                      |
 | `prob: p`               | On a `call`: the share of requests that take it, above 0 and at most 1 (default: the edge's `prob`, else 1). One draw covers every `repeat` |
-| `op: read\|write\|scan` | On a `call` to a database or monolith: use this op for this step only                  |
-| `chain: [ ... ]`        | On a `call` to a service or monolith: the steps it runs, written inline                |
-| `with: name`            | On a `call`: run a named chain from the callee's `chains:` (below)                     |
-| `via: "GET /x"`         | On a `call`: run what another endpoint of the callee does, with that endpoint's op     |
-| `cache: node`           | Look the key up in a cache node                                                        |
-| `parallel: [ ... ]`     | Run branches at the same time                                                          |
+| `op: read\|write\|scan` | On a `call` to a database or monolith: use this op for this step only                                                                       |
+| `chain: [ ... ]`        | On a `call` to a service or monolith: the steps it runs, written inline                                                                     |
+| `with: name`            | On a `call`: run a named chain from the callee's `chains:` (below)                                                                          |
+| `via: "GET /x"`         | On a `call`: run what another endpoint of the callee does, with that endpoint's op                                                          |
+| `cache: node`           | Look the key up in a cache node                                                                                                             |
+| `parallel: [ ... ]`     | Run branches at the same time                                                                                                               |
 
 `chain`, `with` and `via` are mutually exclusive. A bare `- call: node` is the usual form. A `parallel` branch is one step or a list of steps.
 

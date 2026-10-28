@@ -8,13 +8,13 @@ How often a request is expected to enter each node.
 
 It reads the compiled `Seq` trees, not the edge graph, because chains decide the traffic: `with:` and `via:` reuse bodies, `repeat` multiplies, `prob` skips.
 
-| Step                 | Adds                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `call`               | `m * prob * repeat` to the callee; its body runs with that multiplier                      |
-| cache lookup         | `m * (1 + (1-h) + ... )` over `repeat` lookups (a lookup runs only if earlier ones missed) |
-| after a cache step   | the rest of that sequence is scaled by `(1-h)^repeat`                                      |
-| `parallel`           | each branch adds with the same `m`; a hit in one branch leaves siblings and what follows   |
-| `proc`, `op`         | nothing for the runner itself (counted at the call); one visit for another node's inline work |
+| Step               | Adds                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `call`             | `m * prob * repeat` to the callee; its body runs with that multiplier                         |
+| cache lookup       | `m * (1 + (1-h) + ... )` over `repeat` lookups (a lookup runs only if earlier ones missed)    |
+| after a cache step | the rest of that sequence is scaled by `(1-h)^repeat`                                         |
+| `parallel`         | each branch adds with the same `m`; a hit in one branch leaves siblings and what follows      |
+| `proc`, `op`       | nothing for the runner itself (counted at the call); one visit for another node's inline work |
 
 A default-chain cache lookup skips writes, like the executor. Work of a node other than the sequence's runner (an auth node validating locally, with no gateway-to-auth edge) is one inline visit. Chaos and failures are ignored: this is the zero-chaos expectation. A cache `timeout` shorter than its `hit` cost turns hits into misses in the executor; that depends on the sampled cost and is not modelled.
 

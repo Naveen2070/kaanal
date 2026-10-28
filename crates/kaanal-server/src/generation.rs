@@ -6,8 +6,7 @@
 //! to the pipeline is that the realistic-mode `drawn_seed` is now a parameter.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::Read as _;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -20,8 +19,11 @@ use kaanal_core::{
 use kaanal_data::{ApiModel, DEFAULT_LOCALE, DataError, DataSet, Options, PageSpec};
 use serde_json::Value;
 
+use crate::paths::{read_text, resolve, shown};
 use crate::scenarios;
 use crate::state::Route;
+
+pub use crate::paths::Trust;
 
 /// The extractor for a handler that needs the system: the generation in force, taken once at the
 /// start of the request. Answers 409 while a blank start has no system yet.
@@ -39,106 +41,6 @@ impl axum::extract::FromRequestParts<Arc<crate::state::AppState>> for Gen {
             axum::Json(serde_json::json!({ "error": "no system applied yet; apply a draft" })),
         )))
     }
-}
-
-/// Whose text the config is. A person who wrote the file on disk (startup, `check`) may point
-/// `spec:`, `data:` and `endpoints:` anywhere they can read. Text that came through the control
-/// API (a draft) is held to the project folder: the API must not become a way to make the server
-/// read other files and report what it found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Trust {
-    /// The file's owner: paths are taken as written; a scenario file that does not resolve is an error.
-    Owner,
-    /// A draft from the API: paths must stay inside the project folder, messages show paths
-    /// relative to it, and a scenario file that does not resolve is flagged instead of failing.
-    Api,
-}
-
-/// The largest spec or endpoints file read: a bound, so a path to a device or an enormous file
-/// cannot exhaust memory.
-const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
-
-/// **Private.** `rel` (a path written in the config) under `base_dir`. For [`Trust::Api`] it must
-/// be relative, without `..`, and what it names must not leave `base_dir` through a link. The
-/// message repeats only what the draft itself said.
-fn resolve(base_dir: &Path, rel: &str, trust: Trust, at: &[PathSeg]) -> Result<PathBuf, Located> {
-    let file = base_dir.join(rel);
-    if trust == Trust::Owner {
-        return Ok(file);
-    }
-    let p = Path::new(rel);
-    let outside = p.is_absolute()
-        || p.has_root()
-        || p.components().any(|c| {
-            matches!(
-                c,
-                Component::ParentDir | Component::Prefix(_) | Component::RootDir
-            )
-        });
-    let escapes = file
-        .canonicalize()
-        .ok()
-        .zip(base_dir.canonicalize().ok())
-        .is_some_and(|(f, b)| !f.starts_with(b));
-    if outside || escapes {
-        return Err(Located::at_value(
-            at.to_vec(),
-            format!("'{rel}' must be a path inside the project folder (no absolute path, no '..')"),
-        ));
-    }
-    Ok(file)
-}
-
-/// Checks the files a config *text* names (`nodes.*.spec`, `data`, `endpoints`) against the
-/// [`Trust::Api`] rule, without building anything: what Save runs, so a draft that validate and
-/// Apply would refuse is never written where the owner's `kaanal up` (which takes paths as
-/// written) would later trust it. Text that is not YAML cannot be loaded by anyone, so it passes.
-///
-/// # Errors
-/// The first path that is absolute, has `..`, or leaves the project through a link.
-pub(crate) fn confine(text: &str, base_dir: &Path) -> Result<(), Located> {
-    let Ok(leaves) = kaanal_core::splice::scalar_paths(text) else {
-        return Ok(());
-    };
-    for (path, raw) in leaves {
-        let named = matches!(
-            path.as_slice(),
-            [PathSeg::Key(a), PathSeg::Key(_), PathSeg::Key(c)] if a == "nodes" && c == "spec"
-        ) || matches!(path.as_slice(), [PathSeg::Key(k)] if k == "data" || k == "endpoints");
-        if named {
-            // the leaf is source text (quotes included): read it as the scalar it is
-            let rel = serde_yaml_ng::from_str::<String>(&raw).unwrap_or(raw);
-            resolve(base_dir, &rel, Trust::Api, &path)?;
-        }
-    }
-    Ok(())
-}
-
-/// **Private.** `file` as a message names it: as is for the owner, relative to the project for the API.
-fn shown(base_dir: &Path, file: &Path, trust: Trust) -> String {
-    if trust == Trust::Owner {
-        return file.display().to_string();
-    }
-    crate::draft::apply::relative(base_dir, file)
-}
-
-/// **Private.** The text of a regular file, at most [`MAX_FILE_BYTES`].
-fn read_text(path: &Path) -> std::io::Result<String> {
-    let meta = std::fs::metadata(path)?;
-    if !meta.is_file() {
-        return Err(std::io::Error::other("not a regular file"));
-    }
-    if meta.len() > MAX_FILE_BYTES {
-        return Err(std::io::Error::other(format!(
-            "larger than {} MiB",
-            MAX_FILE_BYTES / (1024 * 1024)
-        )));
-    }
-    let mut text = String::new();
-    std::fs::File::open(path)?
-        .take(MAX_FILE_BYTES)
-        .read_to_string(&mut text)?;
-    Ok(text)
 }
 
 /// A scenario file the build left out: it names something the topology does not have.
@@ -478,14 +380,21 @@ pub(crate) fn read_api(
     let file = resolve(base_dir, spec, trust, at)?;
     let label = shown(base_dir, &file, trust);
     let src = read_text(&file).map_err(|e| Located::new(at.to_vec(), format!("{label}: {e}")))?;
-    let api = ApiModel::from_openapi(&src)
-        .map_err(|e| Located::new(at.to_vec(), format!("{label}: {e}")))?;
+    let api = ApiModel::from_openapi(&src).map_err(|e| {
+        // a parse error can quote the file's text; the API must not echo a file it was only pointed at
+        let msg = if trust == Trust::Api {
+            "not a valid OpenAPI document".to_string()
+        } else {
+            e.clone()
+        };
+        Located::new(at.to_vec(), format!("{label}: {msg}"))
+    })?;
     Ok((file, api))
 }
 
 /// **Private.** A data-file error as a [`Located`]: in its file (parse position, else the
 /// key path), or at the config value it names (`data:`) when it has no file.
-fn data_located(e: DataError) -> Located {
+fn data_located(e: DataError, trust: Trust) -> Located {
     let path: Vec<PathSeg> =
         e.at.iter()
             .map(|s| {
@@ -499,7 +408,12 @@ fn data_located(e: DataError) -> Located {
             kaanal_core::ConfigError {
                 line: e.line,
                 col: e.col,
-                msg: e.message,
+                // a parse error can quote the file's text (see `read_api`)
+                msg: if trust == Trust::Api {
+                    "not a valid data file".to_string()
+                } else {
+                    e.message
+                },
             },
         ),
         Some(f) if e.value => Located::at_value(path, e.message).in_file(f),
@@ -522,7 +436,7 @@ pub(crate) fn load_data(
     if let Some(rel) = cfg.data.as_deref() {
         resolve(base_dir, rel, trust, &keys(&["data"]))?;
     }
-    let data = DataSet::load(base_dir, cfg.data.as_deref()).map_err(data_located)?;
+    let data = DataSet::load(base_dir, cfg.data.as_deref()).map_err(|e| data_located(e, trust))?;
     warnings.extend(data.warnings().iter().cloned());
     let project = data
         .options_for(cfg.locale.as_deref().unwrap_or(DEFAULT_LOCALE))
@@ -574,7 +488,13 @@ fn compile_endpoints(
     let label = shown(base_dir, &path, trust);
     let src =
         read_text(&path).map_err(|e| Located::at_value(at.clone(), format!("{label}: {e}")))?;
-    let entries = parse_endpoints(&src).map_err(|e| Located::parsed(path.clone(), e))?;
+    let entries = parse_endpoints(&src).map_err(|mut e| {
+        // a parse error can quote the file's text (see `read_api`)
+        if trust == Trust::Api {
+            e.msg = "not a valid endpoints file".to_string();
+        }
+        Located::parsed(path.clone(), e)
+    })?;
     compile(
         topo,
         routes,
@@ -718,51 +638,5 @@ scenarios:
             (42, 7),
             "seed stays, the chain draw follows"
         );
-    }
-}
-
-#[cfg(test)]
-mod trust_tests {
-    use super::*;
-
-    const SPEC: &str = "openapi: 3.0.0\ninfo: { title: t, version: '1' }\npaths:\n  /ping:\n    get:\n      responses:\n        '200': { description: ok }\n";
-
-    /// A project folder with a spec one level above it.
-    fn project(name: &str) -> (PathBuf, Config) {
-        let root = std::env::temp_dir().join(format!("kaanal-trust-{name}-{}", std::process::id()));
-        let dir = root.join("proj");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(root.join("outside.yaml"), SPEC).unwrap();
-        let yaml = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, spec: '../outside.yaml' }\nedges:\n  - { from: gw, to: app }\n";
-        (dir, Config::from_yaml(yaml).unwrap())
-    }
-
-    #[test]
-    fn the_owner_may_point_outside_the_project_and_the_api_may_not() {
-        let (dir, cfg) = project("owner-api");
-        assert!(Generation::build(&cfg, &dir, None, Trust::Owner).is_ok());
-        let err = Generation::build(&cfg, &dir, None, Trust::Api)
-            .err()
-            .expect("refused");
-        assert!(err.msg.contains("inside the project folder"), "{}", err.msg);
-        assert!(!err.msg.contains(&dir.display().to_string()), "{}", err.msg);
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
-    }
-
-    #[test]
-    fn a_spec_larger_than_the_limit_is_not_read() {
-        let (dir, _) = project("big");
-        let big = dir.join("big.yaml");
-        let f = std::fs::File::create(&big).unwrap();
-        f.set_len(MAX_FILE_BYTES + 1).unwrap();
-        let err = read_text(&big).unwrap_err();
-        assert!(err.to_string().contains("larger than"), "{err}");
-        assert!(
-            read_text(&dir)
-                .unwrap_err()
-                .to_string()
-                .contains("not a regular file")
-        );
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

@@ -41,6 +41,13 @@ pub enum Edit {
         /// Where.
         path: Vec<PathSeg>,
     },
+    /// Renames the mapping key at `path` (its last step) to `to`; the value is not touched.
+    RenameKey {
+        /// The entry whose key changes.
+        path: Vec<PathSeg>,
+        /// The new key (plain text).
+        to: String,
+    },
 }
 
 /// The text after the edits, and what could not be kept.
@@ -244,6 +251,21 @@ fn scalar_node(
     }
 }
 
+/// The deepest collection nesting `parse` builds. The tree is walked and dropped recursively, and
+/// the parser itself allows unlimited block nesting, so without a bound a draft of `- - - - ...`
+/// would overflow a worker's stack. (`serde_yaml_ng` stops at 128 for Validate and Apply.)
+const MAX_DEPTH: usize = 64;
+
+/// **Private.** Refuses one more level of nesting past [`MAX_DEPTH`].
+fn deep_enough(stack: &[Open]) -> Result<(), SpliceError> {
+    if stack.len() >= MAX_DEPTH {
+        return Err(SpliceError::Parse(format!(
+            "nested deeper than {MAX_DEPTH} levels"
+        )));
+    }
+    Ok(())
+}
+
 /// **Private.** The first document of `text` (no BOM) as a span tree; `None` when it is empty.
 fn parse(text: &str) -> Result<Option<Node>, SpliceError> {
     // saphyr counts characters; the rest of this module works in bytes
@@ -270,19 +292,25 @@ fn parse(text: &str) -> Result<Option<Node>, SpliceError> {
                 };
                 attach(&mut stack, &mut root, node, text)?;
             }
-            Event::MappingStart(anchor, _) => stack.push(Open::Map {
-                flow: e > s,
-                start: s,
-                anchored: anchor != 0,
-                entries: Vec::new(),
-                key: None,
-            }),
-            Event::SequenceStart(anchor, _) => stack.push(Open::Seq {
-                flow: e > s,
-                start: s,
-                anchored: anchor != 0,
-                items: Vec::new(),
-            }),
+            Event::MappingStart(anchor, _) => {
+                deep_enough(&stack)?;
+                stack.push(Open::Map {
+                    flow: e > s,
+                    start: s,
+                    anchored: anchor != 0,
+                    entries: Vec::new(),
+                    key: None,
+                });
+            }
+            Event::SequenceStart(anchor, _) => {
+                deep_enough(&stack)?;
+                stack.push(Open::Seq {
+                    flow: e > s,
+                    start: s,
+                    anchored: anchor != 0,
+                    items: Vec::new(),
+                });
+            }
             Event::MappingEnd => {
                 let Some(Open::Map {
                     flow,
@@ -404,7 +432,7 @@ fn locate<'a>(
 
 fn leaves(n: &Node, path: &mut Vec<PathSeg>, text: &str, out: &mut Vec<(Vec<PathSeg>, String)>) {
     match &n.kind {
-        Kind::Scalar if n.start < n.end && !n.anchored && !n.block_scalar => {
+        Kind::Scalar if n.start < n.end && !n.block_scalar => {
             out.push((path.clone(), text[n.start..n.end].to_string()));
         }
         Kind::Map { entries, .. } => {
@@ -492,6 +520,7 @@ fn apply(t: &str, root: Option<&Node>, edit: &Edit, nl: &str) -> Result<Outcome,
         Edit::Set { path, value } => set(t, root, path, value),
         Edit::Insert { parent, key, value } => insert(t, root, parent, key, value, nl),
         Edit::Remove { path } => remove(t, root, path),
+        Edit::RenameKey { path, to } => rename_key(root, path, to),
     }
 }
 
@@ -612,6 +641,30 @@ fn insert(
     Ok(Outcome::Replace(
         at..at,
         format!("{nl}{indent}{}: {value}", key_text(key)),
+        Vec::new(),
+    ))
+}
+
+fn rename_key(root: Option<&Node>, path: &[PathSeg], to: &str) -> Result<Outcome, SpliceError> {
+    let (_, slot, inside) = locate(root, path)?;
+    let Slot::Entry(parent, i) = slot else {
+        return skip(path, "not a mapping entry: nothing to rename");
+    };
+    if inside {
+        return skip(path, SHARED);
+    }
+    let Kind::Map { entries, .. } = &parent.kind else {
+        return skip(path, "not a mapping entry: nothing to rename");
+    };
+    if entries.iter().any(|e| e.key == to) {
+        let mut p = path[..path.len() - 1].to_vec();
+        p.push(PathSeg::Key(to.to_string()));
+        return Err(SpliceError::Exists(dotted(&p)));
+    }
+    let e = &entries[i];
+    Ok(Outcome::Replace(
+        e.key_start..e.key_end,
+        key_text(to),
         Vec::new(),
     ))
 }

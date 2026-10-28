@@ -16,5 +16,6 @@ mod remote;
 mod scenario;
 mod startup;
 mod status;
+mod studio;
 mod usage;
 mod validate;

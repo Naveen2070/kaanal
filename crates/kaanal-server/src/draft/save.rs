@@ -32,6 +32,15 @@ pub enum Change {
     Delete(PathBuf),
 }
 
+/// What Save does besides writing the config, chosen for the text being saved.
+#[derive(Debug, Default)]
+pub struct Plan {
+    /// Scenario files to delete.
+    pub remove: Vec<PathBuf>,
+    /// Scenario files to replace, with their new text.
+    pub rewrite: Vec<(PathBuf, String)>,
+}
+
 /// What Save did, as paths relative to the project.
 #[derive(Debug, Default)]
 pub struct Saved {
@@ -41,9 +50,10 @@ pub struct Saved {
     pub removed: Vec<String>,
 }
 
-/// Writes the draft to its file, after removing what `plan` chooses, and returns what was done.
-/// `plan` gets the text being saved and names the scenario files to delete for it (so the choice
-/// is made for exactly the text that is written).
+/// Writes the draft to its file, after the deletions and rewrites `plan` chooses, and returns what
+/// was done. `plan` gets the text being saved and the renames made since it was set, and names
+/// the scenario files to delete or rewrite (so the choice is made for exactly the text that is
+/// written).
 ///
 /// The draft lock is held only to read and to record the outcome, never across disk work (the
 /// control routes take it on the async threads); `once` makes Saves one at a time. A `PUT` that
@@ -56,13 +66,19 @@ pub fn save(
     draft: &std::sync::Mutex<Draft>,
     once: &std::sync::Mutex<()>,
     confirm_loss: bool,
-    plan: impl FnOnce(&str) -> Result<Vec<PathBuf>, String>,
+    plan: impl FnOnce(&str, &[(String, String)]) -> Result<Plan, String>,
 ) -> Result<Saved, SaveError> {
     let _one = once.lock().unwrap_or_else(PoisonError::into_inner);
-    let (file, text, base, lost) = {
+    let (file, text, base, lost, renames) = {
         let d = draft.lock().unwrap_or_else(PoisonError::into_inner);
         let file = d.file.clone().ok_or(SaveError::NoFile)?;
-        (file, d.text.clone(), d.base.clone(), d.lost.clone())
+        (
+            file,
+            d.text.clone(),
+            d.base.clone(),
+            d.lost.clone(),
+            d.renames.clone(),
+        )
     };
     if !lost.is_empty() && !confirm_loss {
         return Err(SaveError::Lost(lost));
@@ -77,9 +93,10 @@ pub fn save(
     if on_disk != base {
         return Err(SaveError::Conflict);
     }
-    let remove = plan(&text).map_err(SaveError::Plan)?;
+    let Plan { remove, rewrite } = plan(&text, &renames).map_err(SaveError::Plan)?;
     // the config goes last: if anything before it fails nothing refers to a missing file
     let mut changes: Vec<Change> = remove.iter().cloned().map(Change::Delete).collect();
+    changes.extend(rewrite.iter().cloned().map(|(p, t)| Change::Write(p, t)));
     changes.push(Change::Write(target, text.clone()));
     commit(&changes, |from, to| std::fs::rename(from, to))
         .map_err(|e| SaveError::Io(e.to_string()))?;
@@ -87,6 +104,9 @@ pub fn save(
         let mut d = draft.lock().unwrap_or_else(PoisonError::into_inner);
         if d.text == text {
             d.lost.clear();
+            if !rewrite.is_empty() {
+                d.renames.clear();
+            }
         }
         d.base = Some(text);
     }
@@ -94,15 +114,15 @@ pub fn save(
         p.file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
     };
+    let shown = |p: &PathBuf| match p.parent().and_then(Path::file_name) {
+        Some(dir) => format!("{}/{}", dir.to_string_lossy(), name(p)),
+        None => name(p),
+    };
+    let mut written = vec![name(&file)];
+    written.extend(rewrite.iter().map(|(p, _)| shown(p)));
     Ok(Saved {
-        written: vec![name(&file)],
-        removed: remove
-            .iter()
-            .map(|p| match p.parent().and_then(Path::file_name) {
-                Some(dir) => format!("{}/{}", dir.to_string_lossy(), name(p)),
-                None => name(p),
-            })
-            .collect(),
+        written,
+        removed: remove.iter().map(shown).collect(),
     })
 }
 
@@ -212,7 +232,11 @@ pub fn commit(
                 None => std::fs::remove_file(&path),
             };
             if let Err(x) = put_back {
-                stuck.push(format!("{} ({x})", path.display()));
+                stuck.push(format!(
+                    "{} ({x})",
+                    path.file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                ));
             }
         }
         staged
@@ -362,10 +386,10 @@ mod tests {
         draft.lock().unwrap().lost = vec!["a comment".into()];
         let once = std::sync::Mutex::new(());
         // the plan runs after the snapshot: a PUT lands right then
-        let r = save(&draft, &once, true, |text| {
+        let r = save(&draft, &once, true, |text, _| {
             assert_eq!(text, "v2\n");
             draft.lock().unwrap().text = "v3\n".into();
-            Ok(Vec::new())
+            Ok(Plan::default())
         });
         assert!(r.is_ok());
         assert_eq!(
@@ -379,7 +403,7 @@ mod tests {
             assert_eq!(g.lost, ["a comment"], "the newer text still owes its loss");
         }
         // the next Save writes the newer text without a conflict
-        assert!(save(&draft, &once, true, |_| Ok(Vec::new())).is_ok());
+        assert!(save(&draft, &once, true, |_, _| Ok(Plan::default())).is_ok());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "v3\n");
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -392,7 +416,7 @@ mod tests {
         let draft = draft_for(f.clone(), "v1\n");
         draft.lock().unwrap().text = "v2\n".into();
         let once = std::sync::Mutex::new(());
-        let r = save(&draft, &once, false, |_| Err("no build".into()));
+        let r = save(&draft, &once, false, |_, _| Err("no build".into()));
         assert!(matches!(r, Err(SaveError::Plan(m)) if m == "no build"));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "v1\n");
         let _ = std::fs::remove_dir_all(&d);
@@ -409,7 +433,7 @@ mod tests {
         let draft = draft_for(link.clone(), "v1\n");
         draft.lock().unwrap().text = "v2\n".into();
         let once = std::sync::Mutex::new(());
-        assert!(save(&draft, &once, false, |_| Ok(Vec::new())).is_ok());
+        assert!(save(&draft, &once, false, |_, _| Ok(Plan::default())).is_ok());
         assert!(
             std::fs::symlink_metadata(&link)
                 .unwrap()

@@ -4,7 +4,8 @@ use super::*;
 use crate::draft::MAX_DRAFT_BYTES;
 use crate::draft::apply::{self as apply_mod, ApplyError};
 use crate::draft::patch::{self, Op};
-use crate::draft::save::{self as draft_save, SaveError};
+use crate::draft::rename;
+use crate::draft::save::{self as draft_save, Plan, SaveError};
 
 /// **Private.** The draft as the API shows it: `{ text, dirty, generation }` (`generation` is 0
 /// before the first Apply of a blank start).
@@ -49,11 +50,13 @@ pub async fn put_draft(
 ) -> Result<Json<Value>, Reject> {
     let Json(b) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
     let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut extra = None;
     match (b.text, b.patch) {
         (Some(t), None) if t.len() > MAX_DRAFT_BYTES => return Err(too_large(t.len())),
         (Some(t), None) => {
             d.text = t;
             d.lost.clear();
+            d.renames.clear();
         }
         (None, Some(ops)) => {
             let out =
@@ -63,6 +66,8 @@ pub async fn put_draft(
             }
             d.text = out.text;
             d.lost.extend(out.lost);
+            d.renames.extend(out.renamed);
+            extra = Some((out.touched, out.notes));
         }
         _ => {
             return Err(reject(
@@ -72,7 +77,13 @@ pub async fn put_draft(
         }
     }
     drop(d);
-    Ok(view(&st))
+    let mut v = view(&st);
+    if let Some((touched, notes)) = extra {
+        // where a rename_node changed the text, and what it could not reach
+        v.0["touched"] = json!(touched);
+        v.0["notes"] = json!(notes);
+    }
+    Ok(v)
 }
 
 /// What Save does with the scenario files the draft no longer resolves against (the `flagged`
@@ -85,7 +96,8 @@ enum Fix {
     None,
     /// Delete the files, so the next `kaanal up` loads.
     Remove,
-    /// Point them at the renamed node; arrives with rename.
+    /// Point them at the renamed node, for the `rename_node` operations made since the draft was
+    /// set (400 when there were none).
     Rewrite,
 }
 
@@ -138,30 +150,52 @@ pub async fn save_draft(
     let body = payload
         .map_err(|e| reject(e.status(), &e.body_text()))?
         .map_or_else(SaveBody::default, |Json(b)| b);
-    if body.fix_scenarios == Fix::Rewrite {
-        return Err(reject(
-            StatusCode::BAD_REQUEST,
-            "fix_scenarios: rewrite needs a rename, which is not available yet; use remove or none",
-        ));
-    }
     let (confirm, fix) = (body.confirm_loss, body.fix_scenarios);
     let (dir, seed, key, port) = (st.dir.clone(), st.drawn_seed, st.auth_key.clone(), st.port);
     let st2 = st.clone();
     let done = tokio::task::spawn_blocking(move || {
-        draft_save::save(&st2.draft, &st2.save_lock, confirm, |text| {
+        draft_save::save(&st2.draft, &st2.save_lock, confirm, |text, renames| {
             // Save never writes a draft that names files outside the project
-            crate::generation::confine(text, &dir).map_err(|e| e.msg)?;
-            if fix != Fix::Remove {
-                return Ok(Vec::new());
+            crate::paths::confine(text, &dir).map_err(|e| e.msg)?;
+            if fix == Fix::None {
+                return Ok(Plan::default());
             }
-            crate::draft::apply::build_draft(text, &dir, seed, key, port)
+            if fix == Fix::Rewrite && renames.is_empty() {
+                return Err("fix_scenarios: rewrite needs a rename_node made since the draft was set; there is none (use remove or none)".into());
+            }
+            let flagged = crate::draft::apply::build_draft(text, &dir, seed, key, port)
                 .map(|b| stale_scenarios(&b.generation.flagged, &dir))
                 .map_err(|d| {
                     format!(
                         "the draft does not build, so its scenario files cannot be checked: {}",
                         d.message
                     )
-                })
+                })?;
+            if fix == Fix::Remove {
+                return Ok(Plan {
+                    remove: flagged,
+                    ..Plan::default()
+                });
+            }
+            // rewrite: a file that names none of the renamed nodes stays flagged; one that cannot
+            // be rewritten safely stops the whole Save
+            let mut rewrite = Vec::new();
+            for path in flagged {
+                let old = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("{}: {e}", path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())))?;
+                match rename::rewrite_scenario(&old, renames) {
+                    Ok(Some(new)) => rewrite.push((path, new)),
+                    Ok(None) => {}
+                    Err(m) => {
+                        let file = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                        return Err(format!("cannot rewrite scenarios/{file}, so nothing was saved: {m}"));
+                    }
+                }
+            }
+            Ok(Plan {
+                rewrite,
+                ..Plan::default()
+            })
         })
     })
     .await

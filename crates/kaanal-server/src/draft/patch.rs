@@ -1,25 +1,39 @@
-//! Patches to the draft text: the UI's `{ op, path, value }` edits, applied with
-//! [`kaanal_core::splice`] so the comments, key order and flow style of the file survive.
+//! Patches to the draft text: the UI's `{ op, path, value }` edits (and the two Studio
+//! operations `add_node` and `rename_node`), applied with [`kaanal_core::splice`] so the
+//! comments, key order and flow style of the file survive.
 
+use kaanal_core::NodeKind;
 use kaanal_core::PathSeg;
-use kaanal_core::splice::{Edit, Spliced, splice};
+use kaanal_core::presets::starter;
+use kaanal_core::splice::{Edit, splice};
 use serde::Deserialize;
 use serde_json::Value;
 use serde_yaml_ng::Value as Yaml;
 use std::fmt::Write as _;
 
-/// One patch operation, as the API takes it.
+/// One patch operation, as the API takes it. Which fields it needs depends on `op`:
+/// `set`/`insert`/`remove` take `path` (and `value`), `add_node` takes `name` and `kind`,
+/// `rename_node` takes `from` and `to`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Op {
     #[serde(rename = "op")]
-    kind: Kind,
+    what: Kind,
     /// Mapping keys (strings) and list indexes (integers). For `insert` the last step is the new
     /// key and the rest is the mapping it goes into.
+    #[serde(default)]
     path: Vec<Value>,
     /// The new value (`set` and `insert`); `null` is a value, a missing `value` is not.
     #[serde(default, deserialize_with = "present")]
     value: Option<Yaml>,
+    /// `add_node`: the new node's name.
+    name: Option<String>,
+    /// `add_node`: its kind (`service`, `external-api`, ...).
+    kind: Option<String>,
+    /// `rename_node`: the node's name now.
+    from: Option<String>,
+    /// `rename_node`: the name it gets.
+    to: Option<String>,
 }
 
 /// **Private.** A `value` that is in the body, even when it is `null`.
@@ -28,26 +42,101 @@ fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Yaml>, D::Er
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 enum Kind {
     Set,
     Insert,
     Remove,
+    AddNode,
+    RenameNode,
 }
 
-/// Applies `ops` to `text` in order.
+/// What a patch did.
+#[derive(Debug)]
+pub struct Applied {
+    /// The new draft text.
+    pub text: String,
+    /// What could not be kept (comments, anchors).
+    pub lost: Vec<String>,
+    /// Where a `rename_node` changed the text, one entry per place (`nodes.db`, `edges[1].to`).
+    pub touched: Vec<String>,
+    /// Things a rename cannot do for the caller (a file that is not part of the draft).
+    pub notes: Vec<String>,
+    /// The renames made, `(from, to)`, in order.
+    pub renamed: Vec<(String, String)>,
+}
+
+/// The most operations one patch may hold.
+pub const MAX_OPS: usize = 1000;
+
+/// Applies `ops` to `text` in order, each on the result of the one before.
 ///
 /// # Errors
 /// A message for a bad operation (a path that is not keys and indexes, a missing value, an
-/// `insert` without a key) or an edit that cannot be made (nothing at the path, a key that is
-/// already there, text that is not YAML). The text is then unchanged.
-pub fn apply(text: &str, ops: &[Op]) -> Result<Spliced, String> {
-    let edits = ops.iter().map(edit).collect::<Result<Vec<_>, _>>()?;
-    splice(text, &edits).map_err(|e| e.to_string())
+/// `insert` without a key, an unknown node kind, a rename that cannot be done everywhere) or an
+/// edit that cannot be made (nothing at the path, a key that is already there, text that is not
+/// YAML). The text is then unchanged.
+pub fn apply(text: &str, ops: &[Op]) -> Result<Applied, String> {
+    // every op re-parses the whole text, so the count bounds the work one request can ask for
+    if ops.len() > MAX_OPS {
+        return Err(format!("a patch may hold at most {MAX_OPS} operations"));
+    }
+    let mut out = Applied {
+        text: text.to_string(),
+        lost: Vec::new(),
+        touched: Vec::new(),
+        notes: Vec::new(),
+        renamed: Vec::new(),
+    };
+    for o in ops {
+        let (edits, touched) = match o.what {
+            Kind::RenameNode => {
+                let (from, to) = (need(o.from.as_ref(), "from")?, need(o.to.as_ref(), "to")?);
+                let plan = super::rename::plan(&out.text, from, to)?;
+                out.notes.extend(plan.notes);
+                out.renamed.push((from.to_string(), to.to_string()));
+                (plan.edits, plan.touched)
+            }
+            _ => (vec![edit(o)?], Vec::new()),
+        };
+        let done = splice(&out.text, &edits).map_err(|e| e.to_string())?;
+        if matches!(o.what, Kind::RenameNode) && !done.lost.is_empty() {
+            // half a rename is worse than none: a reference left behind breaks the system
+            return Err(format!(
+                "cannot rename everywhere, so nothing was changed: {}",
+                done.lost.join("; ")
+            ));
+        }
+        out.text = done.text;
+        out.lost.extend(done.lost);
+        out.touched.extend(touched);
+    }
+    Ok(out)
 }
 
-/// **Private.** One operation as a splice edit.
+/// **Private.** A field an operation needs.
+fn need<'a>(v: Option<&'a String>, name: &str) -> Result<&'a str, String> {
+    v.map(String::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| format!("this operation needs '{name}'"))
+}
+
+/// **Private.** One `set`, `insert`, `remove` or `add_node` as a splice edit.
 fn edit(o: &Op) -> Result<Edit, String> {
+    if let Kind::AddNode = o.what {
+        let (name, kind) = (
+            need(o.name.as_ref(), "name")?,
+            need(o.kind.as_ref(), "kind")?,
+        );
+        let kind = NodeKind::from_name(kind).ok_or_else(|| {
+            format!("unknown node kind '{kind}' (gateway, service, monolith, database, cache, external-api, auth)")
+        })?;
+        return Ok(Edit::Insert {
+            parent: vec![PathSeg::Key("nodes".into())],
+            key: name.to_string(),
+            value: starter(kind).to_string(),
+        });
+    }
     let mut path = o
         .path
         .iter()
@@ -65,9 +154,9 @@ fn edit(o: &Op) -> Result<Edit, String> {
         o.value
             .as_ref()
             .map(render)
-            .ok_or_else(|| format!("{:?} needs a value", o.kind))
+            .ok_or_else(|| format!("{:?} needs a value", o.what))
     };
-    Ok(match o.kind {
+    Ok(match o.what {
         Kind::Set => Edit::Set {
             value: value()?,
             path,
@@ -83,6 +172,7 @@ fn edit(o: &Op) -> Result<Edit, String> {
                 value: value()?,
             }
         }
+        Kind::AddNode | Kind::RenameNode => unreachable!("handled before"),
     })
 }
 
@@ -112,17 +202,20 @@ fn plain(s: &str) -> bool {
         )
 }
 
+/// A string as it is written in the file: bare when that reads back as the same text, JSON-quoted
+/// (valid YAML) otherwise.
+pub(super) fn scalar(s: &str) -> String {
+    if plain(s) {
+        s.to_string()
+    } else {
+        Value::from(s).to_string()
+    }
+}
+
 /// **Private.** A value as YAML in the project's flow style: bare words where they are safe,
 /// JSON quoting (valid YAML) otherwise, `{ a: 1, b: x }` and `[a, b]` for collections. The value
 /// is read as YAML (not JSON) so an object keeps the order the client sent: `{ type: cache, ... }`.
 fn render(v: &Yaml) -> String {
-    let scalar = |s: &str| {
-        if plain(s) {
-            s.to_string()
-        } else {
-            Value::from(s).to_string()
-        }
-    };
     match v {
         Yaml::String(s) => scalar(s),
         Yaml::Sequence(a) => format!("[{}]", a.iter().map(render).collect::<Vec<_>>().join(", ")),

@@ -83,18 +83,18 @@ A cache in front of slower nodes, with a hit ratio and the cost of a hit and of 
 cache: { type: cache, flavor: redis, hit_ratio: 0.8 }
 ```
 
-| Field         | Meaning                                                                                                                                                                                                                                        | Default     | Status                               |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------ |
-| `flavor`      | Preset for `hit_ratio`, `hit` and `miss`: `redis`, `memcached`                                                                                                                                                                                 | none        | active now                           |
-| `hit_ratio`   | Share of lookups that hit, 0 to 1                                                                                                                                                                                                              | from flavor | active now                           |
-| `hit`         | Cost of a hit                                                                                                                                                                                                                                  | from flavor | active now                           |
-| `miss`        | Cost of finding out it is a miss                                                                                                                                                                                                               | from flavor | active now                           |
-| `ttl`         | Entry lifetime                                                                                                                                                                                                                                 | none        | accepted and checked, not active yet |
-| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited   | active now                           |
-| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none        | active now                           |
+| Field         | Meaning                                                                                                      | Default     | Status                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------ | ----------- | ------------------------------------ |
+| `flavor`      | Preset for `hit_ratio`, `hit` and `miss`: `redis`, `memcached`                                               | none        | active now                           |
+| `hit_ratio`   | Share of lookups that hit, 0 to 1                                                                            | from flavor | active now                           |
+| `hit`         | Cost of a hit                                                                                                | from flavor | active now                           |
+| `miss`        | Cost of finding out it is a miss                                                                             | from flavor | active now                           |
+| `ttl`         | Entry lifetime                                                                                               | none        | accepted and checked, not active yet |
+| `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                              | unlimited   | active now                           |
+| `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429 | none        | active now                           |
 
 A lookup slower than the cache's `timeout` counts as a miss. If `timeout` is below the `hit` cost (its median, for a distribution), most hits are cut, and loading prints a warning naming the cache.
-| `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none        | active now                           |
+| `timeout` | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none | active now |
 
 ## `external-api`
 
@@ -137,6 +137,20 @@ login:
 | `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
 | `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
+## Nodes added in Studio
+
+`add_node` (see the [control API](control-api.md#draft)) writes a node that is valid as it stands and has a capacity, so the bottleneck report can rank it. These are **estimates**: typical sizes for a small deployment, meant to be edited.
+
+| Kind           | Written as                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `gateway`      | `{ type: gateway, concurrency: 256 }`                                                                        |
+| `service`      | `{ type: service, concurrency: 32 }`                                                                         |
+| `monolith`     | `{ type: monolith, concurrency: 64 }`                                                                        |
+| `database`     | `{ type: database, flavor: postgres, pool: { size: 20 } }` (the flavor fills the read, write and scan costs) |
+| `cache`        | `{ type: cache, flavor: redis }` (no capacity; the flavor fills hit ratio and costs)                         |
+| `external-api` | `{ type: external-api, pool: { size: 10 } }`                                                                 |
+| `auth`         | `{ type: auth, concurrency: 32 }` (needs a signing key, which `kaanal up` and `kaanal studio` provide)       |
+
 ## Edges: who may call whom
 
 An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). `prob` (above 0, at most 1, default 1) is the share of requests that take the edge; see [Endpoints](endpoints.md#steps). `bandwidth` (bytes per second, at least 1) limits the link: with a payload size a transfer takes `bytes / bandwidth` on a FIFO link, and without it the link costs nothing and adds no hop. No cycles, no self edges, no duplicate edges.
@@ -160,10 +174,10 @@ Off by default. `per_kb` on any node (a duration like `proc`, e.g. `per_kb: 50us
 
 Any node can have copies: `replicas: 3` (1 to 64, default 1). Each replica has its own slots, queue, pool and rate limit, so three replicas of a service with `concurrency: 4` serve twelve requests at once. `balance` says how traffic entering the node picks a replica:
 
-| `balance`                 | Picks                                                             |
-| ------------------------- | ----------------------------------------------------------------- |
-| `round-robin` (default)   | The next live replica in turn                                     |
-| `random`                  | A uniformly random live replica                                   |
+| `balance`                 | Picks                                                                         |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `round-robin` (default)   | The next live replica in turn                                                 |
+| `random`                  | A uniformly random live replica                                               |
 | `{ weighted: [3, 1, 1] }` | A random live replica, weighted: one weight per replica, at least one above 0 |
 
 A node sets `balance` for traffic entering it, and an edge may override it for calls over that edge: `{ from: app, to: db, balance: random }`. A weighted list must have exactly one weight per replica of the callee. Without `replicas`, `balance` does nothing. Database replicas all take every request: there is no read/write split yet, so a write is not sent to a primary only.

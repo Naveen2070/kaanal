@@ -44,6 +44,32 @@ fn new_dir() -> PathBuf {
     d
 }
 
+/// A server with no system (a blank start) in a fresh folder that holds the fixture spec.
+pub(crate) async fn start_blank() -> Srv {
+    let dir = new_dir();
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/openapi.yaml");
+    std::fs::copy(fixture, dir.join("openapi.yaml")).unwrap();
+    let token = kaanal_server::new_token();
+    let opts = ServeOpts {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        token: token.clone(),
+        // a blank start has no config to say whether an auth node will come, so `up` always gives a key
+        auth_key: Some(kaanal_server::AuthKey::generate().unwrap()),
+        draft: None,
+    };
+    let s = kaanal_server::serve_blank(&dir, &dir.join("kaanal.yaml"), opts)
+        .await
+        .unwrap();
+    Srv {
+        base: format!("http://127.0.0.1:{}", s.addr.port()),
+        token,
+        client: reqwest::Client::new(),
+        dir,
+    }
+}
+
 /// A server for `yaml`, with `yaml` as its draft (as `kaanal up` does with the file's text).
 pub(crate) async fn start(yaml: &str) -> Srv {
     start_with(yaml, Some(yaml)).await

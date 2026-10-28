@@ -404,3 +404,48 @@ fn what_an_edit_cannot_keep_is_listed() {
     let (_, lost) = run("a: 1\n", &[set(&[], "x")]);
     assert!(lost[0].contains("whole document"), "{lost:?}");
 }
+
+#[test]
+fn a_key_is_renamed_in_place_and_nothing_else_moves() {
+    let src = "nodes:\n  # the store\n  db:    { type: database }   # primary\n  app: { type: service }\n";
+    let rename = |path: &[&str], to: &str| Edit::RenameKey {
+        path: p(path),
+        to: to.into(),
+    };
+    let (text, lost) = run(src, &[rename(&["nodes", "db"], "store")]);
+    assert_eq!(text, src.replace("db:", "store:"));
+    assert_eq!(lost, Vec::<String>::new());
+    // a quoted key, and a new name that needs quotes
+    let (text, _) = run("\"a b\": 1\nc: 2\n", &[rename(&["a b"], "x y")]);
+    assert_eq!(text, "\"x y\": 1\nc: 2\n");
+    // a name that is taken, a missing key, a list item and a key inside an anchored map
+    assert!(matches!(
+        splice(src, &[rename(&["nodes", "db"], "app")]),
+        Err(SpliceError::Exists(_))
+    ));
+    assert!(matches!(
+        splice(src, &[rename(&["nodes", "zz"], "q")]),
+        Err(SpliceError::NotFound(_))
+    ));
+    let (text, lost) = run("l: [a, b]\n", &[rename(&["l", "0"], "q")]);
+    assert_eq!((text.as_str(), lost.len()), ("l: [a, b]\n", 1));
+    let anchored = "base: &b { l: 1 }\no: *b\n";
+    let (text, lost) = run(anchored, &[rename(&["base", "l"], "m")]);
+    assert_eq!((text.as_str(), lost.len()), (anchored, 1));
+}
+
+#[test]
+fn deeply_nested_text_is_refused_not_walked() {
+    let deep = "- ".repeat(5000)
+        + "x
+";
+    let err = splice(
+        &deep,
+        &[Edit::Set {
+            path: p(&["0"]),
+            value: "1".into(),
+        }],
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("nested deeper"), "{err}");
+}

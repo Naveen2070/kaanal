@@ -181,6 +181,14 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// The one preprocessing step before `kaanal.yaml` text reaches the YAML parser: a UTF-8 BOM
+/// (Windows editors add one; YAML rejects it) is dropped. Anything that must read the text the
+/// way [`Config::from_yaml`] does (a security check) calls this too, so the two cannot differ.
+#[must_use]
+pub fn strip_bom(src: &str) -> &str {
+    src.strip_prefix('\u{feff}').unwrap_or(src)
+}
+
 impl Config {
     /// Parses `kaanal.yaml` source text.
     ///
@@ -196,8 +204,7 @@ impl Config {
     /// When parsing fails inside `nodes:`, the error is re-placed at the real node and
     /// field (see [`crate::diagnostics`]).
     pub fn from_yaml(src: &str) -> Result<Config, ConfigError> {
-        // Windows editors may save a UTF-8 BOM; YAML parsers reject it.
-        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
+        let src = strip_bom(src);
         let cfg: Config = serde_yaml_ng::from_str(src).map_err(|e| {
             // R1.15: serde loses positions inside tagged nodes; recover them (error path only).
             let mut err = crate::diagnostics::explain(src, serde_error(&e));

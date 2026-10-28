@@ -2,8 +2,8 @@
 
 use crate::{
     Config, Duration, Fail, IpAddr, Path, PathBuf, RUN_FILE, STATE_DIR, ServeOpts, ShutdownReply,
-    auth_users, clean, err, json, keys, lifecycle, load, located_err, lock_instance, post_shutdown,
-    private_dir, write_run_file,
+    auth_users, blank_loaded, clean, err, json, keys, lifecycle, load, located_err, lock_instance,
+    post_shutdown, private_dir, write_run_file,
 };
 
 /// **Private.** The `up` lifecycle: private state dir → instance lock → signing key (auth
@@ -16,30 +16,106 @@ pub(crate) fn up(
     port: Option<u16>,
     host: IpAddr,
     detached: bool,
+    blank: bool,
 ) -> Result<(), Fail> {
-    let loaded = load(config)?;
+    start(config, port, host, detached, blank, false)
+}
+
+/// **Private.** `kaanal studio`: `up --blank`, and the browser opens on the UI unless `no_open`.
+pub(crate) fn studio(
+    config: &Path,
+    port: Option<u16>,
+    host: IpAddr,
+    no_open: bool,
+) -> Result<(), Fail> {
+    start(config, port, host, false, true, !no_open)
+}
+
+/// **Private.** Best effort: asks the desktop to open `url`. A failure is silent; the URL is
+/// printed either way.
+fn open_browser(url: &str) {
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    let _ = cmd
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// **Private.** The body of `up` and `studio`.
+fn start(
+    config: &Path,
+    port: Option<u16>,
+    host: IpAddr,
+    detached: bool,
+    blank: bool,
+    open: bool,
+) -> Result<(), Fail> {
+    let loaded = if blank {
+        if config.exists() {
+            eprintln!(
+                "note: {} exists and is not loaded; Save replaces it only if it has not changed since now",
+                config.display()
+            );
+        }
+        blank_loaded(config)?
+    } else {
+        load(config)?
+    };
     private_dir(Path::new(STATE_DIR))?;
     // Held until this process exits. The OS releases it even if we crash, so there is no stale lock,
     // and two `up` runs started at the same instant cannot both get past this point.
     let lock = lock_instance()?;
-    serve_locked(config, loaded, port, host, detached, lock, |s| {
-        let port = s.port;
-        println!("Mocks: http://localhost:{port}");
-        if detached {
-            println!("UI:    http://localhost:{port}/__kaanal/ui");
-        } else {
-            println!(
-                "UI:    http://localhost:{port}/__kaanal/ui#token={}",
-                s.token
-            );
-        }
-        if let Some(a) = s.auth {
-            println!("Auth:  {a}");
-        }
-        if let Some(seed) = s.drawn_seed {
-            println!("{}", seed_line(seed));
-        }
-    })
+    serve_locked(
+        config,
+        loaded,
+        port,
+        host,
+        Mode { detached, blank },
+        lock,
+        |s| {
+            let port = s.port;
+            println!("Mocks: http://localhost:{port}");
+            if detached {
+                println!("UI:    http://localhost:{port}/__kaanal/ui");
+            } else {
+                let ui = format!("http://localhost:{port}/__kaanal/ui#token={}", s.token);
+                println!("UI:    {ui}");
+                if open {
+                    open_browser(&ui);
+                }
+            }
+            if blank {
+                println!(
+                    "Blank: no system yet; build one in the UI or with `kaanal draft`, then apply it (Save writes {})",
+                    config.display()
+                );
+            }
+            if let Some(a) = s.auth {
+                println!("Auth:  {a}");
+            }
+            if let Some(seed) = s.drawn_seed {
+                println!("{}", seed_line(seed));
+            }
+        },
+    )
+}
+
+/// **Private.** How [`serve_locked`] starts: as `up -d`'s background child (`detached`: the token
+/// stays out of the output, hangup is ignored) and/or with no system (`blank`).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Mode {
+    pub(crate) detached: bool,
+    pub(crate) blank: bool,
 }
 
 /// **Private.** What a started instance tells the caller of [`serve_locked`], to print.
@@ -63,17 +139,21 @@ pub(crate) fn serve_locked(
     (cfg, dir, src): (Config, PathBuf, String),
     port: Option<u16>,
     host: IpAddr,
-    detached: bool,
+    mode: Mode,
     _lock: std::fs::File,
     announce: impl FnOnce(&Started),
 ) -> Result<(), Fail> {
+    let Mode { detached, blank } = mode;
     // The lock proves no live instance owns run.json, so whatever is there is a dead one's (M9).
     // Removed now, not overwritten after binding, so nothing reads it as live during startup.
     let _ = std::fs::remove_file(RUN_FILE);
     // X4: only an auth node needs a key. It is loaded (or created) before binding, so a bad
     // key file stops startup with its name; `validate` and `endpoints` never get here.
-    let users = auth_users(&cfg);
+    let users = if blank { None } else { auth_users(&cfg) };
     let auth_key = match users {
+        // a blank start cannot know whether an auth node will be added; the key lives in memory
+        // for this session (the project's own key file is made by `kaanal up` once it is saved)
+        _ if blank => Some(kaanal_server::AuthKey::generate().map_err(err)?),
         Some(_) => {
             // A config that cannot load must not leave a key behind: check it first (the
             // same load `serve` does, so a topology or spec error shows before any keygen).
@@ -102,9 +182,12 @@ pub(crate) fn serve_locked(
                 text: src.clone(),
             }),
         };
-        let server = kaanal_server::serve(&cfg, &dir, opts)
-            .await
-            .map_err(|e| located_err(config, &src, &e))?;
+        let started = if blank {
+            kaanal_server::serve_blank(&dir, config, opts).await
+        } else {
+            kaanal_server::serve(&cfg, &dir, opts).await
+        };
+        let server = started.map_err(|e| located_err(config, &src, &e))?;
         let port = server.addr.port();
         for w in &server.warnings {
             eprintln!("warning: {}", clean(w));
@@ -132,11 +215,13 @@ pub(crate) fn serve_locked(
         // slows startup and its lines never interleave with the banner.
         // A plain thread: a blocking task would make the runtime wait for it on shutdown.
         let (check_cfg, check_dir) = (cfg.clone(), dir.clone());
-        std::thread::spawn(move || {
-            for w in kaanal_server::selfcheck(&check_cfg, &check_dir).unwrap_or_default() {
-                eprintln!("warning: {}", clean(&w));
-            }
-        });
+        if !blank {
+            std::thread::spawn(move || {
+                for w in kaanal_server::selfcheck(&check_cfg, &check_dir).unwrap_or_default() {
+                    eprintln!("warning: {}", clean(&w));
+                }
+            });
+        }
         // A stop signal (or POST /__kaanal/shutdown, which ends `wait` by itself) drains for up
         // to 5s, then cuts what is left; either way the run file goes below.
         let stop = server.stopper();

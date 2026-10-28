@@ -128,6 +128,12 @@ pub(crate) fn build_draft(
     port: u16,
 ) -> Result<Built, Diagnostic> {
     let cfg = Config::from_yaml(text).map_err(Diagnostic::parsed)?;
+    // the draft decides, not the startup config: `controlled` runs on its `seed:`, `realistic`
+    // on the seed drawn at startup (or one drawn now when startup was controlled)
+    let drawn_seed = match cfg.seed_source() {
+        kaanal_core::SeedSource::Fixed(_) => None,
+        kaanal_core::SeedSource::Entropy => Some(drawn_seed.unwrap_or_else(rand::random)),
+    };
     let (mut generation, scenarios) = Generation::build(&cfg, dir, drawn_seed, Trust::Api)
         .map_err(|e| Diagnostic::located(&e, text, dir))?;
     generation.auth = Issuer::from_config(&cfg, auth_key, port)

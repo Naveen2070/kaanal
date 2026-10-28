@@ -20,8 +20,11 @@ use tokio::time::{Instant, timeout_at};
 pub struct Gate {
     paused: AtomicBool,
     inflight: AtomicUsize,
-    /// Woken when a request leaves, a request steps back, or the gate resumes.
+    /// Woken when a request leaves or steps back: what a drain waits on.
     changed: Notify,
+    /// Woken when the gate resumes: what a held-back request waits on. Separate from `changed`
+    /// so two waiting requests stepping back cannot wake each other in a loop.
+    resumed: Notify,
 }
 
 /// A request inside the gate. Leaving (drop) lets a drain finish.
@@ -40,7 +43,7 @@ pub struct Paused<'a>(&'a Gate);
 impl Drop for Paused<'_> {
     fn drop(&mut self) {
         self.0.paused.store(false, SeqCst);
-        self.0.changed.notify_waiters();
+        self.0.resumed.notify_waiters();
     }
 }
 
@@ -57,7 +60,7 @@ impl Gate {
             self.changed.notify_waiters();
             // Created after our own wake-up and before the re-check, so neither a resume nor a
             // pause in between can be missed.
-            let resumed = self.changed.notified();
+            let resumed = self.resumed.notified();
             if self.paused.load(SeqCst) {
                 resumed.await;
             }
@@ -128,6 +131,34 @@ mod tests {
         tokio::time::sleep(SHORT).await;
         drop(inside);
         assert!(waiter.await.unwrap(), "drained once the request left");
+    }
+
+    #[tokio::test]
+    async fn waiting_requests_do_not_wake_each_other_while_paused() {
+        let g = Arc::new(Gate::default());
+        let hold = g.pause();
+        let tasks: Vec<_> = (0..4)
+            .map(|_| {
+                let g = Arc::clone(&g);
+                tokio::spawn(async move {
+                    let _in = g.enter().await;
+                })
+            })
+            .collect();
+        tokio::time::sleep(SHORT).await;
+        // a livelock would keep stepping in and out: count how often a drain is disturbed
+        let changed = g.changed.notified();
+        assert!(
+            tokio::time::timeout(SHORT, changed).await.is_err(),
+            "idle waiters must not keep notifying the drain"
+        );
+        drop(hold);
+        for t in tasks {
+            tokio::time::timeout(Duration::from_secs(2), t)
+                .await
+                .expect("resumed")
+                .unwrap();
+        }
     }
 
     #[tokio::test]

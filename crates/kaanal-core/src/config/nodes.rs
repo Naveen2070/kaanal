@@ -37,6 +37,23 @@ impl NodeKind {
     }
 }
 
+impl NodeKind {
+    /// The kind written `name` in YAML (`external-api`), if it is one.
+    pub fn from_name(name: &str) -> Option<NodeKind> {
+        [
+            NodeKind::Gateway,
+            NodeKind::Service,
+            NodeKind::Monolith,
+            NodeKind::Database,
+            NodeKind::Cache,
+            NodeKind::ExternalApi,
+            NodeKind::Auth,
+        ]
+        .into_iter()
+        .find(|k| k.as_str() == name)
+    }
+}
+
 impl fmt::Display for NodeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())

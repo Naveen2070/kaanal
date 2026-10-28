@@ -108,3 +108,25 @@ async fn a_spec_in_a_subfolder_of_the_project_is_fine_and_apply_refuses_the_rest
         "{v}"
     );
 }
+
+#[tokio::test]
+async fn a_hidden_file_is_refused_and_a_bad_endpoints_file_is_not_echoed() {
+    let s = start(&system("1ms")).await;
+    let v = validate(&s, &with_spec(".env")).await;
+    assert!(message(&v).contains("inside the project folder"), "{v}");
+    // a file in the project that is not an endpoints map: its text must not come back
+    std::fs::write(s.dir.join("notes.txt"), "TOPSECRETVALUE=hunter2\n").unwrap();
+    let v = validate(&s, &format!("{}endpoints: notes.txt\n", system("1ms"))).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert!(!v.to_string().contains("hunter2"), "{v}");
+}
+
+#[tokio::test]
+async fn a_patch_with_too_many_operations_is_refused() {
+    let s = start(&system("1ms")).await;
+    let ops: Vec<_> = (0..1001)
+        .map(|_| json!({ "op": "set", "path": ["seed"], "value": 1 }))
+        .collect();
+    let r = s.put("/__kaanal/draft", json!({ "patch": ops })).await;
+    assert_eq!(r.status(), 400);
+}

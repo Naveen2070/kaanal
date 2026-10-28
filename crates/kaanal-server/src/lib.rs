@@ -18,6 +18,7 @@ mod generation;
 mod log;
 mod log_api;
 mod mock;
+mod paths;
 mod pin_api;
 mod pins;
 mod record;
@@ -42,7 +43,7 @@ use kaanal_core::{Config, Topology};
 
 pub use auth::AuthKey;
 pub use collections::{Collections, MAX_ITEM_BYTES, MAX_ITEMS};
-pub use draft::DraftSource;
+pub use draft::{BLANK_TEXT, DraftSource};
 /// The data-file schemas, for `kaanal schema dictionary|pack`.
 pub use kaanal_data::{dictionary_schema, pack_schema};
 pub use log::{
@@ -164,12 +165,7 @@ pub fn new_token() -> String {
 /// building server state fails (bad config, specs or routes), or if the config has an auth
 /// node and `opts.auth_key` is `None`.
 pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, Located> {
-    let listener = bind(opts.host, opts.port)
-        .await
-        .map_err(|e| Located::new(Vec::new(), e))?;
-    let addr = listener
-        .local_addr()
-        .map_err(|e| Located::new(Vec::new(), e.to_string()))?;
+    let (listener, addr) = open(&opts).await?;
     let mut st = state::AppState::build(cfg, base_dir, opts.token, addr.port())?;
     // X5: fail closed. `check` never builds an issuer, so `validate` never needs a key.
     st.draft = std::sync::Mutex::new(draft::Draft::from_source(opts.draft));
@@ -180,8 +176,51 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
     g.auth = auth;
     g.engine = Some(actor::spawn(kaanal_core::replay::Engine::new(&g.topo)));
     let warnings = g.warnings.clone();
-    let st = Arc::new(st);
     let drawn_seed = st.drawn_seed;
+    Ok(launch(st, listener, addr, warnings, drawn_seed))
+}
+
+/// Starts with **no system**: the control API and `/__kaanal/ui` work, every other path answers
+/// 404 `{"error":"no system applied yet"}`, and the Studio draft is [`draft::BLANK_TEXT`], to be
+/// saved at `file`. The first `POST /__kaanal/draft/apply` that validates makes generation 1.
+/// `opts.draft` is ignored (there is nothing to start from).
+///
+/// # Errors
+/// Returns a [`Located`] error if no port in `port..=port+20` is free.
+pub async fn serve_blank(
+    base_dir: &Path,
+    file: &Path,
+    opts: ServeOpts,
+) -> Result<BoundServer, Located> {
+    let (listener, addr) = open(&opts).await?;
+    let mut st = state::AppState::blank(base_dir, opts.token, addr.port());
+    st.draft = std::sync::Mutex::new(draft::Draft::blank(file));
+    st.auth_key = opts.auth_key;
+    // no seed line to print: there is no config whose determinism it would belong to
+    Ok(launch(st, listener, addr, Vec::new(), None))
+}
+
+/// **Private.** Binds the port of `opts` and returns the listener and its address.
+async fn open(opts: &ServeOpts) -> Result<(tokio::net::TcpListener, SocketAddr), Located> {
+    let listener = bind(opts.host, opts.port)
+        .await
+        .map_err(|e| Located::new(Vec::new(), e))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| Located::new(Vec::new(), e.to_string()))?;
+    Ok((listener, addr))
+}
+
+/// **Private.** Shares the state, starts the lease task and the axum server, and returns the handle.
+/// `drawn_seed` is what the caller prints (the state keeps its own).
+fn launch(
+    st: state::AppState,
+    listener: tokio::net::TcpListener,
+    addr: SocketAddr,
+    warnings: Vec<String>,
+    drawn_seed: Option<u64>,
+) -> BoundServer {
+    let st = Arc::new(st);
     let shutdown = st.shutdown.clone();
     // Detached; it stops when a shutdown is requested (no lease should fire during the drain).
     let sd = shutdown.clone();
@@ -200,13 +239,13 @@ pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<Bou
             .with_graceful_shutdown(async move { sd.requested().await })
             .await
     });
-    Ok(BoundServer {
+    BoundServer {
         addr,
         warnings,
         drawn_seed,
         handle,
         shutdown,
-    })
+    }
 }
 
 /// **Private.** Binds the requested port, else the next free one up to +20.

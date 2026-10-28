@@ -46,7 +46,7 @@ use self::{
         init,
         logs::{logs_cmd, out_bytes, out_line, trace},
         scenario::{active_names, endpoints, scenario},
-        serve::{Started, drain_wait, serve_locked, start_budget, up, up_detached},
+        serve::{Mode, Started, drain_wait, serve_locked, start_budget, studio, up, up_detached},
     },
     instance::{
         keys, lifecycle,
@@ -55,7 +55,7 @@ use self::{
         target,
     },
     util::{
-        load::{auth_users, config_err, load, located_err},
+        load::{auth_users, blank_loaded, config_err, load, located_err},
         logview, output,
         parse::{active_suffix, clean, clean_lines, encode_segment, ttl_body},
     },
@@ -161,14 +161,24 @@ fn run(cli: Cli) -> Result<(), Fail> {
             detach,
             wait,
             detached,
+            blank,
         } => {
             // A process-bound command: an endpoint (even an exported one) is refused loudly (E6).
             no_endpoint("up starts a local instance and takes no endpoint")?;
             if detach {
                 up_detached(&config, port, host, wait)
             } else {
-                up(&config, port, host, detached)
+                up(&config, port, host, detached, blank)
             }
+        }
+        Cmd::Studio {
+            config,
+            port,
+            host,
+            no_open,
+        } => {
+            no_endpoint("studio starts a local instance and takes no endpoint")?;
+            studio(&config, port, host, no_open)
         }
         Cmd::Demo(args) => {
             no_endpoint("demo starts a local instance and takes no endpoint")?;

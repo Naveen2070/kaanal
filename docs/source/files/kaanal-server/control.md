@@ -6,18 +6,18 @@ The control API handlers and the security guard that stands in front of them.
 
 `control` is a folder module; `mod.rs` re-exports the handlers, so `lib.rs` still mounts `control::get_chaos` and the like. The module is private to the crate, so none of this is public API. The pages below describe all of it.
 
-| File          | What it holds                                                                                                                    |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`      | `Reject`, `reject`, and the one write path `lock`, `lock_gen`, `commit`, `emit`, `remaining_ms`; re-exports the handlers `lib.rs` mounts.    |
-| `guard.rs`    | The security guard: Host check, bearer token, constant-time compare.                                                             |
-| `chaos.rs`    | The chaos handlers (`get_chaos`, `set_chaos`, `set_chaos_keyed`, `clear_node`, `clear_keyed`, `topology`) and their patch types. |
-| `view.rs`     | JSON views of chaos layers and the effective chaos, and the key and path helpers.                                                |
-| `scenario.rs` | The scenario handlers: list, get, put, delete, activate (ttl lease), deactivate, the active stack.                               |
-| `lease.rs`    | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`.                                     |
-| `save.rs`     | `POST /scenarios/save`: live, effective or a named scenario to a file.                                                           |
-| `draft.rs`    | `GET`/`PUT /__kaanal/draft` (`PUT` takes `text` or a `patch`), `POST /draft/validate`, `POST /draft/apply` (answers with `kept`, `dropped` and `flagged`) and `POST /draft/save`.                                                     |
-| `admin.rs`    | `reset`, `shutdown`, the `events` stream and the `ui` page.                                                                      |
-| `tests.rs`    | The unit tests (see the last section).                                                                                           |
+| File          | What it holds                                                                                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`      | `Reject`, `reject`, and the one write path `lock`, `lock_gen`, `commit`, `emit`, `remaining_ms`; re-exports the handlers `lib.rs` mounts.                                         |
+| `guard.rs`    | The security guard: Host check, bearer token, constant-time compare.                                                                                                              |
+| `chaos.rs`    | The chaos handlers (`get_chaos`, `set_chaos`, `set_chaos_keyed`, `clear_node`, `clear_keyed`, `topology`) and their patch types.                                                  |
+| `view.rs`     | JSON views of chaos layers and the effective chaos, and the key and path helpers.                                                                                                 |
+| `scenario.rs` | The scenario handlers: list, get, put, delete, activate (ttl lease), deactivate, the active stack.                                                                                |
+| `lease.rs`    | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`.                                                                                      |
+| `save.rs`     | `POST /scenarios/save`: live, effective or a named scenario to a file.                                                                                                            |
+| `draft.rs`    | `GET`/`PUT /__kaanal/draft` (`PUT` takes `text` or a `patch`), `POST /draft/validate`, `POST /draft/apply` (answers with `kept`, `dropped` and `flagged`) and `POST /draft/save`. |
+| `admin.rs`    | `reset`, `shutdown`, the `events` stream and the `ui` page.                                                                                                                       |
+| `tests.rs`    | The unit tests (see the last section).                                                                                                                                            |
 
 ## The guard (runs before every `/__kaanal/*` route)
 
