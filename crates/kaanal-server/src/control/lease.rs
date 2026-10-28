@@ -49,6 +49,12 @@ pub fn expire_due(st: &AppState) -> usize {
 /// possible if a write skipped `commit`) is dropped without an event.
 pub(super) fn expire_chaos(st: &AppState, c: &mut MutexGuard<'_, Control>) -> usize {
     let now = Instant::now();
+    // Chaos exists only with a system to name its keys. With none, drop the due leases (there is
+    // no key to label an event with), so `lease_task` does not spin on a past deadline.
+    let Some(g) = st.generation() else {
+        c.chaos_leases.retain(|_, d| *d > now);
+        return 0;
+    };
     let mut due: Vec<(Instant, ChaosKey, chaos_lease::Unit)> = c
         .chaos_leases
         .iter()
@@ -93,7 +99,7 @@ pub(super) fn expire_chaos(st: &AppState, c: &mut MutexGuard<'_, Control>) -> us
         });
         if let Ok(snap) = done {
             let mut k = Map::new();
-            key_fields(st, &key, &mut k);
+            key_fields(&g, &key, &mut k);
             let _ = st.events.send(BusEvent::Scenario {
                 action: "expire",
                 name: None,
@@ -103,7 +109,7 @@ pub(super) fn expire_chaos(st: &AppState, c: &mut MutexGuard<'_, Control>) -> us
             n += 1;
         } else {
             // As for scenarios: the restore put the past-due leases back; drop only them.
-            let label = key_label(st, &key);
+            let label = key_label(&g, &key);
             eprintln!(
                 "kaanal: could not expire chaos on {label}; left it in place and dropped its lease"
             );

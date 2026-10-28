@@ -90,6 +90,11 @@ pub(crate) enum Cmd {
         #[command(subcommand)]
         cmd: ScenarioCmd,
     },
+    /// Show, replace, check and apply the running instance's draft (its `kaanal.yaml` text)
+    Draft {
+        #[command(subcommand)]
+        cmd: DraftCmd,
+    },
     /// Step an endpoint's live pin to the next UI state (loading, empty, error, slow, success),
     /// or pin one with --state; e.g. `kaanal cycle "GET /orders"`
     Cycle {
@@ -233,6 +238,31 @@ pub(crate) enum ChaosCmd {
         /// One replica (0-based) of the node
         #[arg(long, requires = "node", conflicts_with = "route")]
         replica: Option<u16>,
+    },
+}
+
+/// **Private.** `draft` subcommands.
+#[derive(Subcommand)]
+pub(crate) enum DraftCmd {
+    /// Print the draft text
+    Show,
+    /// Replace the draft with a file's text (nothing is applied)
+    Set {
+        /// The file whose text becomes the draft
+        #[arg(short, long)]
+        file: PathBuf,
+    },
+    /// Check the draft, or a file without storing it; a problem prints with its line and column and exits 1
+    Validate {
+        /// Check this file's text instead of the stored draft
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+    },
+    /// Make the draft the running system without a restart
+    Apply {
+        /// How long to wait for requests in flight to finish (at most 60s)
+        #[arg(long, default_value = "10s")]
+        timeout: String,
     },
 }
 

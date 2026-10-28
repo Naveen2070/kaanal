@@ -3,6 +3,7 @@
 mod common;
 mod detached;
 mod down;
+mod draft;
 mod endpoints;
 mod json;
 mod keys;

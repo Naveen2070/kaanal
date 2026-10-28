@@ -38,6 +38,7 @@ pub async fn start_in(cfg: &Config, dir: &Path) -> Srv {
         port: 0,
         token: token.clone(),
         auth_key: Some(test_key()),
+        draft: None,
     };
     let s = kaanal_server::serve(cfg, dir, opts).await.unwrap();
     Srv {

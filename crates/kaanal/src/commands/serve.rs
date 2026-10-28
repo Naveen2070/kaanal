@@ -97,6 +97,10 @@ pub(crate) fn serve_locked(
             port: port.unwrap_or(cfg.port),
             token: token.clone(),
             auth_key,
+            draft: Some(kaanal_server::DraftSource {
+                file: config.to_path_buf(),
+                text: src.clone(),
+            }),
         };
         let server = kaanal_server::serve(&cfg, &dir, opts)
             .await

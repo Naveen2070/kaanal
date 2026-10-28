@@ -1,34 +1,35 @@
 //! JSON views of chaos layers and the effective chaos, with the key and path helpers they use.
 
 use super::*;
+use crate::generation::Generation;
 
 /// **Private.** Places each view under its key: `{ nodes, endpoints, node_at }`.
-pub(super) fn keyed_json(st: &AppState, items: Vec<(ChaosKey, Value)>) -> Map<String, Value> {
+pub(super) fn keyed_json(g: &Generation, items: Vec<(ChaosKey, Value)>) -> Map<String, Value> {
     let (mut nodes, mut endpoints, mut node_at, mut replicas, mut edges) =
         (Map::new(), Map::new(), Vec::new(), Vec::new(), Vec::new());
     for (k, view) in items {
         match k {
             ChaosKey::Node(id) => {
-                nodes.insert(st.topo.nodes[id].name.clone(), view);
+                nodes.insert(g.topo.nodes[id].name.clone(), view);
             }
             ChaosKey::Endpoint(e) => {
                 endpoints.insert(e, view);
             }
             ChaosKey::NodeAt(id, e) => {
                 let Value::Object(mut o) = view else { continue };
-                o.insert("node".into(), json!(st.topo.nodes[id].name));
+                o.insert("node".into(), json!(g.topo.nodes[id].name));
                 o.insert("endpoint".into(), json!(e));
                 node_at.push(Value::Object(o));
             }
             ChaosKey::Replica(id, r) => {
                 let Value::Object(mut o) = view else { continue };
-                o.insert("node".into(), json!(st.topo.nodes[id].name));
+                o.insert("node".into(), json!(g.topo.nodes[id].name));
                 o.insert("replica".into(), json!(r));
                 replicas.push(Value::Object(o));
             }
             ChaosKey::Edge(e) => {
                 let Value::Object(mut o) = view else { continue };
-                key_fields(st, &ChaosKey::Edge(e), &mut o);
+                key_fields(g, &ChaosKey::Edge(e), &mut o);
                 edges.push(Value::Object(o));
             }
         }
@@ -79,18 +80,18 @@ pub(super) fn is_calm(r: &Resolved) -> bool {
 }
 
 /// **Private.** The compiled chaos as JSON; calm keys are left out.
-pub(super) fn effective_json(st: &AppState, e: &EffectiveChaos) -> Value {
+pub(super) fn effective_json(g: &Generation, e: &EffectiveChaos) -> Value {
     let items = e
         .entries()
         .into_iter()
         .filter(|(_, r)| !is_calm(r))
         .map(|(k, r)| (k, resolved_json(r)))
         .collect();
-    Value::Object(keyed_json(st, items))
+    Value::Object(keyed_json(g, items))
 }
 
 /// **Private.** `{ active, effective }` of a published snapshot.
-pub(super) fn active_json(st: &AppState, snap: &Effective) -> Value {
+pub(super) fn active_json(g: &Generation, snap: &Effective) -> Value {
     let now = Instant::now();
     let expires: Map<String, Value> = snap
         .leases
@@ -100,7 +101,7 @@ pub(super) fn active_json(st: &AppState, snap: &Effective) -> Value {
     json!({
         "active": snap.stack.active(),
         "expires_in_ms": expires,
-        "effective": effective_json(st, &snap.chaos),
+        "effective": effective_json(g, &snap.chaos),
     })
 }
 
@@ -114,44 +115,44 @@ pub(super) fn source_name(s: Source) -> &'static str {
 }
 
 /// **Private.** Adds the key's `node` / `endpoint` fields to an entry.
-pub(super) fn key_fields(st: &AppState, k: &ChaosKey, o: &mut Map<String, Value>) {
+pub(super) fn key_fields(g: &Generation, k: &ChaosKey, o: &mut Map<String, Value>) {
     match k {
         ChaosKey::Node(id) => {
-            o.insert("node".into(), json!(st.topo.nodes[*id].name));
+            o.insert("node".into(), json!(g.topo.nodes[*id].name));
         }
         ChaosKey::Endpoint(e) => {
             o.insert("endpoint".into(), json!(e));
         }
         ChaosKey::NodeAt(id, e) => {
-            o.insert("node".into(), json!(st.topo.nodes[*id].name));
+            o.insert("node".into(), json!(g.topo.nodes[*id].name));
             o.insert("endpoint".into(), json!(e));
         }
         ChaosKey::Replica(id, r) => {
-            o.insert("node".into(), json!(st.topo.nodes[*id].name));
+            o.insert("node".into(), json!(g.topo.nodes[*id].name));
             o.insert("replica".into(), json!(r));
         }
         ChaosKey::Edge(e) => {
-            let (from, to) = (st.topo.edges[*e].from, st.topo.edges[*e].to);
+            let (from, to) = (g.topo.edges[*e].from, g.topo.edges[*e].to);
             o.insert(
                 "edge".into(),
-                json!({ "from": st.topo.nodes[from].name, "to": st.topo.nodes[to].name }),
+                json!({ "from": g.topo.nodes[from].name, "to": g.topo.nodes[to].name }),
             );
         }
     }
 }
 
 /// **Private.** For a message: `node 'db' at endpoint 'GET /x'`.
-pub(super) fn key_label(st: &AppState, k: &ChaosKey) -> String {
+pub(crate) fn key_label(g: &Generation, k: &ChaosKey) -> String {
     match k {
-        ChaosKey::Node(id) => format!("node '{}'", st.topo.nodes[*id].name),
+        ChaosKey::Node(id) => format!("node '{}'", g.topo.nodes[*id].name),
         ChaosKey::Endpoint(e) => format!("endpoint '{e}'"),
-        ChaosKey::NodeAt(id, e) => format!("node '{}' at endpoint '{e}'", st.topo.nodes[*id].name),
-        ChaosKey::Replica(id, r) => format!("node '{}' replica {r}", st.topo.nodes[*id].name),
+        ChaosKey::NodeAt(id, e) => format!("node '{}' at endpoint '{e}'", g.topo.nodes[*id].name),
+        ChaosKey::Replica(id, r) => format!("node '{}' replica {r}", g.topo.nodes[*id].name),
         ChaosKey::Edge(e) => {
-            let (from, to) = (st.topo.edges[*e].from, st.topo.edges[*e].to);
+            let (from, to) = (g.topo.edges[*e].from, g.topo.edges[*e].to);
             format!(
                 "edge '{}' -> '{}'",
-                st.topo.nodes[from].name, st.topo.nodes[to].name
+                g.topo.nodes[from].name, g.topo.nodes[to].name
             )
         }
     }
@@ -160,7 +161,7 @@ pub(super) fn key_label(st: &AppState, k: &ChaosKey) -> String {
 /// **Private.** A sparse state as scenario entries: only the fields that are set (never the
 /// dense defaults), so reloading a saved file adds no explicit value that would last-win.
 /// A layer that sets nothing (a bare `mode: merge`) is skipped.
-pub(super) fn layers_json(st: &AppState, layers: &ChaosState) -> Vec<Value> {
+pub(super) fn layers_json(g: &Generation, layers: &ChaosState) -> Vec<Value> {
     let mut out = Vec::new();
     for (k, l) in layers.entries() {
         let bare = ChaosLayer {
@@ -171,7 +172,7 @@ pub(super) fn layers_json(st: &AppState, layers: &ChaosState) -> Vec<Value> {
             continue;
         }
         let mut o = Map::new();
-        key_fields(st, &k, &mut o);
+        key_fields(g, &k, &mut o);
         if let Some(d) = l.latency_add {
             o.insert(
                 "latency_ms".into(),
@@ -209,7 +210,7 @@ pub(super) fn layers_json(st: &AppState, layers: &ChaosState) -> Vec<Value> {
 /// pair is compiled together with its node's own chaos (writing both would count the node
 /// twice); both are refused with a message naming the key. A pair that compiled to exactly
 /// its node's own chaos adds nothing and is skipped rather than refused.
-pub(super) fn effective_entries(st: &AppState, e: &EffectiveChaos) -> Result<Vec<Value>, Reject> {
+pub(super) fn effective_entries(g: &Generation, e: &EffectiveChaos) -> Result<Vec<Value>, Reject> {
     let all = e.entries();
     let nodes: HashMap<usize, &Resolved> = all
         .iter()
@@ -230,7 +231,7 @@ pub(super) fn effective_entries(st: &AppState, e: &EffectiveChaos) -> Result<Vec
                 StatusCode::BAD_REQUEST,
                 &format!(
                     "{} is compiled together with the node's own chaos and cannot be written alone; save from live or from a scenario",
-                    key_label(st, &k)
+                    key_label(g, &k)
                 ),
             ));
         }
@@ -239,13 +240,13 @@ pub(super) fn effective_entries(st: &AppState, e: &EffectiveChaos) -> Result<Vec
                 StatusCode::BAD_REQUEST,
                 &format!(
                     "{} has {} failure bands, which one entry cannot hold; save from live or from a scenario",
-                    key_label(st, &k),
+                    key_label(g, &k),
                     r.faults().len()
                 ),
             ));
         }
         let mut o = Map::new();
-        key_fields(st, &k, &mut o);
+        key_fields(g, &k, &mut o);
         let keyed = o.len();
         if !r.latency_add.is_zero() {
             o.insert(

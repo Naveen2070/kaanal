@@ -1,9 +1,9 @@
 //! Building the answer: chaos failures, pinned states, the success body, wire failures (reset, malformed) and CORS.
 
 use super::{
-    AppState, Body, Bytes, ChainResult, Cut, Duration, FailKind, FinishedHop, HeaderValue, Outcome,
-    PinState, Read, Response, Route, StatusCode, Topology, Value, auth, header, json, pins,
-    resolve_error, response,
+    AppState, Body, Bytes, ChainResult, Cut, Duration, FailKind, FinishedHop, Generation,
+    HeaderValue, Outcome, PinState, Read, Response, Route, StatusCode, Topology, Value, auth,
+    header, json, pins, resolve_error, response,
 };
 
 /// **Private.** What a request answers: status and body, the failing node, a `Retry-After` and,
@@ -29,6 +29,7 @@ pub(super) struct Ask<'a> {
 /// a collection operation; a wire failure shows a preview of it, which changes nothing.
 pub(super) fn chaos_reply(
     st: &AppState,
+    g: &Generation,
     route: &Route,
     result: &ChainResult,
     ask: &Ask,
@@ -36,7 +37,7 @@ pub(super) fn chaos_reply(
     trace: &str,
 ) -> Reply {
     let ep = &route.endpoint;
-    let name = |id: usize| st.topo.nodes[id].name.as_str();
+    let name = |id: usize| g.topo.nodes[id].name.as_str();
     match result {
         // E5 + B2a Z8: node, then kind, then status, then class; else the kind's default status and the chaos body.
         ChainResult::Err {
@@ -49,7 +50,7 @@ pub(super) fn chaos_reply(
             // remap (status or class keys, like nginx `error_page 504`); only reset and malformed break the wire.
             let at_wire = *kind != FailKind::Status
                 && *kind != FailKind::Timeout
-                && ep.is_wire_node(&st.topo, *node);
+                && ep.is_wire_node(&g.topo, *node);
             let (mapped, body) = resolve_error(&ep.error_map, name(*node), *kind, *status);
             // An error_map entry by node name or by kind is the user's stated intent and beats the wire behaviour (Z7).
             // Same string lookup as `resolve_error`: a node named `reset` also counts as a kind key for other nodes.
@@ -59,7 +60,7 @@ pub(super) fn chaos_reply(
             // The would-be reply, built only for a wire failure (a collection previews, never applies).
             let would = (at_wire && !overridden).then(|| match read {
                 (_, Some(c)) => (c.preview(&st.collections), true),
-                (login, None) => (answer(st, route, ask, (login, None)), false),
+                (login, None) => (answer(st, g, route, ask, (login, None)), false),
             });
             // A collection reply with no body to break (a 204, a HEAD) would read as a clean
             // success the store contradicts; it fails as at a non-wire node instead. A collection
@@ -87,7 +88,7 @@ pub(super) fn chaos_reply(
             }
         }
         ChainResult::Ok => {
-            let (status, body) = answer(st, route, ask, read);
+            let (status, body) = answer(st, g, route, ask, read);
             Reply {
                 status,
                 body,
@@ -103,12 +104,13 @@ pub(super) fn chaos_reply(
 /// failures, 429 and overflow; the chain's verdict is not read). Never a failed node.
 pub(super) fn pinned_reply(
     st: &AppState,
+    g: &Generation,
     route: &Route,
     ask: &Ask,
     read: Read,
     out: &Outcome,
 ) -> Reply {
-    let (status, body, retry) = pinned_response(st, route, ask, read, out);
+    let (status, body, retry) = pinned_response(st, g, route, ask, read, out);
     Reply {
         status,
         body,
@@ -127,6 +129,7 @@ pub(super) fn pinned_reply(
 /// apply a collection operation; `empty` and `error` change nothing.
 pub(super) fn pinned_response(
     st: &AppState,
+    g: &Generation,
     route: &Route,
     ask: &Ask,
     read: Read,
@@ -154,9 +157,9 @@ pub(super) fn pinned_response(
                 return (status, Value::Null, None);
             }
             let ep = &route.endpoint;
-            let owner = ep.owner.map_or("", |id| st.topo.nodes[id].name.as_str());
-            let seed = pins::route_seed(st.seed, owner, ask.path);
-            let opts = st.options_for_owner(ep.owner);
+            let owner = ep.owner.map_or("", |id| g.topo.nodes[id].name.as_str());
+            let seed = pins::route_seed(g.seed, owner, ask.path);
+            let opts = g.options_for_owner(ep.owner);
             let mut body =
                 pins::empty_form(ep, route.schema.as_ref(), seed, opts).unwrap_or(Value::Null);
             // P9: a `states.empty.body` is returned verbatim; only a derived body gets the params.
@@ -166,7 +169,7 @@ pub(super) fn pinned_response(
             (status, body, None)
         }
         PinState::Loading | PinState::Slow | PinState::Success => {
-            let (status, body) = answer(st, route, ask, read);
+            let (status, body) = answer(st, g, route, ask, read);
             (status, body, None)
         }
     }
@@ -184,32 +187,38 @@ pub(super) fn default_error_body(node: &str, kind: FailKind) -> Value {
 
 /// **Private.** What a route answers when nothing fails: the `override`, else the generated body
 /// (one page of it, or a 400 for a bad paging parameter, on a paged route).
-pub(super) fn success(st: &AppState, route: &Route, ask: &Ask) -> (u16, Value) {
+pub(super) fn success(g: &Generation, route: &Route, ask: &Ask) -> (u16, Value) {
     let ep = &route.endpoint;
     if let Some(ov) = &ep.response {
         return (ov.status, ov.body.clone());
     }
-    let owner = ep.owner.map_or("", |id| st.topo.nodes[id].name.as_str());
+    let owner = ep.owner.map_or("", |id| g.topo.nodes[id].name.as_str());
     if let Some(spec) = &route.paging {
-        return super::paging::page(st, route, spec, owner, ask);
+        return super::paging::page(g, route, spec, owner, ask);
     }
     (
         route.status,
-        generated_body(st, route, owner, ask.path, ask.params),
+        generated_body(g, route, owner, ask.path, ask.params),
     )
 }
 
 /// **Private.** What the route answers when nothing fails: its collection operation (applied here
 /// and nowhere else), a built-in responder (it owns its status codes; the route's 200 and schema
 /// do not apply), else [`success`].
-pub(super) fn answer(st: &AppState, route: &Route, ask: &Ask, (login, coll): Read) -> (u16, Value) {
+pub(super) fn answer(
+    st: &AppState,
+    g: &Generation,
+    route: &Route,
+    ask: &Ask,
+    (login, coll): Read,
+) -> (u16, Value) {
     if let Some(c) = coll {
         return c.apply(&st.collections);
     }
     let ep = &route.endpoint;
     match ep.responder.filter(|_| ep.response.is_none()) {
-        Some(r) => auth::respond(r, st.auth.as_ref(), login),
-        None => success(st, route, ask),
+        Some(r) => auth::respond(r, g.auth.as_ref(), login),
+        None => success(g, route, ask),
     }
 }
 
@@ -273,7 +282,7 @@ pub(super) fn wire_failure(
 
 /// **Private.** The spec-schema body of a successful route (`null` when it has no schema).
 pub(super) fn generated_body(
-    st: &AppState,
+    g: &Generation,
     route: &Route,
     owner: &str,
     path: &str,
@@ -283,8 +292,8 @@ pub(super) fn generated_body(
         return Value::Null;
     };
     // `seed:` (not the chain seed) keys the data: same seed → same data (NFR-10, D14).
-    let seed = pins::route_seed(st.seed, owner, path);
-    let opts = st.options_for_owner(route.endpoint.owner);
+    let seed = pins::route_seed(g.seed, owner, path);
+    let opts = g.options_for_owner(route.endpoint.owner);
     let mut v = kaanal_data::generate(schema, None, seed, opts);
     kaanal_data::apply_params(&mut v, params);
     v

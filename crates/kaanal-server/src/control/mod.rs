@@ -31,10 +31,12 @@ use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tokio_stream::{Stream, StreamExt};
 
 use crate::chaos_lease::{self, Leases};
+use crate::generation::{Gen, Generation};
 use crate::scenarios::{self, WriteError};
 use crate::state::{AppState, BusEvent, Control, Effective};
 mod admin;
 mod chaos;
+mod draft;
 mod guard;
 mod lease;
 mod save;
@@ -45,6 +47,7 @@ mod view;
 
 pub use admin::{events, reset, shutdown, ui};
 pub use chaos::{clear_keyed, clear_node, get_chaos, set_chaos, set_chaos_keyed, topology};
+pub use draft::{apply_draft, get_draft, put_draft, validate_draft};
 pub use guard::guard;
 pub use lease::lease_task;
 pub use save::save_scenario;
@@ -62,9 +65,10 @@ pub use scenario::{
     activate, clear_scenarios, deactivate, delete_scenario, get_active, get_scenario,
     list_scenarios, put_scenario, set_active,
 };
+pub(crate) use view::key_label;
 use view::{
-    active_json, effective_entries, effective_json, key_fields, key_label, keyed_json, layers_json,
-    place, source_name, unknown,
+    active_json, effective_entries, effective_json, key_fields, keyed_json, layers_json, place,
+    source_name, unknown,
 };
 
 /// **Private.** Uniform JSON error shape returned by handlers: `(status, {"error": msg})`.
@@ -75,6 +79,37 @@ pub(crate) type Reject = (StatusCode, Json<Value>);
 // Other clients that print it to a terminal must do the same.
 pub(crate) fn reject(code: StatusCode, msg: &str) -> Reject {
     (code, Json(json!({ "error": msg })))
+}
+
+/// **Private.** [`lock`], for a handler that resolved something against `g`: 409 when an Apply
+/// has put another generation in force since the handler took it. The swap happens under this
+/// same lock, so once it is held the answer cannot change, and a topology-bound id the handler
+/// is about to store can never land in a newer generation's control state.
+pub(crate) fn lock_gen<'a>(
+    st: &'a AppState,
+    g: &Generation,
+) -> Result<MutexGuard<'a, Control>, Reject> {
+    let c = lock(st);
+    match st.generation() {
+        Some(cur) if Arc::as_ptr(&cur) == std::ptr::from_ref(g) => Ok(c),
+        _ => Err(reject(
+            StatusCode::CONFLICT,
+            "the system changed while this request ran; retry",
+        )),
+    }
+}
+
+/// **Private.** The control state and the generation in force, as one consistent pair: locked
+/// first, then read, and an Apply swaps under the same lock. For the reads that pair the two
+/// (`GET /chaos`, `GET /scenarios/active`, `GET /scenarios/{name}`): they never answer 409 for a
+/// swap, they answer from whichever generation is in force once they hold the lock. 409 only
+/// when there is none.
+pub(crate) fn locked(st: &AppState) -> Result<(MutexGuard<'_, Control>, Arc<Generation>), Reject> {
+    let c = lock(st);
+    let g = st
+        .generation()
+        .ok_or_else(|| reject(StatusCode::CONFLICT, "no system applied yet; apply a draft"))?;
+    Ok((c, g))
 }
 
 /// **Private.** The control state, locked. The guard must never live across an `.await`

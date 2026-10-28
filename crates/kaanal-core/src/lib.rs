@@ -37,7 +37,7 @@ pub use chain::{
     collection_op, compile, resolve_error, skeleton,
 };
 pub use chaos::{
-    ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, ErrorKind, FailKind, Fault, HANG_CAP,
+    ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, ErrorKind, FailKind, Fault, HANG_CAP, KeyMap,
     MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers,
 };
 pub use config::{

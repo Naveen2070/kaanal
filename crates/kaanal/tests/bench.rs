@@ -258,6 +258,7 @@ fn http(rows: &mut Vec<Row>) {
         port: 0,
         token: token.clone(),
         auth_key: None,
+        draft: None,
     };
     let srv = rt
         .block_on(kaanal_server::serve(

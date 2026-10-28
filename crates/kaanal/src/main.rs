@@ -37,11 +37,12 @@ mod util;
 // The modules are folders by role; their names are re-exported here so a command reaches
 // `lifecycle::...` or `output::...` by its short path.
 use self::{
-    cli::{Cli, Cmd, LogsArgs, ScenarioCmd, completions, schema},
+    cli::{Cli, Cmd, DraftCmd, LogsArgs, ScenarioCmd, completions, schema},
     commands::{
         chaos::{chaos, chaos_text, cycle, node, pin_extra, pin_extra_ms, pins, source_text},
         demo,
         down::{down, down_remote, drain_budget, warn_all},
+        draft::draft,
         init,
         logs::{logs_cmd, out_bytes, out_line, trace},
         scenario::{active_names, endpoints, scenario},
@@ -49,7 +50,7 @@ use self::{
     },
     instance::{
         keys, lifecycle,
-        remote::{ShutdownReply, call, control_agent, post_shutdown, status},
+        remote::{ShutdownReply, call, call_for, control_agent, post_shutdown, status},
         state_dir::{lock_instance, private_dir, write_run_file},
         target,
     },
@@ -183,6 +184,7 @@ fn run(cli: Cli) -> Result<(), Fail> {
         }
         Cmd::Status => status(),
         Cmd::Scenario { cmd } => scenario(cmd),
+        Cmd::Draft { cmd } => draft(cmd),
         Cmd::Cycle {
             route,
             state,

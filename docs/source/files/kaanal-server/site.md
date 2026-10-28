@@ -4,7 +4,7 @@ The `site:` folder: static files served from the same origin as the mocks (spec 
 
 ## What it does
 
-`AppState::build` opens the folder once (`Site::open`); [mock](mock.md) `handle` calls `serve` for every non-control request whose path no spec route matches, before the request takes an id. A `Some` answer is returned as is; `None` falls through to the mock, so a missing file is the mock's own 404. Site files never reach the engine, the log, the event bus or a route counter, and get no CORS headers.
+`Generation::build` opens the folder once (`Site::open`); [mock](mock.md) `handle` calls `serve` for every non-control request whose path no spec route matches, before the request takes an id. A `Some` answer is returned as is; `None` falls through to the mock, so a missing file is the mock's own 404. Site files never reach the engine, the log, the event bus or a route counter, and get no CORS headers.
 
 ## Items
 

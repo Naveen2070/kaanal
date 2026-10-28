@@ -64,6 +64,7 @@ async fn start_with_scenarios(extra: &str) -> Sc {
         port: 0,
         token: token.clone(),
         auth_key: None,
+        draft: None,
     };
     let s = kaanal_server::serve(&cfg, &dir, opts).await.unwrap();
     Sc {

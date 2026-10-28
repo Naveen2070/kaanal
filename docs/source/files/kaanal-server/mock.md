@@ -64,3 +64,9 @@ The mock request handler — the axum fallback that serves every non-control rou
 ## Unit tests (`mock/tests.rs`)
 
 Unit tests are listed in [../tests.md](../../tests.md#crateskaanal-serversrcmocktestsrs-unit--ids-the-log-and-the-event). Path params are decoded with `percent_encoding::percent_decode_str` (invalid escapes kept, invalid UTF-8 → U+FFFD). HTTP-level behaviour: [../tests.md](../../tests.md#crateskaanal-servertestshttprs).
+
+## One generation per request
+
+`handle` takes the generation in force once (`AppState::generation()`) and reads the router, site, engine, auth, seeds, options and counters from that one value; the helpers (`sizes`, `plan_of`, `finish` and the reply functions) get it as a `&Generation`. A swap during a request never reaches it. With no generation (a blank start before its first Apply) a non-control request is a 404 `{"error":"no system applied yet"}` with no id, counter or log entry.
+
+A request passes the [gate](draft.md) before it takes the generation and keeps the guard to the end, so an Apply waits for it and, while an Apply drains, a new request waits there and then runs on the new system. `early_answer` handles the preflight (204) and an unknown control path (404) before the gate.

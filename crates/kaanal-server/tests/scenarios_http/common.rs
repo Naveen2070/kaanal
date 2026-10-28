@@ -70,6 +70,7 @@ pub(crate) async fn start_full(dir: PathBuf, yaml: &str) -> Sc {
         port: 0,
         token: token.clone(),
         auth_key: None,
+        draft: None,
     };
     let s = kaanal_server::serve(&cfg, &dir, opts).await.unwrap();
     Sc {

@@ -474,7 +474,9 @@ fn reps_sorted<V>(m: &HashMap<(NodeId, u16), V>) -> Vec<((NodeId, u16), &V)> {
 }
 
 mod link;
+mod remap;
 mod resolve;
+pub use remap::KeyMap;
 pub use resolve::{EffectiveChaos, Fault, MAX_FAULTS, Resolved, compile_layers};
 
 impl<const N: usize> From<[(NodeId, NodeChaos); N]> for ChaosState {

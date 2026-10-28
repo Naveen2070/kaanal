@@ -41,11 +41,14 @@ pub async fn reset(State(st): State<Arc<AppState>>) -> Result<StatusCode, Reject
         }
         Ok(())
     })?;
-    for n in &st.counters {
-        n.store(0, Ordering::Relaxed);
-    }
-    if let Some(e) = &st.engine {
-        e.refill_buckets();
+    // a blank start has no system yet: nothing to zero
+    if let Some(g) = st.generation() {
+        for n in &g.counters {
+            n.store(0, Ordering::Relaxed);
+        }
+        if let Some(e) = &g.engine {
+            e.refill_buckets();
+        }
     }
     st.log
         .lock()
@@ -128,6 +131,10 @@ pub async fn events(
             Ok(BusEvent::Request(ev)) => SseEvent::default()
                 .event("request")
                 .json_data(&ev)
+                .unwrap_or_default(),
+            Ok(BusEvent::Applied { generation }) => SseEvent::default()
+                .event("applied")
+                .json_data(json!({ "generation": generation }))
                 .unwrap_or_default(),
             Ok(BusEvent::Scenario {
                 action,

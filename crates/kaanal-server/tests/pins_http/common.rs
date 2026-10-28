@@ -97,6 +97,7 @@ pub(crate) async fn start_yaml(yaml: &str) -> Sc {
         token: token.clone(),
         // An auth node needs a key to start; the built-in-route cycle test has one.
         auth_key: Some(kaanal_server::AuthKey::generate().unwrap()),
+        draft: None,
     };
     let s = kaanal_server::serve(&cfg, &dir, opts).await.unwrap();
     Sc {

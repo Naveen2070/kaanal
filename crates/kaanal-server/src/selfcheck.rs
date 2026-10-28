@@ -6,7 +6,7 @@ use kaanal_core::diagnostics::{Located, keys};
 use kaanal_core::{Config, Topology};
 use kaanal_data::selfcheck::{SAMPLES, check_model};
 
-use crate::state::{load_data, read_api};
+use crate::generation::{load_data, read_api};
 
 /// **Private.** Each node's spec is checked with that node's own options (its `locale`, else the
 /// project's, plus the project dictionary), as the mock would generate it.

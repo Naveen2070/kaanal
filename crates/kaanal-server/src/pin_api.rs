@@ -12,7 +12,8 @@ use kaanal_core::{Endpoint, PinEntry, PinSource, PinState, endpoint_key, validat
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::control::{Reject, commit, emit, lock, reject};
+use crate::control::{Reject, commit, emit, lock, lock_gen, reject};
+use crate::generation::{Gen, Generation};
 use crate::state::AppState;
 
 /// The body of `PUT /pins` and `POST /cycle` (`state` is optional only for a cycle).
@@ -54,9 +55,9 @@ fn entry_json(e: &PinEntry) -> serde_json::Map<String, Value> {
 
 /// **Private.** The normalized key of a known, pinnable endpoint: 400 for a malformed key, a
 /// `HEAD` made from its `GET` or a route with no entry node; 404 for an unknown one.
-fn pinnable<'a>(st: &'a AppState, raw: &str) -> Result<(String, &'a Endpoint), Reject> {
+fn pinnable<'a>(g: &'a Generation, raw: &str) -> Result<(String, &'a Endpoint), Reject> {
     let key = endpoint_key(raw).map_err(|m| bad(&m))?;
-    let ep = st
+    let ep = g
         .endpoints
         .get(&key)
         .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown endpoint '{key}'")))?;
@@ -75,7 +76,7 @@ fn pinnable<'a>(st: &'a AppState, raw: &str) -> Result<(String, &'a Endpoint), R
 
 /// **Private.** The state, status and delay of a body, checked for the state.
 fn entry_of(
-    st: &AppState,
+    g: &Generation,
     key: &str,
     ep: &Endpoint,
     state: PinState,
@@ -88,7 +89,7 @@ fn entry_of(
         .transpose()
         .map_err(|e| bad(&format!("delay: {e}")))?;
     validate_entry(state, b.status, delay).map_err(|m| bad(&m))?;
-    if state == PinState::Empty && !st.empty_ok_for(ep) {
+    if state == PinState::Empty && !g.empty_ok_for(ep) {
         return Err(bad(&format!(
             "no empty form for '{key}'; add states.empty.body to its endpoints entry"
         )));
@@ -137,17 +138,18 @@ pub async fn get_pins(State(st): State<Arc<AppState>>) -> Json<Value> {
 /// 404 unknown endpoint; 400 for a bad value, a `HEAD`, no entry node or `empty` with no form.
 pub async fn put_pin(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     payload: Result<Json<PinBody>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let Json(b) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let (key, ep) = pinnable(&st, &b.endpoint)?;
+    let (key, ep) = pinnable(&g, &b.endpoint)?;
     let state = b
         .state
         .as_deref()
         .and_then(PinState::parse)
         .ok_or_else(|| bad("state must be loading, empty, error, slow or success"))?;
-    let entry = entry_of(&st, &key, ep, state, &b)?;
-    let mut c = lock(&st);
+    let entry = entry_of(&g, &key, ep, state, &b)?;
+    let mut c = lock_gen(&st, &g)?;
     let snap = commit(&st, &mut c, |c| {
         c.stack.live_pins_mut().insert(key.clone(), entry);
         Ok(())
@@ -209,11 +211,12 @@ pub async fn delete_pins(
 /// As [`put_pin`].
 pub async fn cycle(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     payload: Result<Json<PinBody>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let Json(b) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let (key, ep) = pinnable(&st, &b.endpoint)?;
-    let ok = st.empty_ok_for(ep);
+    let (key, ep) = pinnable(&g, &b.endpoint)?;
+    let ok = g.empty_ok_for(ep);
     let allowed = |s: PinState| ok || s != PinState::Empty;
     let wanted = match b.state.as_deref() {
         None => None,
@@ -222,10 +225,10 @@ pub async fn cycle(
                 .ok_or_else(|| bad("state must be loading, empty, error, slow or success"))?,
         ),
     };
-    let mut c = lock(&st);
+    let mut c = lock_gen(&st, &g)?;
     let state = wanted
         .unwrap_or_else(|| PinState::next(c.stack.live_pins().get(&key).map(|e| e.state), allowed));
-    let entry = entry_of(&st, &key, ep, state, &b)?;
+    let entry = entry_of(&g, &key, ep, state, &b)?;
     let snap = commit(&st, &mut c, |c| {
         c.stack.live_pins_mut().insert(key.clone(), entry);
         Ok(())

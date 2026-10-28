@@ -18,6 +18,7 @@ async fn serve_without_a_signing_key_fails_closed() {
         port: 0,
         token: "t".into(),
         auth_key: None,
+        draft: None,
     };
     let e = kaanal_server::serve(&cfg, &fixtures(), opts)
         .await

@@ -9,6 +9,12 @@ fn every_client_command_honours_json() {
     let cmds: &[&[&str]] = &[
         &["status"],
         &["pins"],
+        &["draft", "show"],
+        &["draft", "validate"],
+        &["draft", "apply"],
+        &["draft", "show"],
+        &["draft", "validate"],
+        &["draft", "apply"],
         &["scenario", "list"],
         &["scenario", "show", "db-down"],
         &["scenario", "activate", "db-down"],

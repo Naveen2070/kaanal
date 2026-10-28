@@ -74,6 +74,7 @@ pub(super) struct SaveSource {
 /// `effective` is the latest published state.
 pub(super) fn save_source(
     st: &AppState,
+    g: &Generation,
     c: &MutexGuard<'_, Control>,
     from: SaveFrom,
 ) -> Result<SaveSource, Reject> {
@@ -90,12 +91,12 @@ pub(super) fn save_source(
                     StatusCode::BAD_REQUEST,
                     &format!(
                         "the live chaos on {} is an override, which a scenario file cannot hold; save from effective",
-                        key_label(st, &k)
+                        key_label(g, &k)
                     ),
                 ));
             }
             (
-                layers_json(st, c.stack.live()),
+                layers_json(g, c.stack.live()),
                 pins_json(c.stack.live_pins()),
                 None,
             )
@@ -107,12 +108,12 @@ pub(super) fn save_source(
             for (k, r) in snap.pins.iter() {
                 won.insert(k.clone(), r.entry);
             }
-            (effective_entries(st, &snap.chaos)?, pins_json(&won), None)
+            (effective_entries(g, &snap.chaos)?, pins_json(&won), None)
         }
         SaveFrom::Scenario(other) => match c.scenarios.get(&other) {
             None => return Err(unknown(&other)),
             Some((s, _)) => (
-                layers_json(st, &s.layers),
+                layers_json(g, &s.layers),
                 pins_json(&s.pins),
                 s.description.clone(),
             ),
@@ -143,12 +144,13 @@ pub(super) fn save_source(
 /// the scenario or its file exists and `force` is not set.
 pub async fn save_scenario(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     payload: Result<Json<SaveBody>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let Json(b) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
     valid_name(&b.name).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
     let force = b.force.unwrap_or(false);
-    let mut c = lock(&st);
+    let mut c = lock_gen(&st, &g)?;
     match c.scenarios.get(&b.name) {
         Some((_, Source::Inline)) => {
             return Err(reject(
@@ -193,20 +195,20 @@ pub async fn save_scenario(
         chaos: entries,
         pins,
         description,
-    } = save_source(&st, &c, from)?;
+    } = save_source(&st, &g, &c, from)?;
     if entries.is_empty() && pins.is_empty() {
         return Err(reject(StatusCode::BAD_REQUEST, "nothing to save"));
     }
     let yaml = scenario_yaml(description.as_deref(), &entries, &pins);
     // The memory copy comes from the same parse a reload would do, so disk and memory agree.
     let cfg = parse_scenario(&yaml).map_err(|e| reject(StatusCode::BAD_REQUEST, &e.to_string()))?;
-    let (scenario, _) = resolve_scenario(&b.name, &cfg, &st.topo, &st.endpoints, &|ep| {
-        st.empty_ok_for(ep)
+    let (scenario, _) = resolve_scenario(&b.name, &cfg, &g.topo, &g.endpoints, &|ep| {
+        g.empty_ok_for(ep)
     })
     .map_err(|e| reject(StatusCode::BAD_REQUEST, &place(&e.path, &e.message)))?;
     // ponytail: blocking file IO under the control mutex; a save is rare and tiny. Move the write
     // out (stage, then publish) if a slow disk ever stalls the control plane.
-    let path = scenarios::write(&st.scenarios_dir, &b.name, &yaml, force).map_err(|e| match e {
+    let path = scenarios::write(&g.scenarios_dir, &b.name, &yaml, force).map_err(|e| match e {
         WriteError::Exists => reject(
             StatusCode::CONFLICT,
             &format!(

@@ -40,13 +40,13 @@ pub async fn get_scenario(
     State(st): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, Reject> {
-    let c = lock(&st);
+    let (c, g) = locked(&st)?;
     let (s, src) = c.scenarios.get(&name).ok_or_else(|| unknown(&name))?;
     Ok(Json(json!({
         "name": s.name,
         "source": source_name(src),
         "description": s.description,
-        "chaos": layers_json(&st, &s.layers),
+        "chaos": layers_json(&g, &s.layers),
         "pins": pins_json(&s.pins),
     })))
 }
@@ -77,23 +77,24 @@ pub(crate) fn pins_json(pins: &kaanal_core::PinLayer) -> Vec<Value> {
 /// defined in the config or a file.
 pub async fn put_scenario(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     Path(name): Path<String>,
     payload: Result<Json<ScenarioConfig>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     valid_name(&name).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
     let Json(cfg) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let (scenario, warnings) = resolve_scenario(&name, &cfg, &st.topo, &st.endpoints, &|ep| {
-        st.empty_ok_for(ep)
-    })
-    .map_err(|e| {
-        let code = if e.not_found {
-            StatusCode::NOT_FOUND
-        } else {
-            StatusCode::BAD_REQUEST
-        };
-        reject(code, &place(&e.path, &e.message))
-    })?;
-    let mut c = lock(&st);
+    let (scenario, warnings) =
+        resolve_scenario(&name, &cfg, &g.topo, &g.endpoints, &|ep| g.empty_ok_for(ep)).map_err(
+            |e| {
+                let code = if e.not_found {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                reject(code, &place(&e.path, &e.message))
+            },
+        )?;
+    let mut c = lock_gen(&st, &g)?;
     let was_active = c.stack.active().contains(&name);
     let snap = commit(&st, &mut c, |c| {
         if let Some((_, src)) = c.scenarios.get(&name)
@@ -164,6 +165,7 @@ pub async fn delete_scenario(
 /// 400 for a bad body or ttl, 404 for an unknown name.
 pub async fn activate(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     Path(name): Path<String>,
     body: Bytes,
 ) -> Result<Json<Value>, Reject> {
@@ -174,7 +176,7 @@ pub async fn activate(
             .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad body: {e}")))?;
         b.ttl.as_deref().map(parse_ttl).transpose()?
     };
-    let mut c = lock(&st);
+    let mut c = lock_gen(&st, &g)?;
     let snap = commit(&st, &mut c, |c| {
         c.stack
             .activate(&c.scenarios, &name)
@@ -188,7 +190,7 @@ pub async fn activate(
     emit(&st, "activate", Some(&name), &snap);
     drop(c);
     st.lease_wake.notify_one();
-    Ok(Json(active_json(&st, &snap)))
+    Ok(Json(active_json(&g, &snap)))
 }
 
 /// The accepted body of `POST /__kaanal/scenarios/{name}/activate`.
@@ -234,10 +236,11 @@ pub async fn deactivate(State(st): State<Arc<AppState>>, Path(name): Path<String
 /// 404 for an unknown name; nothing changes.
 pub async fn set_active(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     payload: Result<Json<Vec<String>>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let Json(names) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let mut c = lock(&st);
+    let mut c = lock_gen(&st, &g)?;
     let snap = commit(&st, &mut c, |c| {
         c.leases.clear();
         c.stack
@@ -245,12 +248,14 @@ pub async fn set_active(
             .map_err(|m| reject(StatusCode::NOT_FOUND, &m))
     })?;
     emit(&st, "set", None, &snap);
-    Ok(Json(active_json(&st, &snap)))
+    Ok(Json(active_json(&g, &snap)))
 }
 
 /// `GET /__kaanal/scenarios/active` — the stack and the compiled result.
-pub async fn get_active(State(st): State<Arc<AppState>>) -> Json<Value> {
-    Json(active_json(&st, &st.snapshot()))
+pub async fn get_active(State(st): State<Arc<AppState>>) -> Result<Json<Value>, Reject> {
+    // the lock pairs the snapshot with the generation in force
+    let (_c, g) = locked(&st)?;
+    Ok(Json(active_json(&g, &st.snapshot())))
 }
 
 /// `DELETE /__kaanal/scenarios` — deactivates every scenario; the live layer stays (S12).

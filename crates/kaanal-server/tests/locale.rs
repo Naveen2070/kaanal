@@ -49,6 +49,7 @@ async fn a_node_locale_changes_the_currency_of_its_routes() {
         port: 0,
         token: kaanal_server::new_token(),
         auth_key: None,
+        draft: None,
     };
     let s = kaanal_server::serve(&Config::from_yaml(&src).unwrap(), &dir, opts)
         .await
@@ -88,6 +89,7 @@ async fn an_empty_pin_body_uses_the_node_locale_and_data_yaml() {
         port: 0,
         token: kaanal_server::new_token(),
         auth_key: None,
+        draft: None,
     };
     let s = kaanal_server::serve(&Config::from_yaml(&src).unwrap(), &dir, opts)
         .await

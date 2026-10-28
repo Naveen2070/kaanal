@@ -49,7 +49,8 @@ fn app_with(yaml: &str) -> Arc<AppState> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let cfg = Config::from_yaml(yaml).unwrap();
     let mut st = AppState::build(&cfg, &dir, "t".into(), 0).unwrap();
-    st.engine = Some(crate::actor::spawn(Engine::new(&st.topo)));
+    let g = st.gen_mut();
+    g.engine = Some(crate::actor::spawn(Engine::new(&g.topo)));
     Arc::new(st)
 }
 
@@ -141,8 +142,10 @@ async fn unmatched_and_bad_scope_are_logged_with_rejected() {
 #[tokio::test]
 async fn a_rejected_request_does_not_touch_the_counter() {
     let st = app();
-    let count =
-        |st: &AppState| -> u64 { st.counters.iter().map(|c| c.load(Ordering::Relaxed)).sum() };
+    let count = |st: &AppState| -> u64 {
+        let g = st.generation().unwrap();
+        g.counters.iter().map(|c| c.load(Ordering::Relaxed)).sum()
+    };
     call(&st, "GET", "/users/1", &[]).await;
     let before = count(&st);
     call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "bogus")]).await;
@@ -435,7 +438,7 @@ async fn a_mock_with_a_narrow_link_delays_the_response() {
 #[tokio::test]
 async fn no_payload_costs_means_no_link_hops_whatever_the_body() {
     let st = app();
-    assert!(!st.topo.payload_costs());
+    assert!(!st.generation().unwrap().topo.payload_costs());
     call(&st, "GET", "/users/1", &[("content-length", "5000")]).await;
     let e = &entries(&st)[0];
     assert!(e.hops.iter().all(|h| !h.kind.starts_with("link")));
@@ -453,4 +456,16 @@ async fn a_head_response_carries_no_response_transfer() {
         .filter(|k| k.starts_with("link"))
         .collect();
     assert_eq!(kinds, ["link"], "hyper strips a HEAD body");
+}
+
+#[tokio::test]
+async fn a_blank_state_answers_404_and_a_system_answers_again_once_installed() {
+    let st = app();
+    let g = st.generation().unwrap();
+    st.set_generation(None);
+    let r = call(&st, "GET", "/users/1", &[]).await;
+    assert_eq!(r.status(), 404);
+    assert!(entries(&st).is_empty(), "no id, no counter, no log entry");
+    st.set_generation(Some(g));
+    assert_eq!(call(&st, "GET", "/users/1", &[]).await.status(), 200);
 }

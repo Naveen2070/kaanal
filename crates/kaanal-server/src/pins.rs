@@ -1,6 +1,6 @@
 //! UI-state pins on the server side: the one decision of what an `empty` pin answers
 //! ([`empty_form`]) and the two adapters that let `resolve_scenario` ask it ([`empty_ok`] at
-//! load, [`AppState::empty_ok_for`] at runtime), so load time and request time cannot disagree.
+//! load, [`Generation::empty_ok_for`] at runtime), so load time and request time cannot disagree.
 
 use std::collections::BTreeMap;
 
@@ -8,7 +8,7 @@ use kaanal_core::{Endpoint, stable_hash};
 use kaanal_data::Options;
 use serde_json::Value;
 
-use crate::state::AppState;
+use crate::generation::Generation;
 
 /// The seed of a route's generated data (`seed:` keys the data, not the chain draws): the same
 /// hash `generated_body` uses.
@@ -64,7 +64,7 @@ pub fn empty_ok(
     }
 }
 
-impl AppState {
+impl Generation {
     /// The runtime `empty_ok`, from the built route (control API: `PUT /scenarios`, pins, cycle).
     #[must_use]
     pub fn empty_ok_for(&self, ep: &Endpoint) -> bool {

@@ -158,7 +158,9 @@ pub struct ClearQuery {
 /// `GET /__kaanal/chaos` — the live layer
 /// `{ "nodes": {name: view}, "endpoints": {key: view}, "node_at": [{node, endpoint, ...view}] }`
 /// plus `"effective"`, the compiled result of the scenarios and the live layer.
-pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
+pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Result<Json<Value>, Reject> {
+    // the lock pairs the chaos read below with the generation in force
+    let (_c, g) = locked(&st)?;
     let snap = st.snapshot();
     let now = Instant::now();
     let items = snap
@@ -171,9 +173,9 @@ pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
             (k, v)
         })
         .collect();
-    let mut out = keyed_json(&st, items);
-    out.insert("effective".into(), effective_json(&st, &snap.chaos));
-    Json(Value::Object(out))
+    let mut out = keyed_json(&g, items);
+    out.insert("effective".into(), effective_json(&g, &snap.chaos));
+    Ok(Json(Value::Object(out)))
 }
 
 /// **Private.** Merges `patch` into the live layer under `key`, validates the merged layer
@@ -188,6 +190,7 @@ pub async fn get_chaos(State(st): State<Arc<AppState>>) -> Json<Value> {
 /// first; `commit` then prunes the leases of fields the write left unset (`down: false`).
 pub(super) fn apply_patch(
     st: &AppState,
+    g: &Generation,
     key: &ChaosKey,
     patch: &ChaosPatch,
 ) -> Result<Json<Value>, Reject> {
@@ -204,7 +207,7 @@ pub(super) fn apply_patch(
             "ttl needs a field to lease",
         ));
     }
-    let mut c = lock(st);
+    let mut c = lock_gen(st, g)?;
     let snap = commit(st, &mut c, |c| {
         chaos_lease::apply(&mut c.chaos_leases, key, &units, ttl, Instant::now());
         let mut cur = c.stack.live().layer(key).cloned().unwrap_or_default();
@@ -213,7 +216,7 @@ pub(super) fn apply_patch(
             .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
         // link chaos belongs to an edge key, and an edge key has the link rules
         let linked = match key {
-            ChaosKey::Edge(e) => cur.check_link(st.topo.edges[*e].bandwidth),
+            ChaosKey::Edge(e) => cur.check_link(g.topo.edges[*e].bandwidth),
             _ => cur
                 .link_only_field()
                 .map_or(Ok(()), |f| Err((f, format!("{f} is for an edge key")))),
@@ -253,26 +256,26 @@ pub(super) fn apply_patch(
         .map(|_| {
             format!(
                 "chaos on {}: error_kind/error_status have no effect without error_rate",
-                key_label(st, key)
+                key_label(g, key)
             )
         })
         .into_iter()
         .collect();
-    view["effective"] = effective_json(st, &snap.chaos);
+    view["effective"] = effective_json(g, &snap.chaos);
     view["warnings"] = json!(warnings);
     Ok(Json(view))
 }
 
 /// **Private.** The id of a node by name; unknown (or empty) → 404.
-pub(super) fn node_id(st: &AppState, node: &str) -> Result<usize, Reject> {
-    st.topo
+pub(super) fn node_id(g: &Generation, node: &str) -> Result<usize, Reject> {
+    g.topo
         .id(node)
         .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("unknown node '{node}'")))
 }
 
 /// `GET /__kaanal/topology` — nodes, edges and sorted route keys as JSON.
-pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
-    let t = &st.topo;
+pub async fn topology(Gen(g): Gen) -> Json<Value> {
+    let t = &g.topo;
     let nodes: Vec<Value> = t
         .nodes
         .iter()
@@ -296,7 +299,7 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
         .collect();
     // Expected entries per request to each endpoint, per node (zero entries left out): what a
     // `prob`, a `repeat` or a cache hit does to the traffic a node sees.
-    let endpoints: Vec<Value> = st
+    let endpoints: Vec<Value> = g
         .endpoints
         .iter()
         .filter(|ep| !ep.synthesized)
@@ -310,7 +313,7 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
             json!({ "key": ep.key, "visits": visits })
         })
         .collect();
-    Json(json!({ "nodes": nodes, "edges": edges, "routes": st.route_keys, "endpoints": endpoints }))
+    Json(json!({ "nodes": nodes, "edges": edges, "routes": g.route_keys, "endpoints": endpoints }))
 }
 
 /// `PUT /__kaanal/chaos/{node}` — merges a [`ChaosPatch`] into the node's live settings
@@ -324,18 +327,19 @@ pub async fn topology(State(st): State<Arc<AppState>>) -> Json<Value> {
 /// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
 pub async fn set_chaos(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     Path(node): Path<String>,
     payload: Result<Json<ChaosPatch>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
-    let id = node_id(&st, &node)?;
+    let id = node_id(&g, &node)?;
     let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    apply_patch(&st, &ChaosKey::Node(id), &p)
+    apply_patch(&st, &g, &ChaosKey::Node(id), &p)
 }
 
 /// **Private.** The key of a `replica` request, or `None` when none was named: a replica needs a
 /// node, takes no endpoint (it applies whatever the endpoint) and must exist (400 otherwise).
 fn replica_key(
-    st: &AppState,
+    g: &Generation,
     node: Option<usize>,
     has_endpoint: bool,
     replica: Option<u16>,
@@ -348,11 +352,11 @@ fn replica_key(
             "a replica takes no endpoint (it applies whatever the endpoint)",
         ));
     }
-    let count = st.topo.nodes[n].replicas;
+    let count = g.topo.nodes[n].replicas;
     if r >= count {
         return Err(bad(&format!(
             "node '{}' has {count} replicas (0 to {})",
-            st.topo.nodes[n].name,
+            g.topo.nodes[n].name,
             count - 1
         )));
     }
@@ -362,7 +366,7 @@ fn replica_key(
 /// **Private.** The key of an `edge` request, or `None` when none was named: it takes no node,
 /// endpoint or replica, both ends must be nodes (404) and the edge must exist (404).
 fn edge_key(
-    st: &AppState,
+    g: &Generation,
     other: bool,
     edge: Option<(&str, &str)>,
 ) -> Result<Option<ChaosKey>, Reject> {
@@ -375,9 +379,9 @@ fn edge_key(
             "an edge takes no node, endpoint or replica",
         ));
     }
-    let id = node_id(st, from)?;
-    let to_id = node_id(st, to)?;
-    st.topo
+    let id = node_id(g, from)?;
+    let to_id = node_id(g, to)?;
+    g.topo
         .edge_id(id, to_id)
         .map(|e| Some(ChaosKey::Edge(e)))
         .ok_or_else(|| {
@@ -397,15 +401,16 @@ fn edge_key(
 /// Returns [`Reject`] (400/404 with a JSON `error` field) on invalid input.
 pub async fn set_chaos_keyed(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     payload: Result<Json<KeyedPatch>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let node = p.node.as_deref().map(|n| node_id(&st, n)).transpose()?;
+    let node = p.node.as_deref().map(|n| node_id(&g, n)).transpose()?;
     let endpoint = match p.endpoint.as_deref() {
         None => None,
         Some(e) => {
             let key = endpoint_key(e).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
-            let ep = st.endpoints.get(&key).ok_or_else(|| {
+            let ep = g.endpoints.get(&key).ok_or_else(|| {
                 reject(StatusCode::NOT_FOUND, &format!("unknown endpoint '{key}'"))
             })?;
             if ep.entry_node.is_none() {
@@ -419,9 +424,9 @@ pub async fn set_chaos_keyed(
     };
     let edge = p.edge.as_ref().map(|e| (e.from.as_str(), e.to.as_str()));
     let other = node.is_some() || endpoint.is_some() || p.replica.is_some();
-    let key = if let Some(k) = edge_key(&st, other, edge)? {
+    let key = if let Some(k) = edge_key(&g, other, edge)? {
         k
-    } else if let Some(k) = replica_key(&st, node, p.endpoint.is_some(), p.replica)? {
+    } else if let Some(k) = replica_key(&g, node, p.endpoint.is_some(), p.replica)? {
         k
     } else {
         match (node, endpoint) {
@@ -447,7 +452,7 @@ pub async fn set_chaos_keyed(
         mode: p.mode,
         ttl: p.ttl,
     };
-    apply_patch(&st, &key, &patch)
+    apply_patch(&st, &g, &key, &patch)
 }
 
 /// `DELETE /__kaanal/chaos/{node}` — removes one node's live chaos (204). Scenarios stay.
@@ -456,10 +461,11 @@ pub async fn set_chaos_keyed(
 /// Returns [`Reject`] 404 for an unknown node name.
 pub async fn clear_node(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     Path(node): Path<String>,
 ) -> Result<StatusCode, Reject> {
-    let id = node_id(&st, &node)?;
-    let mut c = lock(&st);
+    let id = node_id(&g, &node)?;
+    let mut c = lock_gen(&st, &g)?;
     commit(&st, &mut c, |c| {
         c.stack.live_mut().remove(&ChaosKey::Node(id));
         Ok(())
@@ -474,10 +480,11 @@ pub async fn clear_node(
 /// Returns [`Reject`] 404 for an unknown node name, 400 for a malformed endpoint (not `METHOD /path`).
 pub async fn clear_keyed(
     State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
     q: Result<Query<ClearQuery>, QueryRejection>,
 ) -> Result<StatusCode, Reject> {
     let Query(q) = q.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let node = q.node.as_deref().map(|n| node_id(&st, n)).transpose()?;
+    let node = q.node.as_deref().map(|n| node_id(&g, n)).transpose()?;
     let endpoint = q
         .endpoint
         .as_deref()
@@ -492,9 +499,9 @@ pub async fn clear_keyed(
         ));
     }
     let other = node.is_some() || endpoint.is_some() || q.replica.is_some();
-    let key = if let Some(k) = edge_key(&st, other, edge)? {
+    let key = if let Some(k) = edge_key(&g, other, edge)? {
         Some(k)
-    } else if let Some(k) = replica_key(&st, node, q.endpoint.is_some(), q.replica)? {
+    } else if let Some(k) = replica_key(&g, node, q.endpoint.is_some(), q.replica)? {
         Some(k)
     } else {
         match (node, endpoint) {
@@ -504,7 +511,7 @@ pub async fn clear_keyed(
             (None, None) => None,
         }
     };
-    let mut c = lock(&st);
+    let mut c = lock_gen(&st, &g)?;
     commit(&st, &mut c, |c| {
         match &key {
             Some(k) => {

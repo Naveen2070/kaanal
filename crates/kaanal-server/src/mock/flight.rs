@@ -2,10 +2,10 @@
 
 use super::{
     Answer, AppState, Arc, Ask, BusEvent, ChainResult, Duration, EffectiveChaos, Endpoint, Facts,
-    Finished, HeaderValue, Instant, IntoResponse, Json, LogEntry, Outcome, PinState, Plan, Read,
-    Reply, Request, Responder, Response, Route, Run, StatusCode, SystemTime, TraceParts,
-    UNIX_EPOCH, Value, chaos_reply, header, json, log, no_store, pinned_reply, record, scope,
-    touched_nodes,
+    Finished, Generation, HeaderValue, Instant, IntoResponse, Json, LogEntry, Outcome, PinState,
+    Plan, Read, Reply, Request, Responder, Response, Route, Run, StatusCode, SystemTime,
+    TraceParts, UNIX_EPOCH, Value, chaos_reply, header, json, log, no_store, pinned_reply, record,
+    scope, touched_nodes,
 };
 
 /// **Private.** A mock request in flight. If the handler future is dropped (the client went away)
@@ -74,7 +74,7 @@ pub(super) struct Served<'a> {
 }
 
 /// **Private.** Builds the response of a request the chain served, then logs it and tells the bus.
-pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
+pub(super) fn finish(st: &AppState, g: &Generation, read: Read, s: Served) -> Response {
     let Served {
         route,
         ident,
@@ -91,7 +91,7 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
     let ep = &route.endpoint;
     let pinned = pin.map(|o| o.state.name());
     let TraceParts { full, header } =
-        record::trace_parts(plan, &fin.hops, &fin.result, &st.topo, pinned);
+        record::trace_parts(plan, &fin.hops, &fin.result, &g.topo, pinned);
     let ask = Ask {
         method,
         path,
@@ -106,8 +106,8 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
         retry,
         wire,
     } = match pin {
-        Some(o) => pinned_reply(st, route, &ask, read, o),
-        None => chaos_reply(st, route, &fin.result, &ask, read, &header),
+        Some(o) => pinned_reply(st, g, route, &ask, read, o),
+        None => chaos_reply(st, g, route, &fin.result, &ask, read, &header),
     };
 
     // D3: only a normal success of a paged route carries `X-Total-Count` and `Link`; a failure,
@@ -118,7 +118,7 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
         && pin.is_none_or(|o| !matches!(o.state, PinState::Empty | PinState::Error));
     let mut resp = wire.unwrap_or_else(|| response(status, body, &header, retry));
     if paged {
-        super::paging::add_headers(st, route, &ask, &mut resp);
+        super::paging::add_headers(g, route, &ask, &mut resp);
     }
     if ep.responder == Some(Responder::Login) {
         no_store(&mut resp);
@@ -129,16 +129,16 @@ pub(super) fn finish(st: &AppState, read: Read, s: Served) -> Response {
     }
     // The event lists what the chain touched, its failing node too, even when a pin hid the failure.
     let chain_failed = match &fin.result {
-        ChainResult::Err { node, .. } => Some(st.topo.nodes[*node].name.as_str()),
+        ChainResult::Err { node, .. } => Some(g.topo.nodes[*node].name.as_str()),
         ChainResult::Ok => None,
     };
-    let nodes = touched_nodes(&fin.hops, chain_failed, &st.topo);
+    let nodes = touched_nodes(&fin.hops, chain_failed, &g.topo);
     let facts = ident.facts(method, path, Some(route.key.as_str()), scope);
     let run = Run {
         plan,
         fin,
         chaos,
-        topo: &st.topo,
+        topo: &g.topo,
         pin_delay: pin.is_some_and(|o| !o.delay.is_zero()),
     };
     let ans = Answer {

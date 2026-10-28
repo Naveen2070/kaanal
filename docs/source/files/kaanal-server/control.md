@@ -8,13 +8,14 @@ The control API handlers and the security guard that stands in front of them.
 
 | File          | What it holds                                                                                                                    |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`      | `Reject`, `reject`, and the one write path `lock`, `commit`, `emit`, `remaining_ms`; re-exports the handlers `lib.rs` mounts.    |
+| `mod.rs`      | `Reject`, `reject`, and the one write path `lock`, `lock_gen`, `commit`, `emit`, `remaining_ms`; re-exports the handlers `lib.rs` mounts.    |
 | `guard.rs`    | The security guard: Host check, bearer token, constant-time compare.                                                             |
 | `chaos.rs`    | The chaos handlers (`get_chaos`, `set_chaos`, `set_chaos_keyed`, `clear_node`, `clear_keyed`, `topology`) and their patch types. |
 | `view.rs`     | JSON views of chaos layers and the effective chaos, and the key and path helpers.                                                |
 | `scenario.rs` | The scenario handlers: list, get, put, delete, activate (ttl lease), deactivate, the active stack.                               |
 | `lease.rs`    | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`.                                     |
 | `save.rs`     | `POST /scenarios/save`: live, effective or a named scenario to a file.                                                           |
+| `draft.rs`    | `GET`/`PUT /__kaanal/draft`, `POST /draft/validate` and `POST /draft/apply` (answers with `kept`, `dropped` and `flagged`).                                                     |
 | `admin.rs`    | `reset`, `shutdown`, the `events` stream and the `ui` page.                                                                      |
 | `tests.rs`    | The unit tests (see the last section).                                                                                           |
 
@@ -93,3 +94,11 @@ Only writers and the two scenario GETs (`list_scenarios`, `get_scenario`, whose 
 `hosts` (Host parsing incl. attack spellings), `constant_time_eq`, `token_comes_only_from_the_token_parameter`, and the lease timer on the paused clock (scenario and chaos leases, see [../../tests.md](../../tests.md#unit-tests-inside-source-files)). The shutdown route is tested over HTTP in [../../tests.md](../../tests.md#crateskaanal-servertestsshutdown_httprs--the-drain-over-http). HTTP-level tests: [../../tests.md](../../tests.md#crateskaanal-servertestshttprs--end-to-end-http) and [../../tests.md](../../tests.md#crateskaanal-servertestsscenarios_httprs--scenario-control-api).
 
 **Link chaos (1d).** `ChaosPatch` and `KeyedPatch` take `jitter_ms` and `bandwidth_cap`; `KeyedPatch` takes `edge: { from, to }` and `DELETE` takes `edge_from` and `edge_to` (`edge_key` resolves them: 400 mixed with a node, endpoint or replica or half an edge, 404 unknown node or edge). `apply_patch` runs `ChaosLayer::check_link` on an edge key against the edge's bandwidth and rejects link-only fields on any other key. `view.rs` lists edges under `edges` as `{ edge: { from, to }, ... }`, shows `jitter_ms` and `bandwidth_cap` only when set, and writes them in saved scenarios.
+
+## One generation per handler
+
+A handler that needs the system (chaos, scenarios, pins, topology, `scenarios/save`) takes the [`Gen`](generation.md) extractor, so it reads the topology and endpoints of one generation from start to end; helpers such as `keyed_json`, `key_label` and `apply_patch` receive it as `&Generation`. With no generation the extractor answers 409 `{"error":"no system applied yet; apply a draft"}` (covered by the extractor's unit test; a handler-level test comes with the blank start, step 2d). `POST /reset` and the lease task work without one (nothing to zero, no chaos to expire).
+
+## `lock_gen`: a handler and an Apply cannot interleave
+
+A handler that resolved something against its generation (a scenario or pin against the topology, a chaos key against the node list) takes the control lock with `lock_gen(st, g)` instead of `lock(st)`. It answers 409 `the system changed while this request ran; retry` when an Apply put another generation in force since the handler took `g`. Apply swaps under the same lock, so once `lock_gen` succeeds the generation cannot change before the lock is released. The reads that pair the control state with the generation (`get_chaos`, `get_active`, `get_scenario`) use `locked(st)` instead: lock first, then read the generation, so they answer from whichever generation is in force and never refuse a swap (409 only when there is no system at all).

@@ -1,26 +1,20 @@
-//! [`AppState`]: everything the running server knows, built once at startup.
-//!
-//! [`AppState::build`] is the full load pipeline shared by `serve` and `check`
-//! (`kaanal validate`): topology → `OpenAPI` specs → endpoints (inline or the endpoints
-//! file) compiled by `kaanal_core::chain::compile` → route table. Every problem is a
-//! fatal error with a precise message, or — for ignorable schema keywords — a collected
-//! warning.
+//! [`AppState`]: the stable shell of the running server (token, port, log, ids, events, chaos,
+//! shutdown, collections), built once at startup. What the config builds (topology, routes,
+//! endpoints, engine) is a [`Generation`], held behind a lock and handed out one `Arc` at a time
+//! (see [`AppState::generation`]); the load pipeline is [`Generation::build`], shared by `serve`
+//! and `check` (`kaanal validate`).
 
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
-use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
-use kaanal_core::config::{EndpointsConfig, NodeConfig, SeedSource, parse_endpoints};
-use kaanal_core::diagnostics::{Located, PathSeg, keys};
-use kaanal_core::{
-    ChaosStack, Config, EffectiveChaos, EffectivePins, Endpoint, Endpoints, NodeId, ScenarioSet,
-    Source, Topology, resolve_scenario, valid_name,
-};
+use kaanal_core::config::SeedSource;
+use kaanal_core::diagnostics::Located;
+use kaanal_core::{ChaosStack, Config, EffectiveChaos, EffectivePins, Endpoint, ScenarioSet};
 
-use crate::scenarios;
-use kaanal_data::{ApiModel, DEFAULT_LOCALE, DataError, DataSet, Options, PageSpec};
+use crate::generation::Generation;
+use kaanal_data::PageSpec;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -91,6 +85,11 @@ pub struct Event {
 // size gap is under clippy's `large_enum_variant` threshold.
 #[derive(Debug, Clone)]
 pub enum BusEvent {
+    /// A new system went live (SSE message `applied`).
+    Applied {
+        /// The generation now in force.
+        generation: u64,
+    },
     /// A finished mock request (SSE message `request`).
     Request(Event),
     /// A scenario stack change (SSE message `scenario`), or a live chaos lease that ran out.
@@ -140,16 +139,11 @@ pub struct Control {
 
 /// Shared server state; one `Arc` clones into every handler.
 pub struct AppState {
-    /// The validated topology graph (immutable after build).
-    pub topo: Topology,
-    /// Path router: each path maps to its method routes.
-    pub paths: matchit::Router<Vec<Route>>,
-    /// Sorted `"METHOD /path"` keys, for `/__kaanal/topology` and `status` (synthesized HEAD routes excluded, R6.8).
-    pub route_keys: Vec<String>,
-    /// Every compiled endpoint, static and synthesized HEAD ones included (the control API checks keys here).
-    pub endpoints: Endpoints,
-    /// The `scenarios/` directory next to the config, under its canonical directory (it may not exist).
-    pub scenarios_dir: PathBuf,
+    /// What the config built: topology, routes, endpoints, engine, auth. A request clones the `Arc`
+    /// once ([`AppState::generation`], or the [`crate::generation::Gen`] extractor) and uses that one
+    /// value, so a later swap never mixes two generations in one request. `None` only before the
+    /// first Apply of a blank start.
+    generation: RwLock<Option<Arc<Generation>>>,
     /// The published chaos state; readers clone the `Arc` and drop the lock ([`AppState::snapshot`]).
     pub chaos: RwLock<Arc<Effective>>,
     /// The scenarios and the stack. Every control write locks it, mutates, and calls
@@ -161,299 +155,34 @@ pub struct AppState {
     /// Compiled scoped stacks by key (see [`AppState::scoped`]). Lock order: `control`, then this.
     /// [`AppState::publish`] clears it on every publish.
     pub scoped: RwLock<HashMap<String, Arc<crate::scope::Scoped>>>,
-    /// Every route's request counter (`POST /reset` zeroes them).
-    pub counters: Vec<Arc<AtomicU64>>,
     /// Event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
     pub events: broadcast::Sender<BusEvent>,
     /// Bearer token the control API requires.
     pub token: String,
-    /// The config's `seed:`: generated bodies use it in both determinism modes (D14).
-    pub seed: u64,
-    /// Seed of the chain draws: `seed:` under `controlled`, the startup draw under `realistic`.
-    pub chain_seed: u64,
-    /// The startup draw under `determinism: realistic`, printed by `up` for replay.
+    /// The startup draw under `determinism: realistic`, printed by `up` for replay. It outlives
+    /// every generation: whoever builds the next one (Apply) must pass this to
+    /// [`Generation::build`], or a realistic config silently falls back to `seed:`.
     pub drawn_seed: Option<u64>,
     /// The bound port (after the +20 search), used by the Host guard.
     pub port: u16,
-    /// Non-fatal findings from loading (ignored schema keywords); shown by `validate` and `up`.
-    pub warnings: Vec<String>,
-    /// The auth node's token issuer; `None` without an auth node and always in `check`
-    /// (`serve` sets it, X5).
-    pub auth: Option<crate::auth::Issuer>,
-    /// The live replay engine; `None` after `build`, set by `serve` (no runtime in `check`).
-    pub engine: Option<crate::actor::EngineHandle>,
+    /// Holds mock traffic back while an Apply drains and swaps (see [`crate::draft::gate`]).
+    pub gate: crate::draft::gate::Gate,
+    /// One Apply at a time.
+    pub apply_lock: tokio::sync::Mutex<()>,
+    /// The signing key an auth node needs, kept so an Apply can build the new issuer.
+    pub auth_key: Option<crate::auth::AuthKey>,
+    /// The directory the config was loaded from: spec, data and scenario files resolve against it.
+    pub dir: std::path::PathBuf,
+    /// The Studio draft: the `kaanal.yaml` text being edited, apart from the running system.
+    pub draft: Mutex<crate::draft::Draft>,
     /// Hands out request ids; never reset.
     pub ids: crate::log::IdGen,
     /// The last finished requests. Push only through [`AppState::push_log`].
     pub log: Mutex<crate::log::LogRing>,
     /// The graceful stop: `POST /__kaanal/shutdown` and `BoundServer::shutdown` ask it.
     pub shutdown: crate::shutdown::Shutdown,
-    /// The `site:` folder, when the config names one.
-    pub site: Option<crate::site::Site>,
     /// The `collection:` items; shared by every scope and user, emptied by `POST /reset`.
     pub collections: crate::collections::Collections,
-    /// **Private.** Generation options per node, by [`NodeId`]: the node's `locale`, else the
-    /// project's (see [`AppState::options_for_owner`]).
-    options: Vec<Options>,
-    /// **Private.** The project's options (top-level `locale`, else `en-IN`).
-    project_options: Options,
-}
-
-/// **Private.** Rejects two paths that differ only in parameter names
-/// (`/users/{id}` vs `/users/{uid}`): the router would refuse the second with an
-/// unhelpful message. Also reserves the `/__kaanal` namespace (rule R5.4).
-fn check_shape(shapes: &mut HashMap<String, String>, path: &str) -> Result<(), String> {
-    // A mock under /__kaanal would be served without CORS next to the control API (RULES R5.4).
-    if path == "/__kaanal" || path.starts_with("/__kaanal/") {
-        return Err(format!("path '{path}' is reserved for the control API"));
-    }
-    let mut shape = String::new();
-    let mut in_param = false;
-    for c in path.chars() {
-        match c {
-            '{' => {
-                in_param = true;
-                shape.push_str("{}");
-            }
-            '}' => in_param = false,
-            _ if !in_param => shape.push(c),
-            _ => {}
-        }
-    }
-    match shapes.get(&shape) {
-        Some(first) if first != path => Err(format!(
-            "paths '{first}' and '{path}' differ only in parameter names; use the same name in both"
-        )),
-        Some(_) => Ok(()),
-        None => {
-            shapes.insert(shape, path.to_string());
-            Ok(())
-        }
-    }
-}
-
-/// **Private.** What the spec files define: one [`RouteSpec`] per route, plus its success
-/// status and response schema by key, and the paging contract of the paged ones.
-struct Specs {
-    routes: Vec<RouteSpec>,
-    info: BTreeMap<String, (u16, Option<Value>)>,
-    paging: BTreeMap<String, Arc<PageSpec>>,
-}
-
-/// The topology and its spec routes, read exactly as [`AppState::build`] reads them.
-pub(crate) fn spec_routes(
-    cfg: &Config,
-    base_dir: &Path,
-) -> Result<(Topology, Vec<RouteSpec>), Located> {
-    let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
-    let specs = load_specs(&topo, base_dir, &mut HashMap::new(), &mut Vec::new(), None)?;
-    Ok((topo, specs.routes))
-}
-
-/// **Private.** Reads every node's spec: path shapes, conflicts between services, ignored
-/// keywords as warnings. Same checks and messages as Phase One. With `options` (one per node),
-/// project dictionary entries that cannot fit a response field are warnings too.
-fn load_specs(
-    topo: &Topology,
-    base_dir: &Path,
-    shapes: &mut HashMap<String, String>,
-    warnings: &mut Vec<String>,
-    options: Option<&[Options]>,
-) -> Result<Specs, Located> {
-    let mut specs = Specs {
-        routes: Vec::new(),
-        info: BTreeMap::new(),
-        paging: BTreeMap::new(),
-    };
-    let mut owners: BTreeMap<String, NodeId> = BTreeMap::new();
-    for (id, node) in topo.nodes.iter().enumerate() {
-        let Some(spec) = &node.spec else { continue };
-        let at = keys(&["nodes", node.name.as_str(), "spec"]);
-        let (file, api) = read_api(spec, base_dir, &at)?;
-        warnings.extend(
-            api.warnings()
-                .into_iter()
-                .map(|w| format!("{}: {w}", file.display())),
-        );
-        if let Some(opts) = options {
-            warnings.extend(
-                kaanal_data::dictionary_warnings(&api, &opts[id])
-                    .into_iter()
-                    .map(|w| format!("{}: {w}", file.display())),
-            );
-        }
-        for ep in api.endpoints {
-            check_shape(shapes, &ep.path).map_err(|m| Located::new(at.clone(), m))?;
-            let key = format!("{} {}", ep.method, ep.path);
-            // `compile` takes unique keys; a duplicate is rejected here (P2).
-            if let Some(&other) = owners.get(&key) {
-                return Err(Located::new(
-                    at.clone(),
-                    format!(
-                        "route {} {} defined by both '{}' and '{}'",
-                        ep.method, ep.path, topo.nodes[other].name, node.name
-                    ),
-                ));
-            }
-            owners.insert(key.clone(), id);
-            specs.routes.push(RouteSpec::inferred(&key, id));
-            if let Some(p) = PageSpec::detect(&ep) {
-                specs.paging.insert(key.clone(), Arc::new(p));
-            }
-            specs.info.insert(key, (ep.status, ep.schema));
-        }
-    }
-    Ok(specs)
-}
-
-/// **Private.** Reads and parses one node's spec file; an error is placed at `at` (the
-/// node's `spec:` key) and names the file.
-pub(crate) fn read_api(
-    spec: &str,
-    base_dir: &Path,
-    at: &[PathSeg],
-) -> Result<(PathBuf, ApiModel), Located> {
-    let file = base_dir.join(spec);
-    let src = std::fs::read_to_string(&file)
-        .map_err(|e| Located::new(at.to_vec(), format!("{}: {e}", file.display())))?;
-    let api = ApiModel::from_openapi(&src)
-        .map_err(|e| Located::new(at.to_vec(), format!("{}: {e}", file.display())))?;
-    Ok((file, api))
-}
-
-/// **Private.** A data-file error as a [`Located`]: in its file (parse position, else the
-/// key path), or at the config value it names (`data:`) when it has no file.
-fn data_located(e: DataError) -> Located {
-    let path: Vec<PathSeg> =
-        e.at.iter()
-            .map(|s| {
-                s.parse()
-                    .map_or_else(|_| PathSeg::Key(s.clone()), PathSeg::Index)
-            })
-            .collect();
-    match e.file {
-        Some(f) if e.line.is_some() => Located::parsed(
-            f,
-            kaanal_core::ConfigError {
-                line: e.line,
-                col: e.col,
-                msg: e.message,
-            },
-        ),
-        Some(f) if e.value => Located::at_value(path, e.message).in_file(f),
-        Some(f) => Located::new(path, e.message).in_file(f),
-        // no file: the config's own `data:` value
-        None => Located::at_value(path, e.message),
-    }
-}
-
-/// **Private.** The data files (`locales/`, `data.yaml` or `data:`) and the options of every
-/// node (its `locale`, else the project's, else `en-IN`), plus the project's own. An unknown
-/// locale is placed at the `locale:` that names it (R6.1).
-pub(crate) fn load_data(
-    cfg: &Config,
-    base_dir: &Path,
-    topo: &Topology,
-    warnings: &mut Vec<String>,
-) -> Result<(Vec<Options>, Options), Located> {
-    let data = DataSet::load(base_dir, cfg.data.as_deref()).map_err(data_located)?;
-    warnings.extend(data.warnings().iter().cloned());
-    let project = data
-        .options_for(cfg.locale.as_deref().unwrap_or(DEFAULT_LOCALE))
-        .map_err(|e| Located::at_value(keys(&["locale"]), format!("locale: {}", e.message)))?;
-    let nodes = topo
-        .nodes
-        .iter()
-        .map(|n| match &n.locale {
-            None => Ok(project.clone()),
-            Some(tag) => data.options_for(tag).map_err(|e| {
-                Located::at_value(
-                    keys(&["nodes", n.name.as_str(), "locale"]),
-                    format!("node '{}': {}", n.name, e.message),
-                )
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((nodes, project))
-}
-
-/// **Private.** The `site:` folder, if any; a bad one is placed at the `site:` value.
-fn load_site(cfg: &Config, base_dir: &Path) -> Result<Option<crate::site::Site>, Located> {
-    cfg.site
-        .as_deref()
-        .map(|rel| {
-            crate::site::Site::open(base_dir, rel)
-                .map_err(|m| Located::at_value(keys(&["site"]), m))
-        })
-        .transpose()
-}
-
-/// **Private.** Compiles the spec routes with `endpoints:`: the inline map, or the file it
-/// names (relative to `base_dir`). A missing file is placed at the `endpoints:` value;
-/// errors inside the file carry that file (spec section 8).
-fn compile_endpoints(
-    cfg: &Config,
-    base_dir: &Path,
-    topo: &Topology,
-    routes: &[RouteSpec],
-) -> Result<Endpoints, Located> {
-    // P4: a spec route with no entry and no gateway edge would fail in `compile` with no place,
-    // but `Topology::build` already rejects a spec node without an edge from the gateway.
-    let Some(EndpointsConfig::File(p)) = &cfg.endpoints else {
-        return compile(topo, routes, EndpointsInput::inline(cfg));
-    };
-    let path = base_dir.join(p);
-    let src = std::fs::read_to_string(&path)
-        .map_err(|e| Located::at_value(keys(&["endpoints"]), format!("{}: {e}", path.display())))?;
-    let entries = parse_endpoints(&src).map_err(|e| Located::parsed(path.clone(), e))?;
-    compile(
-        topo,
-        routes,
-        EndpointsInput {
-            entries: Some(&entries),
-            file: Some(&path),
-        },
-    )
-}
-
-/// **Private.** Every scenario: the inline ones, then `scenarios/*.yaml` next to the config
-/// (S2, S16). Inline errors are placed in `kaanal.yaml`, file errors in the file. Returns the
-/// set and the scenarios directory (under the canonical config directory; it may not exist).
-fn load_scenarios(
-    cfg: &Config,
-    empty_ok: kaanal_core::EmptyOk,
-    base_dir: &Path,
-    topo: &Topology,
-    endpoints: &Endpoints,
-    warnings: &mut Vec<String>,
-) -> Result<(ScenarioSet, PathBuf), Located> {
-    let mut set = ScenarioSet::default();
-    for (name, sc) in &cfg.scenarios {
-        let at = keys(&["scenarios", name.as_str()]);
-        valid_name(name).map_err(|m| Located::new(at.clone(), m))?;
-        let (s, w) = resolve_scenario(name, sc, topo, endpoints, empty_ok)
-            .map_err(|e| e.located(at.clone()))?;
-        warnings.extend(w);
-        set.insert(s, Source::Inline)
-            .map_err(|m| Located::new(at, m))?;
-    }
-    // Canonicalized once, so a later `cd` cannot move it (S16). A symlinked `scenarios/` is
-    // followed here, once; its target is what `save` writes through. Absent: the joined path.
-    let dir = base_dir
-        .canonicalize()
-        .unwrap_or_else(|_| base_dir.to_path_buf())
-        .join("scenarios");
-    let dir = dir.canonicalize().unwrap_or(dir);
-    let (found, found_warnings) = scenarios::discover(&dir)?;
-    warnings.extend(found_warnings);
-    for (name, sc, file) in found {
-        let (s, w) = resolve_scenario(&name, &sc, topo, endpoints, empty_ok)
-            .map_err(|e| e.located(Vec::new()).in_file(file.clone()))?;
-        warnings.extend(w);
-        set.insert(s, Source::File)
-            .map_err(|m| Located::new(Vec::new(), m).in_file(file))?;
-    }
-    Ok((set, dir))
 }
 
 impl AppState {
@@ -516,122 +245,23 @@ impl AppState {
     /// where relevant) for unreadable or invalid specs or endpoints file, route conflicts,
     /// any `endpoints:` error from `compile` (placed in the endpoints file when it comes
     /// from there), or any topology error. Nothing is served half-configured (rule R6.1).
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one linear load pipeline; two lines over after the site: step"
-    )]
     pub fn build(
         cfg: &Config,
         base_dir: &Path,
         token: String,
         port: u16,
     ) -> Result<AppState, Located> {
-        let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
-        // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
-        let mut shapes: HashMap<String, String> = HashMap::new();
-        let mut warnings = Vec::new();
-        // P9: a login mock with no accounts answers 401 to everyone; say so up front.
-        for (name, n) in &cfg.nodes {
-            if let NodeConfig::Auth(a) = n
-                && a.users.is_empty()
-            {
-                warnings.push(format!(
-                    "node '{name}': no users, so every POST /login answers 401 (add users: [{{ username, password }}])"
-                ));
-            }
-        }
-
-        let (options, project_options) = load_data(cfg, base_dir, &topo, &mut warnings)?;
-        let site = load_site(cfg, base_dir)?;
-        let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings, Some(&options))?;
-        let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
-        warnings.extend(endpoints.warnings.iter().cloned());
-        // The seed only changes generated values, not whether an empty form exists.
-        let ok = crate::pins::empty_ok(&specs.info, cfg.seed);
-        let (scenarios, scenarios_dir) =
-            load_scenarios(cfg, &ok, base_dir, &topo, &endpoints, &mut warnings)?;
-        // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
-        let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
-        let mut counters = Vec::new();
-        for ep in endpoints.iter() {
-            let (method, path) = ep.key.split_once(' ').unwrap_or((ep.key.as_str(), ""));
-            if ep.owner.is_none() {
-                // A static route: the spec loop never saw its path.
-                check_shape(&mut shapes, path).map_err(|m| ep.located(m))?;
-            }
-            // HEAD without a spec entry of its own answers like GET (R6.8).
-            let spec = specs.info.get(&ep.key).or_else(|| {
-                if method == "HEAD" {
-                    specs.info.get(&format!("GET {path}"))
-                } else {
-                    None
-                }
-            });
-            let (status, schema) = spec.cloned().unwrap_or((200, None));
-            // A HEAD takes its GET's paging only when the spec has no HEAD entry of its own (a
-            // declared HEAD is paged by its own parameters, which `detect` never pages); a route
-            // that does not generate its body is never paged.
-            let generated =
-                ep.response.is_none() && ep.collection.is_none() && ep.responder.is_none();
-            let get = format!("GET {path}");
-            let follows_get = method == "HEAD" && !specs.info.contains_key(&ep.key);
-            let paging = specs
-                .paging
-                .get(&ep.key)
-                .or_else(|| specs.paging.get(&get).filter(|_| follows_get))
-                .filter(|_| generated)
-                .cloned();
-            // Such a HEAD with an entry of its own but no `total:` reports its GET's total.
-            let total = ep.total.or_else(|| {
-                endpoints
-                    .get(&get)
-                    .filter(|_| follows_get)
-                    .and_then(|g| g.total)
-            });
-            if ep.total.is_some() && paging.is_none() && !ep.synthesized {
-                warnings.push(format!(
-                    "endpoint '{}': `total` has no effect: the route is not paged (no paging query parameter, or no list in its response, or the route does not generate its body: override, collection or built-in responder)",
-                    ep.key
-                ));
-            }
-            let counter = Arc::new(AtomicU64::new(0));
-            counters.push(Arc::clone(&counter));
-            by_path.entry(path.to_string()).or_default().push(Route {
-                method: method.to_string(),
-                key: ep.key.clone(),
-                endpoint: Arc::clone(ep),
-                status,
-                schema,
-                counter,
-                paging,
-                total,
-            });
-        }
-        let route_keys: Vec<String> = endpoints
-            .iter()
-            .filter(|e| !e.synthesized)
-            .map(|e| e.key.clone())
-            .collect();
-        let mut paths = matchit::Router::new();
-        for (p, routes) in by_path {
-            paths
-                .insert(p.clone(), routes)
-                .map_err(|e| Located::new(Vec::new(), format!("route '{p}': {e}")))?;
-        }
         let drawn_seed = match cfg.seed_source() {
             SeedSource::Fixed(_) => None,
             // R2.3: entropy is the server's job, drawn once here; no RNG state is kept.
             SeedSource::Entropy => Some(rand::random::<u64>()),
         };
+        let (g, scenarios) = Generation::build(cfg, base_dir, drawn_seed, false)?;
         let (events, _) = broadcast::channel(1024);
         let ids = crate::log::IdGen::new();
         let log = Mutex::new(crate::log::LogRing::new(ids.boot()));
         Ok(AppState {
-            topo,
-            paths,
-            route_keys,
-            endpoints,
-            scenarios_dir,
+            generation: RwLock::new(Some(Arc::new(g))),
             chaos: RwLock::new(Arc::new(Effective {
                 stack: ChaosStack::default(),
                 chaos: EffectiveChaos::default(),
@@ -647,29 +277,62 @@ impl AppState {
             }),
             lease_wake: tokio::sync::Notify::new(),
             scoped: RwLock::new(HashMap::new()),
-            counters,
             events,
             token,
-            seed: cfg.seed,
-            chain_seed: drawn_seed.unwrap_or(cfg.seed),
             drawn_seed,
             port,
-            warnings,
-            auth: None,
-            engine: None,
-            site,
             collections: crate::collections::Collections::new(),
+            gate: crate::draft::gate::Gate::default(),
+            apply_lock: tokio::sync::Mutex::new(()),
+            auth_key: None,
+            dir: base_dir.to_path_buf(),
+            draft: Mutex::new(crate::draft::Draft::default()),
             ids,
             log,
             shutdown: crate::shutdown::Shutdown::new(),
-            options,
-            project_options,
         })
     }
 
-    /// The generation options of a route owned by `owner`; the project's for a route without
-    /// an owner (static routes have no schema, so this is a fallback).
-    pub fn options_for_owner(&self, owner: Option<NodeId>) -> &Options {
-        owner.map_or(&self.project_options, |id| &self.options[id])
+    /// The generation in force, one `Arc` clone (the lock is gone on return). A request calls
+    /// this once and reads everything from the result, so a swap cannot split it across two
+    /// generations. `None` before the first Apply of a blank start.
+    pub fn generation(&self) -> Option<Arc<Generation>> {
+        self.generation
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replaces the generation in force (or empties it, as a blank start has none).
+    #[cfg(test)]
+    pub(crate) fn set_generation(&self, g: Option<Arc<Generation>>) {
+        *self
+            .generation
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = g;
+    }
+
+    /// Puts `g` in force, as the next generation. The caller holds the `control` lock and has
+    /// drained the gate, so no request straddles the change.
+    pub(crate) fn install(&self, g: Generation) {
+        *self
+            .generation
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(g));
+    }
+
+    /// The generation, to set what a plain `build` leaves out (the engine and the issuer, which
+    /// need a runtime and a key). Only before the state is shared: no clone of the `Arc` may exist.
+    ///
+    /// # Panics
+    /// If there is no generation, or one is held elsewhere.
+    pub fn gen_mut(&mut self) -> &mut Generation {
+        let slot = self
+            .generation
+            .get_mut()
+            .expect("generation lock poisoned")
+            .as_mut()
+            .expect("no generation installed");
+        Arc::get_mut(slot).expect("generation is shared; set the engine before sharing the state")
     }
 }

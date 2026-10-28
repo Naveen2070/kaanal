@@ -29,6 +29,7 @@ use serde_json::{Value, json};
 
 use crate::auth;
 use crate::collections::{self, Call};
+use crate::generation::Generation;
 use crate::log::{self, LogEntry};
 use crate::pins;
 use crate::record::{self, Answer, Facts, Run, TraceParts};
@@ -63,33 +64,34 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let control = path == "/__kaanal" || path.starts_with("/__kaanal/");
     let cors = |r: Response| if control { r } else { with_cors(r) };
 
-    if req.method() == Method::OPTIONS {
-        return cors(StatusCode::NO_CONTENT.into_response());
+    if let Some(early) = early_answer(req.method(), control, &path) {
+        return early;
     }
-    if control {
-        return no_route(&path);
-    }
+    // Held to the end of the request: an Apply waits for it, and while an Apply drains, a new
+    // request waits here, so it runs on the new system.
+    let _in_flight = st.gate.enter().await;
+    // One generation for the whole request: a swap mid-request never reaches it. A blank start has
+    // no system yet, so there is nothing to answer.
+    let Some(g) = st.generation() else {
+        return cors(no_system());
+    };
     // C11: a site file, when no spec route has this path. Before `Flight`, so it takes no id, no
     // counter and no log entry, and never meets the engine (chaos cannot hide the page).
-    if let Some(site) = &st.site
-        && st.paths.at(&path).is_err()
-        && let Some(resp) = crate::site::serve(site, req.method(), &path).await
-    {
+    if let Some(resp) = site_page(&g, req.method(), &path).await {
         return resp;
     }
     // Preflights and site files take no id; everything below does, so ids count the requests that are logged.
     let mut flight = Flight::new(&st, &req, path);
     let (method, path) = (flight.method.as_str(), flight.path.as_str());
 
-    let Ok(matched) = st.paths.at(path) else {
+    let Ok(matched) = g.paths.at(path) else {
         let (ident, resp) = (flight.ident.take().expect("armed"), no_route(path));
         return cors(rejected(&st, ident, method, path, None, "unmatched", resp));
     };
     // A HEAD with no spec entry was given its own copy of GET at build time (R6.8); hyper strips the body.
     let Some(route) = matched.value.iter().find(|r| r.method == method) else {
-        let body = Json(json!({ "error": "method not allowed", "path": path }));
-        let resp = (StatusCode::METHOD_NOT_ALLOWED, body).into_response();
         let ident = flight.ident.take().expect("armed");
+        let resp = no_method(path);
         return cors(rejected(&st, ident, method, path, None, "unmatched", resp));
     };
     flight.endpoint = Some(Arc::clone(&route.endpoint));
@@ -121,7 +123,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         route.key, route.endpoint.key,
         "a route answers with its own endpoint"
     );
-    let sizes = sizes(&st, route, req.headers(), (method, path, &params, &query));
+    let sizes = sizes(&g, route, req.headers(), (method, path, &params, &query));
     let body = read_body(route, &params, req).await;
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     // S10: the scoped stack, or else one snapshot of the live one (the `Arc` is cloned once here
@@ -134,10 +136,10 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         snap = st.snapshot();
         (&snap.chaos, &snap.pins)
     };
-    let (plan, pin) = plan_of(&st, route, n, chaos, pins, sizes);
+    let (plan, pin) = plan_of(&g, route, n, chaos, pins, sizes);
     // limitation: the answer comes from the engine task, which wakes on the OS timer (about 15 ms
     // on Windows) but runs every hop at its scheduled time, so the trace stays exact.
-    let Some(fin) = (match &st.engine {
+    let Some(fin) = (match &g.engine {
         Some(e) => e.run(Arc::clone(&plan)).await,
         None => None,
     }) else {
@@ -156,6 +158,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
     let ident = flight.ident.take().expect("armed");
     let resp = finish(
         &st,
+        &g,
         body,
         Served {
             route,
@@ -225,6 +228,37 @@ fn scope_of(
     Ok(Some((key, scoped)))
 }
 
+/// **Private.** The site file for `path`, when the config has a `site:` and no spec route has it.
+async fn site_page(g: &Generation, method: &Method, path: &str) -> Option<Response> {
+    let site = g.site.as_ref()?;
+    if g.paths.at(path).is_ok() {
+        return None;
+    }
+    crate::site::serve(site, method, path).await
+}
+
+/// **Private.** The 405 for a path that has no route for this method.
+fn no_method(path: &str) -> Response {
+    let body = Json(json!({ "error": "method not allowed", "path": path }));
+    (StatusCode::METHOD_NOT_ALLOWED, body).into_response()
+}
+
+/// **Private.** The answers that need no system: a preflight (204; CORS everywhere but the control
+/// namespace) and an unknown control path (404, never CORS).
+fn early_answer(method: &Method, control: bool, path: &str) -> Option<Response> {
+    if *method == Method::OPTIONS {
+        let r = StatusCode::NO_CONTENT.into_response();
+        return Some(if control { r } else { with_cors(r) });
+    }
+    control.then(|| no_route(path))
+}
+
+/// **Private.** The 404 of a blank start before its first Apply.
+fn no_system() -> Response {
+    let body = Json(json!({ "error": "no system applied yet" }));
+    (StatusCode::NOT_FOUND, body).into_response()
+}
+
 /// **Private.** The 400 for a bad `X-Kaanal-Scenario` header.
 fn bad_scope(detail: &str) -> Response {
     let body = Json(json!({ "error": "bad scenario scope", "detail": detail }));
@@ -235,7 +269,7 @@ fn bad_scope(detail: &str) -> Response {
 /// `pins` of the scoped stack or of the snapshot). A pin's delay goes into the plan; a
 /// synthesized `HEAD` follows its `GET`'s pin.
 fn plan_of(
-    st: &AppState,
+    g: &Generation,
     route: &Route,
     n: u64,
     chaos: &EffectiveChaos,
@@ -254,12 +288,12 @@ fn plan_of(
     let req = ChainRequest {
         endpoint: ep,
         n,
-        seed: st.chain_seed,
+        seed: g.chain_seed,
         pin_delay: pin.as_ref().map_or(Duration::ZERO, |o| o.delay),
         req_bytes,
         resp_bytes,
     };
-    (Arc::new(sample_plan(&st.topo, chaos, &req).0), pin)
+    (Arc::new(sample_plan(&g.topo, chaos, &req).0), pin)
 }
 
 /// **Private.** The request body size from `Content-Length` (0 when absent or not a number).
@@ -286,19 +320,19 @@ type Parts<'a> = (
 // ponytail: those routes pay no response transfer; size them if a real need shows up.
 // Read before `read_body` takes the request (it needs the headers).
 fn sizes(
-    st: &AppState,
+    g: &Generation,
     route: &Route,
     headers: &axum::http::HeaderMap,
     (method, path, params, query): Parts,
 ) -> (u64, u64) {
     // Only a topology with a payload cost looks at sizes at all.
-    if !st.topo.payload_costs() {
+    if !g.topo.payload_costs() {
         return (0, 0);
     }
     (
         content_length(headers),
         resp_bytes(
-            st,
+            g,
             route,
             &Ask {
                 method,
@@ -311,7 +345,7 @@ fn sizes(
 }
 
 /// **Private.** The response half of [`sizes`].
-fn resp_bytes(st: &AppState, route: &Route, ask: &Ask) -> u64 {
+fn resp_bytes(g: &Generation, route: &Route, ask: &Ask) -> u64 {
     let ep = &route.endpoint;
     // hyper strips a HEAD body, so the client never receives those bytes
     if ask.method == "HEAD"
@@ -320,7 +354,7 @@ fn resp_bytes(st: &AppState, route: &Route, ask: &Ask) -> u64 {
     {
         return 0;
     }
-    let (_, body) = reply::success(st, route, ask);
+    let (_, body) = reply::success(g, route, ask);
     if body.is_null() {
         0
     } else {

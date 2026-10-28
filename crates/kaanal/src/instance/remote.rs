@@ -49,6 +49,17 @@ pub(crate) fn post_shutdown(run: &lifecycle::Run, budget: &str) -> Option<Shutdo
 /// exit 1 if it is alive but silent (spec M9, M16); remotely no answer is exit 1 (E5). The client
 /// never follows redirects and never uses a proxy — either could forward the token.
 pub(crate) fn call(method: &str, path: &str, body: Option<Value>) -> Result<Value, Fail> {
+    call_for(method, path, body, Duration::from_secs(10))
+}
+
+/// **Private.** [`call`] with its own total time budget, for a request that waits on purpose
+/// (`draft apply` drains requests in flight).
+pub(crate) fn call_for(
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    total: Duration,
+) -> Result<Value, Fail> {
     let target = target::resolve()?;
     let auth = target.auth();
     let url = target.url(path);
@@ -62,7 +73,7 @@ pub(crate) fn call(method: &str, path: &str, body: Option<Value>) -> Result<Valu
         // The server never redirects; following one could forward the token to another host.
         .max_redirects(0)
         .timeout_connect(Some(Duration::from_secs(2)))
-        .timeout_global(Some(Duration::from_secs(10)))
+        .timeout_global(Some(total))
         .build()
         .into();
     let res = match (method, body) {
@@ -92,7 +103,17 @@ pub(crate) fn call(method: &str, path: &str, body: Option<Value>) -> Result<Valu
             .header("Authorization", &auth)
             .call(),
     };
-    let mut resp = res.map_err(|e| target.unreachable(&e.to_string()))?;
+    let mut resp = res.map_err(|e| {
+        // the server took the connection but did not answer in time: it may still be working
+        // (a drain), which is not the same as nobody answering
+        if matches!(e, ureq::Error::Timeout(ureq::Timeout::Global)) {
+            return err(format!(
+                "{method} {path}: no answer within {}s; the server may still be working (check `kaanal draft show` or `kaanal status`)",
+                total.as_secs()
+            ));
+        }
+        target.unreachable(&e.to_string())
+    })?;
     let status = resp.status().as_u16();
     let text = resp.body_mut().read_to_string().unwrap_or_default();
     let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);

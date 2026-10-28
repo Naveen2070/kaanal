@@ -32,6 +32,7 @@ async fn load_rejects_empty_pin_with_no_form_and_pin_on_head_and_unknown_endpoin
             port: 0,
             token: kaanal_server::new_token(),
             auth_key: None,
+            draft: None,
         };
         let r = kaanal_server::serve(&Config::from_yaml(&yaml).unwrap(), &dir, opts).await;
         assert!(r.is_err(), "{ep}");

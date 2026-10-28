@@ -1,14 +1,16 @@
 //! Unit tests for the control API handlers and guard.
 
 use super::{
-    ChaosPatch, activate, clear_node, ct_eq, expire_due, host_allowed, lease_task, lock,
-    next_deadline, query_token, scenario_data, set_chaos,
+    ChaosPatch, activate, clear_node, ct_eq, expire_due, host_allowed, lease_task, lock, lock_gen,
+    locked, next_deadline, query_token, scenario_data, set_chaos,
 };
 use crate::chaos_lease::Unit;
+use crate::generation::Gen;
 use crate::state::{AppState, BusEvent};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use kaanal_core::{ChaosKey, ChaosLayer, Config};
 use serde_json::json;
 use std::sync::Arc;
@@ -25,9 +27,14 @@ fn state() -> Arc<AppState> {
 
 async fn lease(st: &Arc<AppState>, name: &str, ttl: &str) {
     let body = Bytes::from(format!(r#"{{"ttl":"{ttl}"}}"#));
-    let _ = activate(State(Arc::clone(st)), Path(name.into()), body)
-        .await
-        .unwrap();
+    let _ = activate(
+        State(Arc::clone(st)),
+        Gen(st.generation().unwrap()),
+        Path(name.into()),
+        body,
+    )
+    .await
+    .unwrap();
 }
 
 async fn settle() {
@@ -116,13 +123,18 @@ async fn two_leases_due_in_one_call_expire_in_order() {
 
 async fn put(st: &Arc<AppState>, node: &str, body: serde_json::Value) {
     let p: ChaosPatch = serde_json::from_value(body).unwrap();
-    let _ = set_chaos(State(Arc::clone(st)), Path(node.into()), Ok(Json(p)))
-        .await
-        .unwrap();
+    let _ = set_chaos(
+        State(Arc::clone(st)),
+        Gen(st.generation().unwrap()),
+        Path(node.into()),
+        Ok(Json(p)),
+    )
+    .await
+    .unwrap();
 }
 
 fn node(st: &AppState, name: &str) -> ChaosKey {
-    ChaosKey::Node(st.topo.id(name).unwrap())
+    ChaosKey::Node(st.generation().unwrap().topo.id(name).unwrap())
 }
 
 /// The live entry of `db` in Control and in the published snapshot; they must agree.
@@ -167,7 +179,7 @@ async fn chaos_ttl_expires_and_clears_only_its_unit() {
     let snap = st.snapshot();
     let r = snap
         .chaos
-        .visit(st.topo.id("db").unwrap(), "GET /x")
+        .visit(st.generation().unwrap().topo.id("db").unwrap(), "GET /x")
         .unwrap();
     assert!(!r.down);
     assert_eq!(r.latency_add, Duration::from_millis(200));
@@ -249,9 +261,13 @@ async fn expiry_after_the_entry_was_deleted_emits_nothing_and_does_not_spin() {
     let mut rx = st.events.subscribe();
     tokio::spawn(lease_task(Arc::clone(&st)));
     put(&st, "db", json!({ "down": true, "ttl": "1s" })).await;
-    let _ = clear_node(State(Arc::clone(&st)), Path("db".into()))
-        .await
-        .unwrap();
+    let _ = clear_node(
+        State(Arc::clone(&st)),
+        Gen(st.generation().unwrap()),
+        Path("db".into()),
+    )
+    .await
+    .unwrap();
     tokio::time::advance(Duration::from_secs(2)).await;
     settle().await;
     assert_eq!(next_deadline(&lock(&st)), None);
@@ -291,7 +307,7 @@ async fn expire_event_names_the_chaos_key() {
     );
     // An endpoint and a node@endpoint key name their parts the way `PUT /chaos` does.
     // (Stored directly: the test topology has no routes for a keyed PUT.)
-    let id = st.topo.id("db").unwrap();
+    let id = st.generation().unwrap().topo.id("db").unwrap();
     let past = tokio::time::Instant::now() - Duration::from_secs(1);
     {
         let mut c = lock(&st);
@@ -401,4 +417,68 @@ fn token_comes_only_from_the_token_parameter() {
     assert_eq!(query_token(Some("xtoken=abc")), None);
     assert_eq!(query_token(Some("token")), None);
     assert_eq!(query_token(None), None);
+}
+
+#[tokio::test]
+async fn a_due_chaos_lease_is_dropped_even_with_no_generation() {
+    let st = state();
+    let past = tokio::time::Instant::now() - Duration::from_secs(1);
+    lock(&st)
+        .chaos_leases
+        .insert((ChaosKey::Node(0), Unit::Down), past);
+    st.set_generation(None);
+    assert_eq!(expire_due(&st), 0, "no key to name, so no event");
+    assert!(
+        lock(&st).chaos_leases.is_empty(),
+        "a past-due lease left behind would make the lease task spin"
+    );
+}
+
+#[tokio::test]
+async fn a_stale_generation_is_refused_under_the_control_lock() {
+    let st = state();
+    let old = st.generation().unwrap();
+    assert!(
+        lock_gen(&st, &old).is_ok(),
+        "the generation in force is accepted"
+    );
+    let cfg = Config::from_yaml(
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n",
+    )
+    .unwrap();
+    let (mut next, _) =
+        crate::generation::Generation::build(&cfg, std::path::Path::new("."), None, false).unwrap();
+    next.id = 2;
+    st.install(next);
+    let err = lock_gen(&st, &old)
+        .err()
+        .expect("the old generation is stale");
+    assert_eq!(err.0, StatusCode::CONFLICT);
+    assert!(
+        err.1.0["error"]
+            .as_str()
+            .unwrap()
+            .contains("system changed")
+    );
+    assert!(lock_gen(&st, &st.generation().unwrap()).is_ok());
+}
+
+#[tokio::test]
+async fn locked_pairs_the_lock_with_the_generation_in_force_and_never_refuses_a_swap() {
+    let st = state();
+    let first = st.generation().unwrap();
+    assert_eq!(locked(&st).unwrap().1.id, first.id);
+    let cfg = Config::from_yaml(
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n",
+    )
+    .unwrap();
+    let (mut next, _) =
+        crate::generation::Generation::build(&cfg, std::path::Path::new("."), None, false).unwrap();
+    next.id = 2;
+    st.install(next);
+    // a reader that came after the swap just gets the new one: no 409 for a swap
+    assert_eq!(locked(&st).unwrap().1.id, 2);
+    st.set_generation(None);
+    let err = locked(&st).err().expect("no system");
+    assert_eq!(err.0, StatusCode::CONFLICT);
 }

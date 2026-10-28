@@ -427,6 +427,7 @@ async fn start(name: &str) -> Srv {
         port: 0,
         token: token.clone(),
         auth_key: None,
+        draft: None,
     };
     let s = kaanal_server::serve(&Config::from_yaml(CONFIG).unwrap(), &dir, opts)
         .await

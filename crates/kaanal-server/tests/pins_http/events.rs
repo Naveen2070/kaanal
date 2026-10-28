@@ -57,6 +57,7 @@ async fn save_writes_pins_and_reload_round_trips() {
         port: 0,
         token: "t".into(),
         auth_key: None,
+        draft: None,
     };
     let s2 = kaanal_server::serve(&cfg, &s.dir, opts).await.unwrap();
     let base = format!("http://127.0.0.1:{}", s2.addr.port());

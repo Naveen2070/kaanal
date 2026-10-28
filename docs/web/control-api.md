@@ -203,6 +203,34 @@ Live [pins](pins.md) force an endpoint to answer as `loading`, `empty`, `error`,
 
 A `400` or `404` changes nothing. `POST /__kaanal/reset` clears live pins; `DELETE /__kaanal/chaos` leaves them.
 
+### Draft
+
+The draft is the text of the `kaanal.yaml` being edited, kept apart from the running system and from the disk. Editing it changes neither; Apply and Save (later) do. It starts as the config file's text exactly as `kaanal up` read it (comments and line endings included); a server started with no file starts with an empty draft.
+
+`GET /__kaanal/draft` returns `{ "text": "...", "dirty": false, "generation": 1 }`: `dirty` is true when the text differs from the last applied one, and `generation` counts the systems applied (0 before the first Apply of a blank start).
+
+`PUT /__kaanal/draft` with `{ "text": "..." }` replaces the draft and returns the same view. The text is **not** validated, so a half-typed file can be stored. Last writer wins (one user; two tabs overwrite each other). A body without `text` is a `4xx`; a text over 1 MiB (1048576 bytes) is `400` and the draft is unchanged (the text is what is counted, not the JSON: a body may be up to about 6 MiB so that a text of control characters, six bytes each once escaped, still gets that answer). Both routes need the token.
+
+`POST /__kaanal/draft/validate` builds the draft off to the side with the loader `kaanal up` uses (parse, topology, specs, endpoints, scenarios) and answers `{ "ok": true, "diagnostics": [], "warnings": [...], "flagged": [...] }` (`flagged` as under Apply), or `{ "ok": false, "diagnostics": [ { "file": null, "line": 9, "col": 14, "path": ["edges", 1, "to"], "message": "..." } ], "warnings": [] }`. A problem in the draft is data: the status is `200` and `ok` is false. The loader stops at the first error, so there is at most one diagnostic. `line` is 1-based and `col` 0-based; both are `null` when the error has no place, and `file` names the file when the error is in a spec or the endpoints file rather than `kaanal.yaml` (then `line` and `col` are that file's, or `null`). With a body `{ "text": "..." }` it validates that text instead and stores nothing. It never swaps the running system, never starts an engine, and does not touch the draft. Over 1 MiB is `400`.
+
+`POST /__kaanal/draft/apply` makes the draft the running system, without a restart. It builds the draft (as validate does), then **holds mock traffic back**, waits for the mock requests already in flight to finish, swaps the system and lets traffic go on. A request that arrives while it drains waits and then runs on the new system; one already running finishes on the old. Control-API requests are never held. The body is optional: `{ "timeout_ms": 10000 }` is how long to wait for the drain (default 10 s, at most 60 s).
+
+```
+{ "ok": true, "generation": 2,
+  "kept": { "live_chaos": 1, "active_scenarios": ["s1"], "runtime_scenarios": ["x"], "pins": 1 },
+  "dropped": { "live_chaos": ["node 'db'"], "scenario_chaos": [], "active_scenarios": ["payments-down"], "pins": [] },
+  "flagged": [] }
+```
+
+- **What changes.** The topology, routes, endpoints, specs, data, auth issuer and engine are new; `generation` counts up. Route counters start again at zero (so a seeded sequence restarts), the `collection:` items are emptied (they belong to the system that defined them), and rate-limit buckets and queues start empty. An Apply always rebuilds from disk, so it also picks up an edited spec, data or scenario file, even when the draft text did not change. The control token, key files and port do not change. The scenarios are reloaded from the new draft and `scenarios/`.
+- **What is kept, by name.** Live chaos, its `ttl` leases, the runtime scenarios (those made with `PUT /scenarios/{name}`, which are in no file), the active scenarios and the live pins are carried over where what they name still exists: a chaos key by node name (so reordering nodes is harmless), an edge by its two node names, a replica only while the node still has it, an endpoint key only while the route exists, a scenario only while the new draft (or `scenarios/`) still defines it, a pin only while its endpoint exists (a pin on `empty` also needs the endpoint to still have an empty form). A rename is a removal plus an addition. `kept` counts them: `{ "live_chaos": 1, "active_scenarios": ["s1"], "pins": 1 }`; `dropped` lists what went: `{ "live_chaos": ["node 'db'", "node 'db' replica 2"], "active_scenarios": ["s2"], "pins": ["GET /users/{id}"] }`. A leased unit on a dropped key loses its lease with it. What is kept is also checked the way the API checks a new entry: a `bandwidth_cap` on an edge that no longer has that much bandwidth is removed (the rest of the entry stays; it is listed as `... bandwidth_cap` under `dropped.live_chaos`), a pin or endpoint chaos on a route that is now static with no entry node, or only a `HEAD` made from its `GET`, is dropped. A runtime scenario is carried the same way (its dropped parts are listed under `dropped.scenario_chaos` as `scenario NAME: ...`); if the new draft defines a scenario of the same name, the draft's definition replaces it, and that is listed too.
+- **`flagged`.** A `scenarios/*.yaml` that names a node, edge or endpoint the new system lacks does not fail the Apply (or validate): it is left out of the new system and listed: `[ { "file": "...scenarios/f.yaml", "scenario": "f", "message": "..." } ]`. The file stays on disk, and startup is strict, so the next `kaanal up` fails on it until you fix or remove it. Scenarios defined inline in the draft are part of it and stay strict.
+- `400` when the draft does not build: `{ "error": "...", "diagnostics": [ ... ] }` as in validate, and nothing changes. `400` also for a `timeout_ms` over 60 s.
+- `409` `drain timed out; the old system keeps running` when requests did not finish in time: traffic resumes at once, the draft is kept, and nothing else changes. Apply again later, or with a longer `timeout_ms`.
+- **What holds the drain.** Any mock request in flight, from the moment it arrives until its answer is built: a long chain, a `hang` chaos (up to 60 s), or a client that sends its body slowly. If an Apply keeps ending in `409`, wait for those or raise `timeout_ms`.
+- One Apply at a time; a second waits for the first. A control request that was working on the old system when the swap happened (for example a scenario save) answers `409` `the system changed while this request ran; retry`. The reads that pair chaos with the system (`GET /chaos`, `GET /scenarios/active`, `GET /scenarios/{name}`) never answer that: they answer from whichever system is in force once they hold the control lock.
+- After an Apply, `dirty` on the draft is false and `generation` is the new one; the `events` stream carries an `applied` message.
+
 ### `GET /__kaanal/logs`
 
 The request log: the last finished mock requests, oldest completion first. What an entry holds, the flags and the commands that use this route are in [observability](observability.md).
@@ -262,7 +290,7 @@ Both routes need the token and the `Host` guard like every other control route, 
 
 ### `GET /__kaanal/events`
 
-Server-Sent Events stream of every mock request as it completes, and of scenario changes.
+Server-Sent Events stream of every mock request as it completes, of scenario changes, and of each Apply of the draft (`applied`, with the new `generation`).
 
 ```
 event: request
@@ -270,6 +298,9 @@ data: {"id":"r19a2-0001","client_id":"checkout-17","seq":1,"rejected":null,"ts_m
 
 event: scenario
 data: {"action":"activate","name":"payments-down","active":["payments-down"]}
+
+event: applied
+data: {"generation":2}
 
 event: lagged
 data: 37
