@@ -446,8 +446,13 @@ async fn a_stale_generation_is_refused_under_the_control_lock() {
         "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n",
     )
     .unwrap();
-    let (mut next, _) =
-        crate::generation::Generation::build(&cfg, std::path::Path::new("."), None, false).unwrap();
+    let (mut next, _) = crate::generation::Generation::build(
+        &cfg,
+        std::path::Path::new("."),
+        None,
+        crate::generation::Trust::Owner,
+    )
+    .unwrap();
     next.id = 2;
     st.install(next);
     let err = lock_gen(&st, &old)
@@ -472,8 +477,13 @@ async fn locked_pairs_the_lock_with_the_generation_in_force_and_never_refuses_a_
         "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n",
     )
     .unwrap();
-    let (mut next, _) =
-        crate::generation::Generation::build(&cfg, std::path::Path::new("."), None, false).unwrap();
+    let (mut next, _) = crate::generation::Generation::build(
+        &cfg,
+        std::path::Path::new("."),
+        None,
+        crate::generation::Trust::Owner,
+    )
+    .unwrap();
     next.id = 2;
     st.install(next);
     // a reader that came after the swap just gets the new one: no 409 for a swap

@@ -47,7 +47,7 @@ mod view;
 
 pub use admin::{events, reset, shutdown, ui};
 pub use chaos::{clear_keyed, clear_node, get_chaos, set_chaos, set_chaos_keyed, topology};
-pub use draft::{apply_draft, get_draft, put_draft, validate_draft};
+pub use draft::{apply_draft, get_draft, put_draft, save_draft, validate_draft};
 pub use guard::guard;
 pub use lease::lease_task;
 pub use save::save_scenario;

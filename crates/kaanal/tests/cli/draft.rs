@@ -101,3 +101,50 @@ fn draft_commands_honour_json_and_the_timeout_flag() {
     let err = usage_fails(&up, &["draft", "apply", "--timeout", "2m"]);
     assert!(err.contains("60s"), "{err}");
 }
+
+#[test]
+fn draft_save_prints_the_files_written() {
+    let (up, dir) = scenario_up("draft-save");
+    let next = format!("{}# saved by the CLI\n", base(&dir));
+    let file = dir.join("next.yaml");
+    std::fs::write(&file, &next).unwrap();
+    ok(&up, &["draft", "set", "-f", file.to_str().unwrap()]);
+    // nothing is on disk until save
+    assert_eq!(base(&dir), next.replace("# saved by the CLI\n", ""));
+    let out = ok(&up, &["draft", "save"]);
+    assert_eq!(out.trim(), "saved: kaanal.yaml");
+    assert_eq!(base(&dir), next);
+    let v = one_json(&ok(&up, &["draft", "save", "--json"]));
+    assert_eq!(v["written"][0], "kaanal.yaml");
+}
+
+#[test]
+fn draft_save_refuses_when_the_file_changed_and_removes_stale_scenarios_on_request() {
+    let (up, dir) = scenario_up("draft-save-fix");
+    // a file edited behind the instance's back is a conflict, exit 1, nothing overwritten
+    let mine = base(&dir);
+    std::fs::write(dir.join("kaanal.yaml"), format!("{mine}# theirs\n")).unwrap();
+    let err = fails(&up, &["draft", "save"]);
+    assert!(err.contains("changed on disk"), "{err}");
+    assert!(base(&dir).ends_with("# theirs\n"));
+    std::fs::write(dir.join("kaanal.yaml"), &mine).unwrap();
+
+    // a draft without `db` flags the scenario file that names it; --fix-scenarios remove drops it
+    std::fs::create_dir_all(dir.join("scenarios")).unwrap();
+    std::fs::write(
+        dir.join("scenarios/f.yaml"),
+        "chaos:\n  - { node: db, down: true }\n",
+    )
+    .unwrap();
+    let no_db = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, spec: openapi.yaml }\nedges:\n  - { from: gw, to: app }\n";
+    let file = dir.join("next.yaml");
+    std::fs::write(&file, no_db).unwrap();
+    ok(&up, &["draft", "set", "-f", file.to_str().unwrap()]);
+    let out = ok(&up, &["draft", "save", "--fix-scenarios", "remove"]);
+    assert!(out.contains("saved: kaanal.yaml"), "{out}");
+    assert!(out.contains("removed: scenarios"), "{out}");
+    assert!(!dir.join("scenarios/f.yaml").exists());
+    assert_eq!(base(&dir), no_db);
+    let err = usage_fails(&up, &["draft", "save", "--fix-scenarios", "nope"]);
+    assert!(err.contains("nope"), "{err}");
+}

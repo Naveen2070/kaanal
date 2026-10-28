@@ -264,6 +264,24 @@ pub(crate) enum DraftCmd {
         #[arg(long, default_value = "10s")]
         timeout: String,
     },
+    /// Write the draft to the config file (atomically); the running system is not touched
+    Save {
+        /// Save even though edits dropped comments or anchors
+        #[arg(long)]
+        confirm_loss: bool,
+        /// What to do with scenario files the draft no longer resolves against (default: leave them)
+        #[arg(long, value_enum)]
+        fix_scenarios: Option<FixScenarios>,
+    },
+}
+
+/// **Private.** `draft save --fix-scenarios` values.
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum FixScenarios {
+    /// Point them at the renamed node (needs a rename; not available yet)
+    Rewrite,
+    /// Delete the files
+    Remove,
 }
 
 /// **Private.** `scenario` subcommands.

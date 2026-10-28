@@ -16,6 +16,10 @@ pub(crate) fn draft(cmd: DraftCmd) -> Result<(), Fail> {
         DraftCmd::Set { file } => set(&file),
         DraftCmd::Validate { file } => validate(file.as_deref()),
         DraftCmd::Apply { timeout } => apply(&timeout),
+        DraftCmd::Save {
+            confirm_loss,
+            fix_scenarios,
+        } => save(confirm_loss, fix_scenarios),
     }
 }
 
@@ -58,7 +62,7 @@ fn first_problem(v: &Value, label: &Path) -> Fail {
         msg: clean(d["message"].as_str().unwrap_or("the draft does not build")),
     };
     // a problem in another file (a spec, the endpoints file) names that file
-    let file = d["file"].as_str().map(PathBuf::from);
+    let file = d["file"].as_str().map(|f| PathBuf::from(clean(f)));
     config_err(file.as_deref().unwrap_or(label), &e)
 }
 
@@ -124,6 +128,37 @@ fn apply(timeout: &str) -> Result<(), Fail> {
         wait + Duration::from_secs(15),
     )?;
     output::emit(&v, || print_applied(&v));
+    Ok(())
+}
+
+/// **Private.** `draft save`: writes the draft to the config file. A refusal (the file changed on
+/// disk, edits that lost something) is the server's message and exits 1.
+fn save(confirm_loss: bool, fix: Option<crate::cli::FixScenarios>) -> Result<(), Fail> {
+    let fix = match fix {
+        None => "none",
+        Some(crate::cli::FixScenarios::Remove) => "remove",
+        Some(crate::cli::FixScenarios::Rewrite) => "rewrite",
+    };
+    let v = call(
+        "POST",
+        "/__kaanal/draft/save",
+        Some(json!({ "confirm_loss": confirm_loss, "fix_scenarios": fix })),
+    )?;
+    output::emit(&v, || {
+        let list = |k: &str| -> Vec<String> {
+            v[k].as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(clean)
+                .collect()
+        };
+        println!("saved: {}", list("written").join(", "));
+        let removed = list("removed");
+        if !removed.is_empty() {
+            println!("removed: {}", removed.join(", "));
+        }
+    });
     Ok(())
 }
 

@@ -13,7 +13,7 @@ use kaanal_core::config::SeedSource;
 use kaanal_core::diagnostics::Located;
 use kaanal_core::{ChaosStack, Config, EffectiveChaos, EffectivePins, Endpoint, ScenarioSet};
 
-use crate::generation::Generation;
+use crate::generation::{Generation, Trust};
 use kaanal_data::PageSpec;
 use serde::Serialize;
 use serde_json::Value;
@@ -169,6 +169,8 @@ pub struct AppState {
     pub gate: crate::draft::gate::Gate,
     /// One Apply at a time.
     pub apply_lock: tokio::sync::Mutex<()>,
+    /// One Save at a time (its disk work runs without the `draft` lock held).
+    pub save_lock: Mutex<()>,
     /// The signing key an auth node needs, kept so an Apply can build the new issuer.
     pub auth_key: Option<crate::auth::AuthKey>,
     /// The directory the config was loaded from: spec, data and scenario files resolve against it.
@@ -256,7 +258,7 @@ impl AppState {
             // R2.3: entropy is the server's job, drawn once here; no RNG state is kept.
             SeedSource::Entropy => Some(rand::random::<u64>()),
         };
-        let (g, scenarios) = Generation::build(cfg, base_dir, drawn_seed, false)?;
+        let (g, scenarios) = Generation::build(cfg, base_dir, drawn_seed, Trust::Owner)?;
         let (events, _) = broadcast::channel(1024);
         let ids = crate::log::IdGen::new();
         let log = Mutex::new(crate::log::LogRing::new(ids.boot()));
@@ -284,6 +286,7 @@ impl AppState {
             collections: crate::collections::Collections::new(),
             gate: crate::draft::gate::Gate::default(),
             apply_lock: tokio::sync::Mutex::new(()),
+            save_lock: Mutex::new(()),
             auth_key: None,
             dir: base_dir.to_path_buf(),
             draft: Mutex::new(crate::draft::Draft::default()),

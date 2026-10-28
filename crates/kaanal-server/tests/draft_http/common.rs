@@ -56,6 +56,9 @@ pub(crate) async fn start_with(yaml: &str, draft: Option<&str>) -> Srv {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/openapi.yaml");
     std::fs::copy(fixture, dir.join("openapi.yaml")).unwrap();
     std::fs::write(dir.join("extra.yaml"), EXTRA_SPEC).unwrap();
+    if let Some(t) = draft {
+        std::fs::write(dir.join("kaanal.yaml"), t).unwrap(); // the file `up` read the draft from
+    }
     let cfg = Config::from_yaml(yaml).unwrap();
     let token = kaanal_server::new_token();
     let opts = ServeOpts {

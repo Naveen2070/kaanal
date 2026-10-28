@@ -13,7 +13,7 @@ One test target (`cargo test -p kaanal-core --test config`), one module per topi
 | Module         | What it covers                                  |
 | -------------- | ----------------------------------------------- |
 | `common.rs`    | The sample config.                              |
-| `draft.rs` | `kaanal draft`: `draft_show_prints_the_config_text_the_instance_started_from` (text and `--json`), `draft_validate_prints_positions_and_exits_1` (`--file` is checked without storing, the stored draft prints as `draft:LINE:`), `draft_apply_prints_kept_dropped_and_flagged` (kept chaos, a dropped active scenario, a flagged scenario file, the new system serving, the draft clean at generation 2), `draft_apply_with_a_bad_draft_exits_1_with_the_position_and_changes_nothing`, `draft_commands_honour_json_and_the_timeout_flag` (a bad or over-60s `--timeout` is a usage error). `show`, `validate` and `apply` are also in `every_client_command_honours_json`. |
+| `draft.rs` | `kaanal draft`: `draft_show_prints_the_config_text_the_instance_started_from` (text and `--json`), `draft_validate_prints_positions_and_exits_1` (`--file` is checked without storing, the stored draft prints as `draft:LINE:`), `draft_apply_prints_kept_dropped_and_flagged` (kept chaos, a dropped active scenario, a flagged scenario file, the new system serving, the draft clean at generation 2), `draft_apply_with_a_bad_draft_exits_1_with_the_position_and_changes_nothing`, `draft_commands_honour_json_and_the_timeout_flag` (a bad or over-60s `--timeout` is a usage error), `draft_save_prints_the_files_written` (nothing on disk until save, `saved: kaanal.yaml`, `--json`), `draft_save_refuses_when_the_file_changed_and_removes_stale_scenarios_on_request` (a file edited behind the instance is exit 1 and kept; `--fix-scenarios remove` deletes the flagged file and prints it; an unknown value is a usage error). `show`, `validate` and `apply` are also in `every_client_command_honours_json`. |
 | `basics.rs`    | Defaults, positioned errors, durations.         |
 | `nodes.rs`     | Node kinds, p50 and p99, edges, the schema.     |
 | `endpoints.rs` | The `endpoints:` map and its positioned errors. |
@@ -400,6 +400,33 @@ One test target (`cargo test -p kaanal-core --test chain`), one module per topic
 | `a_step_prob_out_of_range_is_a_positioned_error` | A step `prob` of 0, 1.2 or -1 fails at the step (line 23) with `prob must be above 0`. |
 | `a_cache_timeout_below_the_hit_p50_warns` | (`compile.rs`) A cache with `hit: 5ms, timeout: 2ms` (and a `p50: 5ms` pair with `timeout: 4ms`) gives one compile warning naming the cache and "cut to misses". |
 | `a_cache_timeout_at_or_above_the_hit_p50_or_none_is_quiet` | `timeout` of 20 ms, equal to the hit cost, or none: no warning. |
+
+## `crates/kaanal-core/tests/splice.rs` — edits that keep the rest of the text
+
+See [splice](files/kaanal-core/splice.md).
+
+| Test | What it proves |
+| --- | --- |
+| `set_replaces_only_the_value_span` | A scalar, a quoted scalar, a flow map and a list item are replaced and nothing else changes. |
+| `set_on_an_empty_value_and_on_a_block_collection` | `key:` with no value and a block mapping are set after their key's colon. |
+| `insert_into_a_flow_map_keeps_the_style` | `, key: value` goes after the last entry; an empty `{ }` or `{}` becomes `{ key: value }`. |
+| `insert_into_a_block_map_matches_the_indent` | A new line after the last entry with the same indent (nested, at the root before a trailing comment, and in a map that starts on a `- ` line). |
+| `insert_into_an_empty_document_and_without_a_final_newline` | An empty or comment-only document gets its first key; a file with no final newline gets a line break first. |
+| `comments_and_blank_lines_survive_an_edit` | Three edits leave every comment, the blank line and the end-of-file comment where they were. |
+| `crlf_and_bom_are_kept` | The BOM stays and every new line ending is CRLF in a CRLF file. |
+| `non_ascii_text_before_an_edit_does_not_shift_it` | Characters outside ASCII before an edit do not move it (character index versus byte offset). |
+| `an_anchor_or_alias_target_is_refused_with_a_lost_entry` | An anchored value and an alias are left alone and listed; the rest of the document is still editable. |
+| `remove_takes_the_whole_entry_and_reports_the_comment_left_behind` | Block entries go with their line, a comment above stays and is listed, flow entries (first, middle, last, only) and list items (block and flow) go cleanly. |
+| `a_missing_path_or_a_duplicate_key_is_an_error_and_edits_apply_in_order` | `NotFound`, `Exists` and `Parse` errors; a later edit sees the result of an earlier one. |
+| `removing_a_block_scalar_or_an_empty_value_does_not_take_the_next_entry` | `|` and `>` scalars and an empty value (also in CRLF) are removed with their own lines only; the following entry stays. |
+| `inserting_after_a_block_scalar_or_empty_last_value_stays_in_its_parent` | A key inserted after such a last value lands in its own mapping, not after the next top-level entry. |
+| `setting_a_block_scalar_keeps_the_next_key_on_its_own_line` | Setting a block scalar replaces header and text; the next key is not joined to it and the result parses. |
+| `editing_inside_an_anchored_value_is_refused_not_applied` | A set, insert or remove inside an anchored map (flow and block) changes nothing and is listed; a sibling is still editable; an alias is not edited. |
+| `quoted_keys_are_found_by_their_value` | `"a"` and `'b c'` are found by `a` and `b c`; inserting `b c` is `Exists`. |
+| `an_inserted_key_can_never_carry_syntax` | A key with a colon and a newline is quoted and stays one key; `yes` and `404` are quoted, `ok_key-2` is bare; flow maps quote too. |
+| `duplicate_keys_are_a_parse_error_not_a_silent_first_match` | `a: 1\na: 2` is `Parse("duplicate key 'a'")`. |
+| `what_an_edit_cannot_keep_is_listed` | A comment between key and block value, the only child of a mapping, and a root edit each add a `lost` line. |
+| `unedited_bytes_never_change` | Setting every scalar leaf of three documents (including the demo fixture) to its own text reproduces the file byte for byte. |
 
 ## `crates/kaanal-core/tests/chaos_remap.rs` — chaos by name across topologies
 
@@ -1560,6 +1587,74 @@ See [draft](files/kaanal-server/draft.md) and [control-api](../web/control-api.m
 | `a_draft_edited_during_an_apply_stays_dirty_with_its_new_text` | A PUT made while an Apply drains is not lost: after it the draft has the new text, is dirty, and is at generation 2. |
 | `traffic_never_sees_a_gap_across_swaps` | Six clients hammering a route through three Applies get 200 every time. |
 | `a_draft_of_escapes_is_judged_by_the_text_limit_not_the_body_limit` | 1 MiB of newlines (2 MiB as JSON) is accepted; one byte more is the documented 400, not a 413. |
+| `an_absolute_spec_path_is_refused_even_when_the_file_exists` | A draft whose `spec:` is the absolute path of a file that exists is refused with a message naming only the draft's own text, at `nodes.app.spec`. |
+| `a_parent_dir_spec_path_is_refused` | `../x` and `specs/../../x` are refused. |
+| `data_and_endpoints_files_are_held_to_the_project_too` | An absolute `data:` and a `../` `endpoints:` are refused, with the path of the key. |
+| `a_missing_or_non_file_spec_reports_a_relative_path_and_no_content` | A missing spec and a folder named as a spec are reported by their relative path (`not a regular file`), never the project's absolute path. |
+| `a_spec_in_a_subfolder_of_the_project_is_fine_and_apply_refuses_the_rest` | `specs/api.yaml` validates; Apply of a `../` spec is 400 with the same message. |
+
+## `crates/kaanal-server/tests/draft_http/save.rs` — patches and Save
+
+See [draft](files/kaanal-server/draft.md).
+
+| Test | What it proves |
+| --- | --- |
+| `a_patch_keeps_comments_and_style` | A `set`, an `insert` of an object (keys in the order sent) and a `remove` change only their own bytes: the comment and the flow style stay, `lost` is empty and the result still validates. |
+| `a_bad_patch_is_400_and_changes_nothing` | A missing path, a duplicate key, a path step that is neither key nor index, a missing value, an insert without a key, both or neither of `text` and `patch` are 400; an unknown `op` is the extractor's 422; the draft is as it was. |
+| `the_disk_is_untouched_until_save` | A patch and an Apply leave the file's bytes and mtime as they were. |
+| `save_writes_the_draft_and_the_next_save_is_not_a_conflict` | Save writes the draft, answers `written: ["kaanal.yaml"]`, leaves no temp file, and a second Save after another patch is not a conflict (Save updates the base it compares with). |
+| `save_without_confirm_lists_what_would_be_lost` | A patch on an anchored value reports `lost`; Save is 409 with the list and writes nothing; with `confirm_loss` it writes the draft as it stands and `lost` clears. |
+| `replacing_the_text_clears_what_was_lost` | A whole-text `PUT` empties `lost`. |
+| `save_refuses_when_the_file_changed_or_vanished_on_disk` | A file edited elsewhere is 409 `conflict: true` and keeps the other edit; a deleted file is a conflict and is not recreated. |
+| `save_refuses_a_draft_that_names_a_file_outside_the_project` | An absolute `spec:`, a `../` `data:` and an absolute `endpoints:` are each 400 with the project-folder message and nothing is written; a relative spec and a draft that is not YAML still save. |
+| `save_with_no_config_file_is_409` | A server with no config file has nothing to save to. |
+
+## `crates/kaanal-server/tests/draft_http/fix.rs` — Save with fix_scenarios
+
+See [draft](files/kaanal-server/draft.md).
+
+| Test | What it proves |
+| --- | --- |
+| `remove_deletes_only_the_flagged_files_and_the_next_load_works` | `fix_scenarios: remove` deletes `scenarios/f.yaml` (flagged), keeps `ok.yaml`, reports `removed`, and the saved draft validates with nothing flagged. |
+| `without_a_fix_the_flagged_file_stays` | No body and `none` leave the file. |
+| `rewrite_is_refused_until_rename_exists` | `rewrite` is 400 and deletes nothing; an unknown value is 422. |
+| `a_refused_save_deletes_nothing` | A conflict (file changed on disk) is 409 and the flagged file stays. |
+| `remove_on_a_draft_that_does_not_build_is_400` | `remove` on a draft that does not build is 400 and deletes nothing. |
+
+## `crates/kaanal-server/src/draft/patch.rs` and `save.rs` (unit)
+
+See [draft](files/kaanal-server/draft.md).
+
+| Test | What it proves |
+| --- | --- |
+| `values_render_in_flow_style` | Numbers, booleans, null, bare words, `{ from: a, to: b, net: 2ms }` in the order sent, `[a, 1]` and `{}`. |
+| `a_null_value_is_a_value_and_a_missing_one_is_not` | `"value": null` sets null; no `value` is "needs a value". |
+| `strings_that_would_change_meaning_are_quoted` | `yes`, `8`, `a: b`, empty, a newline and `1e3` are quoted; `2ms` and `1.5s` are bare. |
+| `a_failure_between_write_and_rename_leaves_the_old_file_and_no_temp` | With a rename that fails, the target keeps its old text and the temp file is gone. |
+| `every_change_is_made_or_none` | A delete, a replace and a create where the second rename fails: the delete is undone, the replaced file has its old text, the new file is absent, no temp file is left; with no failure all three happen. |
+| `a_file_that_cannot_be_read_stops_the_commit_and_restores_what_it_did` | A delete followed by a write onto a folder: the read fails, the delete is undone, the folder stays, no temp file is left. |
+| `a_put_during_a_save_is_kept_and_the_saved_text_is_what_was_checked` | A `PUT` that lands after the snapshot: the checked text is written, the draft keeps the newer one with its `lost`, and the next Save writes it without a conflict. |
+| `temp_names_are_unique_and_never_reuse_what_is_there` | Two staged temp files differ, and `create_new` refuses a path that already exists. |
+| `a_plan_that_fails_writes_nothing` | A failing plan is `SaveError::Plan` and the file is untouched. |
+| `a_config_that_is_a_link_is_written_through` | (unix) the link stays a link and its target gets the text. |
+| `a_failed_stage_changes_nothing` | A write into a missing folder fails while staging, before anything is renamed. |
+| `a_good_write_replaces_the_file_whole_and_leaves_no_temp` | The new bytes (CRLF included) replace the file and only it is left in the folder. |
+
+## `crates/kaanal-server/src/draft/apply.rs` and `control/draft.rs` (unit) — what clients see, what Save deletes
+
+| Test | What it proves |
+| --- | --- |
+| `messages_and_files_never_show_the_project_folder_in_either_spelling` | With the project given as `tmp/sub/..`, a message holding the canonical path and one holding the given path both lose it; `relative` understands the canonical folder. |
+| `only_regular_files_in_the_projects_own_scenarios_folder_may_be_deleted` | A flagged file the loader found in another folder is not deleted, though it is named `scenarios/f.yaml`; a folder and a missing `scenarios/` give nothing. |
+
+## `crates/kaanal-server/src/generation.rs` (unit, trust) — files named in a config
+
+See [generation](files/kaanal-server/generation.md).
+
+| Test | What it proves |
+| --- | --- |
+| `the_owner_may_point_outside_the_project_and_the_api_may_not` | The same config with `spec: '../outside.yaml'` builds for `Trust::Owner` and is refused for `Trust::Api`, without the project's path in the message. |
+| `a_spec_larger_than_the_limit_is_not_read` | A file over 16 MiB and a folder are refused before reading. |
 
 ## `crates/kaanal-server/src/draft/apply.rs` (unit) — Apply
 

@@ -28,6 +28,7 @@ pub mod replay;
 pub mod rng;
 pub mod scenario;
 pub mod schema;
+pub mod splice;
 pub mod topology;
 pub mod visits;
 

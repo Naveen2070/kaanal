@@ -4,7 +4,7 @@ The Studio draft: the text of the `kaanal.yaml` being edited, apart from the run
 
 ## What it does
 
-The draft is canonical YAML text, so comments, order and line endings survive an edit (Studio step 2, spec section 5). Replacing it touches neither the running system nor the disk; Apply and Save (later tasks) are what do. One draft per server, last writer wins (single user).
+The draft is canonical YAML text, so comments, order and line endings survive an edit (Studio step 2, spec section 5). Replacing it, or patching it, touches neither the running system nor the disk; Apply and Save are what do. One draft per server, last writer wins (single user).
 
 ## Types
 
@@ -12,14 +12,34 @@ The draft is canonical YAML text, so comments, order and line endings survive an
 | --- | --- | --- |
 | `MAX_DRAFT_BYTES` | const | 1 MiB (1048576): the longest text `PUT /draft` accepts. |
 | `DraftSource` | struct | `file` and `text`: what a draft starts from. `kaanal up` passes the config file and the text it read; exported through `ServeOpts.draft`. |
-| `Draft` | struct | `text` (being edited) and `applied` (the text of the generation in force). `Draft::from_source(Option<DraftSource>)` starts clean, or empty with no source; `dirty()` is `text != applied`. Held in `AppState.draft` (`Mutex<Draft>`). |
+| `Draft` | struct | `text` (being edited), `applied` (the text of the generation in force), `file` (what Save writes, made absolute at start; `None` with no source), `base` (what the file held when we last read or wrote it: Save compares the disk with it; `None` when the file did not exist) and `lost` (what patches could not keep, until the text is replaced whole). `Draft::from_source(Option<DraftSource>)` starts clean, or empty with no source; `dirty()` is `text != applied`. Held in `AppState.draft` (`Mutex<Draft>`). |
 
 `draft/apply.rs` turns draft text into a system:
 
 | Item | Kind | What it does |
 | --- | --- | --- |
 | `Diagnostic` | struct | One problem placed in the draft: `file` (when not `kaanal.yaml`), `line` (1-based), `col` (0-based), `path` (`["edges", 1, "to"]`), `message`. |
-| `build_draft(text, dir, drawn_seed, auth_key, port)` | fn | `Config::from_yaml`, then `Generation::build` (lenient) and the auth issuer (so a draft with an auth node and no key fails in validate as in Apply), with no engine started; returns the generation and its scenarios, or the first problem as a `Diagnostic`. Apply (T6) builds the same way before it swaps. |
+| `build_draft(text, dir, drawn_seed, auth_key, port)` | fn | `Config::from_yaml`, then `Generation::build` with `Trust::Api` (paths confined, lenient scenario files) and the auth issuer (so a draft with an auth node and no key fails in validate as in Apply), with no engine started; returns the generation and its scenarios, or the first problem as a `Diagnostic`. Apply (T6) builds the same way before it swaps. |
+
+`draft/patch.rs` turns the UI's edits into splices:
+
+| Item | Kind | What it does |
+| --- | --- | --- |
+| `Op` | struct | One `{ op, path, value }` of a patch (`op`: `set`, `insert`, `remove`). A path is keys (text) and list indexes (numbers); for `insert` its last step is the new key (quoted by `splice` when not plain). `value` is read as YAML so an object keeps the order sent; `null` is a value, a missing `value` is an error. |
+| `apply(text, ops)` | fn | Maps the operations to [`kaanal_core::splice`](../kaanal-core/splice.md) edits and applies them: returns the new text and `lost`, or a message (bad operation, nothing at the path, key already there, not YAML). |
+| `render` (private) | fn | A value as YAML in the project's flow style: bare words where safe (including durations like `2ms`), JSON quoting where a bare word would change meaning (`yes`, `8`, `1e3`, `0xab`, empty), `{ a: 1 }` and `[a, b]`. |
+
+`draft/save.rs` writes the draft to its file:
+
+| Item | Kind | What it does |
+| --- | --- | --- |
+| `SaveError` | enum | `Lost(Vec<String>)`, `Conflict`, `NoFile`, `Plan(String)` (the draft does not build, so its scenario files cannot be chosen), `Io(String)`: why nothing was changed. |
+| `Change` | enum | `Write(path, text)` or `Delete(path)`. |
+| `Saved` | struct | `written` (the config's file name) and `removed` (`scenarios/NAME`). |
+| `save(draft, once, confirm_loss, plan)` | fn | Saves one at a time (`once` is `AppState.save_lock`) and holds the draft lock only to snapshot and to record the outcome, never across disk work. From the snapshot: `NoFile`, then `Lost` unless `confirm_loss`, then `Conflict` when the file's text (a link is followed) is not `base` (changed, deleted, or created behind us); then `plan(text)` (the route first runs `generation::confine` on it, so a draft naming a file outside the project is `Plan` -> 400) names the files to delete for exactly that text; the deletions and then the config (last) are committed, `base` becomes the text and `lost` clears (unless a `PUT` changed the text meanwhile: the newer text stays and still owes its `lost`). The comparison is of text, not of mtime or a hash: it is exact, and a `touch` is not a conflict. |
+| `commit(changes, rename)` | fn | Every change or none: stages every `Write` as a temp file in its folder (`.NAME.kaanal-PID-NANOS-N.tmp`: unpredictable, opened with `create_new` so nothing already there is followed or reused; flushed with `sync_all`; the target's permissions set through the open handle), then makes the changes in order, each remembering what it replaced; a file that cannot be read stops it before it changes anything; if one fails the earlier ones are restored (a file that could not be put back is named in the error) and the temp files removed. A single file is replaced by rename, so a reader sees the old or the new one. `rename` is a parameter so a test can fail it. |
+
+The route (`control/draft.rs`) adds `fix_scenarios`: `remove` is the `plan`: it builds the saved text and keeps the `flagged` scenario files that are regular files (not links) directly in the project's own `scenarios/` folder (`stale_scenarios`, by `Flagged.path`, not by the name shown to clients); `rewrite` is 400 until rename exists.
 
 `draft/gate.rs` is the admission gate Apply uses to stop mock traffic for the length of a drain:
 
@@ -42,5 +62,7 @@ The order that makes it safe: `enter` counts itself in first and reads the flag 
 | `Report` | struct | `kept` (`{ live_chaos: n, active_scenarios, runtime_scenarios, pins: n }`) and `dropped` (`{ live_chaos: [labels], scenario_chaos: [labels], active_scenarios, pins }`), the shapes of the Apply answer. |
 
 `Generation::build` takes a `lenient` flag for this: a scenario *file* that does not resolve against the new topology is left out and listed in `Generation.flagged` (a [`Flagged`](generation.md)) instead of failing the build; startup and `check` stay strict.
+
+What a client gets back never shows the machine's layout: `Diagnostic.file`, the `flagged` files and the project folder inside messages and warnings (`scrub`, in both the spelling given and the loader's canonical one) are made relative (`relative`, which also understands the canonical folder), and the CLI cleans a server-supplied file name like every other string.
 
 The routes are in [control.md](control.md) (`draft.rs`); the HTTP contract is in [docs/web/control-api.md](../../../web/control-api.md#draft).

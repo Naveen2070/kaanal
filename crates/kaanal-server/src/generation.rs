@@ -6,7 +6,8 @@
 //! to the pipeline is that the realistic-mode `drawn_seed` is now a parameter.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::io::Read as _;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -40,6 +41,106 @@ impl axum::extract::FromRequestParts<Arc<crate::state::AppState>> for Gen {
     }
 }
 
+/// Whose text the config is. A person who wrote the file on disk (startup, `check`) may point
+/// `spec:`, `data:` and `endpoints:` anywhere they can read. Text that came through the control
+/// API (a draft) is held to the project folder: the API must not become a way to make the server
+/// read other files and report what it found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trust {
+    /// The file's owner: paths are taken as written; a scenario file that does not resolve is an error.
+    Owner,
+    /// A draft from the API: paths must stay inside the project folder, messages show paths
+    /// relative to it, and a scenario file that does not resolve is flagged instead of failing.
+    Api,
+}
+
+/// The largest spec or endpoints file read: a bound, so a path to a device or an enormous file
+/// cannot exhaust memory.
+const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// **Private.** `rel` (a path written in the config) under `base_dir`. For [`Trust::Api`] it must
+/// be relative, without `..`, and what it names must not leave `base_dir` through a link. The
+/// message repeats only what the draft itself said.
+fn resolve(base_dir: &Path, rel: &str, trust: Trust, at: &[PathSeg]) -> Result<PathBuf, Located> {
+    let file = base_dir.join(rel);
+    if trust == Trust::Owner {
+        return Ok(file);
+    }
+    let p = Path::new(rel);
+    let outside = p.is_absolute()
+        || p.has_root()
+        || p.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::Prefix(_) | Component::RootDir
+            )
+        });
+    let escapes = file
+        .canonicalize()
+        .ok()
+        .zip(base_dir.canonicalize().ok())
+        .is_some_and(|(f, b)| !f.starts_with(b));
+    if outside || escapes {
+        return Err(Located::at_value(
+            at.to_vec(),
+            format!("'{rel}' must be a path inside the project folder (no absolute path, no '..')"),
+        ));
+    }
+    Ok(file)
+}
+
+/// Checks the files a config *text* names (`nodes.*.spec`, `data`, `endpoints`) against the
+/// [`Trust::Api`] rule, without building anything: what Save runs, so a draft that validate and
+/// Apply would refuse is never written where the owner's `kaanal up` (which takes paths as
+/// written) would later trust it. Text that is not YAML cannot be loaded by anyone, so it passes.
+///
+/// # Errors
+/// The first path that is absolute, has `..`, or leaves the project through a link.
+pub(crate) fn confine(text: &str, base_dir: &Path) -> Result<(), Located> {
+    let Ok(leaves) = kaanal_core::splice::scalar_paths(text) else {
+        return Ok(());
+    };
+    for (path, raw) in leaves {
+        let named = matches!(
+            path.as_slice(),
+            [PathSeg::Key(a), PathSeg::Key(_), PathSeg::Key(c)] if a == "nodes" && c == "spec"
+        ) || matches!(path.as_slice(), [PathSeg::Key(k)] if k == "data" || k == "endpoints");
+        if named {
+            // the leaf is source text (quotes included): read it as the scalar it is
+            let rel = serde_yaml_ng::from_str::<String>(&raw).unwrap_or(raw);
+            resolve(base_dir, &rel, Trust::Api, &path)?;
+        }
+    }
+    Ok(())
+}
+
+/// **Private.** `file` as a message names it: as is for the owner, relative to the project for the API.
+fn shown(base_dir: &Path, file: &Path, trust: Trust) -> String {
+    if trust == Trust::Owner {
+        return file.display().to_string();
+    }
+    crate::draft::apply::relative(base_dir, file)
+}
+
+/// **Private.** The text of a regular file, at most [`MAX_FILE_BYTES`].
+fn read_text(path: &Path) -> std::io::Result<String> {
+    let meta = std::fs::metadata(path)?;
+    if !meta.is_file() {
+        return Err(std::io::Error::other("not a regular file"));
+    }
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(std::io::Error::other(format!(
+            "larger than {} MiB",
+            MAX_FILE_BYTES / (1024 * 1024)
+        )));
+    }
+    let mut text = String::new();
+    std::fs::File::open(path)?
+        .take(MAX_FILE_BYTES)
+        .read_to_string(&mut text)?;
+    Ok(text)
+}
+
 /// A scenario file the build left out: it names something the topology does not have.
 #[derive(Debug, Clone, serde::Serialize, PartialEq)]
 pub struct Flagged {
@@ -49,6 +150,9 @@ pub struct Flagged {
     pub scenario: String,
     /// What did not resolve, as the loader words it.
     pub message: String,
+    /// The file as the loader found it (not shown to clients: `file` is theirs).
+    #[serde(skip)]
+    pub path: PathBuf,
 }
 
 /// What one config builds: the topology, the route table, the compiled endpoints and the data
@@ -101,10 +205,10 @@ impl Generation {
     /// compiled routes → matchit router. Spec paths are resolved against `base_dir` (the config
     /// file's directory). Routes are inserted in deterministic (`BTreeMap`) order so a conflict
     /// always names the same path. `drawn_seed` is the realistic-mode startup draw, passed in so it
-    /// stays the same across generations. With `lenient`, a scenario *file* that does not resolve
-    /// against the new topology (it names a node the draft removed) is left out and listed in
-    /// `flagged` instead of failing the build; inline scenarios are part of the draft and stay
-    /// strict. Also returns the scenarios the config and `scenarios/`
+    /// stays the same across generations. With [`Trust::Api`] (a draft), the paths in the config are
+    /// held to the project folder, and a scenario *file* that does not resolve against the new
+    /// topology (it names a node the draft removed) is left out and listed in `flagged` instead of
+    /// failing the build; inline scenarios are part of the draft and stay strict. Also returns the scenarios the config and `scenarios/`
     /// define, resolved against this topology.
     ///
     /// # Errors
@@ -119,7 +223,7 @@ impl Generation {
         cfg: &Config,
         base_dir: &Path,
         drawn_seed: Option<u64>,
-        lenient: bool,
+        trust: Trust,
     ) -> Result<(Generation, ScenarioSet), Located> {
         let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
@@ -136,10 +240,17 @@ impl Generation {
             }
         }
 
-        let (options, project_options) = load_data(cfg, base_dir, &topo, &mut warnings)?;
+        let (options, project_options) = load_data(cfg, base_dir, &topo, &mut warnings, trust)?;
         let site = load_site(cfg, base_dir)?;
-        let specs = load_specs(&topo, base_dir, &mut shapes, &mut warnings, Some(&options))?;
-        let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes)?;
+        let specs = load_specs(
+            &topo,
+            base_dir,
+            &mut shapes,
+            &mut warnings,
+            Some(&options),
+            trust,
+        )?;
+        let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes, trust)?;
         warnings.extend(endpoints.warnings.iter().cloned());
         // The seed only changes generated values, not whether an empty form exists.
         let ok = crate::pins::empty_ok(&specs.info, cfg.seed);
@@ -150,7 +261,7 @@ impl Generation {
             &topo,
             &endpoints,
             &mut warnings,
-            lenient,
+            trust == Trust::Api,
         )?;
         // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
@@ -291,7 +402,14 @@ pub(crate) fn spec_routes(
     base_dir: &Path,
 ) -> Result<(Topology, Vec<RouteSpec>), Located> {
     let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
-    let specs = load_specs(&topo, base_dir, &mut HashMap::new(), &mut Vec::new(), None)?;
+    let specs = load_specs(
+        &topo,
+        base_dir,
+        &mut HashMap::new(),
+        &mut Vec::new(),
+        None,
+        Trust::Owner,
+    )?;
     Ok((topo, specs.routes))
 }
 
@@ -304,6 +422,7 @@ fn load_specs(
     shapes: &mut HashMap<String, String>,
     warnings: &mut Vec<String>,
     options: Option<&[Options]>,
+    trust: Trust,
 ) -> Result<Specs, Located> {
     let mut specs = Specs {
         routes: Vec::new(),
@@ -314,17 +433,14 @@ fn load_specs(
     for (id, node) in topo.nodes.iter().enumerate() {
         let Some(spec) = &node.spec else { continue };
         let at = keys(&["nodes", node.name.as_str(), "spec"]);
-        let (file, api) = read_api(spec, base_dir, &at)?;
-        warnings.extend(
-            api.warnings()
-                .into_iter()
-                .map(|w| format!("{}: {w}", file.display())),
-        );
+        let (file, api) = read_api(spec, base_dir, &at, trust)?;
+        let label = shown(base_dir, &file, trust);
+        warnings.extend(api.warnings().into_iter().map(|w| format!("{label}: {w}")));
         if let Some(opts) = options {
             warnings.extend(
                 kaanal_data::dictionary_warnings(&api, &opts[id])
                     .into_iter()
-                    .map(|w| format!("{}: {w}", file.display())),
+                    .map(|w| format!("{label}: {w}")),
             );
         }
         for ep in api.endpoints {
@@ -357,12 +473,13 @@ pub(crate) fn read_api(
     spec: &str,
     base_dir: &Path,
     at: &[PathSeg],
+    trust: Trust,
 ) -> Result<(PathBuf, ApiModel), Located> {
-    let file = base_dir.join(spec);
-    let src = std::fs::read_to_string(&file)
-        .map_err(|e| Located::new(at.to_vec(), format!("{}: {e}", file.display())))?;
+    let file = resolve(base_dir, spec, trust, at)?;
+    let label = shown(base_dir, &file, trust);
+    let src = read_text(&file).map_err(|e| Located::new(at.to_vec(), format!("{label}: {e}")))?;
     let api = ApiModel::from_openapi(&src)
-        .map_err(|e| Located::new(at.to_vec(), format!("{}: {e}", file.display())))?;
+        .map_err(|e| Located::new(at.to_vec(), format!("{label}: {e}")))?;
     Ok((file, api))
 }
 
@@ -400,7 +517,11 @@ pub(crate) fn load_data(
     base_dir: &Path,
     topo: &Topology,
     warnings: &mut Vec<String>,
+    trust: Trust,
 ) -> Result<(Vec<Options>, Options), Located> {
+    if let Some(rel) = cfg.data.as_deref() {
+        resolve(base_dir, rel, trust, &keys(&["data"]))?;
+    }
     let data = DataSet::load(base_dir, cfg.data.as_deref()).map_err(data_located)?;
     warnings.extend(data.warnings().iter().cloned());
     let project = data
@@ -441,15 +562,18 @@ fn compile_endpoints(
     base_dir: &Path,
     topo: &Topology,
     routes: &[RouteSpec],
+    trust: Trust,
 ) -> Result<Endpoints, Located> {
     // P4: a spec route with no entry and no gateway edge would fail in `compile` with no place,
     // but `Topology::build` already rejects a spec node without an edge from the gateway.
     let Some(EndpointsConfig::File(p)) = &cfg.endpoints else {
         return compile(topo, routes, EndpointsInput::inline(cfg));
     };
-    let path = base_dir.join(p);
-    let src = std::fs::read_to_string(&path)
-        .map_err(|e| Located::at_value(keys(&["endpoints"]), format!("{}: {e}", path.display())))?;
+    let at = keys(&["endpoints"]);
+    let path = resolve(base_dir, p, trust, &at)?;
+    let label = shown(base_dir, &path, trust);
+    let src =
+        read_text(&path).map_err(|e| Located::at_value(at.clone(), format!("{label}: {e}")))?;
     let entries = parse_endpoints(&src).map_err(|e| Located::parsed(path.clone(), e))?;
     compile(
         topo,
@@ -502,6 +626,7 @@ fn load_scenarios(
                     file: file.display().to_string(),
                     scenario: name,
                     message: e.located(Vec::new()).msg,
+                    path: file.clone(),
                 });
                 continue;
             }
@@ -533,7 +658,7 @@ scenarios:
 
     fn build(drawn: Option<u64>) -> (Generation, ScenarioSet) {
         let cfg = Config::from_yaml(YAML).unwrap();
-        Generation::build(&cfg, Path::new("."), drawn, false).unwrap()
+        Generation::build(&cfg, Path::new("."), drawn, Trust::Owner).unwrap()
     }
 
     #[test]
@@ -593,5 +718,51 @@ scenarios:
             (42, 7),
             "seed stays, the chain draw follows"
         );
+    }
+}
+
+#[cfg(test)]
+mod trust_tests {
+    use super::*;
+
+    const SPEC: &str = "openapi: 3.0.0\ninfo: { title: t, version: '1' }\npaths:\n  /ping:\n    get:\n      responses:\n        '200': { description: ok }\n";
+
+    /// A project folder with a spec one level above it.
+    fn project(name: &str) -> (PathBuf, Config) {
+        let root = std::env::temp_dir().join(format!("kaanal-trust-{name}-{}", std::process::id()));
+        let dir = root.join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(root.join("outside.yaml"), SPEC).unwrap();
+        let yaml = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, spec: '../outside.yaml' }\nedges:\n  - { from: gw, to: app }\n";
+        (dir, Config::from_yaml(yaml).unwrap())
+    }
+
+    #[test]
+    fn the_owner_may_point_outside_the_project_and_the_api_may_not() {
+        let (dir, cfg) = project("owner-api");
+        assert!(Generation::build(&cfg, &dir, None, Trust::Owner).is_ok());
+        let err = Generation::build(&cfg, &dir, None, Trust::Api)
+            .err()
+            .expect("refused");
+        assert!(err.msg.contains("inside the project folder"), "{}", err.msg);
+        assert!(!err.msg.contains(&dir.display().to_string()), "{}", err.msg);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn a_spec_larger_than_the_limit_is_not_read() {
+        let (dir, _) = project("big");
+        let big = dir.join("big.yaml");
+        let f = std::fs::File::create(&big).unwrap();
+        f.set_len(MAX_FILE_BYTES + 1).unwrap();
+        let err = read_text(&big).unwrap_err();
+        assert!(err.to_string().contains("larger than"), "{err}");
+        assert!(
+            read_text(&dir)
+                .unwrap_err()
+                .to_string()
+                .contains("not a regular file")
+        );
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

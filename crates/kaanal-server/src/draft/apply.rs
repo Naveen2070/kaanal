@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::auth::{AuthKey, Issuer};
 use crate::draft::remap::Report;
-use crate::generation::{Flagged, Generation};
+use crate::generation::{Flagged, Generation, Trust};
 use crate::state::{AppState, BusEvent, Control};
 
 /// One problem in a draft, placed in its text. The loader stops at the first error, so a
@@ -44,7 +44,7 @@ impl Diagnostic {
     }
 
     /// A load error, placed in `text` when it is in `kaanal.yaml`.
-    fn located(e: &Located, text: &str) -> Diagnostic {
+    fn located(e: &Located, text: &str, dir: &Path) -> Diagnostic {
         let path = e
             .path
             .iter()
@@ -62,11 +62,11 @@ impl Diagnostic {
             Some(_) => e.pos.unzip(),
         };
         Diagnostic {
-            file: e.file.as_ref().map(|f| f.display().to_string()),
+            file: e.file.as_ref().map(|f| relative(dir, f)),
             line,
             col,
             path,
-            message: e.msg.clone(),
+            message: scrub(&e.msg, dir),
         }
     }
 }
@@ -76,6 +76,40 @@ impl Diagnostic {
 pub(crate) struct Built {
     pub(crate) generation: Generation,
     pub(crate) scenarios: ScenarioSet,
+}
+
+/// `file` as a client may see it: relative to the project folder (the last two components when
+/// it is outside it, like a scenario file under its canonical folder), never an absolute path.
+pub(crate) fn relative(dir: &Path, file: &Path) -> String {
+    let canonical = dir.canonicalize().ok();
+    for d in std::iter::once(dir).chain(canonical.as_deref()) {
+        if let Ok(rel) = file.strip_prefix(d) {
+            return rel.display().to_string();
+        }
+    }
+    let tail: Vec<_> = file.components().rev().take(2).collect();
+    tail.iter()
+        .rev()
+        .collect::<std::path::PathBuf>()
+        .display()
+        .to_string()
+}
+
+/// `msg` with the project folder (as given and as the loader's canonical form) written as `.`, so a
+/// message never shows where the project lives on the machine.
+fn scrub(msg: &str, dir: &Path) -> String {
+    let mut out = msg.to_string();
+    if let Ok(c) = dir.canonicalize() {
+        let c = c.display().to_string();
+        // Windows canonical paths start with `\\?\`; messages may carry either form
+        let plain = c.strip_prefix(r"\\?\").unwrap_or(&c).to_string();
+        out = out.replace(&c, ".").replace(&plain, ".");
+    }
+    let here = dir.display().to_string();
+    if here != "." {
+        out = out.replace(&here, ".");
+    }
+    out
 }
 
 /// Builds the system `text` describes, without starting anything: parse, then the same load
@@ -94,10 +128,18 @@ pub(crate) fn build_draft(
     port: u16,
 ) -> Result<Built, Diagnostic> {
     let cfg = Config::from_yaml(text).map_err(Diagnostic::parsed)?;
-    let (mut generation, scenarios) = Generation::build(&cfg, dir, drawn_seed, true)
-        .map_err(|e| Diagnostic::located(&e, text))?;
-    generation.auth =
-        Issuer::from_config(&cfg, auth_key, port).map_err(|e| Diagnostic::located(&e, text))?;
+    let (mut generation, scenarios) = Generation::build(&cfg, dir, drawn_seed, Trust::Api)
+        .map_err(|e| Diagnostic::located(&e, text, dir))?;
+    generation.auth = Issuer::from_config(&cfg, auth_key, port)
+        .map_err(|e| Diagnostic::located(&e, text, dir))?;
+    // what goes back to a client names files inside the project, never the machine's layout
+    for w in &mut generation.warnings {
+        *w = scrub(w, dir);
+    }
+    for f in &mut generation.flagged {
+        f.file = relative(dir, &f.path);
+        f.message = scrub(&f.message, dir);
+    }
     Ok(Built {
         generation,
         scenarios,
@@ -214,6 +256,31 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
 mod tests {
     use super::*;
     use kaanal_core::CollectionOp;
+
+    #[test]
+    fn messages_and_files_never_show_the_project_folder_in_either_spelling() {
+        let tmp = std::env::temp_dir().join(format!("kaanal-scrub-{}", std::process::id()));
+        std::fs::create_dir_all(tmp.join("sub")).unwrap();
+        // the same folder spelled with a `..`: the loader's canonical form differs from what was given
+        let given = tmp.join("sub").join("..");
+        let canonical = given.canonicalize().unwrap();
+        let msg = format!(
+            "cannot read {} and {}",
+            canonical.join("a.yaml").display(),
+            given.join("b.yaml").display()
+        );
+        let shown = scrub(&msg, &given);
+        assert!(!shown.contains(&tmp.display().to_string()), "{shown}");
+        assert!(
+            shown.contains("a.yaml") && shown.contains("b.yaml"),
+            "{shown}"
+        );
+        assert_eq!(
+            relative(&given, &canonical.join("scenarios").join("f.yaml")),
+            format!("scenarios{}f.yaml", std::path::MAIN_SEPARATOR)
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     const YAML: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app }\n";
 

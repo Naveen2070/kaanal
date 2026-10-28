@@ -4,7 +4,9 @@
 
 pub(crate) mod apply;
 pub(crate) mod gate;
+pub(crate) mod patch;
 pub(crate) mod remap;
+pub(crate) mod save;
 
 /// The longest draft text accepted: 1 MiB. A `kaanal.yaml` is a few KiB; this bounds memory and
 /// the work of validating a pasted file.
@@ -30,15 +32,28 @@ pub struct Draft {
     pub text: String,
     /// The text of the generation in force (what was last applied): `dirty` is the difference.
     pub applied: String,
+    /// The config file Save writes (`None` when the server was not started from one).
+    pub file: Option<std::path::PathBuf>,
+    /// What the file held when it was last read or written by us: Save refuses if the disk differs
+    /// (`None`: the file did not exist, so Save refuses if one has appeared).
+    pub base: Option<String>,
+    /// What patches could not keep (comments, anchors), until the text is replaced whole.
+    pub lost: Vec<String>,
 }
 
 impl Draft {
     /// A draft that starts as `src` (clean), or empty with no source.
     pub fn from_source(src: Option<DraftSource>) -> Draft {
-        let text = src.map(|s| s.text).unwrap_or_default();
+        let Some(s) = src else {
+            return Draft::default();
+        };
         Draft {
-            applied: text.clone(),
-            text,
+            applied: s.text.clone(),
+            base: Some(s.text.clone()),
+            text: s.text,
+            // absolute, so a later change of the working directory cannot move it
+            file: Some(std::path::absolute(&s.file).unwrap_or(s.file)),
+            lost: Vec::new(),
         }
     }
 

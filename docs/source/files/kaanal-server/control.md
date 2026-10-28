@@ -15,7 +15,7 @@ The control API handlers and the security guard that stands in front of them.
 | `scenario.rs` | The scenario handlers: list, get, put, delete, activate (ttl lease), deactivate, the active stack.                               |
 | `lease.rs`    | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`.                                     |
 | `save.rs`     | `POST /scenarios/save`: live, effective or a named scenario to a file.                                                           |
-| `draft.rs`    | `GET`/`PUT /__kaanal/draft`, `POST /draft/validate` and `POST /draft/apply` (answers with `kept`, `dropped` and `flagged`).                                                     |
+| `draft.rs`    | `GET`/`PUT /__kaanal/draft` (`PUT` takes `text` or a `patch`), `POST /draft/validate`, `POST /draft/apply` (answers with `kept`, `dropped` and `flagged`) and `POST /draft/save`.                                                     |
 | `admin.rs`    | `reset`, `shutdown`, the `events` stream and the `ui` page.                                                                      |
 | `tests.rs`    | The unit tests (see the last section).                                                                                           |
 

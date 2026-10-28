@@ -121,7 +121,8 @@ impl BoundServer {
 /// Returns the first load error (bad config, unreadable or invalid spec, route conflict),
 /// with its place in `kaanal.yaml` (see [`Located::in_source`]).
 pub fn check(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, Located> {
-    generation::Generation::build(cfg, base_dir, None, false).map(|(g, _)| g.warnings)
+    generation::Generation::build(cfg, base_dir, None, generation::Trust::Owner)
+        .map(|(g, _)| g.warnings)
 }
 
 /// Samples every spec endpoint's generated response and validates it against its schema
@@ -285,6 +286,7 @@ fn router(st: Arc<state::AppState>) -> Router {
             post(control::validate_draft).layer(DefaultBodyLimit::max(draft::MAX_DRAFT_BODY)),
         )
         .route("/__kaanal/draft/apply", post(control::apply_draft))
+        .route("/__kaanal/draft/save", post(control::save_draft))
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/shutdown", post(control::shutdown))
         .route("/__kaanal/events", get(control::events))
