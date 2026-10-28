@@ -112,6 +112,28 @@ pub(crate) enum Cmd {
         #[command(subcommand)]
         cmd: DraftCmd,
     },
+    /// Run the simulator on the running system and read the report (a relative what-if, not a prediction)
+    Sim {
+        #[command(subcommand)]
+        cmd: SimCmd,
+    },
+    /// Print one generated response body of an endpoint, e.g. `kaanal sample "GET /users/{id}"`
+    Sample {
+        /// Endpoint key, "METHOD /path"
+        route: String,
+        /// Seed of the data (default the config's `seed:`)
+        #[arg(long)]
+        seed: Option<u64>,
+    },
+    /// Print the generated skeleton `OpenAPI` file for the draft's `endpoints:`, or write it with -o
+    Skeleton {
+        /// Write the file here instead of printing it
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Overwrite an existing output file
+        #[arg(long, requires = "output")]
+        force: bool,
+    },
     /// Step an endpoint's live pin to the next UI state (loading, empty, error, slow, success),
     /// or pin one with --state; e.g. `kaanal cycle "GET /orders"`
     Cycle {
@@ -289,6 +311,42 @@ pub(crate) enum DraftCmd {
         /// What to do with scenario files the draft no longer resolves against (default: leave them)
         #[arg(long, value_enum)]
         fix_scenarios: Option<FixScenarios>,
+    },
+}
+
+/// **Private.** `sim` subcommands.
+#[derive(Subcommand)]
+pub(crate) enum SimCmd {
+    /// Start a run and wait for its report (one run at a time)
+    Run {
+        /// A profile of the config's `traffic:` section
+        #[arg(short, long, conflicts_with = "file")]
+        profile: Option<String>,
+        /// A file holding one profile (`rps`, `journeys`, ...) as YAML or JSON
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+        /// Simulated time, e.g. 60s (at most 1h; default the profile's, else 60s)
+        #[arg(long)]
+        duration: Option<String>,
+        /// Simulated time before results count (default a tenth of the duration)
+        #[arg(long)]
+        warmup: Option<String>,
+        /// Seed of the draws (default the config's `seed:`)
+        #[arg(long)]
+        seed: Option<u64>,
+        /// Run under this scenario's chaos alone (default: the live chaos)
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Print the run id and return without waiting
+        #[arg(long)]
+        no_wait: bool,
+    },
+    /// List the last eight runs
+    List,
+    /// Show one run with its report
+    Show {
+        /// A run id, e.g. s1
+        id: String,
     },
 }
 

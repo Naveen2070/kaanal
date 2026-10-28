@@ -6,6 +6,7 @@
 use super::{
     Deserialize, Deserializer, Duration, IndexMap, JsonSchema, Located, PathSeg, de, keys,
 };
+use crate::scenario::endpoint_key;
 
 /// Fewest requests per second a profile may ask for (the simulator's slowest stream).
 const MIN_RPS: f64 = 1e-6;
@@ -13,6 +14,8 @@ const MIN_RPS: f64 = 1e-6;
 const MAX_RPS: f64 = 1e6;
 /// Most journeys in one profile (each becomes a simulator stream).
 const MAX_JOURNEYS: usize = 64;
+/// Longest simulated time a profile or a run may ask for.
+pub const MAX_DURATION: Duration = Duration::from_secs(3600);
 /// Largest payload size a journey may declare, in bytes.
 const MAX_BYTES: u64 = 1 << 30;
 
@@ -120,8 +123,19 @@ pub fn check_profile(name: &str, p: &TrafficConfig) -> Result<(), Located> {
             ),
         ));
     }
+    // the simulator keys streams by the normalized endpoint, so `GET /a` and `get /a` are one
+    let norm = |raw: &str| endpoint_key(raw).unwrap_or_else(|_| raw.to_string());
     for (i, j) in p.journeys.iter().enumerate() {
-        if p.journeys[..i].iter().any(|o| o.endpoint == j.endpoint) {
+        if let Err(m) = endpoint_key(&j.endpoint) {
+            return Err(Located::at_value(
+                at(&[PathSeg::Index(i), PathSeg::Key("endpoint".into())]),
+                m,
+            ));
+        }
+        if p.journeys[..i]
+            .iter()
+            .any(|o| norm(&o.endpoint) == norm(&j.endpoint))
+        {
             return Err(Located::at_value(
                 at(&[PathSeg::Index(i), PathSeg::Key("endpoint".into())]),
                 format!(
@@ -138,6 +152,21 @@ pub fn check_profile(name: &str, p: &TrafficConfig) -> Result<(), Located> {
                 ));
             }
         }
+    }
+    let at_key = |k: &str| keys(&["traffic", name, k]);
+    if p.duration.is_some_and(|d| d.is_zero() || d > MAX_DURATION) {
+        return Err(Located::at_value(
+            at_key("duration"),
+            "duration must be above 0 and at most 1h".to_string(),
+        ));
+    }
+    if let (Some(w), Some(d)) = (p.warmup, p.duration)
+        && w >= d
+    {
+        return Err(Located::at_value(
+            at_key("warmup"),
+            "warmup must be shorter than the duration".to_string(),
+        ));
     }
     Ok(())
 }

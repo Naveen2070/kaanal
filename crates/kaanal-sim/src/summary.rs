@@ -332,6 +332,15 @@ fn warnings(requests: u64, nodes: &[NodeSummary], links: &[LinkSummary]) -> Vec<
             n.utilization.unwrap_or(0.0)
         ));
     }
+    for n in nodes
+        .iter()
+        .filter(|n| n.offered_load.is_none() && n.timed_out > 0)
+    {
+        warnings.push(format!(
+            "{} deadlines fired at node {} (it has no slot limit, so a callee was too slow)",
+            n.timed_out, n.name
+        ));
+    }
     for l in links.iter().filter(|l| l.saturated) {
         warnings.push(format!("link {} -> {} is saturated", l.from, l.to));
     }
@@ -439,10 +448,13 @@ pub fn summarize(
                 mean_wait_ms: total.mean_wait_ms(),
                 offered_load: load,
                 utilization: util,
-                saturated: load.is_some_and(|l| l >= 1.0)
-                    || util.is_some_and(|u| u >= SATURATED)
-                    || st.overflowed > 0
-                    || st.timed_out > 0,
+                // only a node with slots can be saturated; a deadline that fires at a node
+                // without slots says its callee was slow, and gets its own warning
+                saturated: slots.is_some()
+                    && (load.is_some_and(|l| l >= 1.0)
+                        || util.is_some_and(|u| u >= SATURATED)
+                        || st.overflowed > 0
+                        || st.timed_out > 0),
                 max_queue: st.max_queue,
                 limited: st.limited,
                 overflowed: st.overflowed,

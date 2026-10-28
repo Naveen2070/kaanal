@@ -140,9 +140,18 @@ pub(crate) fn shown(base_dir: &Path, file: &Path, trust: Trust) -> String {
     crate::draft::apply::relative(base_dir, file)
 }
 
-/// **Private.** The text of a regular file, at most [`MAX_FILE_BYTES`].
+/// **Private.** The text of a regular file, at most [`MAX_FILE_BYTES`]. The file is opened first
+/// and judged by its own handle, so it cannot be swapped between the check and the read.
 pub(crate) fn read_text(path: &Path) -> std::io::Result<String> {
-    let meta = std::fs::metadata(path)?;
+    let file = std::fs::File::open(path).map_err(|e| {
+        // Windows refuses to open a directory at all: say what it is, as on Unix
+        if std::fs::metadata(path).is_ok_and(|m| !m.is_file()) {
+            std::io::Error::other("not a regular file")
+        } else {
+            e
+        }
+    })?;
+    let meta = file.metadata()?;
     if !meta.is_file() {
         return Err(std::io::Error::other("not a regular file"));
     }
@@ -153,9 +162,7 @@ pub(crate) fn read_text(path: &Path) -> std::io::Result<String> {
         )));
     }
     let mut text = String::new();
-    std::fs::File::open(path)?
-        .take(MAX_FILE_BYTES)
-        .read_to_string(&mut text)?;
+    file.take(MAX_FILE_BYTES).read_to_string(&mut text)?;
     Ok(text)
 }
 

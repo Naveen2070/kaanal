@@ -47,6 +47,7 @@ use self::{
         logs::{logs_cmd, out_bytes, out_line, trace},
         scenario::{active_names, endpoints, scenario},
         serve::{Mode, Started, drain_wait, serve_locked, start_budget, studio, up, up_detached},
+        sim::{sample, sim, skeleton_cmd},
     },
     instance::{
         keys, lifecycle,
@@ -195,6 +196,9 @@ fn run(cli: Cli) -> Result<(), Fail> {
         Cmd::Status => status(),
         Cmd::Scenario { cmd } => scenario(cmd),
         Cmd::Draft { cmd } => draft(cmd),
+        Cmd::Sim { cmd } => sim(cmd),
+        Cmd::Sample { route, seed } => sample(&route, seed),
+        Cmd::Skeleton { output, force } => skeleton_cmd(output.as_deref(), force),
         Cmd::Cycle {
             route,
             state,

@@ -94,7 +94,9 @@ pub struct SimConfig {
     pub duration: Duration,
     /// Requests arriving before this are simulated but not reported.
     pub warmup: Duration,
-    /// The config's `seed:` (a `Topology` does not carry it). Same value live mode uses.
+    /// The config's `seed:` (a `Topology` does not carry it). Live mode draws from the same value
+    /// under `determinism: controlled`; under `realistic` it uses the seed drawn at startup, so a
+    /// run is repeatable but its draws do not match the live ones.
     pub seed: u64,
 }
 
@@ -170,7 +172,8 @@ pub struct NodeStats {
     pub limited: u64,
     /// Requests refused at this node by a full queue, over reported requests.
     pub overflowed: u64,
-    /// Deadlines (`timeout:` spans) that fired at this node, over reported requests. A `hang` that\n    /// runs to its planned 504 is a timeout in [`SimReport::errors_by_kind`] but not counted here (no deadline fired).
+    /// Deadlines (`timeout:` spans) that fired at this node, over reported requests. A `hang` that
+    /// runs to its planned 504 is a timeout in [`SimReport::errors_by_kind`] but not counted here (no deadline fired).
     pub timed_out: u64,
 }
 

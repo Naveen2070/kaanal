@@ -28,6 +28,7 @@ pub mod replay;
 pub mod rng;
 pub mod scenario;
 pub mod schema;
+pub mod spec_skeleton;
 pub mod splice;
 pub mod topology;
 pub mod visits;
@@ -42,9 +43,9 @@ pub use chaos::{
     MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers,
 };
 pub use config::{
-    ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointsConfig, JourneyConfig,
-    NodeKind, ScenarioConfig, SeedSource, TrafficConfig, check_profile, parse_scenario, strip_bom,
-    valid_locale_tag,
+    ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointConfig, EndpointsConfig,
+    JourneyConfig, NodeKind, ScenarioConfig, SeedSource, TrafficConfig, check_profile,
+    parse_scenario, strip_bom, valid_locale_tag,
 };
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
@@ -62,6 +63,7 @@ pub use scenario::{
     endpoint_key, resolve_scenario, valid_name, validate_scenario_shape,
 };
 pub use schema::config_schema;
+pub use spec_skeleton::skeleton_openapi;
 pub use topology::{
     Admission, CacheModel, Edge, EdgeId, Node, NodeId, RateLimit, Topology, TopologyError,
 };

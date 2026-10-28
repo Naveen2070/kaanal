@@ -17,6 +17,7 @@ humantime.workspace = true
 percent-encoding.workspace = true
 ureq.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 dirs.workspace = true
 sha2.workspace = true
 # `init URL` checks the download is OpenAPI 3.0 before saving it.

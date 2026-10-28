@@ -93,7 +93,19 @@ pub(crate) fn sample(g: &Generation, key: &str, seed: Option<u64>) -> Option<Sam
     })
 }
 
-/// The size in bytes of one sampled body of `key`; 0 when it has none.
+/// The size in bytes the mock charges for the response of `key`: one sampled body, or 0 where the
+/// mock charges nothing (a `HEAD`, whose body hyper strips; a `collection:` route; a built-in
+/// responder without an `override`). `sample` itself still returns the body for a preview.
 pub(crate) fn sized(g: &Generation, key: &str, seed: u64) -> usize {
+    let Some(route) = find_route(g, key) else {
+        return 0;
+    };
+    let ep = &route.endpoint;
+    if key.starts_with("HEAD ")
+        || ep.collection.is_some()
+        || (ep.responder.is_some() && ep.response.is_none())
+    {
+        return 0;
+    }
     sample(g, key, Some(seed)).map_or(0, |s| s.bytes)
 }

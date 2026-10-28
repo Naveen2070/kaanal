@@ -8,3 +8,4 @@ pub(crate) mod init;
 pub(crate) mod logs;
 pub(crate) mod scenario;
 pub(crate) mod serve;
+pub(crate) mod sim;

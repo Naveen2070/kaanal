@@ -97,3 +97,27 @@ fn the_schema_lists_traffic() {
     assert!(schema.contains("\"traffic\""));
     assert!(schema.contains("resp_bytes"));
 }
+
+#[test]
+fn endpoints_are_compared_normalized_and_must_be_keys() {
+    let err = load("  p:\n    rps: 1\n    journeys:\n      - { endpoint: 'GET /a' }\n      - { endpoint: 'get /a' }\n").unwrap_err();
+    assert!(err.contains("appears twice"), "{err}");
+    let err = load("  p:\n    rps: 1\n    journeys: [ { endpoint: 'nonsense' } ]\n").unwrap_err();
+    assert!(err.contains("expected 'METHOD /path'"), "{err}");
+}
+
+#[test]
+fn duration_and_warmup_are_checked_at_load() {
+    for (extra, want) in [
+        ("duration: 2h", "at most 1h"),
+        ("duration: 0s", "above 0"),
+        ("duration: 10s\n    warmup: 10s", "warmup must be shorter"),
+    ] {
+        let err = load(&format!(
+            "  p:\n    rps: 1\n    {extra}\n    journeys: [ {{ endpoint: 'GET /a' }} ]\n"
+        ))
+        .unwrap_err();
+        assert!(err.contains(want), "{extra}: {err}");
+    }
+    load("  p:\n    rps: 1\n    duration: 1h\n    warmup: 59m\n    journeys: [ { endpoint: 'GET /a' } ]\n").unwrap();
+}

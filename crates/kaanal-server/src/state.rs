@@ -187,6 +187,9 @@ pub struct AppState {
     pub collections: crate::collections::Collections,
     /// Simulation runs started from Studio (one at a time, the last eight kept).
     pub sims: crate::sim::SimStore,
+    /// Permits for CPU-heavy control work outside a run (`/sample`, `/openapi/skeleton`): a few
+    /// at once, so repeated calls cannot fill the blocking pool the mocks' neighbours share.
+    pub work: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -315,6 +318,7 @@ impl AppState {
             port,
             collections: crate::collections::Collections::new(),
             sims: crate::sim::SimStore::default(),
+            work: Arc::new(tokio::sync::Semaphore::new(crate::sim::WORK_PERMITS)),
             gate: crate::draft::gate::Gate::default(),
             apply_lock: tokio::sync::Mutex::new(()),
             save_lock: Mutex::new(()),

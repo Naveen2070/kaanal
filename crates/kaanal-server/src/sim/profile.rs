@@ -13,7 +13,7 @@ use crate::generation::Generation;
 /// Default simulated time of a run.
 const DEFAULT_DURATION: Duration = Duration::from_secs(60);
 /// Longest simulated time a run may ask for.
-const MAX_DURATION: Duration = Duration::from_secs(3600);
+const MAX_DURATION: Duration = kaanal_core::config::MAX_DURATION;
 
 /// Which profile a run uses.
 pub(crate) enum Profile {
@@ -125,7 +125,12 @@ pub(crate) fn to_sim(g: &Generation, req: &RunRequest) -> Result<Planned, SimErr
     if duration.is_zero() || duration > MAX_DURATION {
         return Err(bad("duration must be above 0 and at most 1 hour"));
     }
-    let warmup = req.warmup.or(p.warmup).unwrap_or(duration / 10);
+    // the profile's own warmup only stands if it still fits a duration the request shortened
+    let warmup = match (req.warmup, p.warmup) {
+        (Some(w), _) => w,
+        (None, Some(w)) if w < duration => w,
+        _ => duration / 10,
+    };
     if warmup >= duration {
         return Err(bad("warmup must be shorter than the duration"));
     }
@@ -139,7 +144,8 @@ pub(crate) fn to_sim(g: &Generation, req: &RunRequest) -> Result<Planned, SimErr
     let streams = p
         .journeys
         .iter()
-        .map(|j| stream(g, j, p.rps * j.weight / total))
+        // weight over total first: rps times a huge weight would overflow on its own
+        .map(|j| stream(g, j, p.rps * (j.weight / total)))
         .collect::<Result<Vec<_>, _>>()?;
     let fill = p
         .journeys
@@ -260,6 +266,60 @@ traffic:
         );
         let e = to_sim(&generation(), &r).unwrap_err();
         assert!(e.message.contains("weights"), "{}", e.message);
+    }
+
+    #[test]
+    fn one_huge_weight_is_a_share_not_an_overflow() {
+        let mut r = named("x");
+        r.profile = Profile::Inline(
+            serde_json::from_value(serde_json::json!({
+                "rps": 10,
+                "journeys": [ { "endpoint": "GET /users", "weight": 1e308 } ]
+            }))
+            .unwrap(),
+        );
+        let s = to_sim(&generation(), &r).unwrap().cfg;
+        assert!((s.streams[0].rate_per_s - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_shortened_duration_drops_a_warmup_that_no_longer_fits() {
+        let g = generation();
+        let mut r = named("peak");
+        r.duration = Some(Duration::from_secs(20));
+        r.profile = Profile::Inline(
+            serde_json::from_value(serde_json::json!({
+                "rps": 5, "warmup": "30s", "journeys": [ { "endpoint": "GET /users" } ]
+            }))
+            .unwrap(),
+        );
+        let s = to_sim(&g, &r).unwrap().cfg;
+        assert_eq!(s.warmup, Duration::from_secs(2), "a tenth of 20s");
+    }
+
+    #[test]
+    fn a_head_is_charged_no_body_as_the_mock_does() {
+        let g = generation();
+        assert!(sample::sized(&g, "GET /users", 42) > 2);
+        assert_eq!(sample::sized(&g, "HEAD /users", 42), 0);
+    }
+
+    #[test]
+    fn a_journey_that_names_no_route_is_a_warning_at_load() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let yaml = YAML.replace("'get /users/{id}'", "'GET /usres'");
+        let cfg = Config::from_yaml(&yaml).unwrap();
+        let g = AppState::build(&cfg, &dir, "t".into(), 0)
+            .unwrap()
+            .generation()
+            .unwrap();
+        assert!(
+            g.warnings
+                .iter()
+                .any(|w| w.contains("GET /usres") && w.contains("not a route")),
+            "{:?}",
+            g.warnings
+        );
     }
 
     #[test]

@@ -48,7 +48,7 @@ pub use nodes::{
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
 pub use shared::{DistConfig, EdgeConfig, Override, UserConfig};
-pub use traffic::{JourneyConfig, TrafficConfig, check_profile};
+pub use traffic::{JourneyConfig, MAX_DURATION, TrafficConfig, check_profile};
 use values::{
     MAX_BURST_WINDOW_S, NOT_TEXT, call_timeout, http_url, password_text, positive_rps, ratio,
     status_5xx, token_ttl, unique_nodes, unique_users,

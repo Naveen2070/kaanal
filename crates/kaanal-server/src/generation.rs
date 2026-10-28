@@ -224,6 +224,18 @@ impl Generation {
                 total,
             });
         }
+        for (name, profile) in &cfg.traffic {
+            for j in &profile.journeys {
+                let known = kaanal_core::endpoint_key(&j.endpoint)
+                    .is_ok_and(|k| endpoints.get(&k).is_some());
+                if !known {
+                    warnings.push(format!(
+                        "traffic profile '{name}': endpoint '{}' is not a route of this system, so a run of it will be refused",
+                        j.endpoint
+                    ));
+                }
+            }
+        }
         let route_keys: Vec<String> = endpoints
             .iter()
             .filter(|e| !e.synthesized)

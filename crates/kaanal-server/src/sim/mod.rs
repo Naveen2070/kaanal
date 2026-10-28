@@ -7,3 +7,6 @@ pub(crate) mod sample;
 pub(crate) mod store;
 
 pub use store::{RunRecord, SimStore};
+
+/// How many `/sample` and `/openapi/skeleton` jobs may run at once.
+pub const WORK_PERMITS: usize = 2;

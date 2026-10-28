@@ -327,6 +327,7 @@ fn router(st: Arc<state::AppState>) -> Router {
         )
         .route("/__kaanal/draft/apply", post(control::apply_draft))
         .route("/__kaanal/draft/save", post(control::save_draft))
+        .route("/__kaanal/openapi/skeleton", get(control::get_skeleton))
         .route("/__kaanal/sample", post(control::post_sample))
         .route("/__kaanal/sim/run", post(control::post_run))
         .route("/__kaanal/sim/runs", get(control::list_runs))

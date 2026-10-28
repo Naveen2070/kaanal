@@ -14,6 +14,7 @@ mod pins;
 mod project;
 mod remote;
 mod scenario;
+mod sim;
 mod startup;
 mod status;
 mod studio;

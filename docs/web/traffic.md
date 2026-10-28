@@ -27,3 +27,5 @@ A journey has an `endpoint` (the `"METHOD /path"` key, as in `endpoints:`), a `w
 **What the result means.** A simulation is a relative what-if, not a prediction. Real traffic is burstier than a Poisson stream, so tails in a real system will be worse than a smooth stream shows.
 
 Profile names follow the scenario-name rule: 1 to 64 characters of `a-z`, `0-9`, `_` or `-`, starting with a letter or a digit.
+
+**Checked when the config loads:** the endpoint keys (`GET /a` and `get /a` are the same endpoint, and appear once), `duration` (above 0, at most 1h) and `warmup` (shorter than the duration). Whether an endpoint is a route of the system is a warning (`kaanal validate`, `up` and Apply show it), because the routes come from your specs; a run of a profile that names no route is refused. A request that shortens the duration drops a profile `warmup` that no longer fits and uses a tenth of the new duration.

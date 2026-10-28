@@ -207,3 +207,20 @@ fn timeouts_do_not_hide_a_saturated_node() {
     assert!(app.saturated);
     assert_eq!(s.bottlenecks[0], t.id("app").unwrap());
 }
+
+#[test]
+fn a_deadline_at_a_node_without_slots_is_a_warning_not_saturation() {
+    // `app` has no slot limit but a 10 ms deadline, and its callee `db` takes 100 ms
+    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms, timeout: 10ms }\n  db: { type: database, flavor: postgres, ops: { read: 100ms, write: 100ms, scan: 100ms } }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: db }\n";
+    let (t, s) = summary_of(y, &windowed(20.0, 30, 2));
+    let app = &s.nodes[t.id("app").unwrap()];
+    assert!(app.timed_out > 0, "the deadline fires");
+    assert!(!app.saturated, "no slots, no queue to saturate");
+    assert!(
+        s.warnings
+            .iter()
+            .any(|w| w.contains("deadlines fired at node app")),
+        "{:?}",
+        s.warnings
+    );
+}

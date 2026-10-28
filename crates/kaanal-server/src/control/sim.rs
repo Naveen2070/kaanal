@@ -163,17 +163,31 @@ const SAMPLE_CAP: usize = 256 * 1024;
 ///
 /// # Errors
 /// 400 for a bad body, a bad key or a sample over 256 KiB; 404 for an endpoint that is not a
-/// route; 409 without a system.
-pub async fn post_sample(Gen(g): Gen, body: Bytes) -> Result<Json<Value>, Reject> {
+/// route; 409 without a system; 429 while two samples or skeletons are already being made.
+pub async fn post_sample(
+    State(st): State<Arc<AppState>>,
+    Gen(g): Gen,
+    body: Bytes,
+) -> Result<Json<Value>, Reject> {
     let b: SampleBody = serde_json::from_slice(&body)
         .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad body: {e}")))?;
     let key = endpoint_key(&b.endpoint).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
-    // generating a body is CPU work: off the async threads
+    // generating a body is CPU work: off the async threads, a few at a time. The permit moves
+    // into the job, so it is held for as long as the work lasts, even if the client leaves.
+    let permit = Arc::clone(&st.work).try_acquire_owned().map_err(|_| {
+        reject(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many samples at once; retry",
+        )
+    })?;
     let (g2, key2, seed) = (Arc::clone(&g), key.clone(), b.seed);
-    let s = tokio::task::spawn_blocking(move || crate::sim::sample::sample(&g2, &key2, seed))
-        .await
-        .map_err(|_| reject(StatusCode::INTERNAL_SERVER_ERROR, "the sample failed"))?
-        .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("no route '{key}'")))?;
+    let s = tokio::task::spawn_blocking(move || {
+        let _held = permit;
+        crate::sim::sample::sample(&g2, &key2, seed)
+    })
+    .await
+    .map_err(|_| reject(StatusCode::INTERNAL_SERVER_ERROR, "the sample failed"))?
+    .ok_or_else(|| reject(StatusCode::NOT_FOUND, &format!("no route '{key}'")))?;
     if s.bytes > SAMPLE_CAP {
         return Err(reject(
             StatusCode::BAD_REQUEST,

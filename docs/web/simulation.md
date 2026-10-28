@@ -50,3 +50,28 @@ A run is answered at once with `202`; poll `GET /sim/runs/{id}` until `state` is
 ## Sample a body
 
 `POST /__kaanal/sample` with `{ "endpoint": "GET /users/{id}", "seed": 7 }` returns the body the mock would generate, its size in bytes and the success status, so you can see what a route carries. It is the same generator and seeds the mock uses. A route without a response schema returns `body: null`; a paged list route returns the whole schema body, not one page; a sample over 256 KiB is refused. The size is what a journey's `resp_bytes` defaults to.
+
+## A spec for a system that has none
+
+An `endpoints:` entry cannot create a route by itself: routes belong to a node through its OpenAPI `spec:`. If you have designed a system and its endpoints but have no spec, `GET /__kaanal/openapi/skeleton` (or `kaanal skeleton`) writes one: an OpenAPI 3.0 file with an operation for every key under `endpoints:` in the **draft**, its path parameters (`in: path`, `required: true`), a success response (the entry's `override` status, else 200) with an empty object schema, and `x-kaanal-skeleton: true`. It reads the draft, so it works before the first Apply.
+
+```bash
+kaanal skeleton -o specs/app.yaml        # refuses to overwrite without --force
+# then set  nodes.app.spec: specs/app.yaml  in the draft and apply it
+```
+
+Paths are written as they are (a catch-all `{*rest}` stays one, since the router reads spec paths unchanged), repeated parameters are declared once, and a skeleton covers at most 10000 endpoints. The skeleton lists every key in `endpoints:`, because an entry does not say which node owns it; use it on a node that has no spec of its own. Payload sizes still come from the traffic profile.
+
+## Known limits
+
+- **A journey is a stream of independent requests**, not a user session: no think time, no state, and Poisson arrivals are smoother than real traffic. Real tails will be worse.
+- **One run is one sample.** There is no confidence interval; the report warns when the tail rests on few requests. Run longer or compare seeds.
+- **No cancel.** A run is bounded to a couple of seconds of CPU by the server caps, so it ends on its own. Runs are not kept across a restart (the last eight are kept while the server runs).
+- **Request bodies are not sized from the spec.** `req_bytes` is 0 unless the profile sets it. A paged list route's default `resp_bytes` is the whole schema body, not one page.
+- **Samples** use the mock's generator and seeds, but a sample's data can differ from what the mock returns for the same path.
+- **Skeleton specs** have empty object schemas and cover every key of `endpoints:`.
+- **Not built yet:** profiles in `traffic/NAME.yaml` files (use the `traffic:` section), live load against the running mocks, and adding the generated skeleton to the draft in one step (save it with `kaanal skeleton -o` and set `spec:`).
+- **Seeds.** A run uses the request's `seed`, else the config's `seed:`. Under `determinism: realistic` the live mocks use a seed drawn at startup, so a run is repeatable but its draws do not match what the mocks did.
+- **Waits under timeouts are biased low.** A request that a `timeout:` cancels while it still queues never starts its hop, so it is absent from `mean_wait_ms` and `visits_per_s` on a node that sheds load. Utilization and the saturation flag do not have this bias.
+- **Pins are not part of a run.** A pinned UI state (`kaanal cycle`) changes what the mocks answer, not what the simulator runs; only the chaos does.
+- **Payload sizes follow the mocks:** a `HEAD`, a `collection:` route and a built-in responder without an `override` count as 0 bytes, as live mode charges them.
