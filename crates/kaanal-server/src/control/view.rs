@@ -253,13 +253,24 @@ pub(super) fn effective_entries(st: &AppState, e: &EffectiveChaos) -> Result<Vec
                 json!(u64::try_from(r.latency_add.as_millis()).unwrap_or(u64::MAX)),
             );
         }
+        if !r.jitter.is_zero() {
+            o.insert(
+                "jitter_ms".into(),
+                json!(u64::try_from(r.jitter.as_millis()).unwrap_or(u64::MAX)),
+            );
+        }
+        if let Some(c) = r.bandwidth_cap {
+            o.insert("bandwidth_cap".into(), json!(c));
+        }
         if r.down {
             o.insert("down".into(), json!(true));
         }
         if let Some(f) = r.faults().first() {
             o.insert("error_rate".into(), json!(f.upto));
             o.insert("error_kind".into(), json!(f.kind.as_str()));
-            o.insert("error_status".into(), json!(f.status));
+            if !matches!(k, ChaosKey::Edge(_)) {
+                o.insert("error_status".into(), json!(f.status));
+            }
         }
         if o.len() > keyed {
             out.push(Value::Object(o));

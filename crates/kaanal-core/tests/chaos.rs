@@ -630,3 +630,28 @@ fn a_kind_without_a_rate_adds_no_fault_and_warns() {
     );
     assert_eq!(s.warnings().len(), 0);
 }
+
+#[test]
+fn first_error_applies_the_link_key_rules() {
+    let on = |k: ChaosKey, l: ChaosLayer| {
+        let mut s = ChaosState::default();
+        s.set(k, l);
+        s.first_error()
+    };
+    let jitter = ChaosLayer {
+        jitter: Some(std::time::Duration::from_millis(5)),
+        ..Default::default()
+    };
+    assert!(
+        on(ChaosKey::Node(0), jitter.clone())
+            .unwrap()
+            .contains("jitter")
+    );
+    assert!(on(ChaosKey::Edge(0), jitter).is_none());
+    let status = ChaosLayer {
+        error_rate: Some(0.5),
+        error_kind: Some(ErrorKind::Status),
+        ..Default::default()
+    };
+    assert!(on(ChaosKey::Edge(0), status).is_some());
+}

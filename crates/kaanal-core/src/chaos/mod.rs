@@ -444,7 +444,18 @@ impl ChaosState {
     #[must_use]
     pub fn first_error(&self) -> Option<String> {
         self.entries().into_iter().find_map(|(k, l)| {
-            l.validate().err().map(|e| match k {
+            // The key rules live mode enforces too. A cap against the edge's own bandwidth
+            // needs the topology, which this has not got, so it is left out here.
+            let key_rule = if let ChaosKey::Edge(_) = k {
+                let mut no_cap = l.clone();
+                no_cap.bandwidth_cap = None;
+                no_cap.check_link(None).err().map(|(_, m)| m)
+            } else {
+                l.link_only_field()
+                    .map(|f| format!("{f} is for an edge key"))
+            };
+            let own = l.validate().err();
+            own.or(key_rule).map(|e| match k {
                 ChaosKey::Node(id) => format!("chaos on node {id}: {e}"),
                 ChaosKey::NodeAt(id, ep) => format!("chaos on node {id} at endpoint '{ep}': {e}"),
                 ChaosKey::Endpoint(ep) => format!("chaos on endpoint '{ep}': {e}"),

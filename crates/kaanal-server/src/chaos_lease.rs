@@ -24,6 +24,8 @@ pub enum Unit {
     Error,
     /// `down`.
     Down,
+    /// `jitter_ms` (link only): its own lease, so it never clobbers a `latency_ms` lease.
+    Jitter,
     /// `bandwidth_cap` (link only).
     Bandwidth,
     /// The `mode` switch; its expiry goes back to merge and touches no other unit.
@@ -38,6 +40,7 @@ impl Unit {
             Unit::Latency => "latency",
             Unit::Error => "error",
             Unit::Down => "down",
+            Unit::Jitter => "jitter",
             Unit::Bandwidth => "bandwidth",
             Unit::Mode => "mode",
         }
@@ -51,7 +54,8 @@ pub type Leases = HashMap<(ChaosKey, Unit), Instant>;
 #[must_use]
 pub fn units_set(p: &ChaosLayer) -> Vec<Unit> {
     [
-        (Unit::Latency, p.latency_add.is_some() || p.jitter.is_some()),
+        (Unit::Latency, p.latency_add.is_some()),
+        (Unit::Jitter, p.jitter.is_some()),
         (
             Unit::Error,
             p.error_rate.is_some() || p.error_kind.is_some() || p.error_status.is_some(),
@@ -102,10 +106,8 @@ pub fn leased_fields(leases: &Leases, live: &ChaosState) -> usize {
         .filter_map(|(k, u)| {
             let l = live.layer(k)?;
             Some(match u {
-                Unit::Latency => {
-                    usize::from(l.latency_add.is_some()) + usize::from(l.jitter.is_some())
-                }
-                Unit::Down | Unit::Bandwidth => 1,
+                Unit::Latency => usize::from(l.latency_add.is_some()),
+                Unit::Down | Unit::Jitter | Unit::Bandwidth => 1,
                 Unit::Error => [
                     l.error_rate.is_some(),
                     l.error_kind.is_some(),
@@ -124,10 +126,8 @@ pub fn leased_fields(leases: &Leases, live: &ChaosState) -> usize {
 /// which is merge.
 pub fn clear_units(layer: &mut ChaosLayer, unit: Unit) {
     match unit {
-        Unit::Latency => {
-            layer.latency_add = None;
-            layer.jitter = None;
-        }
+        Unit::Latency => layer.latency_add = None,
+        Unit::Jitter => layer.jitter = None,
         Unit::Bandwidth => layer.bandwidth_cap = None,
         Unit::Error => {
             layer.error_rate = None;
@@ -249,6 +249,18 @@ mod tests {
         live.remove(&b);
         prune(&mut ls, &live);
         assert_eq!(ls.keys().cloned().collect::<Vec<_>>(), [(a, Unit::Latency)]);
+    }
+
+    #[test]
+    fn jitter_has_its_own_lease_apart_from_latency() {
+        let l = layer(|l| {
+            l.latency_add = Some(Duration::from_millis(1));
+            l.jitter = Some(Duration::from_millis(1));
+        });
+        assert_eq!(units_set(&l), [Unit::Latency, Unit::Jitter]);
+        let mut l = l;
+        clear_units(&mut l, Unit::Jitter);
+        assert!(l.jitter.is_none() && l.latency_add.is_some());
     }
 
     #[test]

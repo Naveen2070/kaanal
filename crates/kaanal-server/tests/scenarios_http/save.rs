@@ -421,3 +421,26 @@ async fn scenario_save_round_trips_an_edge_entry() {
     assert_eq!(e["jitter_ms"], 4);
     assert_eq!(e["latency_ms"], 20);
 }
+
+#[tokio::test]
+async fn save_from_effective_keeps_an_edge_jitter_and_writes_no_status() {
+    let s = start_full(new_dir(&[]), BASE).await;
+    let body = json!({ "edge": { "from": "app", "to": "db" }, "jitter_ms": 4, "error_rate": 0.1 });
+    assert_eq!(s.put("/__kaanal/chaos", body).await.status(), 200);
+    let r = s
+        .post_json(
+            "/__kaanal/scenarios/save",
+            json!({ "name": "e2", "from": "effective" }),
+        )
+        .await;
+    assert_eq!(r.status(), 200);
+    let text = std::fs::read_to_string(s.dir.join("scenarios/e2.yaml")).unwrap();
+    assert!(
+        text.contains(r#""jitter_ms":4"#) && !text.contains("error_status"),
+        "{text}"
+    );
+    let t = start_full(new_dir(&[("e2.yaml", &text)]), BASE).await;
+    let r = t.post("/__kaanal/scenarios/e2/activate").await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    assert_eq!(t.active().await["effective"]["edges"][0]["jitter_ms"], 4);
+}
