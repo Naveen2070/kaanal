@@ -86,6 +86,8 @@ pub struct Generation {
     pub seed: u64,
     /// Seed of the chain draws: `seed:` under `controlled`, the drawn one under `realistic`.
     pub chain_seed: u64,
+    /// The config's named traffic profiles (`traffic:`), for the simulator.
+    pub traffic: indexmap::IndexMap<String, kaanal_core::TrafficConfig>,
     /// Scenario files left out because they do not resolve against this topology. Always empty
     /// for a strict build (startup, `check`), where such a file is an error.
     pub flagged: Vec<Flagged>,
@@ -248,6 +250,7 @@ impl Generation {
                 warnings,
                 seed: cfg.seed,
                 chain_seed: drawn_seed.unwrap_or(cfg.seed),
+                traffic: cfg.traffic.clone(),
                 flagged,
                 auth: None,
                 engine: None,

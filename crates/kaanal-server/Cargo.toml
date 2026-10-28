@@ -9,6 +9,7 @@ description = "Kaanal HTTP layer: mock ingress, control API, embedded UI"
 [dependencies]
 kaanal-core.workspace = true
 kaanal-data.workspace = true
+kaanal-sim.workspace = true
 tokio.workspace = true
 axum.workspace = true
 matchit.workspace = true

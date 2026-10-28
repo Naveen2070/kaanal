@@ -185,6 +185,8 @@ pub struct AppState {
     pub shutdown: crate::shutdown::Shutdown,
     /// The `collection:` items; shared by every scope and user, emptied by `POST /reset`.
     pub collections: crate::collections::Collections,
+    /// Simulation runs started from Studio (one at a time, the last eight kept).
+    pub sims: crate::sim::SimStore,
 }
 
 impl AppState {
@@ -312,6 +314,7 @@ impl AppState {
             drawn_seed,
             port,
             collections: crate::collections::Collections::new(),
+            sims: crate::sim::SimStore::default(),
             gate: crate::draft::gate::Gate::default(),
             apply_lock: tokio::sync::Mutex::new(()),
             save_lock: Mutex::new(()),

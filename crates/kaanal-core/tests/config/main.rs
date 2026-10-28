@@ -11,3 +11,4 @@ mod nodes;
 mod payload;
 mod prob;
 mod replicas;
+mod traffic;

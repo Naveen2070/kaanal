@@ -460,6 +460,46 @@
         }
       ]
     },
+    "JourneyConfig": {
+      "additionalProperties": false,
+      "description": "One endpoint in a profile's mix.",
+      "properties": {
+        "endpoint": {
+          "description": "The endpoint key, `\"METHOD /path\"`, as in `endpoints:`.",
+          "type": "string"
+        },
+        "req_bytes": {
+          "default": null,
+          "description": "Bytes of each request body (default 0: no link or `per_kb` cost).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resp_bytes": {
+          "default": null,
+          "description": "Bytes of each response body (default: the size of one generated body for a route with a\nresponse schema, else 0).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "weight": {
+          "default": 1.0,
+          "description": "Relative share of the profile's rate (above 0, default 1).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "endpoint"
+      ],
+      "type": "object"
+    },
     "NodeConfig": {
       "description": "One node in `nodes:`. `type` selects the kind; each kind rejects fields it does not have.",
       "oneOf": [
@@ -1678,6 +1718,41 @@
         }
       ]
     },
+    "TrafficConfig": {
+      "additionalProperties": false,
+      "description": "One named load profile.",
+      "properties": {
+        "duration": {
+          "default": null,
+          "description": "Simulated time of a run (default 60s); a run request may override it.",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        "journeys": {
+          "description": "The mix: each journey gets `rps × weight ÷ sum of weights`.",
+          "items": {
+            "$ref": "#/$defs/JourneyConfig"
+          },
+          "type": "array"
+        },
+        "rps": {
+          "description": "Total requests per second across all journeys (0.000001 to 1000000).",
+          "format": "double",
+          "type": "number"
+        },
+        "warmup": {
+          "default": null,
+          "description": "Simulated time before results count (default a tenth of the duration).",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rps",
+        "journeys"
+      ],
+      "type": "object"
+    },
     "UserConfig": {
       "additionalProperties": false,
       "description": "One account on an `auth` node (synthetic accounts only). `Debug` never shows the password.",
@@ -1806,6 +1881,13 @@
         "string",
         "null"
       ]
+    },
+    "traffic": {
+      "additionalProperties": {
+        "$ref": "#/$defs/TrafficConfig"
+      },
+      "description": "Named load profiles for the simulator: a total rate and a weighted mix of endpoints.",
+      "type": "object"
     },
     "version": {
       "description": "Config schema version. Must be `1`.",

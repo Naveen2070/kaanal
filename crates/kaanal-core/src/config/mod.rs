@@ -27,6 +27,7 @@ mod limits;
 mod nodes;
 mod scenario;
 mod shared;
+mod traffic;
 mod values;
 
 use crate::balance::{Balance, MAX_REPLICAS};
@@ -47,6 +48,7 @@ pub use nodes::{
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
 pub use shared::{DistConfig, EdgeConfig, Override, UserConfig};
+pub use traffic::{JourneyConfig, TrafficConfig, check_profile};
 use values::{
     MAX_BURST_WINDOW_S, NOT_TEXT, call_timeout, http_url, password_text, positive_rps, ratio,
     status_5xx, token_ttl, unique_nodes, unique_users,
@@ -95,6 +97,9 @@ pub struct Config {
     /// Static files served next to the mocks, a folder relative to this file.
     #[serde(default)]
     pub site: Option<String>,
+    /// Named load profiles for the simulator: a total rate and a weighted mix of endpoints.
+    #[serde(default)]
+    pub traffic: IndexMap<String, TrafficConfig>,
     /// **Private.** Phase One's `routes:` key, kept only to explain that it was replaced.
     #[serde(default)]
     #[schemars(skip)]
@@ -231,6 +236,7 @@ impl Config {
         check_edges(&cfg).map_err(|e| e.in_source(src))?;
         check_replicas(&cfg).map_err(|e| e.in_source(src))?;
         check_locales(&cfg).map_err(|e| e.in_source(src))?;
+        traffic::check_traffic(&cfg.traffic).map_err(|e| e.in_source(src))?;
         Ok(cfg)
     }
 }

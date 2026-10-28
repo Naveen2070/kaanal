@@ -238,6 +238,17 @@ The draft is the text of the `kaanal.yaml` being edited, kept apart from the run
 - One Apply at a time; a second waits for the first. A control request that was working on the old system when the swap happened (for example a scenario save) answers `409` `the system changed while this request ran; retry`. The reads that pair chaos with the system (`GET /chaos`, `GET /scenarios/active`, `GET /scenarios/{name}`) never answer that: they answer from whichever system is in force once they hold the control lock.
 - After an Apply, `dirty` on the draft is false and `generation` is the new one; the `events` stream carries an `applied` message.
 
+### Simulation
+
+Run the simulator on the applied system and read the report. See [simulation.md](simulation.md) for the body, the limits and how to read a summary, and [traffic.md](traffic.md) for profiles.
+
+| Route                         | Answer                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /__kaanal/sim/run`      | Starts a run. `202 { "id", "state": "running" }` with `Location: /__kaanal/sim/runs/{id}`. `400` for a bad body, a profile that names an unknown endpoint, or a request over the server caps (the message names the cap); `404` for an unknown profile or scenario; `409 { "error", "id" }` while another run is in progress, or `409` with no system (blank start). |
+| `GET /__kaanal/sim/runs`      | `{ "runs": [...] }`: the last eight runs (oldest first) without their summaries.                                                                                                                                                                                                                                                                                     |
+| `GET /__kaanal/sim/runs/{id}` | One run: `state` (`running`, `done`, `failed`), `generation`, `profile`, `scenario`, `started_ms`, `finished_ms`, and `summary` or `error`. `404` once pushed out of the last eight.                                                                                                                                                                                 |
+| `POST /__kaanal/sample`       | `{ "endpoint": "GET /users/{id}", "seed"?: 7 }` answers `{ endpoint, status, body, bytes, label }`: one body from the generator the mock uses. `404` for an endpoint that is not a route; `400` over 256 KiB; `409` with no system.                                                                                                                                  |
+
 ### `GET /__kaanal/logs`
 
 The request log: the last finished mock requests, oldest completion first. What an entry holds, the flags and the commands that use this route are in [observability](observability.md).

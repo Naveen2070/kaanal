@@ -15,6 +15,8 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | [auth.md](auth.md)                   | Everyone                      | Login and JWKS from an auth node: config, tokens, keys, limits               |
 | [capacity.md](capacity.md)           | Everyone                      | Slots, queues, rate limits, 429s and the `wait` trace piece                  |
 | [scenarios.md](scenarios.md)         | Everyone                      | Named chaos scenarios: YAML, stacking, CLI, API, reset, test-runner recipes  |
+| [traffic.md](traffic.md)             | Everyone                      | Traffic profiles: rate, weighted journeys, payload sizes for the simulator   |
+| [simulation.md](simulation.md)       | Everyone                      | Run the simulator: start a run, limits, reading the report, sampling a body  |
 | [pins.md](pins.md)                   | Frontend developers, testers  | Pinned UI states (loading, empty, error, slow) and `kaanal cycle`            |
 | [observability.md](observability.md) | Everyone                      | Request ids, `kaanal logs`, `kaanal trace`, flags, test-runner recipes       |
 | [lifecycle.md](lifecycle.md)         | CI authors, test authors      | `up -d`, `down`, stale state, signals, the drain, exit codes, CI recipes     |

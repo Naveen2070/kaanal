@@ -41,6 +41,7 @@ mod guard;
 mod lease;
 mod save;
 mod scenario;
+mod sim;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -51,6 +52,7 @@ pub use draft::{apply_draft, get_draft, put_draft, save_draft, validate_draft};
 pub use guard::guard;
 pub use lease::lease_task;
 pub use save::save_scenario;
+pub use sim::{get_run, list_runs, post_run, post_sample};
 // What only the unit tests reach by `super::`.
 #[cfg(test)]
 use chaos::ChaosPatch;

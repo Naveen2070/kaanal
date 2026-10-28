@@ -229,6 +229,20 @@ pub fn run_with_limits(
     engine::simulate(topo, &streams, chaos, cfg).map(|(report, _)| report)
 }
 
+/// Checks `cfg` against `limits` and the topology without running it: what [`run_with_limits`]
+/// would reject before starting (chaos is the caller's to have checked).
+///
+/// # Errors
+/// As [`run_effective`], for everything but a clock overflow found while running.
+pub fn check_with_limits(
+    topo: &Topology,
+    endpoints: &Endpoints,
+    cfg: &SimConfig,
+    limits: &Limits,
+) -> Result<(), String> {
+    validate(topo, endpoints, None, cfg, limits).map(drop)
+}
+
 /// **Private.** Largest value `d` can sample, in seconds (NaN if its parameters are NaN).
 fn worst_case_secs(d: &Dist) -> f64 {
     match d {
