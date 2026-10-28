@@ -1168,6 +1168,7 @@ dependencies = [
  "kaanal-core",
  "rand 0.9.5",
  "rand_chacha 0.9.0",
+ "serde",
 ]
 
 [[package]]

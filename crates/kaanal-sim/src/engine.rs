@@ -173,7 +173,33 @@ fn report(
             timed_out: c.timed_out,
         })
         .collect();
-    SimReport { requests, nodes }
+    // measured utilization of each replica and link: busy slot-time inside the window over its
+    // slots (a link is one slot), clipped by the engine, so at most 1
+    let replica_utilization = engine
+        .replica_counters()
+        .iter()
+        .zip(&topo.nodes)
+        .map(|(rs, n)| {
+            rs.iter()
+                .map(|c| {
+                    n.admission
+                        .as_ref()
+                        .map_or(0.0, |a| c.area as f64 / (f64::from(a.slots) * window))
+                })
+                .collect()
+        })
+        .collect();
+    let link_utilization = engine
+        .link_counters()
+        .iter()
+        .map(|c| c.area as f64 / window)
+        .collect();
+    SimReport {
+        requests,
+        nodes,
+        replica_utilization,
+        link_utilization,
+    }
 }
 
 #[cfg(test)]

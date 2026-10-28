@@ -9,24 +9,56 @@
 #![warn(missing_docs)]
 
 mod engine;
+mod summary;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use summary::{
+    Bucket, Latency, LinkSummary, NodeSummary, ReplicaSummary, StreamSummary, Summary, summarize,
+};
+
 use kaanal_core::{
     ChainResult, ChaosState, Dist, EffectiveChaos, Endpoint, Endpoints, Hop, Topology,
 };
 
-/// **Private.** Most hop records one run may produce (R6.13): expected reported (post-warmup) arrivals × the most
-/// hops each stream's chain can take (`Seq::hops`, repeats included). A record costs about
-/// 100 bytes per hop plus a few hundred per request, so the cap bounds a run near 2–3 GB.
-/// Start value; tune once measured.
-const MAX_HOP_RECORDS: f64 = 20_000_000.0;
-/// **Private.** Most hop events one run may simulate, warmup included (a CPU bound; R6.13 bounds
-/// memory only). About 0.35 µs per hop in release, so the cap is roughly 20 s. Start value;
-/// tune once measured.
-const MAX_SIM_HOPS: f64 = 50_000_000.0;
+/// The two caps on the size of a run, checked before it starts.
+///
+/// `max_hop_records` (R6.13) bounds memory: expected reported (post-warmup) arrivals × the most
+/// hops each stream's chain can take (`Seq::hops`, repeats included). A record costs about 100
+/// bytes per hop plus a few hundred per request, so the default bounds a run near 2–3 GB.
+/// `max_sim_hops` bounds CPU: hop events simulated, warmup included, about 0.35 µs each in
+/// release, so the default is roughly 20 s. Start values; tune once measured.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Limits {
+    /// Most hop records one run may produce.
+    pub max_hop_records: f64,
+    /// Most hop events one run may simulate.
+    pub max_sim_hops: f64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            max_hop_records: 20_000_000.0,
+            max_sim_hops: 50_000_000.0,
+        }
+    }
+}
+
+impl Limits {
+    /// The caps for a run inside the server, which shares its runtime with the mocks: about 2 s
+    /// of CPU and a tenth of the memory.
+    #[must_use]
+    pub const fn server() -> Limits {
+        Limits {
+            max_hop_records: 2_000_000.0,
+            max_sim_hops: 5_000_000.0,
+        }
+    }
+}
+
 /// **Private.** Largest single service/net time a topology may sample (the config's 1 h
 /// cap times the 10× exponential/lognormal tail cap).
 const MAX_SERVICE: Duration = Duration::from_hours(10);
@@ -73,6 +105,12 @@ pub struct SimReport {
     pub requests: Vec<RequestRecord>,
     /// Per-node statistics, indexed by [`NodeId`].
     pub nodes: Vec<NodeStats>,
+    /// Measured utilization of each replica, `[node][replica]`: busy slot-time inside the window
+    /// over its slots, at most 1; `0.0` without slots. Counts a cancelled hop for as long as it
+    /// held its slot (the records carry the cut duration).
+    pub replica_utilization: Vec<Vec<f64>>,
+    /// Measured utilization of each edge's link, by edge index; `0.0` without a `bandwidth`.
+    pub link_utilization: Vec<f64>,
 }
 
 impl SimReport {
@@ -159,7 +197,7 @@ pub fn run(
     chaos: &ChaosState,
     cfg: &SimConfig,
 ) -> Result<SimReport, String> {
-    let streams = validate(topo, endpoints, Some(chaos), cfg)?;
+    let streams = validate(topo, endpoints, Some(chaos), cfg, &Limits::default())?;
     engine::simulate(topo, &streams, &chaos.compile(), cfg).map(|(report, _)| report)
 }
 
@@ -173,7 +211,21 @@ pub fn run_effective(
     chaos: &EffectiveChaos,
     cfg: &SimConfig,
 ) -> Result<SimReport, String> {
-    let streams = validate(topo, endpoints, None, cfg)?;
+    run_with_limits(topo, endpoints, chaos, cfg, &Limits::default())
+}
+
+/// [`run_effective`] under caller-chosen [`Limits`] (the server passes [`Limits::server`]).
+///
+/// # Errors
+/// As [`run_effective`], with `limits` in place of the default caps.
+pub fn run_with_limits(
+    topo: &Topology,
+    endpoints: &Endpoints,
+    chaos: &EffectiveChaos,
+    cfg: &SimConfig,
+    limits: &Limits,
+) -> Result<SimReport, String> {
+    let streams = validate(topo, endpoints, None, cfg, limits)?;
     engine::simulate(topo, &streams, chaos, cfg).map(|(report, _)| report)
 }
 
@@ -192,6 +244,7 @@ fn validate(
     endpoints: &Endpoints,
     chaos: Option<&ChaosState>,
     cfg: &SimConfig,
+    limits: &Limits,
 ) -> Result<Vec<Arc<Endpoint>>, String> {
     if cfg.streams.len() > MAX_STREAMS {
         return Err(format!(
@@ -277,14 +330,16 @@ fn validate(
         work += s.rate_per_s * cfg.duration.as_secs_f64() * hops;
         out.push(Arc::clone(ep));
     }
-    if records > MAX_HOP_RECORDS {
+    if records > limits.max_hop_records {
         return Err(format!(
-            "workload too large: about {arrivals:.0} arrivals with up to {records:.0} hops in total (max {MAX_HOP_RECORDS:.0}); lower the rate, the duration or the chain length"
+            "workload too large: about {arrivals:.0} arrivals with up to {records:.0} hops in total (max {:.0}); lower the rate, the duration or the chain length",
+            limits.max_hop_records
         ));
     }
-    if work > MAX_SIM_HOPS {
+    if work > limits.max_sim_hops {
         return Err(format!(
-            "simulated work too large: about {work:.0} hops in total, warmup included (max {MAX_SIM_HOPS:.0}); lower the rate, the duration, the warmup or the chain length"
+            "simulated work too large: about {work:.0} hops in total, warmup included (max {:.0}); lower the rate, the duration, the warmup or the chain length",
+            limits.max_sim_hops
         ));
     }
     Ok(out)

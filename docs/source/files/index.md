@@ -93,10 +93,11 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
 
-| File            | Page                                         | Contents                                     |
-| --------------- | -------------------------------------------- | -------------------------------------------- |
-| `src/lib.rs`    | [kaanal-sim/lib.md](kaanal-sim/lib.md)       | `run`, config and report types, validation   |
-| `src/engine.rs` | [kaanal-sim/engine.md](kaanal-sim/engine.md) | The event loop: arrivals, FIFO slots, report |
+| File             | Page                                           | Contents                                                                    |
+| ---------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
+| `src/lib.rs`     | [kaanal-sim/lib.md](kaanal-sim/lib.md)         | `run`, config and report types, validation                                  |
+| `src/engine.rs`  | [kaanal-sim/engine.md](kaanal-sim/engine.md)   | The event loop: arrivals, FIFO slots, report                                |
+| `src/summary.rs` | [kaanal-sim/summary.md](kaanal-sim/summary.md) | The Studio report: percentiles, per node, replica and link load, saturation |
 
 ## [kaanal](kaanal/) (binary)
 

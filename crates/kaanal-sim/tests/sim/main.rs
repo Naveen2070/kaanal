@@ -11,5 +11,6 @@ mod forks;
 mod links;
 mod replicas;
 mod streams;
+mod summary;
 mod visits;
 mod zero_load;
