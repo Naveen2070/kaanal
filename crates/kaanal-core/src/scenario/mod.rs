@@ -3,19 +3,15 @@
 //! Pure data and rules: where scenarios come from (config, files, the control API) is the
 //! server's business. [`ChaosStack::compile`] folds the active scenarios, bottom to top, and
 //! the live state on top, into the [`EffectiveChaos`] the executor reads.
-
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
 use crate::chain::{Endpoint, Endpoints, Seq, Step};
-use crate::chaos::{
-    ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, ErrorKind, MAX_LATENCY_ADD, compile_layers,
-};
-use crate::config::{ChaosEntry, ScenarioConfig};
+use crate::chaos::{ChaosKey, ChaosLayer, ChaosState, EffectiveChaos, compile_layers};
+use crate::config::ScenarioConfig;
 use crate::diagnostics::{Located, PathSeg};
-use crate::pin::{EffectivePins, EmptyOk, PinEntry, PinLayer, PinSource, PinState, check_entry};
+use crate::pin::{EffectivePins, EmptyOk, PinLayer, PinSource, PinState};
 use crate::topology::{NodeId, Topology};
 
 /// Most scenarios a [`ScenarioSet`] holds.
@@ -307,193 +303,9 @@ fn missing(path: Vec<PathSeg>, message: String) -> ScenarioError {
     }
 }
 
-/// **Private.** What makes two chaos entries of one scenario the same key.
-type EntryKey = (Option<String>, Option<String>, Option<u16>);
-
-/// **Private.** One entry after the topology-free checks: where it points (the node as
-/// written, the endpoint normalized) and the layer it sets.
-struct Shaped {
-    node: Option<String>,
-    endpoint: Option<String>,
-    replica: Option<u16>,
-    layer: ChaosLayer,
-}
-
-/// **Private.** The checks of one entry that need no topology: something to point at, a
-/// well-formed endpoint, a known kind, something set, every value in range.
-fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
-    let item = || vec![PathSeg::Key("chaos".into()), PathSeg::Index(i)];
-    let field = |f: &str| {
-        let mut p = item();
-        p.push(PathSeg::Key(f.into()));
-        p
-    };
-    if e.node.is_none() && e.endpoint.is_none() {
-        return Err(err(item(), false, "entry needs a node or endpoint".into()));
-    }
-    if e.replica.is_some() && e.node.is_none() {
-        return Err(err(field("replica"), true, "replica needs a node".into()));
-    }
-    if e.replica.is_some() && e.endpoint.is_some() {
-        return Err(err(
-            field("replica"),
-            true,
-            "a replica entry takes no endpoint (it applies whatever the endpoint)".into(),
-        ));
-    }
-    let endpoint = match &e.endpoint {
-        None => None,
-        Some(raw) => Some(endpoint_key(raw).map_err(|m| err(field("endpoint"), true, m))?),
-    };
-    let kind = match &e.error_kind {
-        None => None,
-        Some(k) => Some(ErrorKind::parse(k).ok_or_else(|| {
-            err(
-                field("error_kind"),
-                true,
-                format!("error_kind '{k}' must be one of status, reset, hang, malformed"),
-            )
-        })?),
-    };
-    let layer = ChaosLayer {
-        latency_add: e.latency_ms.map(Duration::from_millis),
-        error_rate: e.error_rate,
-        error_kind: kind,
-        error_status: e.error_status,
-        down: e.down,
-        replace: None,
-    };
-    if layer == ChaosLayer::default() {
-        return Err(err(
-            item(),
-            false,
-            "entry sets nothing (add latency_ms, error_rate, error_kind, error_status or down)"
-                .into(),
-        ));
-    }
-    if let Err((f, m)) = layer.check() {
-        return Err(if f == "latency_add" {
-            err(
-                field("latency_ms"),
-                true,
-                format!(
-                    "latency_ms must be at most {} ms (5 min)",
-                    MAX_LATENCY_ADD.as_millis()
-                ),
-            )
-        } else {
-            err(field(f), true, m)
-        });
-    }
-    Ok(Shaped {
-        node: e.node.clone(),
-        endpoint,
-        replica: e.replica,
-        layer,
-    })
-}
-
-/// **Private.** One pin after the topology-free checks.
-struct ShapedPin {
-    key: String,
-    entry: PinEntry,
-}
-
-/// **Private.** [`validate_scenario_shape`] keeping the checked entries.
-fn shape(cfg: &ScenarioConfig) -> Result<(Vec<Shaped>, Vec<ShapedPin>), ScenarioError> {
-    cfg.check_supported().map_err(|m| {
-        let field = m.split(':').next().unwrap_or_default().to_string();
-        err(vec![PathSeg::Key(field)], false, m)
-    })?;
-    // The raw counts, before duplicate keys could collapse a huge list into a small one.
-    for (name, n) in [("chaos", cfg.chaos.len()), ("pins", cfg.pins.len())] {
-        if n > MAX_ENTRIES {
-            return Err(err(
-                vec![PathSeg::Key(name.into())],
-                false,
-                format!("scenario has {n} entries; at most {MAX_ENTRIES}"),
-            ));
-        }
-    }
-    if cfg.chaos.is_empty() && cfg.pins.is_empty() {
-        return Err(err(
-            vec![PathSeg::Key("chaos".into())],
-            false,
-            "scenario needs at least one of chaos or pins".into(),
-        ));
-    }
-    let total = cfg.chaos.len() + cfg.pins.len();
-    if total > MAX_ENTRIES {
-        return Err(err(
-            vec![PathSeg::Key("pins".into())],
-            false,
-            format!("scenario has {total} entries (chaos and pins); at most {MAX_ENTRIES}"),
-        ));
-    }
-    let mut out = Vec::with_capacity(cfg.chaos.len());
-    let mut first_at: HashMap<EntryKey, usize> = HashMap::new();
-    for (i, e) in cfg.chaos.iter().enumerate() {
-        let s = shape_entry(i, e)?;
-        if let Some(j) = first_at.insert((s.node.clone(), s.endpoint.clone(), s.replica), i) {
-            let at = vec![PathSeg::Key("chaos".into()), PathSeg::Index(i)];
-            return Err(err(
-                at,
-                false,
-                format!("entry has the same key as chaos[{j}]; merge them into one"),
-            ));
-        }
-        out.push(s);
-    }
-    Ok((out, shape_pins(cfg)?))
-}
-
-/// **Private.** The topology-free checks of the pins: a well-formed endpoint, status and delay
-/// in range for the state, no endpoint twice.
-fn shape_pins(cfg: &ScenarioConfig) -> Result<Vec<ShapedPin>, ScenarioError> {
-    let mut out: Vec<ShapedPin> = Vec::with_capacity(cfg.pins.len());
-    for (i, p) in cfg.pins.iter().enumerate() {
-        let field = |f: &str| {
-            vec![
-                PathSeg::Key("pins".into()),
-                PathSeg::Index(i),
-                PathSeg::Key(f.into()),
-            ]
-        };
-        let key = endpoint_key(&p.endpoint).map_err(|m| err(field("endpoint"), true, m))?;
-        check_entry(p.state, p.status, p.delay).map_err(|(f, m)| err(field(f), true, m))?;
-        if let Some(j) = out.iter().position(|o| o.key == key) {
-            return Err(err(
-                vec![PathSeg::Key("pins".into()), PathSeg::Index(i)],
-                false,
-                format!(
-                    "pins[{i}] pins '{key}' again; pins[{j}] already does, merge them into one"
-                ),
-            ));
-        }
-        out.push(ShapedPin {
-            key,
-            entry: PinEntry {
-                state: p.state,
-                status: p.status,
-                delay: p.delay,
-            },
-        });
-    }
-    Ok(out)
-}
-
-/// Every check of a scenario that needs neither the topology nor the endpoints: the reserved
-/// `limits` key, the entry counts, a scenario with neither `chaos` nor `pins`, per chaos entry
-/// a node or endpoint, the endpoint's `METHOD /path` shape, the error kind, something set,
-/// every value in range, per pin the endpoint shape and a status and delay valid for its
-/// state, and duplicate keys. [`resolve_scenario`] runs it first; a client
-/// (`kaanal scenario load`) runs it alone to place the error in the file.
-///
-/// # Errors
-/// The first problem, placed by entry index and field.
-pub fn validate_scenario_shape(cfg: &ScenarioConfig) -> Result<(), ScenarioError> {
-    shape(cfg).map(|_| ())
-}
+mod shape;
+pub use shape::validate_scenario_shape;
+use shape::{Shaped, ShapedPin, shape};
 
 /// **Private.** Looks one checked entry up in the topology and the endpoints; pushes a warning
 /// when the entry's `endpoint` never visits its `node`.
@@ -512,6 +324,22 @@ fn resolve_entry(
             PathSeg::Key(f.into()),
         ]
     };
+    if let Some((a, b)) = &s.edge {
+        let edge = topo
+            .id(a)
+            .zip(topo.id(b))
+            .and_then(|(x, y)| topo.edge_id(x, y))
+            .ok_or_else(|| missing(field("edge"), format!("no edge '{a}' -> '{b}'")))?;
+        s.layer
+            .check_link(topo.edges[edge].bandwidth)
+            .map_err(|(f, m)| err(field(f), true, m))?;
+        if s.layer.has_orphan_fault_fields() {
+            warnings.push(format!(
+                "scenario '{name}': chaos[{i}]: error_kind/error_status have no effect without error_rate"
+            ));
+        }
+        return Ok((ChaosKey::Edge(edge), s.layer));
+    }
     let node = match &s.node {
         None => None,
         Some(n) => Some(

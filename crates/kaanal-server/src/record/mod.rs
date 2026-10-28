@@ -465,6 +465,14 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                         added = c.map_or(Duration::ZERO, |c| c.latency_add).min(h.dur);
                     }
                 }
+                if !hang && !run.chaos.is_empty() && !lead_pin {
+                    let (extra, note) = link::note(run, h.kind, h.node, h.dur);
+                    added = added.max(extra);
+                    if let Some(n) = note {
+                        delayed = true;
+                        why.push(n);
+                    }
+                }
                 if !added.is_zero() {
                     delayed = true;
                     why.push(format!("chaos +{}ms", added.as_millis()));
@@ -484,15 +492,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                         HopKind::Op(op) => Some(op.name()),
                         _ => None,
                     },
-                    kind: match h.kind {
-                        HopKind::Net => "net",
-                        HopKind::Proc => "proc",
-                        HopKind::Op(_) => "op",
-                        HopKind::CacheHit => "hit",
-                        HopKind::CacheMiss => "miss",
-                        HopKind::Delay => "delay",
-                        HopKind::Link { resp, .. } => link_name(resp),
-                    },
+                    kind: kind_str(h.kind),
                     start_ms: ms(h.start),
                     dur_ms: ms(h.dur),
                     wait_ms: ms(fh.wait),
@@ -526,6 +526,21 @@ pub fn event_of(e: &LogEntry, nodes: Vec<String>) -> Event {
         kind: e.kind,
         scope: e.scope.clone(),
         rejected: e.rejected,
+    }
+}
+
+mod link;
+
+/// **Private.** The `kind` string of a hop in the log and the trace.
+fn kind_str(kind: HopKind) -> &'static str {
+    match kind {
+        HopKind::Net => "net",
+        HopKind::Proc => "proc",
+        HopKind::Op(_) => "op",
+        HopKind::CacheHit => "hit",
+        HopKind::CacheMiss => "miss",
+        HopKind::Delay => "delay",
+        HopKind::Link { resp, .. } => link_name(resp),
     }
 }
 

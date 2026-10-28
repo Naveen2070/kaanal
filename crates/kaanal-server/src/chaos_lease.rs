@@ -24,6 +24,8 @@ pub enum Unit {
     Error,
     /// `down`.
     Down,
+    /// `bandwidth_cap` (link only).
+    Bandwidth,
     /// The `mode` switch; its expiry goes back to merge and touches no other unit.
     Mode,
 }
@@ -36,6 +38,7 @@ impl Unit {
             Unit::Latency => "latency",
             Unit::Error => "error",
             Unit::Down => "down",
+            Unit::Bandwidth => "bandwidth",
             Unit::Mode => "mode",
         }
     }
@@ -48,12 +51,13 @@ pub type Leases = HashMap<(ChaosKey, Unit), Instant>;
 #[must_use]
 pub fn units_set(p: &ChaosLayer) -> Vec<Unit> {
     [
-        (Unit::Latency, p.latency_add.is_some()),
+        (Unit::Latency, p.latency_add.is_some() || p.jitter.is_some()),
         (
             Unit::Error,
             p.error_rate.is_some() || p.error_kind.is_some() || p.error_status.is_some(),
         ),
         (Unit::Down, p.down.is_some()),
+        (Unit::Bandwidth, p.bandwidth_cap.is_some()),
         (Unit::Mode, p.replace.is_some()),
     ]
     .into_iter()
@@ -98,7 +102,10 @@ pub fn leased_fields(leases: &Leases, live: &ChaosState) -> usize {
         .filter_map(|(k, u)| {
             let l = live.layer(k)?;
             Some(match u {
-                Unit::Latency | Unit::Down => 1,
+                Unit::Latency => {
+                    usize::from(l.latency_add.is_some()) + usize::from(l.jitter.is_some())
+                }
+                Unit::Down | Unit::Bandwidth => 1,
                 Unit::Error => [
                     l.error_rate.is_some(),
                     l.error_kind.is_some(),
@@ -117,7 +124,11 @@ pub fn leased_fields(leases: &Leases, live: &ChaosState) -> usize {
 /// which is merge.
 pub fn clear_units(layer: &mut ChaosLayer, unit: Unit) {
     match unit {
-        Unit::Latency => layer.latency_add = None,
+        Unit::Latency => {
+            layer.latency_add = None;
+            layer.jitter = None;
+        }
+        Unit::Bandwidth => layer.bandwidth_cap = None,
         Unit::Error => {
             layer.error_rate = None;
             layer.error_kind = None;

@@ -62,6 +62,7 @@ Keys name exactly one thing. `DELETE` removes exactly the key named (an unknown 
 - Endpoint chaos has its own RNG path, `draw_rng(root, entry node name, b"endpoint")`, so adding it re-seeds nothing else. `error_kind` is config, so no extra draw is made for it; the existing per-hop roll is made against the compiled faults (Z15: one fault is `u < rate`, several are banded, see "Banded faults").
 - A static endpoint needs a gateway or an owner, so an entry node always exists (the control API's 400 for "no entry node" is defensive).
 
+## Link chaos (edges)A chaos key can be an **edge** (`ChaosKey::Edge(EdgeId)`), written `edge: { from, to }`. It reuses layers, leases and the merge rules: latencies add, `down` is an OR, failure bands stack, and `jitter` takes the largest and `bandwidth_cap` the smallest across layers. A link has no status, so its failures are `reset` (the default) or `hang` and it never takes `error_status`; a cap only lowers the edge's own `bandwidth`. `ChaosLayer::check_link(bandwidth)` holds these rules for the control API and for scenarios; `ChaosLayer::link_only_field` keeps `jitter` and `bandwidth_cap` off every other key. `EffectiveChaos::link(edge)` is the lookup.
 ## Layers and the stack
 
 Chaos has more than one source (B2b-1, rule R1.39). The state is an ordered **stack of layers**, bottom to top:

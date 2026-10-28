@@ -5,18 +5,15 @@ use std::time::Duration;
 
 use rand::{Rng, SeedableRng};
 
+use super::link::MAX_HOP;
 use super::{Hop, HopKind, Op, PlanItem, fail_of, hang_cap};
 use crate::balance::{Balance, pick_replica};
 use crate::chain::{Seq, Step};
-use crate::chaos::{EffectiveChaos, ErrorKind, FailKind};
+use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, Resolved};
 use crate::dist::Dist;
 use crate::rng::HopRng;
 use crate::stable_hash;
-use crate::topology::{EdgeId, NodeId, Topology};
-
-/// **Private.** Longest single payload cost (a transfer or a `per_kb` surcharge): 10 h, like a
-/// sampled hop, so a chain's sum stays far from `Duration`'s limit.
-const MAX_HOP: Duration = Duration::from_hours(10);
+use crate::topology::{NodeId, Topology};
 
 /// **Private.** The RNG of one hop's draws (R1.34, D8).
 pub(crate) fn draw_rng(path: u64, node: &str, tag: &[u8]) -> HopRng {
@@ -143,6 +140,7 @@ impl Walk<'_> {
     ) -> Flow {
         // A copy of the reference, so node names can be held across `&mut self` calls.
         let topo = self.topo;
+        let chaos = self.chaos;
         let mut now = at;
         let mut inline = None;
         for step in &body.steps {
@@ -180,11 +178,18 @@ impl Walk<'_> {
                         };
                         let span = self.open_span(call.node, now);
                         let edge = topo.edge_id(run.0, call.node);
-                        now += self.link(edge, call.node, false, now, r);
-                        now += self.net(call.node, &call.net, rep_path, now, r);
+                        let lc = edge.and_then(|e| chaos.link(e));
+                        let cap = lc.and_then(|l| l.bandwidth_cap);
+                        if let Some(k) = lc.and_then(|l| self.link_drop(l, call.node, rep_path)) {
+                            let fail = self.link_fail(k, call.node, r, now);
+                            self.close_span(span);
+                            return fail;
+                        }
+                        now += self.link(edge, call.node, false, (now, r), cap);
+                        now += self.net(call.node, &call.net, rep_path, (now, r), lc);
                         let flow = self.seq(&call.body, rep_path, op, now, (call.node, r));
                         if let Flow::Done(end) | Flow::Hit(end) = flow {
-                            now = end + self.link(edge, call.node, true, end, r);
+                            now = end + self.link(edge, call.node, true, (end, r), cap);
                         }
                         self.close_span(span);
                         match flow {
@@ -207,12 +212,20 @@ impl Walk<'_> {
                             .pick(cache.node, cache.balance.as_ref(), rep_path)
                             .unwrap_or(0);
                         let edge = topo.edge_id(run.0, cache.node);
-                        now += self.link(edge, cache.node, false, now, r);
-                        now += self.net(cache.node, &cache.net, rep_path, now, r);
+                        let lc = edge.and_then(|e| chaos.link(e));
+                        let cap = lc.and_then(|l| l.bandwidth_cap);
+                        // A cache never fails the request (Z17): a dropped link is a miss, a
+                        // reset at once and a hang or partition after the node's timeout.
+                        if let Some(k) = lc.and_then(|l| self.link_drop(l, cache.node, rep_path)) {
+                            now += self.cache_miss_on_drop(k, cache.node, (now, r));
+                            continue;
+                        }
+                        now += self.link(edge, cache.node, false, (now, r), cap);
+                        now += self.net(cache.node, &cache.net, rep_path, (now, r), lc);
                         let (hit, dur) = self.lookup(cache.node, rep_path, now, r);
                         now += dur;
                         if hit {
-                            now += self.link(edge, cache.node, true, now, r);
+                            now += self.link(edge, cache.node, true, (now, r), cap);
                             return Flow::Hit(now);
                         }
                     }
@@ -249,38 +262,17 @@ impl Walk<'_> {
         }
     }
 
-    /// **Private.** A payload crossing `edge` as a `Link` hop: `bytes / bandwidth`, capped at 10 h.
-    /// Nothing (zero, no hop) without a bandwidth or without bytes in this direction.
-    fn link(
+    /// **Private.** An edge's latency as a `Net` hop, with the link's chaos (extra latency, jitter) on it.
+    fn net(
         &mut self,
-        edge: Option<EdgeId>,
         to: NodeId,
-        resp: bool,
-        start: Duration,
-        replica: u16,
+        d: &Dist,
+        path: u64,
+        (start, replica): (Duration, u16),
+        lc: Option<&Resolved>,
     ) -> Duration {
-        let bytes = if resp { self.bytes.1 } else { self.bytes.0 };
-        let Some((edge, bw)) = edge.and_then(|e| Some((e, self.topo.edges[e].bandwidth?))) else {
-            return Duration::ZERO;
-        };
-        if bytes == 0 {
-            return Duration::ZERO;
-        }
-        let ns = (u128::from(bytes) * 1_000_000_000 / u128::from(bw)).min(MAX_HOP.as_nanos());
-        let dur = Duration::from_nanos(u64::try_from(ns).unwrap_or(u64::MAX));
-        self.items.push(PlanItem::Hop(Hop {
-            node: to,
-            replica,
-            kind: HopKind::Link { edge, resp },
-            start,
-            dur,
-        }));
-        dur
-    }
-
-    /// **Private.** An edge's latency as a `Net` hop (no chaos on edges, as in A1).
-    fn net(&mut self, to: NodeId, d: &Dist, path: u64, start: Duration, replica: u16) -> Duration {
         let dur = d.sample(&mut draw_rng(path, &self.topo.nodes[to].name, b"net"));
+        let dur = self.shake(dur, lc, path, to);
         self.items.push(PlanItem::Hop(Hop {
             node: to,
             replica,

@@ -1,4 +1,7 @@
-# `crates/kaanal-core/src/chaos.rs`
+# `crates/kaanal-core/src/chaos/`
+
+**Layout (R3.8):** `mod.rs` holds the state types (kinds, `NodeChaos`, `ChaosLayer`, `ChaosKey`, `ChaosState`); `resolve.rs` holds the compiled form (`Resolved`, `EffectiveChaos`, `compile_layers`). Public paths are unchanged. 
+`chaos/link.rs` holds the rules of chaos on an edge (`ChaosLayer::check_link`, `link_only_field`).
 
 Chaos state types: the user-controlled failure knobs, their sparse layers and the compiled form the executor reads. The whole model (kinds, layers, banding, override) is explained in [../../chaos.md](../../chaos.md).
 

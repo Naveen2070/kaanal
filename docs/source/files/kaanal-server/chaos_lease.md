@@ -27,3 +27,5 @@ Timed live chaos (spec L1-L6): the lease table behind the optional `ttl` of `PUT
 ## Tests
 
 [../../tests.md](../../tests.md#crateskaanal-serversrcchaos_leasers-unit--the-chaos-lease-table) (unit), the expiry tests in [control.rs](../../tests.md#unit-tests-inside-source-files) (paused clock) and the lease tests in [scenarios_http.rs](../../tests.md#crateskaanal-servertestsscenarios_httprs--scenario-control-api).
+
+**Link chaos (1d).** `Unit::Bandwidth` leases `bandwidth_cap`; `jitter_ms` is leased with `latency_ms` (`Unit::Latency`). `units_set`, `leased_fields` and `clear_units` know both.

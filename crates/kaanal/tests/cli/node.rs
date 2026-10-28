@@ -245,3 +245,99 @@ fn node_list_shows_the_replica_count_of_a_replicated_node() {
     assert_eq!(find("app")["replicas"], 3);
     assert!(find("gw").get("replicas").is_none());
 }
+
+/// A project whose `gw -> app` edge has a bandwidth.
+fn linked_up(name: &str) -> (Up, std::path::PathBuf) {
+    let dir = scratch(name);
+    std::fs::write(
+        dir.join("kaanal.yaml"),
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n",
+    )
+    .unwrap();
+    (Up::start_in(dir.clone()), dir)
+}
+
+#[test]
+fn an_edge_is_set_and_cleared_with_from_colon_to() {
+    let (up, _dir) = linked_up("edge-chaos");
+    let out = ok(
+        &up,
+        &[
+            "chaos",
+            "set",
+            "--edge",
+            "gw:app",
+            "--latency",
+            "20ms",
+            "--jitter",
+            "5ms",
+            "--bandwidth-cap",
+            "500000",
+        ],
+    );
+    assert!(out.contains("gw -> app"), "{out}");
+    let live = ok(
+        &up,
+        &["--json", "chaos", "set", "--edge", "gw:app", "--down"],
+    );
+    assert!(
+        live.contains("\"jitter_ms\":5") || live.contains("\"jitter_ms\": 5"),
+        "{live}"
+    );
+    assert!(ok(&up, &["chaos", "clear", "--edge", "gw:app"]).contains("cleared"));
+}
+
+#[test]
+fn bad_edge_flags_are_usage_errors_or_rejected_by_the_server() {
+    let (up, _dir) = linked_up("edge-usage");
+    for args in [
+        &["chaos", "set", "--edge", "gwapp", "--down"][..],
+        &["chaos", "set", "gw", "--edge", "gw:app", "--down"],
+    ] {
+        let out = up.run(args);
+        assert_eq!(out.status.code(), Some(64), "{args:?}: {}", stderr(&out));
+    }
+    let e = fails(
+        &up,
+        &[
+            "chaos",
+            "set",
+            "--edge",
+            "gw:app",
+            "--kind",
+            "status",
+            "--error-rate",
+            "50%",
+        ],
+    );
+    assert!(e.contains("reset or hang"), "{e}");
+    let e = fails(&up, &["chaos", "set", "--edge", "app:gw", "--down"]);
+    assert!(e.contains("no edge 'app' -> 'gw'"), "{e}");
+}
+
+#[test]
+fn status_lists_an_edge_entry_with_its_jitter_and_cap() {
+    let (up, _dir) = linked_up("edge-status");
+    ok(
+        &up,
+        &[
+            "chaos",
+            "set",
+            "--edge",
+            "gw:app",
+            "--latency",
+            "20ms",
+            "--jitter",
+            "5ms",
+            "--bandwidth-cap",
+            "500000",
+        ],
+    );
+    let out = ok(&up, &["status"]);
+    assert!(
+        out.contains("gw -> app: +20ms ±5ms, cap 500000 B/s"),
+        "{out}"
+    );
+    ok(&up, &["chaos", "clear", "--edge", "gw:app"]);
+    assert!(!ok(&up, &["status"]).contains("gw -> app"));
+}

@@ -190,6 +190,15 @@ pub(crate) enum ChaosCmd {
         /// Endpoint key, e.g. "GET /orders"; with a node: that node, only through this endpoint
         #[arg(long)]
         route: Option<String>,
+        /// A link instead of a node: the edge FROM:TO, e.g. `--edge app:db`
+        #[arg(long, value_name = "FROM:TO", conflicts_with_all = ["node", "route", "replica"])]
+        edge: Option<String>,
+        /// Link only: random extra latency of up to this much either way, e.g. 5ms
+        #[arg(long, requires = "edge")]
+        jitter: Option<String>,
+        /// Link only: cap the edge's bandwidth, in bytes per second (at most its own)
+        #[arg(long = "bandwidth-cap", requires = "edge")]
+        bandwidth_cap: Option<u64>,
         /// One replica (0-based) of the node, whatever the endpoint
         #[arg(long, requires = "node", conflicts_with = "route")]
         replica: Option<u16>,
@@ -218,6 +227,9 @@ pub(crate) enum ChaosCmd {
         /// Endpoint key, e.g. "GET /orders"
         #[arg(long)]
         route: Option<String>,
+        /// A link instead of a node: the edge FROM:TO, e.g. `--edge app:db`
+        #[arg(long, value_name = "FROM:TO", conflicts_with_all = ["node", "route", "replica"])]
+        edge: Option<String>,
         /// One replica (0-based) of the node
         #[arg(long, requires = "node", conflicts_with = "route")]
         replica: Option<u16>,
@@ -288,13 +300,14 @@ impl Cli {
                 ChaosCmd::Set {
                     node: None,
                     route: None,
+                    edge: None,
                     ..
                 },
         } = &self.cmd
         {
             return Err(Cli::command().error(
                 clap::error::ErrorKind::MissingRequiredArgument,
-                "chaos set needs a node or --route",
+                "chaos set needs a node, --route or --edge",
             ));
         }
         Ok(self)

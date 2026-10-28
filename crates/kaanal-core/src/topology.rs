@@ -181,6 +181,8 @@ pub enum TopologyError {
     SecondAuth(String),
     /// No gateway, service, monolith or auth node: requests have nowhere to enter.
     NoEntry,
+    /// More edges than a link hop can name (`u16`, which keeps a hop at 48 bytes).
+    TooManyEdges(usize),
     /// An edge from a node to itself.
     SelfLoop {
         /// 0-based index of the offending edge.
@@ -239,6 +241,7 @@ impl fmt::Display for TopologyError {
             TopologyError::SecondAuth(n) => {
                 write!(f, "node '{n}': a topology has at most one auth node")
             }
+            TopologyError::TooManyEdges(n) => write!(f, "{n} edges: at most {} are supported", u16::MAX),
             TopologyError::NoEntry => f.write_str(
                 "a topology needs a gateway, a service, a monolith or an auth node (requests enter there)",
             ),
@@ -327,6 +330,7 @@ impl TopologyError {
             | TopologyError::MissingCache(n)
             | TopologyError::MissingGatewayEdge(n) => keys(&["nodes", n]),
             TopologyError::NoEntry => keys(&["nodes"]),
+            TopologyError::TooManyEdges(_) => keys(&["edges"]),
         };
         Located::new(path, self.to_string())
     }
@@ -455,6 +459,9 @@ impl Topology {
             return Err(TopologyError::NoEntry);
         }
 
+        if cfg.edges.len() > usize::from(u16::MAX) {
+            return Err(TopologyError::TooManyEdges(cfg.edges.len()));
+        }
         let mut edges: Vec<Edge> = Vec::new();
         let mut seen = HashSet::new();
         for (i, e) in cfg.edges.iter().enumerate() {

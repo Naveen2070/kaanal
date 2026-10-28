@@ -67,6 +67,7 @@ fn a_link_hop_lasts_bytes_over_bandwidth() {
     let edge = t
         .edge_id(t.id("app").unwrap(), t.id("db").unwrap())
         .unwrap();
+    let edge = u16::try_from(edge).unwrap();
     assert_eq!(l[0].kind, HopKind::Link { edge, resp: false });
 }
 

@@ -165,7 +165,7 @@ fn scenario_load_places_shape_errors_in_the_file_and_sends_nothing() {
         (
             "target.yaml",
             "chaos:\n  - { down: true }\n",
-            "node or endpoint",
+            "node, endpoint or edge",
         ),
         (
             "path.yaml",

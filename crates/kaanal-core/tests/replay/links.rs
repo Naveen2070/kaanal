@@ -11,7 +11,10 @@ fn link(to: usize, edge: usize, resp: bool, ms: u64) -> PlanItem {
     PlanItem::Hop(Hop {
         node: to,
         replica: 0,
-        kind: HopKind::Link { edge, resp },
+        kind: HopKind::Link {
+            edge: u16::try_from(edge).unwrap(),
+            resp,
+        },
         start: Duration::ZERO,
         dur: Duration::from_millis(ms),
     })

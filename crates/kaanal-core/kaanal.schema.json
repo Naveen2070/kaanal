@@ -80,12 +80,32 @@
       "additionalProperties": false,
       "description": "One chaos entry of a scenario: where it applies plus the fields it sets.",
       "properties": {
+        "bandwidth_cap": {
+          "description": "Edge only: caps the edge's `bandwidth` (bytes per second, at least 1, at most the\nedge's own).",
+          "format": "uint64",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "down": {
           "description": "Hard outage.",
           "type": [
             "boolean",
             "null"
           ]
+        },
+        "edge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EdgeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A link: the edge from one node to another (it must exist). Takes no node, endpoint or\nreplica; sets `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`,\n`down` (a partition) and `bandwidth_cap`."
         },
         "endpoint": {
           "description": "`METHOD /path`: the front door of that endpoint.",
@@ -113,6 +133,15 @@
           "description": "Status of a failed visit, 500 to 504 (default 503).",
           "format": "uint16",
           "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "jitter_ms": {
+          "description": "Edge only: random extra latency of up to this many milliseconds either way.",
+          "format": "uint64",
           "minimum": 0,
           "type": [
             "integer",
@@ -287,6 +316,25 @@
         },
         "to": {
           "description": "Name of the node it calls.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "EdgeRef": {
+      "additionalProperties": false,
+      "description": "The two ends of an edge in a chaos entry: `edge: { from: app, to: db }`.",
+      "properties": {
+        "from": {
+          "description": "The calling node.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The node it calls.",
           "type": "string"
         }
       },

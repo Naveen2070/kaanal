@@ -129,7 +129,7 @@ impl Units {
     /// hop the edge's pseudo-node (index `nodes + edge`, replica 0).
     pub(super) fn target(&self, h: &Hop) -> (NodeId, u16) {
         match h.kind {
-            HopKind::Link { edge, .. } => (self.nodes + edge, 0),
+            HopKind::Link { edge, .. } => (self.nodes + usize::from(edge), 0),
             _ => (h.node, h.replica),
         }
     }

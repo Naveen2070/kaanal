@@ -6,6 +6,7 @@ mod common;
 mod deadlines;
 mod endpoint;
 mod layers;
+mod link_chaos;
 mod links;
 mod prob;
 mod replica_chaos;

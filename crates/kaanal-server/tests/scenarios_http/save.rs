@@ -395,3 +395,29 @@ async fn a_saved_replica_entry_round_trips() {
     let eff = t.active().await;
     assert_eq!(eff["effective"]["replicas"][0]["replica"], 1);
 }
+
+#[tokio::test]
+async fn scenario_save_round_trips_an_edge_entry() {
+    let s = start_full(new_dir(&[]), BASE).await;
+    let body = json!({ "edge": { "from": "app", "to": "db" }, "latency_ms": 20, "jitter_ms": 4, "error_rate": 0.1 });
+    assert_eq!(s.put("/__kaanal/chaos", body).await.status(), 200);
+    let r = s
+        .post_json("/__kaanal/scenarios/save", json!({ "name": "e1" }))
+        .await;
+    assert_eq!(r.status(), 200);
+    let text = std::fs::read_to_string(s.dir.join("scenarios/e1.yaml")).unwrap();
+    assert!(
+        text.contains(r#""edge":{"from":"app","to":"db"}"#) && text.contains(r#""jitter_ms":4"#),
+        "{text}"
+    );
+    // the saved file loads and resolves to the same edge entry
+    let t = start_full(new_dir(&[("e1.yaml", &text)]), BASE).await;
+    assert_eq!(
+        t.post("/__kaanal/scenarios/e1/activate").await.status(),
+        200
+    );
+    let e = &t.active().await["effective"]["edges"][0];
+    assert_eq!(e["edge"]["to"], "db");
+    assert_eq!(e["jitter_ms"], 4);
+    assert_eq!(e["latency_ms"], 20);
+}

@@ -60,6 +60,11 @@ pub struct ChaosEntry {
     /// `METHOD /path`: the front door of that endpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    /// A link: the edge from one node to another (it must exist). Takes no node, endpoint or
+    /// replica; sets `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`,
+    /// `down` (a partition) and `bandwidth_cap`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge: Option<EdgeRef>,
     /// With `node`: one replica of it (0-based), whatever the endpoint. Needs the node to have
     /// that many `replicas`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,6 +83,14 @@ pub struct ChaosEntry {
     /// Status of a failed visit, 500 to 504 (default 503).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_status: Option<u16>,
+    /// Edge only: random extra latency of up to this many milliseconds either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jitter_ms: Option<u64>,
+    /// Edge only: caps the edge's `bandwidth` (bytes per second, at least 1, at most the
+    /// edge's own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 1))]
+    pub bandwidth_cap: Option<u64>,
     /// Hard outage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub down: Option<bool>,
@@ -90,4 +103,14 @@ pub struct ChaosEntry {
 pub fn parse_scenario(src: &str) -> Result<ScenarioConfig, ConfigError> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     serde_yaml_ng::from_str(src).map_err(|e| serde_error(&e))
+}
+
+/// The two ends of an edge in a chaos entry: `edge: { from: app, to: db }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeRef {
+    /// The calling node.
+    pub from: String,
+    /// The node it calls.
+    pub to: String,
 }

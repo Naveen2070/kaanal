@@ -61,7 +61,11 @@ fn bad_scenarios_are_rejected_with_the_entry_and_field() {
     let (topo, eps) = fixture();
     // (yaml, wanted words, path of the error)
     let cases = [
-        ("chaos: [ { down: true } ]", "node or endpoint", "chaos.0"),
+        (
+            "chaos: [ { down: true } ]",
+            "node, endpoint or edge",
+            "chaos.0",
+        ),
         (
             "chaos: [ { node: ghost, down: true } ]",
             "unknown node",

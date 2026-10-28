@@ -41,8 +41,8 @@ pub use chaos::{
     MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers,
 };
 pub use config::{
-    ChaosEntry, Config, ConfigError, Determinism, EndpointsConfig, NodeKind, ScenarioConfig,
-    SeedSource, parse_scenario, valid_locale_tag,
+    ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointsConfig, NodeKind,
+    ScenarioConfig, SeedSource, parse_scenario, valid_locale_tag,
 };
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;

@@ -1,6 +1,8 @@
-# `crates/kaanal-core/src/scenario.rs`
+# `crates/kaanal-core/src/scenario/`
 
 Named chaos scenarios and the stack that layers them under the live chaos. Pure data and rules: where scenarios come from (the config, `scenarios/*.yaml`, the control API) is the server's business ([../kaanal-server/scenarios.md](../kaanal-server/scenarios.md)). The model is explained in [../../chaos.md](../../chaos.md).
+**Layout (R3.8):** `mod.rs` holds the scenario set, names and errors and `resolve_scenario`; `shape.rs` holds the topology-free checks (`validate_scenario_shape`). An entry may now name an `edge: { from, to }` (with `jitter_ms` and `bandwidth_cap`): `shape` rejects an edge mixed with a node, endpoint or replica and the link rules, and `resolve_entry` finds the edge (a missing one is a positioned `no edge 'a' -> 'b'`) and checks the cap against its real `bandwidth`.
+
 
 ## What it does
 

@@ -4,6 +4,7 @@ mod auth;
 mod capacity;
 mod chains;
 mod chaos_api;
+mod chaos_links;
 mod chaos_replicas;
 mod common;
 mod events_ui;

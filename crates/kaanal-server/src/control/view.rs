@@ -4,8 +4,8 @@ use super::*;
 
 /// **Private.** Places each view under its key: `{ nodes, endpoints, node_at }`.
 pub(super) fn keyed_json(st: &AppState, items: Vec<(ChaosKey, Value)>) -> Map<String, Value> {
-    let (mut nodes, mut endpoints, mut node_at, mut replicas) =
-        (Map::new(), Map::new(), Vec::new(), Vec::new());
+    let (mut nodes, mut endpoints, mut node_at, mut replicas, mut edges) =
+        (Map::new(), Map::new(), Vec::new(), Vec::new(), Vec::new());
     for (k, view) in items {
         match k {
             ChaosKey::Node(id) => {
@@ -26,6 +26,11 @@ pub(super) fn keyed_json(st: &AppState, items: Vec<(ChaosKey, Value)>) -> Map<St
                 o.insert("replica".into(), json!(r));
                 replicas.push(Value::Object(o));
             }
+            ChaosKey::Edge(e) => {
+                let Value::Object(mut o) = view else { continue };
+                key_fields(st, &ChaosKey::Edge(e), &mut o);
+                edges.push(Value::Object(o));
+            }
         }
     }
     let mut out = Map::new();
@@ -35,6 +40,9 @@ pub(super) fn keyed_json(st: &AppState, items: Vec<(ChaosKey, Value)>) -> Map<St
     // only when there is one, so a topology without replica chaos reads as before
     if !replicas.is_empty() {
         out.insert("replicas".into(), Value::Array(replicas));
+    }
+    if !edges.is_empty() {
+        out.insert("edges".into(), Value::Array(edges));
     }
     out
 }
@@ -46,16 +54,28 @@ pub(super) fn resolved_json(r: &Resolved) -> Value {
         .iter()
         .map(|f| json!({ "upto": f.upto, "kind": f.kind.as_str(), "status": f.status }))
         .collect();
-    json!({
+    let mut v = json!({
         "latency_ms": u64::try_from(r.latency_add.as_millis()).unwrap_or(u64::MAX),
         "down": r.down,
         "faults": faults,
-    })
+    });
+    // link fields only for a link, so a node's view reads as before
+    if !r.jitter.is_zero() {
+        v["jitter_ms"] = json!(u64::try_from(r.jitter.as_millis()).unwrap_or(u64::MAX));
+    }
+    if let Some(c) = r.bandwidth_cap {
+        v["bandwidth_cap"] = json!(c);
+    }
+    v
 }
 
 /// **Private.** A compiled key that does nothing (a live override calmed it): not shown, not saved.
 pub(super) fn is_calm(r: &Resolved) -> bool {
-    r.latency_add.is_zero() && !r.down && r.faults().is_empty()
+    r.latency_add.is_zero()
+        && r.jitter.is_zero()
+        && r.bandwidth_cap.is_none()
+        && !r.down
+        && r.faults().is_empty()
 }
 
 /// **Private.** The compiled chaos as JSON; calm keys are left out.
@@ -110,6 +130,13 @@ pub(super) fn key_fields(st: &AppState, k: &ChaosKey, o: &mut Map<String, Value>
             o.insert("node".into(), json!(st.topo.nodes[*id].name));
             o.insert("replica".into(), json!(r));
         }
+        ChaosKey::Edge(e) => {
+            let (from, to) = (st.topo.edges[*e].from, st.topo.edges[*e].to);
+            o.insert(
+                "edge".into(),
+                json!({ "from": st.topo.nodes[from].name, "to": st.topo.nodes[to].name }),
+            );
+        }
     }
 }
 
@@ -120,6 +147,13 @@ pub(super) fn key_label(st: &AppState, k: &ChaosKey) -> String {
         ChaosKey::Endpoint(e) => format!("endpoint '{e}'"),
         ChaosKey::NodeAt(id, e) => format!("node '{}' at endpoint '{e}'", st.topo.nodes[*id].name),
         ChaosKey::Replica(id, r) => format!("node '{}' replica {r}", st.topo.nodes[*id].name),
+        ChaosKey::Edge(e) => {
+            let (from, to) = (st.topo.edges[*e].from, st.topo.edges[*e].to);
+            format!(
+                "edge '{}' -> '{}'",
+                st.topo.nodes[from].name, st.topo.nodes[to].name
+            )
+        }
     }
 }
 
@@ -152,6 +186,15 @@ pub(super) fn layers_json(st: &AppState, layers: &ChaosState) -> Vec<Value> {
         }
         if let Some(s) = l.error_status {
             o.insert("error_status".into(), json!(s));
+        }
+        if let Some(d) = l.jitter {
+            o.insert(
+                "jitter_ms".into(),
+                json!(u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            );
+        }
+        if let Some(c) = l.bandwidth_cap {
+            o.insert("bandwidth_cap".into(), json!(c));
         }
         if let Some(d) = l.down {
             o.insert("down".into(), json!(d));

@@ -1,6 +1,6 @@
 //! The chaos handlers: read and patch live chaos per node, endpoint or node at endpoint, and the topology view.
 
-use kaanal_core::expected_visits;
+use kaanal_core::{EdgeRef, expected_visits};
 
 use super::*;
 
@@ -12,6 +12,10 @@ pub(super) struct ChaosView {
     pub(super) error_kind: &'static str,
     pub(super) error_status: u16,
     pub(super) down: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub(super) jitter_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) bandwidth_cap: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) mode: Option<&'static str>,
 }
@@ -26,6 +30,10 @@ impl From<&ChaosLayer> for ChaosView {
             error_kind: c.error_kind.as_str(),
             error_status: c.error_status,
             down: c.down,
+            jitter_ms: l
+                .jitter
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            bandwidth_cap: l.bandwidth_cap,
             mode: (l.replace == Some(true)).then_some("override"),
         }
     }
@@ -80,6 +88,8 @@ pub struct ChaosPatch {
     pub(super) error_kind: Option<String>,
     pub(super) error_status: Option<u16>,
     pub(super) down: Option<bool>,
+    pub(super) jitter_ms: Option<u64>,
+    pub(super) bandwidth_cap: Option<u64>,
     pub(super) mode: Option<String>,
     pub(super) ttl: Option<String>,
 }
@@ -102,6 +112,8 @@ impl ChaosPatch {
             error_kind,
             error_status: self.error_status,
             down: self.down,
+            jitter: self.jitter_ms.map(Duration::from_millis),
+            bandwidth_cap: self.bandwidth_cap,
             replace: parse_mode(self.mode.as_deref())?,
         })
     }
@@ -120,11 +132,14 @@ pub struct KeyedPatch {
     pub(super) node: Option<String>,
     pub(super) endpoint: Option<String>,
     pub(super) replica: Option<u16>,
+    pub(super) edge: Option<EdgeRef>,
     pub(super) latency_ms: Option<u64>,
     pub(super) error_rate: Option<f64>,
     pub(super) error_kind: Option<String>,
     pub(super) error_status: Option<u16>,
     pub(super) down: Option<bool>,
+    pub(super) jitter_ms: Option<u64>,
+    pub(super) bandwidth_cap: Option<u64>,
     pub(super) mode: Option<String>,
     pub(super) ttl: Option<String>,
 }
@@ -136,6 +151,8 @@ pub struct ClearQuery {
     pub(super) node: Option<String>,
     pub(super) endpoint: Option<String>,
     pub(super) replica: Option<u16>,
+    pub(super) edge_from: Option<String>,
+    pub(super) edge_to: Option<String>,
 }
 
 /// `GET /__kaanal/chaos` — the live layer
@@ -194,6 +211,14 @@ pub(super) fn apply_patch(
         cur.apply(&patch);
         cur.validate()
             .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
+        // link chaos belongs to an edge key, and an edge key has the link rules
+        let linked = match key {
+            ChaosKey::Edge(e) => cur.check_link(st.topo.edges[*e].bandwidth),
+            _ => cur
+                .link_only_field()
+                .map_or(Ok(()), |f| Err((f, format!("{f} is for an edge key")))),
+        };
+        linked.map_err(|(_, m)| reject(StatusCode::BAD_REQUEST, &m))?;
         // `down: false` in the live layer means "unset": drop it, and drop an entry it leaves empty.
         if cur.down == Some(false) {
             cur.down = None;
@@ -334,6 +359,35 @@ fn replica_key(
     Ok(Some(ChaosKey::Replica(n, r)))
 }
 
+/// **Private.** The key of an `edge` request, or `None` when none was named: it takes no node,
+/// endpoint or replica, both ends must be nodes (404) and the edge must exist (404).
+fn edge_key(
+    st: &AppState,
+    other: bool,
+    edge: Option<(&str, &str)>,
+) -> Result<Option<ChaosKey>, Reject> {
+    let Some((from, to)) = edge else {
+        return Ok(None);
+    };
+    if other {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            "an edge takes no node, endpoint or replica",
+        ));
+    }
+    let id = node_id(st, from)?;
+    let to_id = node_id(st, to)?;
+    st.topo
+        .edge_id(id, to_id)
+        .map(|e| Some(ChaosKey::Edge(e)))
+        .ok_or_else(|| {
+            reject(
+                StatusCode::NOT_FOUND,
+                &format!("no edge '{from}' -> '{to}'"),
+            )
+        })
+}
+
 /// `PUT /__kaanal/chaos` — like [`set_chaos`] but keyed by `node`, `endpoint` or both (the node
 /// only when visited through that endpoint). At least one is required; an unknown node or
 /// endpoint → 404; a malformed endpoint (not `METHOD /path`) → 400; an endpoint with no entry
@@ -363,7 +417,11 @@ pub async fn set_chaos_keyed(
             Some(key)
         }
     };
-    let key = if let Some(k) = replica_key(&st, node, p.endpoint.is_some(), p.replica)? {
+    let edge = p.edge.as_ref().map(|e| (e.from.as_str(), e.to.as_str()));
+    let other = node.is_some() || endpoint.is_some() || p.replica.is_some();
+    let key = if let Some(k) = edge_key(&st, other, edge)? {
+        k
+    } else if let Some(k) = replica_key(&st, node, p.endpoint.is_some(), p.replica)? {
         k
     } else {
         match (node, endpoint) {
@@ -373,7 +431,7 @@ pub async fn set_chaos_keyed(
             (None, None) => {
                 return Err(reject(
                     StatusCode::BAD_REQUEST,
-                    "set node, endpoint or both",
+                    "set node, endpoint, edge or a node with an endpoint",
                 ));
             }
         }
@@ -384,6 +442,8 @@ pub async fn set_chaos_keyed(
         error_kind: p.error_kind,
         error_status: p.error_status,
         down: p.down,
+        jitter_ms: p.jitter_ms,
+        bandwidth_cap: p.bandwidth_cap,
         mode: p.mode,
         ttl: p.ttl,
     };
@@ -424,7 +484,17 @@ pub async fn clear_keyed(
         .map(endpoint_key)
         .transpose()
         .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
-    let key = if let Some(k) = replica_key(&st, node, q.endpoint.is_some(), q.replica)? {
+    let edge = q.edge_from.as_deref().zip(q.edge_to.as_deref());
+    if q.edge_from.is_some() != q.edge_to.is_some() {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            "an edge needs both edge_from and edge_to",
+        ));
+    }
+    let other = node.is_some() || endpoint.is_some() || q.replica.is_some();
+    let key = if let Some(k) = edge_key(&st, other, edge)? {
+        Some(k)
+    } else if let Some(k) = replica_key(&st, node, q.endpoint.is_some(), q.replica)? {
         Some(k)
     } else {
         match (node, endpoint) {
@@ -445,4 +515,13 @@ pub async fn clear_keyed(
         Ok(())
     })?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// **Private.** serde's `skip_serializing_if` for a zero count (a node view has no jitter).
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }

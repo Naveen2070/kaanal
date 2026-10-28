@@ -139,6 +139,13 @@ pub(crate) fn status() -> Result<(), Fail> {
             );
             println!("{}", clean(&format!("{n} @ {e}: {}", chaos_text(c))));
         }
+        for c in eff["edges"].as_array().into_iter().flatten() {
+            let (a, b) = (
+                c["edge"]["from"].as_str().unwrap_or(""),
+                c["edge"]["to"].as_str().unwrap_or(""),
+            );
+            println!("{}", clean(&format!("{a} -> {b}: {}", chaos_text(c))));
+        }
         for (key, p) in pins["effective"].as_object().into_iter().flatten() {
             let line = format!(
                 "pin {key}: {}{} ({})",

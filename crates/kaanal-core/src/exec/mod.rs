@@ -9,6 +9,7 @@
 //! (R1.34), so editing one step never changes another step's draws. Pure: no sleeping, no
 //! IO; live mode sleeps [`ChainOutcome::total`], the simulator advances virtual time (R2.5).
 
+mod link;
 mod walk;
 
 pub(crate) use walk::draw_rng;
@@ -79,7 +80,7 @@ pub enum HopKind {
     /// to the edge's target and queues FIFO behind other transfers on the same edge.
     Link {
         /// The edge crossed.
-        edge: crate::topology::EdgeId,
+        edge: u16,
         /// False for the request body, true for the response body.
         resp: bool,
     },

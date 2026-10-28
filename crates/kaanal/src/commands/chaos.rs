@@ -49,6 +49,9 @@ pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
             node,
             route,
             replica,
+            edge,
+            jitter,
+            bandwidth_cap,
             kind,
             latency,
             error_rate,
@@ -56,14 +59,19 @@ pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
             down,
             for_,
         } => {
-            let mut patch = chaos_patch(latency, error_rate, error, kind, down)?;
+            let link = (jitter, bandwidth_cap);
+            let mut patch = chaos_patch(latency, error_rate, error, kind, down, link)?;
             let revert = for_set(&mut patch, for_)?;
             let label = match (&node, &route) {
+                _ if edge.is_some() => edge.clone().unwrap_or_default().replace(':', " -> "),
                 (Some(n), Some(e)) => format!("{n} @ {e}"),
                 (Some(n), None) => node_label(n, replica),
                 (None, e) => e.clone().unwrap_or_default(),
             };
-            let v = if route.is_some() {
+            let v = if let Some(e) = &edge {
+                patch.insert("edge".into(), edge_ref(e)?);
+                call("PUT", "/__kaanal/chaos", Some(Value::Object(patch)))?
+            } else if route.is_some() {
                 patch.extend(node.map(|n| ("node".to_string(), json!(n))));
                 patch.extend(route.map(|e| ("endpoint".to_string(), json!(e))));
                 call("PUT", "/__kaanal/chaos", Some(Value::Object(patch)))?
@@ -81,8 +89,19 @@ pub(crate) fn chaos(cmd: ChaosCmd) -> Result<(), Fail> {
             node,
             route,
             replica,
+            edge,
         } => {
-            let path = chaos_clear_path(node, route, replica);
+            let path = match &edge {
+                Some(e) => {
+                    let (from, to) = edge_ends(e)?;
+                    format!(
+                        "/__kaanal/chaos?edge_from={}&edge_to={}",
+                        encode_segment(from),
+                        encode_segment(to)
+                    )
+                }
+                None => chaos_clear_path(node, route, replica),
+            };
             let v = call("DELETE", &path, None)?;
             output::emit(&v, || println!("cleared"));
             Ok(())
@@ -97,6 +116,7 @@ pub(crate) fn chaos_patch(
     error: Option<u16>,
     kind: Option<String>,
     down: bool,
+    (jitter, bandwidth_cap): (Option<String>, Option<u64>),
 ) -> Result<Map<String, Value>, Fail> {
     let mut patch = Map::new();
     if let Some(l) = latency {
@@ -117,12 +137,21 @@ pub(crate) fn chaos_patch(
     if let Some(k) = kind {
         patch.insert("error_kind".into(), json!(k));
     }
+    if let Some(j) = jitter {
+        patch.insert(
+            "jitter_ms".into(),
+            json!(parse_ms(&j).map_err(Fail::usage)?),
+        );
+    }
+    if let Some(c) = bandwidth_cap {
+        patch.insert("bandwidth_cap".into(), json!(c));
+    }
     if down {
         patch.insert("down".into(), json!(true));
     }
     if patch.is_empty() {
         return Err(Fail::usage(
-            "nothing to set: use --latency, --error-rate, --error, --kind or --down",
+            "nothing to set: use --latency, --error-rate, --error, --kind, --down, --jitter or --bandwidth-cap",
         ));
     }
     Ok(patch)
@@ -332,6 +361,13 @@ pub(crate) fn pins_text(v: &Value) {
 /// than `status` show by name, `status` shows its code), then DOWN.
 pub(crate) fn chaos_text(c: &Value) -> String {
     let mut s = format!("+{}ms", c["latency_ms"]);
+    // link chaos only, so a node line reads as before
+    if let Some(j) = c["jitter_ms"].as_u64() {
+        let _ = write!(s, " ±{j}ms");
+    }
+    if let Some(cap) = c["bandwidth_cap"].as_u64() {
+        let _ = write!(s, ", cap {cap} B/s");
+    }
     // `upto` is cumulative; show each band's own share of the requests.
     let mut prev = 0.0;
     for f in c["faults"].as_array().into_iter().flatten() {
@@ -348,4 +384,18 @@ pub(crate) fn chaos_text(c: &Value) -> String {
         s.push_str(", DOWN");
     }
     s
+}
+
+/// **Private.** The two ends of `--edge FROM:TO`.
+fn edge_ends(edge: &str) -> Result<(&str, &str), Fail> {
+    edge.split_once(':')
+        .filter(|(a, b)| !a.is_empty() && !b.is_empty() && !b.contains(':'))
+        .ok_or_else(|| Fail::usage(format!("--edge wants FROM:TO (like app:db), got '{edge}'")))
+}
+
+/// **Private.** `--edge FROM:TO` as the API's `edge: { from, to }` (the colon form is a flag
+/// convenience only).
+fn edge_ref(edge: &str) -> Result<Value, Fail> {
+    let (from, to) = edge_ends(edge)?;
+    Ok(json!({ "from": from, "to": to }))
 }

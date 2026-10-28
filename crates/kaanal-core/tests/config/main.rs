@@ -5,6 +5,7 @@ mod basics;
 mod common;
 mod endpoints;
 mod limits;
+mod link_chaos;
 mod locale;
 mod nodes;
 mod payload;

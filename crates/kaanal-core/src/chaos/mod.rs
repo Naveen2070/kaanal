@@ -7,10 +7,10 @@
 //! [`ChaosKey`] (a node, an endpoint, or a node at one endpoint). The executor resolves the
 //! layers into an [`EffectiveChaos`] (see [`compile_layers`]) once, so a visit is one lookup.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::topology::NodeId;
+use crate::topology::{EdgeId, NodeId};
 
 /// Longest extra latency chaos may add to a node (5 min). A typo like 1e12 ms would
 /// otherwise hang every request (live) or overflow the virtual clock (simulator).
@@ -157,6 +157,12 @@ pub struct ChaosLayer {
     pub down: Option<bool>,
     /// `true` drops every lower layer's contribution to this key (an override).
     pub replace: Option<bool>,
+    /// Link only: random extra latency of up to this much either way on the edge's `net` hop;
+    /// the largest across layers.
+    pub jitter: Option<Duration>,
+    /// Link only: caps the edge's `bandwidth` (bytes per second, at most the edge's own); the
+    /// smallest across layers.
+    pub bandwidth_cap: Option<u64>,
 }
 
 impl From<NodeChaos> for ChaosLayer {
@@ -168,6 +174,8 @@ impl From<NodeChaos> for ChaosLayer {
             error_status: Some(c.error_status),
             down: Some(c.down),
             replace: None,
+            jitter: None,
+            bandwidth_cap: None,
         }
     }
 }
@@ -195,6 +203,12 @@ impl ChaosLayer {
                     MAX_LATENCY_ADD.as_millis()
                 ),
             ));
+        }
+        if self.jitter.is_some_and(|d| d > MAX_LATENCY_ADD) {
+            return Err(("jitter", "jitter must be at most 300000 ms (5 min)".into()));
+        }
+        if self.bandwidth_cap == Some(0) {
+            return Err(("bandwidth_cap", "bandwidth_cap must be at least 1".into()));
         }
         if self.error_rate.is_some_and(|r| !(0.0..=1.0).contains(&r)) {
             return Err(("error_rate", "error_rate must be between 0 and 1".into()));
@@ -239,7 +253,9 @@ impl ChaosLayer {
             error_kind,
             error_status,
             down,
-            replace
+            replace,
+            jitter,
+            bandwidth_cap
         );
     }
 }
@@ -257,6 +273,8 @@ pub enum ChaosKey {
     /// One replica of a node, whatever the endpoint. It folds in the node's own entry and its
     /// node-at-endpoint entries; a replica that is `down` is skipped by the balancer.
     Replica(NodeId, u16),
+    /// One edge (a link between two nodes), by its index in the topology.
+    Edge(EdgeId),
 }
 
 /// Every chaos layer in force, by key. An absent key has no chaos.
@@ -266,6 +284,7 @@ pub struct ChaosState {
     endpoints: HashMap<String, ChaosLayer>,
     node_at: HashMap<NodeId, HashMap<String, ChaosLayer>>,
     replicas: HashMap<(NodeId, u16), ChaosLayer>,
+    edges: HashMap<EdgeId, ChaosLayer>,
 }
 
 impl ChaosState {
@@ -276,6 +295,7 @@ impl ChaosState {
             && self.endpoints.is_empty()
             && self.node_at.is_empty()
             && self.replicas.is_empty()
+            && self.edges.is_empty()
     }
 
     /// Sets a whole-node entry from dense settings.
@@ -298,6 +318,9 @@ impl ChaosState {
             ChaosKey::Replica(n, r) => {
                 self.replicas.insert((n, r), layer);
             }
+            ChaosKey::Edge(e) => {
+                self.edges.insert(e, layer);
+            }
         }
     }
 
@@ -309,6 +332,7 @@ impl ChaosState {
             ChaosKey::Endpoint(e) => self.endpoints.get(e),
             ChaosKey::NodeAt(n, e) => self.node_at.get(n).and_then(|m| m.get(e)),
             ChaosKey::Replica(n, r) => self.replicas.get(&(*n, *r)),
+            ChaosKey::Edge(e) => self.edges.get(e),
         }
     }
 
@@ -327,6 +351,7 @@ impl ChaosState {
                     ChaosKey::Node(id) => format!("node {id}"),
                     ChaosKey::NodeAt(id, ep) => format!("node {id} at endpoint '{ep}'"),
                     ChaosKey::Replica(id, r) => format!("node {id} replica {r}"),
+                    ChaosKey::Edge(e) => format!("edge {e}"),
                     ChaosKey::Endpoint(ep) => format!("endpoint '{ep}'"),
                 };
                 format!("chaos on {at}: error_kind/error_status have no effect without error_rate")
@@ -340,6 +365,7 @@ impl ChaosState {
             ChaosKey::Node(n) => self.nodes.remove(n).is_some(),
             ChaosKey::Endpoint(e) => self.endpoints.remove(e).is_some(),
             ChaosKey::Replica(n, r) => self.replicas.remove(&(*n, *r)).is_some(),
+            ChaosKey::Edge(e) => self.edges.remove(e).is_some(),
             ChaosKey::NodeAt(n, e) => {
                 let Some(m) = self.node_at.get_mut(n) else {
                     return false;
@@ -359,6 +385,7 @@ impl ChaosState {
         self.endpoints.clear();
         self.node_at.clear();
         self.replicas.clear();
+        self.edges.clear();
     }
 
     /// Compiles this single layer set; same as `compile_layers(&[self])`.
@@ -374,6 +401,7 @@ impl ChaosState {
             + self.endpoints.len()
             + self.node_at.values().map(HashMap::len).sum::<usize>()
             + self.replicas.len()
+            + self.edges.len()
     }
 
     /// Every layer with its key, sorted: nodes by id, then endpoints by name, then
@@ -400,7 +428,15 @@ impl ChaosState {
         let reps = reps_sorted(&self.replicas)
             .into_iter()
             .map(|((n, r), l)| (ChaosKey::Replica(n, r), l));
-        nodes.chain(eps).chain(at).chain(reps).collect()
+        let mut edges: Vec<_> = self.edges.iter().collect();
+        edges.sort_by_key(|(e, _)| **e);
+        let edges = edges.into_iter().map(|(e, l)| (ChaosKey::Edge(*e), l));
+        nodes
+            .chain(eps)
+            .chain(at)
+            .chain(reps)
+            .chain(edges)
+            .collect()
     }
 
     /// The first validation failure, by [`ChaosState::entries`] order, so the message is
@@ -413,6 +449,7 @@ impl ChaosState {
                 ChaosKey::NodeAt(id, ep) => format!("chaos on node {id} at endpoint '{ep}': {e}"),
                 ChaosKey::Endpoint(ep) => format!("chaos on endpoint '{ep}': {e}"),
                 ChaosKey::Replica(id, r) => format!("chaos on node {id} replica {r}: {e}"),
+                ChaosKey::Edge(id) => format!("chaos on edge {id}: {e}"),
             })
         })
     }
@@ -425,285 +462,9 @@ fn reps_sorted<V>(m: &HashMap<(NodeId, u16), V>) -> Vec<((NodeId, u16), &V)> {
     v
 }
 
-/// Most failure bands one visit can carry; further faults fold into the last band.
-pub const MAX_FAULTS: usize = 8;
-
-/// One failure band: a roll below `upto` (cumulative) fails this way.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Fault {
-    /// Cumulative probability bound of this band.
-    pub upto: f64,
-    /// How the failure shows up.
-    pub kind: ErrorKind,
-    /// HTTP status for a `status` failure.
-    pub status: u16,
-}
-
-/// Chaos compiled for one visit (or one endpoint front door): no allocation to read.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Resolved {
-    /// Extra latency, at most [`MAX_LATENCY_ADD`].
-    pub latency_add: Duration,
-    /// Hard outage: every visit fails with 503.
-    pub down: bool,
-    faults: [Fault; MAX_FAULTS],
-    len: u8,
-}
-
-impl Resolved {
-    fn empty() -> Self {
-        Resolved {
-            latency_add: Duration::ZERO,
-            down: false,
-            faults: [Fault {
-                upto: 0.0,
-                kind: ErrorKind::Status,
-                status: 503,
-            }; MAX_FAULTS],
-            len: 0,
-        }
-    }
-
-    /// The failure bands, top layer first.
-    #[must_use]
-    pub fn faults(&self) -> &[Fault] {
-        &self.faults[..self.len as usize]
-    }
-
-    /// Total failure probability (the last band's bound), 0.0 when none.
-    #[must_use]
-    pub fn rate(&self) -> f64 {
-        self.faults().last().map_or(0.0, |f| f.upto)
-    }
-
-    /// The failure a roll in 0..1 lands on; `down` always fails with 503.
-    #[must_use]
-    pub fn hit(&self, roll: f64) -> Option<(ErrorKind, u16)> {
-        if self.down {
-            return Some((ErrorKind::Status, 503));
-        }
-        self.faults()
-            .iter()
-            .find(|f| roll < f.upto)
-            .map(|f| (f.kind, f.status))
-    }
-
-    fn push(&mut self, r: f64, kind: ErrorKind, status: u16) {
-        let n = self.len as usize;
-        let upto = if n == 0 {
-            r
-        } else {
-            let u = self.faults[n - 1].upto;
-            u + r - u * r
-        };
-        if n < MAX_FAULTS {
-            self.faults[n] = Fault { upto, kind, status };
-            self.len += 1;
-        } else {
-            self.faults[n - 1].upto = upto; // fold the tail into the last band
-        }
-    }
-}
-
-/// (rank, specificity, layer)
-type Entry<'a> = (usize, u8, &'a ChaosLayer);
-
-fn resolve_entries(mut entries: Vec<Entry<'_>>) -> Resolved {
-    entries.sort_by_key(|e| std::cmp::Reverse((e.0, e.1))); // highest layer first, then most specific
-    let mut out = Resolved::empty();
-    for (_, _, l) in entries {
-        if let Some(d) = l.latency_add {
-            out.latency_add = out.latency_add.saturating_add(d);
-        }
-        if l.down == Some(true) {
-            out.down = true;
-        }
-        if let Some(r) = l.error_rate
-            && r > 0.0
-        {
-            out.push(
-                r,
-                l.error_kind.unwrap_or(ErrorKind::Status),
-                l.error_status.unwrap_or(503),
-            );
-        }
-    }
-    out.latency_add = out.latency_add.min(MAX_LATENCY_ADD);
-    out
-}
-
-/// Entries of one key across the layers, truncated at the last `replace`.
-fn entries_of<'a>(
-    layers: &[&'a ChaosState],
-    spec: u8,
-    get: impl Fn(&'a ChaosState) -> Option<&'a ChaosLayer>,
-) -> Vec<Entry<'a>> {
-    let mut v: Vec<Entry<'a>> = layers
-        .iter()
-        .enumerate()
-        .filter_map(|(i, s)| get(s).map(|l| (i, spec, l)))
-        .collect();
-    if let Some(p) = v.iter().rposition(|e| e.2.replace == Some(true)) {
-        v.drain(..p);
-    }
-    v
-}
-
-/// Every key's chaos, compiled from the layer stack. Read-only on the hot path.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct EffectiveChaos {
-    nodes: HashMap<NodeId, Resolved>,
-    node_at: HashMap<NodeId, HashMap<String, Resolved>>,
-    endpoints: HashMap<String, Resolved>,
-    /// A replica entry: the node's own entry folded with the replica's.
-    replicas: HashMap<(NodeId, u16), Resolved>,
-    /// The same through one endpoint: also folds in the node-at-endpoint entry.
-    replica_at: HashMap<(NodeId, u16), HashMap<String, Resolved>>,
-}
-
-impl EffectiveChaos {
-    /// True when nothing is set (the executor's fast path).
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-            && self.node_at.is_empty()
-            && self.endpoints.is_empty()
-            && self.replicas.is_empty()
-    }
-
-    /// The chaos for a visit of `node` through `endpoint`: the node-at-endpoint entry (which
-    /// already folds in the node's own), else the node entry. The endpoint-wide entry is not
-    /// here: it applies once at the front door.
-    #[must_use]
-    pub fn visit(&self, node: NodeId, endpoint: &str) -> Option<&Resolved> {
-        self.node_at
-            .get(&node)
-            .and_then(|m| m.get(endpoint))
-            .or_else(|| self.nodes.get(&node))
-    }
-
-    /// [`EffectiveChaos::visit`] for one `replica` of `node`: its replica entry (which folds in the
-    /// node's own entry and, through `endpoint`, the node-at-endpoint entry), else the plain visit.
-    #[must_use]
-    pub fn visit_replica(&self, node: NodeId, endpoint: &str, replica: u16) -> Option<&Resolved> {
-        self.replica_at
-            .get(&(node, replica))
-            .and_then(|m| m.get(endpoint))
-            .or_else(|| self.replicas.get(&(node, replica)))
-            .or_else(|| self.visit(node, endpoint))
-    }
-
-    /// Whether `replica` of `node` is down for a visit through `endpoint`: its own entry, or the
-    /// node's (a node that is down takes every replica with it).
-    #[must_use]
-    pub fn replica_down(&self, node: NodeId, endpoint: &str, replica: u16) -> bool {
-        self.visit_replica(node, endpoint, replica)
-            .is_some_and(|r| r.down)
-    }
-
-    /// The endpoint-wide entry, if any.
-    #[must_use]
-    pub fn endpoint(&self, endpoint: &str) -> Option<&Resolved> {
-        self.endpoints.get(endpoint)
-    }
-
-    /// Every entry with its key, sorted like [`ChaosState::entries`].
-    #[must_use]
-    pub fn entries(&self) -> Vec<(ChaosKey, &Resolved)> {
-        let mut nodes: Vec<_> = self.nodes.iter().collect();
-        nodes.sort_by_key(|(n, _)| **n);
-        let mut eps: Vec<_> = self.endpoints.iter().collect();
-        eps.sort_by(|a, b| a.0.cmp(b.0));
-        let mut at: Vec<_> = self
-            .node_at
-            .iter()
-            .flat_map(|(n, m)| m.iter().map(move |(e, l)| ((*n, e), l)))
-            .collect();
-        at.sort_by(|a, b| a.0.cmp(&b.0));
-        let nodes = nodes.into_iter().map(|(n, l)| (ChaosKey::Node(*n), l));
-        let eps = eps
-            .into_iter()
-            .map(|(e, l)| (ChaosKey::Endpoint(e.clone()), l));
-        let at = at
-            .into_iter()
-            .map(|((n, e), l)| (ChaosKey::NodeAt(n, e.clone()), l));
-        let reps = reps_sorted(&self.replicas)
-            .into_iter()
-            .map(|((n, r), l)| (ChaosKey::Replica(n, r), l));
-        nodes.chain(eps).chain(at).chain(reps).collect()
-    }
-}
-
-/// Compiles layers (bottom to top) into one [`EffectiveChaos`]. Per key, the higher layer's
-/// fault takes the first band (layer order beats specificity; within a layer the more specific
-/// key goes first), latencies add (then clamp to [`MAX_LATENCY_ADD`]), `down` is an OR, and
-/// a layer with `replace` drops the lower layers' contribution to that key. A node override
-/// also drops the lower layers' entries of that node's node-at-endpoint pairs.
-#[must_use]
-pub fn compile_layers(layers: &[&ChaosState]) -> EffectiveChaos {
-    let mut node_ids = BTreeSet::new();
-    let mut eps = BTreeSet::new();
-    let mut pairs = BTreeSet::new();
-    let mut reps = BTreeSet::new();
-    for s in layers {
-        node_ids.extend(s.nodes.keys().copied());
-        eps.extend(s.endpoints.keys().cloned());
-        reps.extend(s.replicas.keys().copied());
-        for (n, m) in &s.node_at {
-            pairs.extend(m.keys().map(|e| (*n, e.clone())));
-        }
-    }
-    let mut out = EffectiveChaos::default();
-    for id in node_ids {
-        let e = entries_of(layers, 0, |s| s.nodes.get(&id));
-        out.nodes.insert(id, resolve_entries(e));
-    }
-    for ep in eps {
-        let e = entries_of(layers, 0, |s| s.endpoints.get(&ep));
-        out.endpoints.insert(ep, resolve_entries(e));
-    }
-    // A replica folds in its node's own entry (and, per endpoint, the node-at-endpoint entry),
-    // so one lookup serves a visit; a node override calms the replica entries of lower layers.
-    for (n, r) in reps {
-        let floor = layers
-            .iter()
-            .rposition(|s| s.nodes.get(&n).is_some_and(|l| l.replace == Some(true)))
-            .unwrap_or(0);
-        let mut own = entries_of(layers, 2, |s| s.replicas.get(&(n, r)));
-        own.retain(|x| x.0 >= floor);
-        let mut e = entries_of(layers, 0, |s| s.nodes.get(&n));
-        e.extend(own.iter().copied());
-        out.replicas.insert((n, r), resolve_entries(e));
-        for (_, ep) in pairs.iter().filter(|(pn, _)| *pn == n) {
-            let mut e = entries_of(layers, 0, |s| s.nodes.get(&n));
-            let mut at = entries_of(layers, 1, |s| s.node_at.get(&n).and_then(|m| m.get(ep)));
-            at.retain(|x| x.0 >= floor);
-            e.extend(at);
-            e.extend(own.iter().copied());
-            out.replica_at
-                .entry((n, r))
-                .or_default()
-                .insert(ep.clone(), resolve_entries(e));
-        }
-    }
-    for (n, ep) in pairs {
-        let mut e = entries_of(layers, 0, |s| s.nodes.get(&n));
-        // A node override also calms the node's pairs from lower layers; a pair override
-        // leaves the node-level entries alone.
-        let floor = layers
-            .iter()
-            .rposition(|s| s.nodes.get(&n).is_some_and(|l| l.replace == Some(true)))
-            .unwrap_or(0);
-        let mut at = entries_of(layers, 1, |s| s.node_at.get(&n).and_then(|m| m.get(&ep)));
-        at.retain(|x| x.0 >= floor);
-        e.extend(at);
-        out.node_at
-            .entry(n)
-            .or_default()
-            .insert(ep, resolve_entries(e));
-    }
-    out
-}
+mod link;
+mod resolve;
+pub use resolve::{EffectiveChaos, Fault, MAX_FAULTS, Resolved, compile_layers};
 
 impl<const N: usize> From<[(NodeId, NodeChaos); N]> for ChaosState {
     fn from(a: [(NodeId, NodeChaos); N]) -> Self {
