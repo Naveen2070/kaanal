@@ -1336,6 +1336,16 @@ Starts a real server on an OS-chosen port (the gateway, a service and a database
 | `other_connections_still_drain_with_an_events_stream_open` | With an events stream open and an 800 ms request in flight, the request still completes with 200, the stream still ends with `event: shutdown`, and the server ends within 3 s.                                        |
 | `a_whitespace_body_is_no_body`                             | A body of a space, a newline and a tab answers `202` with `timeout_ms` 5000.                                                                                                                                           |
 
+## `crates/kaanal-server/tests/site_ui.rs` — Studio's page and assets
+
+In a build without a bundle only the first runs; with one (`cfg(kaanal_ui)`) the second runs too.
+
+| Test                                                    | What it proves                                                                                                 |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `studio_serves_the_fallback_page_without_a_bundle`      | `/__kaanal/studio` is the status page and the assets are 404, with no bundle built in.                         |
+| `studio_serves_the_bundle_with_the_right_content_types` | With a bundle: the page, `app.js` and `app.css` answer 200 with `text/html`, `text/javascript` and `text/css`. |
+| `the_assets_need_no_token_but_the_api_still_does`       | The three exempt paths answer without a token; `/__kaanal/topology` still gets 401.                            |
+
 ## `crates/kaanal-server/tests/site.rs` — the `site:` folder
 
 The `site:` key through `check`, then a real server (a gateway, a service with the users/orders spec, a database, `site: web`) with `secret.txt` next to `web/` and one level above. `Srv::raw` sends a request line byte for byte, since reqwest would resolve `..` and `\` before sending. See [site](files/kaanal-server/site.md).

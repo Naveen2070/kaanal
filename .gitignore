@@ -12,3 +12,9 @@ graft/
 # Build output
 /target
 /target-review
+
+# Studio UI (ui/): dependencies, scratch build, and the built bundle (CI or the release step builds it; ui-dist/.gitkeep stays)
+ui/node_modules
+ui/dist
+/crates/kaanal-server/ui-dist/*
+!/crates/kaanal-server/ui-dist/.gitkeep

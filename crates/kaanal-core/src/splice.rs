@@ -14,6 +14,9 @@ use std::fmt::Write as _;
 
 use saphyr_parser::{Event, Parser, ScalarStyle};
 
+mod append;
+use append::append;
+
 use crate::diagnostics::PathSeg;
 
 /// One edit of the text, by path into the document. A `value` is already-rendered YAML text, in
@@ -34,6 +37,13 @@ pub enum Edit {
         /// The new key (plain text).
         key: String,
         /// The value text.
+        value: String,
+    },
+    /// Adds `value` as the last item of the list at `parent`, in the list's own style.
+    Append {
+        /// The list.
+        parent: Vec<PathSeg>,
+        /// The item text.
         value: String,
     },
     /// Removes the mapping entry or list item at `path`.
@@ -519,6 +529,7 @@ fn apply(t: &str, root: Option<&Node>, edit: &Edit, nl: &str) -> Result<Outcome,
     match edit {
         Edit::Set { path, value } => set(t, root, path, value),
         Edit::Insert { parent, key, value } => insert(t, root, parent, key, value, nl),
+        Edit::Append { parent, value } => append(t, root, parent, value, nl),
         Edit::Remove { path } => remove(t, root, path),
         Edit::RenameKey { path, to } => rename_key(root, path, to),
     }

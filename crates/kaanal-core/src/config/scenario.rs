@@ -101,7 +101,7 @@ pub struct ChaosEntry {
 /// # Errors
 /// Malformed YAML, an unknown key or a wrong type, with serde's line and column.
 pub fn parse_scenario(src: &str) -> Result<ScenarioConfig, ConfigError> {
-    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
+    let src = super::preprocess(src)?;
     serde_yaml_ng::from_str(src).map_err(|e| serde_error(&e))
 }
 

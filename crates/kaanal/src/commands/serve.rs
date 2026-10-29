@@ -18,17 +18,17 @@ pub(crate) fn up(
     detached: bool,
     blank: bool,
 ) -> Result<(), Fail> {
-    start(config, port, host, detached, blank, false)
+    start(config, port, host, detached, blank, None)
 }
 
-/// **Private.** `kaanal studio`: `up --blank`, and the browser opens on the UI unless `no_open`.
+/// **Private.** `kaanal studio`: `up --blank`, and the browser opens on the Studio route unless `no_open`.
 pub(crate) fn studio(
     config: &Path,
     port: Option<u16>,
     host: IpAddr,
     no_open: bool,
 ) -> Result<(), Fail> {
-    start(config, port, host, false, true, !no_open)
+    start(config, port, host, false, true, Some(!no_open))
 }
 
 /// **Private.** Best effort: asks the desktop to open `url`. A failure is silent; the URL is
@@ -51,14 +51,15 @@ fn open_browser(url: &str) {
         .spawn();
 }
 
-/// **Private.** The body of `up` and `studio`.
+/// **Private.** The body of `up` and `studio`. `studio` is `Some(open)` for `kaanal studio` (the UI line
+/// names the Studio route, and the browser opens on it when `open`), `None` for `up`.
 fn start(
     config: &Path,
     port: Option<u16>,
     host: IpAddr,
     detached: bool,
     blank: bool,
-    open: bool,
+    studio: Option<bool>,
 ) -> Result<(), Fail> {
     let loaded = if blank {
         if config.exists() {
@@ -84,13 +85,14 @@ fn start(
         lock,
         |s| {
             let port = s.port;
+            let page = if studio.is_some() { "studio" } else { "ui" };
             println!("Mocks: http://localhost:{port}");
             if detached {
-                println!("UI:    http://localhost:{port}/__kaanal/ui");
+                println!("UI:    http://localhost:{port}/__kaanal/{page}");
             } else {
-                let ui = format!("http://localhost:{port}/__kaanal/ui#token={}", s.token);
+                let ui = format!("http://localhost:{port}/__kaanal/{page}#token={}", s.token);
                 println!("UI:    {ui}");
-                if open {
+                if studio == Some(true) {
                     open_browser(&ui);
                 }
             }

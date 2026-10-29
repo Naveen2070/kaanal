@@ -8,14 +8,14 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use kaanal_core::replay::{Engine, EngineError};
+use kaanal_core::replay::{Engine, EngineError, FailCause};
 use kaanal_core::{
     ChainRequest, Dist, EffectiveChaos, Endpoint, Topology, sample_plan, stable_hash,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::{NodeStats, RequestRecord, SimConfig, SimReport};
+use crate::{Cause, NodeStats, RequestRecord, SimConfig, SimReport};
 
 /// **Private.** Low bits of a request tag hold the stream's request counter, high bits the stream.
 const TAG_BITS: u32 = 48;
@@ -130,6 +130,12 @@ pub(crate) fn simulate(
                     arrival: Duration::from_nanos(f.arrival),
                     latency: Duration::from_nanos(f.done - f.arrival),
                     result: f.result,
+                    cause: f.cause.map(|c| match c {
+                        FailCause::Chaos => Cause::Chaos,
+                        FailCause::RateLimit => Cause::RateLimit,
+                        FailCause::Overflow => Cause::Overflow,
+                        FailCause::Deadline => Cause::Deadline,
+                    }),
                     hops: f.hops.into_iter().map(|h| (h.hop, h.wait)).collect(),
                 },
             ));

@@ -16,7 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use summary::{
-    Bucket, Latency, LinkSummary, NodeSummary, ReplicaSummary, StreamSummary, Summary, summarize,
+    Bucket, Latency, LinkSummary, NodeSummary, ReplicaSummary, Series, StreamSummary, Summary,
+    summarize,
 };
 
 use kaanal_core::{
@@ -130,6 +131,32 @@ impl SimReport {
     }
 }
 
+/// Why a simulated request failed (what the engine recorded, not a guess from the status).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cause {
+    /// A planned chaos failure (a hang included).
+    Chaos,
+    /// A node's rate limit refused it.
+    RateLimit,
+    /// A node's queue was full.
+    Overflow,
+    /// A `timeout:` deadline fired.
+    Deadline,
+}
+
+impl Cause {
+    /// `chaos|rate_limit|overflow|deadline`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Cause::Chaos => "chaos",
+            Cause::RateLimit => "rate_limit",
+            Cause::Overflow => "overflow",
+            Cause::Deadline => "deadline",
+        }
+    }
+}
+
 /// One simulated request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RequestRecord {
@@ -145,6 +172,8 @@ pub struct RequestRecord {
     /// malformed or hang; a hang is reported as kind `timeout`, 504), a deadline that fired (kind `timeout`, 504), a rate limit (429,
     /// with `retry_after`) or a full queue (the node's overflow status).
     pub result: ChainResult,
+    /// Why it failed, as the engine decided it; `None` when `result` is Ok.
+    pub cause: Option<Cause>,
     /// The hops that ran, in plan order, each with the queue wait before it: `start` is the
     /// actual offset from arrival; a hop whose branch a failure cancelled is cut at the
     /// failure instant (one that had not started is absent). Equals `execute()`'s hops at

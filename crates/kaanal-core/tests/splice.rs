@@ -449,3 +449,115 @@ fn deeply_nested_text_is_refused_not_walked() {
     .unwrap_err();
     assert!(err.to_string().contains("nested deeper"), "{err}");
 }
+
+fn append(parent: &[&str], value: &str) -> Edit {
+    Edit::Append {
+        parent: p(parent),
+        value: value.into(),
+    }
+}
+
+#[test]
+fn append_adds_a_block_item_under_the_dash_and_keeps_what_follows() {
+    let (text, lost) = run(SRC, &[append(&["edges"], "{ from: db, to: nginx }")]);
+    assert_eq!(
+        text,
+        SRC.replace(
+            "net: 1ms }
+# end",
+            "net: 1ms }
+  - { from: db, to: nginx }
+# end"
+        )
+    );
+    assert!(lost.is_empty(), "{lost:?}");
+    // a deeper dash, and a comment on the last item's line
+    let deep = "x:
+    - a   # first
+    - b # last
+y: 1
+";
+    let (text, _) = run(deep, &[append(&["x"], "c")]);
+    assert_eq!(
+        text,
+        "x:
+    - a   # first
+    - b # last
+    - c
+y: 1
+"
+    );
+}
+
+#[test]
+fn append_to_a_flow_list_keeps_the_style() {
+    let (text, _) = run(
+        "l: [a, b]
+",
+        &[append(&["l"], "c")],
+    );
+    assert_eq!(
+        text,
+        "l: [a, b, c]
+"
+    );
+    let (text, _) = run(
+        "l: []
+",
+        &[append(&["l"], "c")],
+    );
+    assert_eq!(
+        text,
+        "l: [ c ]
+"
+    );
+}
+
+#[test]
+fn append_keeps_crlf_and_chains_with_itself() {
+    let src = "e:\r\n  - a\r\n  - b\r\n";
+    let (text, _) = run(src, &[append(&["e"], "c"), append(&["e"], "d")]);
+    assert_eq!(text, "e:\r\n  - a\r\n  - b\r\n  - c\r\n  - d\r\n");
+    // the last line has no line ending
+    let (text, _) = run("e:\n  - a", &[append(&["e"], "b")]);
+    assert_eq!(text, "e:\n  - a\n  - b");
+    // a null first item: the dash has no space to copy
+    let (text, _) = run("e:\n  -\n  - b\n", &[append(&["e"], "c")]);
+    assert_eq!(text, "e:\n  -\n  - b\n  - c\n");
+    let (text, _) = run("e:\n-\n", &[append(&["e"], "c")]);
+    assert_eq!(text, "e:\n-\n- c\n");
+}
+
+#[test]
+fn append_refuses_what_it_cannot_do_safely() {
+    // not a list, an empty block value, an anchored list
+    for (src, path) in [
+        (
+            "m: { a: 1 }
+",
+            "m",
+        ),
+        (
+            "e:
+", "e",
+        ),
+    ] {
+        let (text, lost) = run(src, &[append(&[path], "c")]);
+        assert_eq!(text, src, "{src}");
+        assert_eq!(lost.len(), 1, "{src}: {lost:?}");
+    }
+    let anchored = "e: &l
+  - a
+";
+    let (text, lost) = run(anchored, &[append(&["e"], "c")]);
+    assert_eq!((text.as_str(), lost.len()), (anchored, 1));
+    // a missing path is an error, nothing changes
+    assert!(matches!(
+        splice(
+            "a: 1
+",
+            &[append(&["nope"], "c")]
+        ),
+        Err(SpliceError::NotFound(_))
+    ));
+}

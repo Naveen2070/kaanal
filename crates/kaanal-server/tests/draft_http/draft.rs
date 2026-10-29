@@ -77,3 +77,17 @@ async fn the_draft_routes_need_the_token() {
         .unwrap();
     assert_eq!(r.status(), 401);
 }
+
+#[tokio::test]
+async fn the_demo_and_the_run_log_need_the_token() {
+    let s = start(BASE).await;
+    for path in ["/__kaanal/demo", "/__kaanal/sim/runs/r1/log"] {
+        let r = s
+            .client
+            .get(format!("{}{path}", s.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 401, "{path}");
+    }
+}

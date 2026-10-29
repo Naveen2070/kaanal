@@ -374,7 +374,7 @@ pub fn parse_endpoints(src: &str) -> Result<IndexMap<String, EndpointConfig>, Co
             d.deserialize_map(V)
         }
     }
-    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
+    let src = super::preprocess(src)?;
     serde_yaml_ng::from_str::<Option<File>>(src)
         .map(|f| f.map(|f| f.0).unwrap_or_default())
         .map_err(|e| serde_error(&e))

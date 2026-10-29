@@ -45,6 +45,10 @@ use kaanal_core::{Config, Topology};
 pub use auth::AuthKey;
 pub use collections::{Collections, MAX_ITEM_BYTES, MAX_ITEMS};
 pub use draft::{BLANK_TEXT, DraftSource};
+
+/// Studio's starter text, one self-contained file (`GET /__kaanal/demo` serves it). The
+/// `kaanal demo` project, with its spec, scenarios and site, lives in `crates/kaanal/demo`.
+pub const STUDIO_DEMO_YAML: &str = include_str!("../demo/studio.yaml");
 /// The data-file schemas, for `kaanal schema dictionary|pack`.
 pub use kaanal_data::{dictionary_schema, pack_schema};
 pub use log::{
@@ -316,6 +320,10 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/logs", get(log_api::logs))
         .route("/__kaanal/trace/{id}", get(log_api::trace))
         .route(
+            "/__kaanal/demo",
+            get(control::get_demo),
+        )
+        .route(
             "/__kaanal/draft",
             get(control::get_draft)
                 .put(control::put_draft)
@@ -332,10 +340,14 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/sim/run", post(control::post_run))
         .route("/__kaanal/sim/runs", get(control::list_runs))
         .route("/__kaanal/sim/runs/{id}", get(control::get_run))
+        .route("/__kaanal/sim/runs/{id}/log", get(control::get_run_log))
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/shutdown", post(control::shutdown))
         .route("/__kaanal/events", get(control::events))
         .route("/__kaanal/ui", get(control::ui))
+        .route("/__kaanal/studio", get(control::studio))
+        .route("/__kaanal/studio/assets/app.js", get(control::app_js))
+        .route("/__kaanal/studio/assets/app.css", get(control::app_css))
         // route_layer: wraps only the control routes above, never the mock fallback.
         // Every control route is guarded here, so a new handler cannot forget authentication.
         .route_layer(middleware::from_fn_with_state(st.clone(), control::guard))

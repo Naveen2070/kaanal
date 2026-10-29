@@ -2,6 +2,7 @@
 
 // The tests include this file with `#[path]`, so keep it free of other code; the command is in
 // `demo.rs`.
+// Studio's starter text is separate: `crates/kaanal-server/demo/studio.yaml`.
 /// (path relative to the project root, contents).
 pub const FILES: &[(&str, &str)] = &[
     ("kaanal.yaml", include_str!("../../../demo/kaanal.yaml")),

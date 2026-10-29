@@ -18,3 +18,11 @@ Download the archive for your system, check it against `SHA256SUMS`, unpack it a
 | Windows | `kaanal-v0.0.1-x86_64-pc-windows-msvc.zip`      |
 
 Try it with `kaanal demo`.
+
+<!--
+Maintainer notes (an HTML comment, so it does not show in the published release):
+- The UI build is part of a release: release.yml builds `ui/` and fails before `cargo build` if
+  `crates/kaanal-server/ui-dist/{index.html,app.js,app.css}` is missing. Nothing to do by hand.
+- [ ] crates.io step, when there is one: `cargo package` drops git-ignored files, so `ui-dist/` must be built
+  and included in the package first (Cargo.toml has no `include` list on purpose). Until then, do not publish.
+-->

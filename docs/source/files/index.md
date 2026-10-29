@@ -73,6 +73,8 @@ One page per source file: what the file does and what each function/type in it d
 | `src/control/lease.rs`           | [kaanal-server/control.md](kaanal-server/control.md)         | Lease expiry: `expire_due`, `expire_chaos`, `next_deadline` and the background `lease_task`                                     |
 | `src/control/save.rs`            | [kaanal-server/control.md](kaanal-server/control.md)         | `POST /scenarios/save`: live, effective or a named scenario to a file                                                           |
 | `src/control/admin.rs`           | [kaanal-server/control.md](kaanal-server/control.md)         | `reset`, `shutdown`, the `events` stream and the `ui` page                                                                      |
+| `src/control/studio.rs`          | [kaanal-server/studio.md](kaanal-server/studio.md)           | The Studio page and its two fixed assets, embedded when `ui-dist/` had a bundle at build time                                   |
+| `build.rs`                       | [kaanal-server/studio.md](kaanal-server/studio.md)           | Sets `cfg(kaanal_ui)` when the bundle is in `ui-dist/`; never runs Node                                                         |
 | `src/control/tests.rs`           | [kaanal-server/control.md](kaanal-server/control.md)         | The unit tests (see the last section)                                                                                           |
 | `src/chaos_lease.rs`             | [kaanal-server/chaos_lease.md](kaanal-server/chaos_lease.md) | Leases on live chaos (`ttl`): units, table, pruning                                                                             |
 | `src/mock/mod.rs`                | [kaanal-server/mock.md](kaanal-server/mock.md)               | Mock request handler, request ids, CORS                                                                                         |
@@ -96,11 +98,11 @@ One page per source file: what the file does and what each function/type in it d
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
 
-| File             | Page                                           | Contents                                                                    |
-| ---------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
-| `src/lib.rs`     | [kaanal-sim/lib.md](kaanal-sim/lib.md)         | `run`, config and report types, validation                                  |
-| `src/engine.rs`  | [kaanal-sim/engine.md](kaanal-sim/engine.md)   | The event loop: arrivals, FIFO slots, report                                |
-| `src/summary.rs` | [kaanal-sim/summary.md](kaanal-sim/summary.md) | The Studio report: percentiles, per node, replica and link load, saturation |
+| File            | Page                                           | Contents                                                                    |
+| --------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
+| `src/lib.rs`    | [kaanal-sim/lib.md](kaanal-sim/lib.md)         | `run`, config and report types, validation                                  |
+| `src/engine.rs` | [kaanal-sim/engine.md](kaanal-sim/engine.md)   | The event loop: arrivals, FIFO slots, report                                |
+| `src/summary/`  | [kaanal-sim/summary.md](kaanal-sim/summary.md) | The Studio report: percentiles, per node, replica and link load, saturation |
 
 ## [kaanal](kaanal/) (binary)
 

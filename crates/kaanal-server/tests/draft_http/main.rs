@@ -3,9 +3,11 @@
 mod apply;
 mod blank;
 mod common;
+mod doc;
 mod draft;
 mod fix;
 mod hardening;
+mod layout;
 mod paths;
 mod remap;
 mod rename;

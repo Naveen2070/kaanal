@@ -5,6 +5,8 @@
 //! caps ([`kaanal_sim::Limits::server`]), keeping a summary and dropping the hop records.
 
 use super::*;
+use crate::sim::draft_run::{DraftRunError, draft_job};
+use crate::sim::log;
 use crate::sim::profile::{Profile, RunRequest, SimError, to_sim};
 use crate::sim::run::{Job, Slot, check, execute_run};
 
@@ -26,6 +28,10 @@ pub struct RunBody {
     /// Run under this scenario's chaos alone, instead of the live chaos.
     #[serde(default)]
     scenario: Option<String>,
+    /// `applied` (default) simulates the system in force; `draft` simulates the draft text,
+    /// without Apply.
+    #[serde(default)]
+    source: Option<String>,
 }
 
 /// **Private.** Seconds from a body as a `Duration`; `None` when absent.
@@ -75,18 +81,48 @@ pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Re
         seed: b.seed,
         scenario: b.scenario,
     };
-    // the chaos and the generation as one pair: an Apply swaps under this same lock
-    let (c, g) = locked(&st)?;
-    let chaos = if let Some(name) = &req.scenario {
-        let mut stack = kaanal_core::ChaosStack::default();
-        stack
-            .set_active(&c.scenarios, std::slice::from_ref(name))
-            .map_err(|_| reject(StatusCode::NOT_FOUND, &format!("unknown scenario '{name}'")))?;
-        stack.compile(&c.scenarios)
-    } else {
-        st.snapshot().chaos.clone()
+    let (g, chaos, source, draft_rev) = match b.source.as_deref() {
+        None | Some("applied") => {
+            // the chaos and the generation as one pair: an Apply swaps under this same lock
+            let (c, g) = locked(&st)?;
+            let chaos = if let Some(name) = &req.scenario {
+                let mut stack = kaanal_core::ChaosStack::default();
+                stack
+                    .set_active(&c.scenarios, std::slice::from_ref(name))
+                    .map_err(|_| {
+                        reject(StatusCode::NOT_FOUND, &format!("unknown scenario '{name}'"))
+                    })?;
+                stack.compile(&c.scenarios)
+            } else {
+                st.snapshot().chaos.clone()
+            };
+            drop(c);
+            (g, chaos, "applied", None)
+        }
+        Some("draft") => {
+            let (job, rev) = draft_job(&st, &req).await.map_err(|e| match e {
+                DraftRunError::Invalid(d) => (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": d.message, "diagnostic": d })),
+                ),
+                DraftRunError::UnknownScenario(n) => {
+                    reject(StatusCode::NOT_FOUND, &format!("unknown scenario '{n}'"))
+                }
+                DraftRunError::Busy => reject(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "too many drafts being built at once; retry",
+                ),
+                DraftRunError::Internal(m) => reject(StatusCode::INTERNAL_SERVER_ERROR, &m),
+            })?;
+            (job.g, job.chaos, "draft", Some(rev))
+        }
+        Some(_) => {
+            return Err(reject(
+                StatusCode::BAD_REQUEST,
+                "source must be applied or draft",
+            ));
+        }
     };
-    drop(c);
     let mut planned = to_sim(&g, &req).map_err(|e| from_sim(&e))?;
     // the cheap checks first, with placeholder response sizes: sampling a body per journey is
     // real work and waits until the request is known to be accepted
@@ -98,7 +134,7 @@ pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Re
     check(&job).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
     let id = st
         .sims
-        .begin(job.g.id, &label, req.scenario.as_deref())
+        .begin(job.g.id, &label, req.scenario.as_deref(), source, draft_rev)
         .map_err(|running| {
             (
                 StatusCode::CONFLICT,
@@ -201,4 +237,98 @@ pub async fn post_sample(
         "bytes": s.bytes,
         "label": "relative what-if, not a prediction",
     })))
+}
+
+/// The query of `GET /__kaanal/sim/runs/{id}/log`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogQuery {
+    node: Option<String>,
+    replica: Option<u16>,
+    endpoint: Option<String>,
+    level: Option<String>,
+    request: Option<u64>,
+    limit: Option<usize>,
+    after: Option<usize>,
+}
+
+/// Lines a page may hold, and its default.
+const LOG_MAX: usize = 1000;
+const LOG_DEFAULT: usize = 200;
+
+/// `GET /__kaanal/sim/runs/{id}/log` — a page of the run's log sample (see `sim::log`).
+/// `limit` defaults to 200 and is clamped to 1000; `after` is the index of the last line
+/// seen; `next` is the `after` of the next page, `null` at the end; `total` counts the stored
+/// lines, before the filters.
+///
+/// # Errors
+/// 400 for a bad `level` or `endpoint`; 404 for an unknown id; 409 while the run is running, and
+/// for a failed run (it has no log; the body carries its `error`).
+pub async fn get_run_log(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    q: Result<Query<LogQuery>, QueryRejection>,
+) -> Result<Json<Value>, Reject> {
+    let Query(q) = q.map_err(|e| reject(StatusCode::BAD_REQUEST, &e.body_text()))?;
+    let level = match q.level.as_deref() {
+        None => None,
+        Some(l @ ("info" | "warn" | "error")) => Some(l.to_string()),
+        Some(_) => {
+            return Err(reject(
+                StatusCode::BAD_REQUEST,
+                "level must be info, warn or error",
+            ));
+        }
+    };
+    let endpoint = q
+        .endpoint
+        .as_deref()
+        .map(|e| endpoint_key(e).map_err(|m| reject(StatusCode::BAD_REQUEST, &m)))
+        .transpose()?;
+    let run = st.sims.get(&id).ok_or_else(|| {
+        reject(
+            StatusCode::NOT_FOUND,
+            "no such run (only the last eight are kept)",
+        )
+    })?;
+    match run.state {
+        "done" => {}
+        "running" => return Err(reject(StatusCode::CONFLICT, "the run is still running")),
+        _ => {
+            let why = run.error.as_deref().unwrap_or("unknown");
+            return Err(reject(
+                StatusCode::CONFLICT,
+                &format!("the run failed and has no log: {why}"),
+            ));
+        }
+    }
+    let f = log::Filter {
+        node: q.node,
+        replica: q.replica,
+        endpoint,
+        level,
+        request: q.request,
+    };
+    let limit = q.limit.unwrap_or(LOG_DEFAULT).clamp(1, LOG_MAX);
+    let (lines, next) = log::page(&run.log.lines, &f, q.after, limit);
+    let note = format!(
+        "A sample in virtual time, not every request: all failed requests (up to {}), the {} \
+         slowest, and an even spread of the rest, {} requests at most. Only requests that \
+         arrived after the warmup are logged. Failure lines carry no replica (the engine does \
+         not record it), so a replica filter skips them.{}",
+        log::MAX_FAILED,
+        log::SLOWEST,
+        log::MAX_REQUESTS,
+        if run.log.truncated {
+            format!(
+                " The log is capped at {} lines, so fewer requests were kept than the rule allows.",
+                log::MAX_LINES
+            )
+        } else {
+            String::new()
+        }
+    );
+    Ok(Json(
+        json!({ "lines": lines, "next": next, "total": run.log.lines.len(), "sampled": true, "note": note }),
+    ))
 }

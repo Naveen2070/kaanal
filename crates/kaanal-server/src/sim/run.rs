@@ -7,6 +7,7 @@ use std::sync::Arc;
 use kaanal_core::EffectiveChaos;
 use kaanal_sim::{Limits, SimConfig, Summary, run_with_limits, summarize};
 
+use super::log::{LogSample, sample};
 use crate::generation::Generation;
 use crate::state::AppState;
 
@@ -29,11 +30,12 @@ pub(crate) fn check(job: &Job) -> Result<(), String> {
     kaanal_sim::check_with_limits(&job.g.topo, &job.g.endpoints, &job.cfg, &Limits::server())
 }
 
-/// Runs the simulation and folds the report into a summary; the hop records are dropped here.
+/// Runs the simulation and folds the report into a summary and a log sample; the other hop
+/// records are dropped here.
 ///
 /// # Errors
 /// The simulator's message.
-pub(crate) fn execute_run(job: &Job) -> Result<Summary, String> {
+pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample), String> {
     let report = run_with_limits(
         &job.g.topo,
         &job.g.endpoints,
@@ -41,7 +43,11 @@ pub(crate) fn execute_run(job: &Job) -> Result<Summary, String> {
         &job.cfg,
         &Limits::server(),
     )?;
-    Ok(summarize(&job.g.topo, &job.g.endpoints, &job.cfg, &report))
+    let log = sample(&report, &job.g.topo, &job.g.endpoints, &job.cfg);
+    Ok((
+        summarize(&job.g.topo, &job.g.endpoints, &job.cfg, &report),
+        log,
+    ))
 }
 
 /// Frees the run slot with a failure if the run never reported: a panic in the simulator, or a
@@ -63,7 +69,7 @@ impl Slot {
     }
 
     /// Records the result and releases the slot.
-    pub(crate) fn finish(mut self, result: Result<Summary, String>) {
+    pub(crate) fn finish(mut self, result: Result<(Summary, LogSample), String>) {
         self.done = true;
         self.st.sims.finish(&self.id, result);
     }

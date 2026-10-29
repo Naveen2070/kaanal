@@ -12,7 +12,7 @@ use serde_yaml_ng::Value as Yaml;
 use std::fmt::Write as _;
 
 /// One patch operation, as the API takes it. Which fields it needs depends on `op`:
-/// `set`/`insert`/`remove` take `path` (and `value`), `add_node` takes `name` and `kind`,
+/// `set`/`insert`/`append`/`remove` take `path` (and `value`), `add_node` takes `name` and `kind`,
 /// `rename_node` takes `from` and `to`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +46,7 @@ fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Yaml>, D::Er
 enum Kind {
     Set,
     Insert,
+    Append,
     Remove,
     AddNode,
     RenameNode,
@@ -160,6 +161,10 @@ fn edit(o: &Op) -> Result<Edit, String> {
         Kind::Set => Edit::Set {
             value: value()?,
             path,
+        },
+        Kind::Append => Edit::Append {
+            parent: path,
+            value: value()?,
         },
         Kind::Remove => Edit::Remove { path },
         Kind::Insert => {

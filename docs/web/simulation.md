@@ -14,15 +14,20 @@ curl -s localhost:8080/__kaanal/sim/runs/s1 -H "Authorization: Bearer $TOKEN"
 
 The body:
 
-| Field        | Meaning                                                                                                                    |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `profile`    | A profile name from `traffic:`, or a profile written out (`{ "rps": 50, "journeys": [ ... ] }`).                           |
-| `duration_s` | Simulated seconds (default: the profile's, else 60; at most 3600).                                                         |
-| `warmup_s`   | Simulated seconds before results count (default a tenth of the duration).                                                  |
-| `seed`       | Seed of the draws (default the config's `seed:`). The same inputs give the same report.                                    |
-| `scenario`   | Run under this [scenario](scenarios.md)'s chaos alone. Without it the run uses the **live chaos** in force when it starts. |
+| Field        | Meaning                                                                                                                      |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `profile`    | A profile name from `traffic:`, or a profile written out (`{ "rps": 50, "journeys": [ ... ] }`).                             |
+| `duration_s` | Simulated seconds (default: the profile's, else 60; at most 3600).                                                           |
+| `warmup_s`   | Simulated seconds before results count (default a tenth of the duration).                                                    |
+| `seed`       | Seed of the draws (default the config's `seed:`). The same inputs give the same report.                                      |
+| `scenario`   | Run under this [scenario](scenarios.md)'s chaos alone. Without it the run uses the **live chaos** in force when it starts.   |
+| `source`     | `applied` (default) runs the system in force; `draft` runs the draft text without Apply (see below). Anything else is `400`. |
 
 A run is answered at once with `202`; poll `GET /sim/runs/{id}` until `state` is `done` (or `failed`, with an `error`). `GET /sim/runs` lists the last eight runs without their reports.
+
+## Run on the draft
+
+With `"source": "draft"` the run simulates the text of the draft (`GET /draft`) as it is now, without Apply: nothing is swapped, no counter is reset, mock traffic is untouched. The live chaos is carried onto the draft by name (what the draft no longer has is left out), and a `scenario` resolves against the draft's scenarios. A draft that does not build is `400` with `{ "error", "diagnostic" }` and does not take the run slot. The run record says `"source": "draft"` and a `draft_rev` (the draft's `rev`, which `GET /draft` shows and which counts each change of its text), so a result can be matched to the edit it describes; `generation` is the one in force.
 
 ## Limits
 
@@ -37,7 +42,7 @@ A run is answered at once with `202`; poll `GET /sim/runs/{id}` until `state` is
 
 - **`latency`**: `p50_ms`, `p95_ms`, `p99_ms`, `max_ms` and log2 buckets. Percentiles are exact over the run's requests.
 - **`requests`, `failed`, `errors`**: reported requests, how many failed, and failures by kind (`status`, `reset`, `malformed`, `timeout`).
-- **`nodes`**: per node, with a row per replica: `visits_per_s` (measured) beside `expected_visits_per_s` (what the chains predict), `mean_wait_ms`, `offered_load`, `utilization`, `saturated`, `max_queue`, and refusals (`limited`, `overflowed`, `timed_out`).
+- **`nodes`**: per node, with a row per replica: `visits_per_s` (measured) beside `expected_visits_per_s` (what the chains predict), `mean_wait_ms`, `offered_load`, `utilization`, `saturated`, `max_queue`, and refusals (`limited`, `overflowed`, `timed_out`); `capacity_per_s` (what the node can take in **visits** per second, not requests per second: slots × replicas ÷ mean service time per visit, absent without a limit or visits), `saturates_at_req_s` (the same figure in **requests** per second for the whole traffic mix: `capacity_per_s` divided by the visits one request makes to the node; absent when there is no capacity or no request reaches the node); `headroom` (`1 - offered_load`, at least 0); and `series`: 60 windows of `busy` (fraction of slots busy), `queue` (the longest queue seen when a request joined, taken per replica, so it misses requests cancelled while queued and can read low under deadlines) and `latency` (counts of the node's own hop durations in the summary's buckets), `window_s` wide each. A run with a warmup under-counts the earliest windows. In the run log the `queued` event fires only when the wait is longer than the service time.
 - **`links`**: per edge with a `bandwidth`: transfers, wait, load.
 - **`bottlenecks`**: node ids, most loaded first (nodes with a `concurrency` or `pool` limit first, since a node with no limit cannot queue).
 - **`streams`**: percentiles per endpoint.
@@ -46,6 +51,14 @@ A run is answered at once with `202`; poll `GET /sim/runs/{id}` until `state` is
 **Offered load and utilization.** `offered_load` is hop time over capacity and can pass 1; `utilization` is the share of slot time actually busy and tops out at 1. A node is `saturated` when its offered load is 1 or more, its utilization is 0.95 or more, or it already refuses work (a full queue or a fired `timeout:`). Its queue then grows for as long as the run lasts, so its latency is not a steady-state figure.
 
 **Warnings about noise.** With fewer than 1000 reported requests the p99 is noise; with fewer than 100, so is p95. One run is one sample of a random process and has no confidence interval: run longer, or run twice with different seeds and compare.
+
+## The run log
+
+`GET /__kaanal/sim/runs/{id}/log` pages a **sample** of the run's requests, one line per hop, in virtual time (`t_ms` is the arrival plus the hop's start). It is not every request: it keeps every failed request (up to 1000), the 500 slowest, and an even spread of the rest, 4000 requests at most and 20 000 lines in all (a run that reaches the cap says so in `note`). Only requests that arrived after the warmup are logged.
+
+Query: `node`, `replica`, `endpoint` (`GET /users/{id}`, URL-encoded), `level` (`info`, `warn`, `error`; anything else is 400), `limit` (default 200, at most 1000), `after` (the `next` of the previous page). Filters combine with AND; an unknown `node` answers 200 with no lines. The answer is `{ lines, next, total, sampled: true, note }`: pass `next` as `after` to continue, `null` means the end; `total` counts the stored lines before filtering.
+
+A line has `t_ms`, `level`, `request` (the endpoint's request counter), `stream` (the endpoint), `node`, `replica`, `event`, `wait_ms`, `service_ms`, `status` and `note`. `event` is `served`, `queued` (the wait was longer than the service: level `warn`), or the failure of a request, on the failing node at the instant it failed (level `error`): `failed` (chaos), `limited` (a rate limit), `overflowed` (a full queue), `timeout` (a deadline). The event comes from the simulator's own record of the cause, so a chaos 503 on a node whose full queue also answers 503 is still `failed`. The simulator does not record which replica a failure happened on, so a failure line has `replica`, `wait_ms` and `service_ms` set to `null`, and `?replica=N` skips failure lines. The log never holds half a request: when the 20 000-line cap is reached, the even spread of requests gets thinner (still across the whole run) and `note` says so.
 
 ## Sample a body
 

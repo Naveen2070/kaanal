@@ -10,6 +10,7 @@ mod config;
 mod forks;
 mod links;
 mod replicas;
+mod series;
 mod streams;
 mod summary;
 mod visits;

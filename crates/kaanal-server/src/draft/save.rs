@@ -48,6 +48,10 @@ pub struct Saved {
     pub written: Vec<String>,
     /// Files removed.
     pub removed: Vec<String>,
+    /// Whether the layout sidecar was written (after the config; see [`super::layout::save`]).
+    pub layout_written: bool,
+    /// Why it was not, when it was not. The config write stands either way.
+    pub layout_note: Option<String>,
 }
 
 /// Writes the draft to its file, after the deletions and rewrites `plan` chooses, and returns what
@@ -69,7 +73,7 @@ pub fn save(
     plan: impl FnOnce(&str, &[(String, String)]) -> Result<Plan, String>,
 ) -> Result<Saved, SaveError> {
     let _one = once.lock().unwrap_or_else(PoisonError::into_inner);
-    let (file, text, base, lost, renames) = {
+    let (file, text, base, lost, renames, layout) = {
         let d = draft.lock().unwrap_or_else(PoisonError::into_inner);
         let file = d.file.clone().ok_or(SaveError::NoFile)?;
         (
@@ -78,6 +82,7 @@ pub fn save(
             d.base.clone(),
             d.lost.clone(),
             d.renames.clone(),
+            d.layout.clone(),
         )
     };
     if !lost.is_empty() && !confirm_loss {
@@ -98,10 +103,19 @@ pub fn save(
     let mut changes: Vec<Change> = remove.iter().cloned().map(Change::Delete).collect();
     changes.extend(rewrite.iter().cloned().map(|(p, t)| Change::Write(p, t)));
     changes.push(Change::Write(target, text.clone()));
+    // the folder the sidecar goes in, as it resolves before anything is written
+    let dir_before = file.parent().and_then(|d| d.canonicalize().ok());
     commit(&changes, |from, to| std::fs::rename(from, to))
         .map_err(|e| SaveError::Io(e.to_string()))?;
+    // after the config: a sidecar that cannot be written is a note, the config stands
+    let (layout_written, layout_note) =
+        super::layout::save(&file, dir_before.as_deref(), &layout, &text);
     {
         let mut d = draft.lock().unwrap_or_else(PoisonError::into_inner);
+        if layout_written {
+            d.layout_note = None;
+            d.saved_layout = layout;
+        }
         if d.text == text {
             d.lost.clear();
             if !rewrite.is_empty() {
@@ -123,6 +137,8 @@ pub fn save(
     Ok(Saved {
         written,
         removed: remove.iter().map(shown).collect(),
+        layout_written,
+        layout_note,
     })
 }
 

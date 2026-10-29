@@ -9,6 +9,10 @@ use std::sync::Arc;
 use kaanal_core::{ChainResult, Endpoint, Endpoints, HopKind, NodeKind, Topology, visits_per_s};
 use serde::Serialize;
 
+mod series;
+
+pub use series::Series;
+
 use crate::{SimConfig, SimReport};
 
 /// The label every report carries (R6.5).
@@ -118,6 +122,17 @@ pub struct NodeSummary {
     pub saturated: bool,
     /// Longest queue seen.
     pub max_queue: usize,
+    /// Visits per second the node can take: slots × replicas ÷ mean service time per visit;
+    /// `None` without slots or visits.
+    pub capacity_per_s: Option<f64>,
+    /// Requests per second the whole traffic mix can reach before this node saturates:
+    /// `capacity_per_s` divided by the visits one request makes here (the mix's expected visits
+    /// over its request rate). `None` without a capacity or when the mix never visits the node.
+    pub saturates_at_req_s: Option<f64>,
+    /// `1 - offered_load`, at least 0; `None` without slots.
+    pub headroom: Option<f64>,
+    /// Busy fraction, longest queue and hop latencies over time, 60 windows.
+    pub series: Series,
     /// Refused by the rate limit.
     pub limited: u64,
     /// Refused by a full queue.
@@ -190,6 +205,16 @@ impl Acc {
         }
     }
 
+    /// Visits per second `slots` slots can take at this mean busy time per visit; `None`
+    /// without visits or busy time.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "visit counts are far below 2^52"
+    )]
+    fn capacity(self, slots: f64) -> Option<f64> {
+        (self.v > 0 && self.busy > 0.0).then(|| slots * self.v as f64 / self.busy)
+    }
+
     #[expect(
         clippy::cast_precision_loss,
         reason = "visit counts are far below 2^52"
@@ -222,15 +247,20 @@ fn pct(sorted: &[f64], p: f64) -> f64 {
     sorted[rank - 1]
 }
 
+/// Index of the bucket a latency in ms falls in: `(previous le, le]`, the overflow bucket last.
+fn bucket_of(v: f64) -> usize {
+    let (mut i, mut le) = (0, 0.25);
+    while i < BUCKETS && v > le {
+        le *= 2.0;
+        i += 1;
+    }
+    i
+}
+
 fn latency(sorted: &[f64]) -> Latency {
     let mut counts = vec![0u64; BUCKETS + 1];
     for &v in sorted {
-        let (mut i, mut le) = (0, 0.25);
-        while i < BUCKETS && v > le {
-            le *= 2.0;
-            i += 1;
-        }
-        counts[i] += 1;
+        counts[bucket_of(v)] += 1;
     }
     let mut le = 0.25;
     let buckets = counts
@@ -385,6 +415,38 @@ fn stream_summaries(cfg: &SimConfig, lat_by: &[Vec<f64>], failed_by: &[u64]) -> 
         .collect()
 }
 
+/// **Private.** Per edge that has a `bandwidth`.
+fn link_summaries(
+    topo: &Topology,
+    report: &SimReport,
+    link_acc: &[Acc],
+    window_s: f64,
+) -> Vec<LinkSummary> {
+    topo.edges
+        .iter()
+        .zip(link_acc)
+        .enumerate()
+        .filter(|(_, (e, _))| e.bandwidth.is_some())
+        .map(|(k, (e, a))| {
+            let load = if window_s > 0.0 {
+                a.busy / window_s
+            } else {
+                0.0
+            };
+            let util = report.link_utilization[k];
+            LinkSummary {
+                from: topo.nodes[e.from].name.clone(),
+                to: topo.nodes[e.to].name.clone(),
+                transfers: a.n,
+                mean_wait_ms: a.mean_wait_ms(),
+                offered_load: load,
+                utilization: util,
+                saturated: load >= 1.0 || util >= SATURATED,
+            }
+        })
+        .collect()
+}
+
 /// Folds `report` (a run of `cfg` on `topo`) into a [`Summary`].
 #[must_use]
 #[expect(
@@ -417,6 +479,8 @@ pub fn summarize(
         })
         .collect();
     let expected = visits_per_s(topo, &mix);
+    let mix_rate: f64 = mix.iter().map(|(_, r)| r).sum();
+    let mut series = series::series(topo, cfg, report).into_iter();
     let load_of = |busy: f64, capacity: f64| per_s(busy) / capacity;
     let nodes: Vec<NodeSummary> = topo
         .nodes
@@ -439,6 +503,7 @@ pub fn summarize(
             let total = node_acc[i].iter().fold(Acc::default(), |t, a| t.plus(*a));
             let load = slots.map(|s| load_of(total.busy, s * node_acc[i].len() as f64));
             let st = &report.nodes[i];
+            let capacity = slots.and_then(|s| total.capacity(s * node_acc[i].len() as f64));
             let util = slots.map(|_| st.utilization);
             NodeSummary {
                 name: n.name.clone(),
@@ -456,32 +521,19 @@ pub fn summarize(
                         || st.overflowed > 0
                         || st.timed_out > 0),
                 max_queue: st.max_queue,
+                capacity_per_s: capacity,
+                saturates_at_req_s: capacity
+                    .filter(|_| expected[i] > 0.0)
+                    .map(|c| c * mix_rate / expected[i]),
+                headroom: load.map(|l| (1.0 - l).max(0.0)),
+                series: series.next().expect("one series per node"),
                 limited: st.limited,
                 overflowed: st.overflowed,
                 timed_out: st.timed_out,
             }
         })
         .collect();
-    let links: Vec<LinkSummary> = topo
-        .edges
-        .iter()
-        .zip(&link_acc)
-        .enumerate()
-        .filter(|(_, (e, _))| e.bandwidth.is_some())
-        .map(|(k, (e, a))| {
-            let load = load_of(a.busy, 1.0);
-            let util = report.link_utilization[k];
-            LinkSummary {
-                from: topo.nodes[e.from].name.clone(),
-                to: topo.nodes[e.to].name.clone(),
-                transfers: a.n,
-                mean_wait_ms: a.mean_wait_ms(),
-                offered_load: load,
-                utilization: util,
-                saturated: load >= 1.0 || util >= SATURATED,
-            }
-        })
-        .collect();
+    let links = link_summaries(topo, report, &link_acc, window_s);
     let requests = report.requests.len() as u64;
     let warnings = warnings(requests, &nodes, &links);
     let bottlenecks = bottlenecks(&nodes);

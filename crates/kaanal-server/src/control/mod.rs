@@ -2,7 +2,7 @@
 //!
 //! Every `/__kaanal/*` request passes [`guard`] before any handler or extractor
 //! runs: Host must be loopback with the bound port, and every route except
-//! `health`/`ui` needs the bearer token.
+//! `health`/`ui`/`studio` (and its two assets) needs the bearer token.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -36,6 +36,7 @@ use crate::scenarios::{self, WriteError};
 use crate::state::{AppState, BusEvent, Control, Effective};
 mod admin;
 mod chaos;
+mod doc;
 mod draft;
 mod guard;
 mod lease;
@@ -43,18 +44,21 @@ mod save;
 mod scenario;
 mod sim;
 mod skeleton;
+mod studio;
 #[cfg(test)]
 mod tests;
 mod view;
 
 pub use admin::{events, reset, shutdown, ui};
 pub use chaos::{clear_keyed, clear_node, get_chaos, set_chaos, set_chaos_keyed, topology};
+pub use doc::get_demo;
 pub use draft::{apply_draft, get_draft, put_draft, save_draft, validate_draft};
 pub use guard::guard;
 pub use lease::lease_task;
 pub use save::save_scenario;
-pub use sim::{get_run, list_runs, post_run, post_sample};
+pub use sim::{get_run, get_run_log, list_runs, post_run, post_sample};
 pub use skeleton::get_skeleton;
+pub use studio::{app_css, app_js, studio};
 // What only the unit tests reach by `super::`.
 #[cfg(test)]
 use chaos::ChaosPatch;

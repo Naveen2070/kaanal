@@ -79,7 +79,11 @@ pub(crate) fn resolve(
 pub(crate) fn confine(text: &str, base_dir: &Path) -> Result<(), Located> {
     use serde_yaml_ng::Value;
     // same preprocessing as `Config::from_yaml`: a BOM-prefixed draft loads, so it must be checked
-    let Ok(doc) = serde_yaml_ng::from_str::<Value>(kaanal_core::strip_bom(text)) else {
+    // (a bomb is refused there, so nobody can load it: nothing to check, and nothing is expanded)
+    let Ok(text) = kaanal_core::preprocess(text) else {
+        return Ok(());
+    };
+    let Ok(doc) = serde_yaml_ng::from_str::<Value>(text) else {
         return Ok(());
     };
     // no `apply_merge`: serde does not merge `<<` when the loader reads `Config`, so `<<` is an
@@ -207,6 +211,30 @@ mod trust_tests {
         );
         let err = confine(draft, &dir).expect_err("refused");
         assert!(err.msg.contains("inside the project folder"), "{}", err.msg);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn confine_does_not_expand_an_alias_bomb() {
+        use std::fmt::Write as _;
+        let (dir, _) = project("bomb");
+        let mut draft = String::from("version: 1\nnodes: {}\nx0: &a0 [lol, lol, lol, lol, lol]\n");
+        for n in 1..=20_000 {
+            let _ = writeln!(
+                draft,
+                "x{n}: &a{n} [{}]",
+                vec![format!("*a{}", n - 1); 10].join(", ")
+            );
+        }
+        // the loader refuses it, so there is nothing to check; the point is that it returns at once,
+        // so run it on a thread: a regression fails the test instead of hanging it
+        let (tx, rx) = std::sync::mpsc::channel();
+        let d = dir.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(confine(&draft, &d).is_ok());
+        });
+        let done = rx.recv_timeout(std::time::Duration::from_secs(5));
+        assert_eq!(done, Ok(true), "confine did not return on an alias bomb");
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 

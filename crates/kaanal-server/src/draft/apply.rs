@@ -33,7 +33,7 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     /// A parse error of the draft itself.
-    fn parsed(e: ConfigError) -> Diagnostic {
+    pub(crate) fn parsed(e: ConfigError) -> Diagnostic {
         Diagnostic {
             file: None,
             line: e.line,

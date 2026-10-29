@@ -3,16 +3,62 @@
 use super::*;
 use crate::draft::MAX_DRAFT_BYTES;
 use crate::draft::apply::{self as apply_mod, ApplyError};
+use crate::draft::layout::Layout;
 use crate::draft::patch::{self, Op};
 use crate::draft::rename;
 use crate::draft::save::{self as draft_save, Plan, SaveError};
 
-/// **Private.** The draft as the API shows it: `{ text, dirty, generation }` (`generation` is 0
-/// before the first Apply of a blank start).
+/// **Private.** The draft as the API shows it: `{ text, dirty, generation, lost, rev, doc,
+/// doc_error, project_id, kind_defaults, boot, layout, layout_note, layout_dirty }` (`layout_dirty`: the
+/// positions differ from the sidecar, so a Save would write them) (`generation` is 0 before the first Apply of a blank
+/// start; `doc` is the text as JSON, or null with `doc_error` saying why).
 fn view(st: &AppState) -> Json<Value> {
-    let d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
-    let generation = st.generation().map_or(0, |g| g.id);
-    Json(json!({ "text": d.text, "dirty": d.dirty(), "generation": generation, "lost": d.lost }))
+    // copy what the view needs and let go of the lock before parsing, so a big draft does not
+    // hold up PUT and Apply
+    let (text, dirty, generation, lost, rev, file, mut layout, layout_note, layout_dirty, cached) = {
+        let d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
+        (
+            d.text.clone(),
+            d.dirty(),
+            st.generation().map_or(0, |g| g.id),
+            d.lost.clone(),
+            d.rev,
+            d.file.clone(),
+            d.layout.clone(),
+            d.layout_note.clone(),
+            d.layout_dirty(),
+            d.doc_cache
+                .as_ref()
+                .filter(|(r, _)| *r == d.rev)
+                .map(|(_, p)| Arc::clone(p)),
+        )
+    };
+    // parsed once per `rev`: Studio polls this route, and a parse is the dear part
+    let parsed = cached.unwrap_or_else(|| {
+        let p = Arc::new(doc::draft_doc(&text));
+        let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
+        // only if the text is still the one parsed (a PUT may have landed meanwhile)
+        if d.rev == rev {
+            d.doc_cache = Some((rev, Arc::clone(&p)));
+        }
+        p
+    });
+    let (doc, doc_error) = (&parsed.0, &parsed.1);
+    // positions of nodes the text does not define are not shown (only when the text is a config)
+    if let Some(nodes) = doc
+        .as_ref()
+        .and_then(|d| d.get("nodes"))
+        .and_then(Value::as_object)
+    {
+        layout.0.retain(|k, _| nodes.contains_key(k));
+    }
+    Json(json!({
+        "text": text, "dirty": dirty, "generation": generation, "lost": lost, "rev": rev,
+        "boot": doc::boot_id(),
+        "doc": doc, "doc_error": doc_error,
+        "project_id": doc::project_id(file.as_deref()), "kind_defaults": doc::kind_defaults(),
+        "layout": layout, "layout_note": layout_note, "layout_dirty": layout_dirty,
+    }))
 }
 
 /// `GET /__kaanal/draft` — the draft text, whether it differs from what is applied, and the
@@ -27,33 +73,55 @@ pub struct DraftBody {
     text: String,
 }
 
-/// The accepted body of `PUT /__kaanal/draft`: the whole new `text`, or a `patch` of edits.
+/// The accepted body of `PUT /__kaanal/draft`: the whole new `text`, or a `patch` of edits, and/or
+/// a `layout` (node name to `[x, y]`, replacing the whole map).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PutBody {
     text: Option<String>,
     patch: Option<Vec<Op>>,
+    layout: Option<Layout>,
 }
 
 /// `PUT /__kaanal/draft` — replaces the draft text, or applies a `patch` to it (`[{ op: set |
 /// insert | remove, path, value }]`, kept to the bytes it touches so comments and style survive),
-/// and returns the new view. What a patch could not keep is in `lost`. The text is not validated
-/// (a half-typed file must be savable); `POST /draft/validate` does that.
+/// and/or replaces the `layout`, and returns the new view. What a patch could not keep is in
+/// `lost`; a `rename_node` moves the node's position too. The text is not validated (a half-typed
+/// file must be savable); `POST /draft/validate` does that. A layout change never bumps `rev`.
 ///
 /// # Errors
-/// 400 for a body with both or neither of `text` and `patch`, a text over 1 MiB (1048576 bytes),
-/// or a patch that cannot be made (nothing at the path, a key already there, a draft that is not
-/// YAML); the draft is unchanged.
+/// 400 for a body with both `text` and `patch` or none of `text`, `patch` and `layout`, a text
+/// over 1 MiB (1048576 bytes), a patch that cannot be made (nothing at the path, a key already
+/// there, a draft that is not YAML), or a layout that cannot be kept (over 2000 positions, an
+/// empty name, a coordinate beyond ±1e6, over 256 KiB as a file); the draft is unchanged.
 pub async fn put_draft(
     State(st): State<Arc<AppState>>,
     payload: Result<Json<PutBody>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let Json(b) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
+    if b.text.is_some() && b.patch.is_some() {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            "send either `text` or `patch`, not both",
+        ));
+    }
+    if b.text.is_none() && b.patch.is_none() && b.layout.is_none() {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            "send `text` or `patch`, and/or `layout`",
+        ));
+    }
+    if let Some(l) = &b.layout {
+        l.check().map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
+    }
     let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
     let mut extra = None;
     match (b.text, b.patch) {
         (Some(t), None) if t.len() > MAX_DRAFT_BYTES => return Err(too_large(t.len())),
         (Some(t), None) => {
+            if d.text != t {
+                d.rev += 1;
+            }
             d.text = t;
             d.lost.clear();
             d.renames.clear();
@@ -64,17 +132,22 @@ pub async fn put_draft(
             if out.text.len() > MAX_DRAFT_BYTES {
                 return Err(too_large(out.text.len()));
             }
+            if d.text != out.text {
+                d.rev += 1;
+            }
             d.text = out.text;
             d.lost.extend(out.lost);
+            for (from, to) in &out.renamed {
+                d.layout.rename(from, to);
+            }
             d.renames.extend(out.renamed);
             extra = Some((out.touched, out.notes));
         }
-        _ => {
-            return Err(reject(
-                StatusCode::BAD_REQUEST,
-                "send either `text` or `patch`",
-            ));
-        }
+        // a layout alone (both was refused above)
+        _ => {}
+    }
+    if let Some(l) = b.layout {
+        d.layout = l;
     }
     drop(d);
     let mut v = view(&st);
@@ -135,7 +208,9 @@ fn stale_scenarios(
 /// `POST /__kaanal/draft/save` — writes the draft text to the config file (atomically) and
 /// answers `{ ok, written, removed }`. The running system is not touched; that is Apply. With
 /// `fix_scenarios: "remove"` the scenario files the saved text no longer resolves against are
-/// deleted in the same Save (every file changes or none).
+/// deleted in the same Save (every file changes or none). After the config, the layout goes to
+/// `kaanal.layout.json` (`layout_written`, and `layout_note` when it was not: a link or non-file
+/// there is refused, and the config write stands).
 ///
 /// # Errors
 /// 409 with `lost` when patches dropped something and `confirm_loss` is not true; 409 with
@@ -201,9 +276,10 @@ pub async fn save_draft(
     .await
     .map_err(|e| reject(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
     match done {
-        Ok(s) => Ok(Json(
-            json!({ "ok": true, "written": s.written, "removed": s.removed }),
-        )),
+        Ok(s) => Ok(Json(json!({
+            "ok": true, "written": s.written, "removed": s.removed,
+            "layout_written": s.layout_written, "layout_note": s.layout_note,
+        }))),
         Err(SaveError::Lost(lost)) => Err((
             StatusCode::CONFLICT,
             Json(json!({

@@ -32,7 +32,36 @@ impl Drop for Srv {
     }
 }
 
-fn new_dir() -> PathBuf {
+/// A server for `cfg` whose draft is `dir/kaanal.yaml` holding `text` (written first unless it is
+/// already there); `root` is what is removed when the server goes (`dir` or a folder above it).
+pub(crate) async fn start_at(root: PathBuf, dir: &std::path::Path, cfg: &str, text: &str) -> Srv {
+    let file = dir.join("kaanal.yaml");
+    if !file.exists() {
+        std::fs::write(&file, text).unwrap();
+    }
+    let token = kaanal_server::new_token();
+    let opts = ServeOpts {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        token: token.clone(),
+        auth_key: None,
+        draft: Some(DraftSource {
+            file,
+            text: text.to_string(),
+        }),
+    };
+    let s = kaanal_server::serve(&Config::from_yaml(cfg).unwrap(), dir, opts)
+        .await
+        .unwrap();
+    Srv {
+        base: format!("http://127.0.0.1:{}", s.addr.port()),
+        token,
+        client: reqwest::Client::new(),
+        dir: root,
+    }
+}
+
+pub(crate) fn new_dir() -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     let d = std::env::temp_dir().join(format!(
         "kaanal-dr-{}-{}",
@@ -50,6 +79,11 @@ pub(crate) async fn start_blank() -> Srv {
     let fixture =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/openapi.yaml");
     std::fs::copy(fixture, dir.join("openapi.yaml")).unwrap();
+    start_blank_in(dir).await
+}
+
+/// A blank start in `dir`, which holds whatever the caller put there (the fresh-project case: nothing).
+pub(crate) async fn start_blank_in(dir: PathBuf) -> Srv {
     let token = kaanal_server::new_token();
     let opts = ServeOpts {
         host: "127.0.0.1".parse().unwrap(),

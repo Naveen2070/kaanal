@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://kaanal.naveenr.in/schema/v1.json
+# Studio's starter system: one file, nothing else needed. Edit it, then press Run.
+version: 1
+seed: 7
+nodes:
+  nginx: { type: gateway, concurrency: 256, proc: { p50: 1ms, p99: 3ms } }
+  shop: { type: service, concurrency: 8, replicas: 2, proc: { p50: 8ms, p99: 30ms } }
+  search: { type: service, concurrency: 16, proc: { p50: 5ms, p99: 20ms } }
+  db: { type: database, flavor: postgres, pool: { size: 20 } }
+  cache: { type: cache, flavor: redis, hit_ratio: 0.8 }
+edges:
+  - { from: nginx, to: shop, net: { p50: 1ms, p99: 3ms } }
+  - { from: nginx, to: search, net: { p50: 1ms, p99: 3ms } }
+  - { from: shop, to: db, net: { p50: 1ms, p99: 3ms } }
+  - { from: shop, to: cache, net: { p50: 1ms, p99: 2ms } }
+  - { from: search, to: db, net: { p50: 1ms, p99: 3ms } }
+# Routes are written here (no OpenAPI file): the gateway serves the fixed reply, and the chain is the work behind it.
+endpoints:
+  # A product page reads through the cache; a miss falls through to the db.
+  "GET /products/{id}":
+    op: read
+    override: { body: { id: 1, name: Kettle } }
+    chain: [{ call: shop, chain: [{ cache: cache }, { call: db, op: read }] }]
+  # A search always scans the db.
+  "GET /search":
+    op: scan
+    override: { body: { results: [] } }
+    chain: [{ call: search, chain: [{ call: db, op: scan }] }]
+traffic:
+  # A normal day.
+  peak:
+    rps: 300
+    duration: 30s
+    journeys:
+      - { endpoint: "GET /products/{id}", weight: 4 }
+      - { endpoint: "GET /search", weight: 1 }

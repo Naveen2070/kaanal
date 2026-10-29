@@ -8,7 +8,7 @@ use super::{
 /// Runs in front of every `/__kaanal/*` route, before any extractor parses a body or query,
 /// so unauthenticated callers never reach handler code:
 /// 1. `Host` must be loopback with our port (DNS-rebinding guard), for the whole namespace.
-/// 2. Everything except `health` and `ui` needs the bearer token. `/events` alone may take it
+/// 2. Everything except `health`, `ui`, `studio` and its two assets (`studio/assets/app.js`, `app.css`; the page must load before it has the token) needs the bearer token. `/events` alone may take it
 ///    as `?token=`, because the browser `EventSource` cannot set headers.
 /// 3. Responses are marked uncacheable and non-sniffable.
 pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
@@ -21,7 +21,14 @@ pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) ->
         return reject(StatusCode::FORBIDDEN, "bad Host header").into_response();
     }
     let path = req.uri().path();
-    if !matches!(path, "/__kaanal/health" | "/__kaanal/ui") {
+    if !matches!(
+        path,
+        "/__kaanal/health"
+            | "/__kaanal/ui"
+            | "/__kaanal/studio"
+            | "/__kaanal/studio/assets/app.js"
+            | "/__kaanal/studio/assets/app.css"
+    ) {
         let bearer = headers
             .get(header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok())

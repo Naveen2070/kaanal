@@ -4,6 +4,7 @@
 
 pub(crate) mod apply;
 pub(crate) mod gate;
+pub mod layout;
 pub(crate) mod patch;
 pub(crate) mod remap;
 pub(crate) mod rename;
@@ -47,7 +48,23 @@ pub struct Draft {
     /// The `rename_node` operations made since the text was set, in order: what Save's
     /// `fix_scenarios: rewrite` applies to scenario files that still use the old names.
     pub renames: Vec<(String, String)>,
+    /// Counts every change of `text` (whole-text PUT and patch), so a simulation run can say which
+    /// draft it described. Starts at 0.
+    pub rev: u64,
+    /// Where Studio draws each node; edits never change `rev` (a drag is not a change to the
+    /// system). Read from the sidecar when the draft is made, written by Save.
+    pub layout: layout::Layout,
+    /// Why the sidecar was not used when it was read (`None`: it was, or there was none).
+    pub layout_note: Option<String>,
+    /// The layout as last read from or written to the sidecar: `layout_dirty` is the difference.
+    pub saved_layout: layout::Layout,
+    /// The text parsed as JSON for `GET /draft`, with the `rev` it was parsed at: polling reads
+    /// it instead of parsing again. A change of `text` always bumps `rev`, which drops it.
+    pub doc_cache: Option<(u64, std::sync::Arc<DocParse>)>,
 }
+
+/// A draft text as JSON, or why it is not a config (see `control::doc::draft_doc`).
+pub type DocParse = (Option<serde_json::Value>, Option<apply::Diagnostic>);
 
 impl Draft {
     /// A draft that starts as `src` (clean), or empty with no source.
@@ -55,14 +72,21 @@ impl Draft {
         let Some(s) = src else {
             return Draft::default();
         };
+        // absolute, so a later change of the working directory cannot move it
+        let file = std::path::absolute(&s.file).unwrap_or(s.file);
+        let (layout, layout_note) = file.parent().map(layout::load).unwrap_or_default();
         Draft {
             applied: s.text.clone(),
             base: Some(s.text.clone()),
             text: s.text,
-            // absolute, so a later change of the working directory cannot move it
-            file: Some(std::path::absolute(&s.file).unwrap_or(s.file)),
+            file: Some(file),
             lost: Vec::new(),
             renames: Vec::new(),
+            rev: 0,
+            saved_layout: layout.clone(),
+            layout,
+            layout_note,
+            doc_cache: None,
         }
     }
 
@@ -70,14 +94,26 @@ impl Draft {
     /// `file`. `base` is what `file` holds now (`None` when it does not exist), so a Save
     /// refuses if it changed meanwhile, and replaces an existing file only if nobody touched it.
     pub fn blank(file: &std::path::Path) -> Draft {
+        let abs = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+        let (layout, layout_note) = abs.parent().map(layout::load).unwrap_or_default();
         Draft {
             text: BLANK_TEXT.to_string(),
             applied: String::new(),
-            file: Some(std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf())),
+            file: Some(abs),
             base: std::fs::read_to_string(file).ok(),
             lost: Vec::new(),
             renames: Vec::new(),
+            rev: 0,
+            saved_layout: layout.clone(),
+            layout,
+            layout_note,
+            doc_cache: None,
         }
+    }
+
+    /// Whether the layout differs from what the sidecar holds (a Save would write it).
+    pub fn layout_dirty(&self) -> bool {
+        self.layout != self.saved_layout
     }
 
     /// Whether the draft differs from what is applied.

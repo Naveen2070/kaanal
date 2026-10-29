@@ -125,3 +125,81 @@ nodes:
     .unwrap_err();
     assert!(err.msg.contains("{ mean: 5ms }"), "{err}");
 }
+
+/// A "billion laughs" text: `levels` anchors, each listing the previous one ten times.
+pub fn bomb(levels: usize) -> String {
+    use std::fmt::Write as _;
+    let mut t = String::from(
+        "version: 1\nnodes: {}\nx0: &a0 [lol, lol, lol, lol, lol, lol, lol, lol, lol, lol]\n",
+    );
+    for n in 1..=levels {
+        let _ = writeln!(
+            t,
+            "x{n}: &a{n} [{}]",
+            vec![format!("*a{}", n - 1); 10].join(", ")
+        );
+    }
+    t
+}
+
+/// Runs `f` on its own thread and fails (rather than hangs) when it takes over 5 s.
+fn within_5s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("the alias bomb was not refused quickly: the guard is gone or bypassed")
+}
+
+#[test]
+fn an_alias_bomb_is_refused_before_it_expands() {
+    let (two_docs_late, two_docs_early) = (
+        format!("version: 1\nnodes: {{}}\n---\n{}", bomb(300)),
+        format!("{}---\nversion: 1\nnodes: {{}}\n", bomb(300)),
+    );
+    // 20 KB (hundreds of levels), ~1 MiB (thousands), and a bomb in the second / first document
+    for text in [bomb(300), bomb(20_000), two_docs_late, two_docs_early] {
+        within_5s(move || {
+            let e = Config::from_yaml(&text).unwrap_err();
+            assert!(e.msg.contains("too much alias expansion"), "{e}");
+            assert!(
+                e.line.is_some(),
+                "the alias that crossed the limit is placed"
+            );
+            assert!(kaanal_core::parse_scenario(&text).is_err());
+            assert!(kaanal_core::config::parse_endpoints(&text).is_err());
+            assert!(kaanal_core::preprocess(&text).is_err());
+        });
+    }
+}
+
+#[test]
+fn an_anchor_reused_in_a_later_document_counts_each_document_on_its_own() {
+    // a legit two-document text: `a` is defined again in document 2; serde refuses it (one
+    // document only) but the guard must neither panic nor refuse it as a bomb
+    let text = "version: 1\nx: &a [1, 2]\ny: *a\n---\nx: &a [3]\ny: *a\n";
+    within_5s(move || {
+        assert!(kaanal_core::preprocess(text).is_ok());
+        let e = Config::from_yaml(text).unwrap_err();
+        assert!(!e.msg.contains("alias expansion"), "{e}");
+    });
+}
+
+#[test]
+fn a_handful_of_legitimate_anchors_and_aliases_load() {
+    let yaml = "version: 1
+nodes:
+  nginx: { type: gateway, proc: 1ms }
+  app:   { type: service, proc: &p 1ms }
+  api:   { type: service, proc: *p }
+  db:    { type: database, ops: &ops { read: 1ms, write: 1ms, scan: 1ms } }
+  db2:   { type: database, ops: *ops }
+edges:
+  - { from: nginx, to: app, net: &n 1ms }
+  - { from: nginx, to: api, net: *n }
+  - { from: app, to: db, net: *n }
+  - { from: api, to: db2, net: *n }
+";
+    Config::from_yaml(yaml).unwrap();
+}

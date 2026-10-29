@@ -54,9 +54,46 @@ jobs:
             exit 1
           fi
 
+  # Studio's bundle is built once (Linux) and shared with every build job: it is git-ignored, so without it
+  # the binaries would silently serve the status page at /__kaanal/studio. Same Vite+ pin as ci.yml's ui job.
+  # No dependency cache on purpose (nothing restored from a cache may end up in a release).
+  ui:
+    name: Build the Studio UI
+    needs: info
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          version: "1.4.0"
+          node-version: "26"
+          run-install: false
+
+      - name: Install dependencies
+        working-directory: ui
+        run: vp install
+
+      - name: Check, test and build
+        working-directory: ui
+        run: |
+          vp check
+          vp test run
+          vp build
+
+      - name: Keep the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-ui-dist
+          path: crates/kaanal-server/ui-dist
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build (${{ matrix.target }})
-    needs: info
+    needs: [info, ui]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -71,6 +108,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Fetch the Studio bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: studio-ui-dist
+          path: crates/kaanal-server/ui-dist
+
+      # A release must never ship the fallback status page: fail before cargo if any bundle file is missing.
+      - name: Require the Studio bundle
+        run: |
+          for f in index.html app.js app.css; do
+            [ -s "crates/kaanal-server/ui-dist/$f" ] || { echo "missing crates/kaanal-server/ui-dist/$f: the release would not contain Studio" >&2; exit 1; }
+          done
+        shell: bash
 
       # rustup ships on every runner, so no third-party action is needed. There is no build cache on
       # purpose: nothing restored from a cache may end up in a release binary.

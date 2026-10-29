@@ -7,6 +7,8 @@
 )]
 mod common;
 
+mod draft_run;
+mod log;
 mod run;
 mod sample;
 mod skeleton;

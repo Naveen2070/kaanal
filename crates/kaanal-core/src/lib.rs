@@ -45,7 +45,7 @@ pub use chaos::{
 pub use config::{
     ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointConfig, EndpointsConfig,
     JourneyConfig, NodeKind, ScenarioConfig, SeedSource, TrafficConfig, check_profile,
-    parse_scenario, strip_bom, valid_locale_tag,
+    parse_scenario, preprocess, strip_bom, valid_locale_tag,
 };
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;

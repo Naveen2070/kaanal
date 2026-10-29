@@ -143,3 +143,41 @@ jobs:
         with:
           name: bench-baseline
           path: bench.json
+
+  # Studio's frontend (ui/). Vite+ is pinned to the version in ui/package.json (1.4.0); setup-vp is the
+  # documented CI install method (https://viteplus.dev/guide/ci). The bundle is a build artifact, never
+  # committed: the Rust jobs above build without it (/__kaanal/studio then serves the status page).
+  ui:
+    name: UI (vp check, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          version: "1.4.0"
+          node-version: "26"
+          working-directory: ui
+          cache: true
+
+      - name: Check (format, lint, types)
+        working-directory: ui
+        run: vp check
+
+      - name: Test
+        working-directory: ui
+        run: vp test run
+
+      # Writes app.js, app.css and index.html into crates/kaanal-server/ui-dist.
+      - name: Build
+        working-directory: ui
+        run: vp build
+
+      - name: Keep the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-ui-dist
+          path: crates/kaanal-server/ui-dist
+          if-no-files-found: error

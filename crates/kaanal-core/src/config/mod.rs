@@ -21,6 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::exec::Op;
 use crate::pin::{PinEntryConfig, StateOverrideConfig};
+mod aliases;
 mod checks;
 mod endpoints;
 mod limits;
@@ -194,6 +195,19 @@ pub fn strip_bom(src: &str) -> &str {
     src.strip_prefix('\u{feff}').unwrap_or(src)
 }
 
+/// The whole preprocessing of `kaanal.yaml` text before it reaches a YAML parser: [`strip_bom`],
+/// then a refusal of a file whose aliases expand past a bound (a "billion laughs" file would pin
+/// a core for minutes; nothing real comes near it). [`Config::from_yaml`] and every security check
+/// that reads the text itself (`paths::confine`) call this, so they see the same text.
+///
+/// # Errors
+/// [`ConfigError`] ("too much alias expansion ...") for such a file; nothing has been expanded.
+pub fn preprocess(src: &str) -> Result<&str, ConfigError> {
+    let src = strip_bom(src);
+    aliases::check(src)?;
+    Ok(src)
+}
+
 impl Config {
     /// Parses `kaanal.yaml` source text.
     ///
@@ -209,7 +223,7 @@ impl Config {
     /// When parsing fails inside `nodes:`, the error is re-placed at the real node and
     /// field (see [`crate::diagnostics`]).
     pub fn from_yaml(src: &str) -> Result<Config, ConfigError> {
-        let src = strip_bom(src);
+        let src = preprocess(src)?;
         let cfg: Config = serde_yaml_ng::from_str(src).map_err(|e| {
             // R1.15: serde loses positions inside tagged nodes; recover them (error path only).
             let mut err = crate::diagnostics::explain(src, serde_error(&e));
