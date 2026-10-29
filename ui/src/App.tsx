@@ -30,7 +30,8 @@ export function App() {
   return (
     <Loading ready={view !== null}>
       <FeedContext.Provider value={feed}>
-        <div className="flex h-full flex-col">
+        <main className="flex h-full flex-col">
+          <h1 className="sr-only">Kaanal Studio</h1>
           <TopBar onRun={runNow} />
           <FirstRun />
           <div className="flex min-h-0 flex-1">
@@ -39,7 +40,7 @@ export function App() {
             </div>
             <Panel />
           </div>
-        </div>
+        </main>
       </FeedContext.Provider>
     </Loading>
   );

@@ -160,7 +160,15 @@ export interface Summary {
   latency: { p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; buckets: Bucket[] };
   streams: { endpoint: string; requests: number; failed: number; [k: string]: unknown }[];
   nodes: NodeSummary[];
-  links: { from: string; to: string; saturated: boolean; [k: string]: unknown }[];
+  links: {
+    from: string;
+    to: string;
+    transfers: number;
+    mean_wait_ms: number;
+    offered_load: number;
+    utilization: number;
+    saturated: boolean;
+  }[];
   /** Indexes into `nodes`. */
   bottlenecks: number[];
 }
@@ -211,12 +219,4 @@ export interface LogPage {
   total: number;
   sampled: true;
   note: string;
-}
-
-export interface SampleResult {
-  endpoint: string;
-  status: number;
-  body: unknown;
-  bytes: number;
-  label: string;
 }

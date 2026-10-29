@@ -5,6 +5,8 @@ import { useDraft } from "../store/draft";
 import { runNow } from "../store/loopRuntime";
 import { TABS, useSelected, useTab, type Tab } from "../store/view";
 import { Controls } from "./Controls";
+import { LogTab } from "./LogTab";
+import { Results } from "./Results";
 
 const LABEL: Record<Tab, string> = { controls: "Controls", log: "Log", results: "Results" };
 
@@ -34,10 +36,10 @@ export function Panel() {
           </button>
         ))}
       </div>
-      {tab !== "controls" ? (
-        <p className="p-3 text-sm text-neutral-500">
-          The {LABEL[tab]} tab is coming in a later part.
-        </p>
+      {tab === "log" ? (
+        <LogTab />
+      ) : tab === "results" ? (
+        <Results />
       ) : selected !== null && config ? (
         <Controls
           name={selected}

@@ -7,6 +7,7 @@ import { LIMITS, setRate } from "../panel/fields";
 import { useFirstRun } from "../first-run/store";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
+import { SaveFlow } from "./SaveFlow";
 
 const SLIDER_KEYS = new Set([
   "ArrowLeft",
@@ -105,6 +106,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
       <output className={`text-xs ${lastError ? "text-red-700" : "text-neutral-500"}`}>
         {line}
       </output>
+      <SaveFlow />
       <button
         type="button"
         aria-label="Show the tour"

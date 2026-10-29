@@ -52,11 +52,13 @@ test("a_selected_node_shows_its_controls_and_a_missing_one_asks_again", async ()
   expect(screen.getByText(/Select a component/)).toBeTruthy();
 });
 
-test("the_tabs_switch_and_log_and_results_say_they_are_not_built_yet", async () => {
+test("the_tabs_switch_between_controls_log_and_results", async () => {
   await show("/__kaanal/studio?node=app");
   await act(async () => fireEvent.click(screen.getByRole("tab", { name: "Log" })));
-  expect(await screen.findByText(/Log tab is coming/)).toBeTruthy();
+  expect(await screen.findByText(/No finished run yet. The log appears/)).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Log" }).getAttribute("aria-selected")).toBe("true");
+  await act(async () => fireEvent.click(screen.getByRole("tab", { name: "Results" })));
+  expect(await screen.findByText(/The results appear after the first run/)).toBeTruthy();
   await act(async () => fireEvent.click(screen.getByRole("tab", { name: "Controls" })));
   expect(await screen.findByLabelText("Slots per instance")).toBeTruthy();
 });

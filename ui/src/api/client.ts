@@ -11,7 +11,6 @@ import type {
   PutBody,
   RunBody,
   RunRecord,
-  SampleResult,
   SaveBody,
   SaveResult,
   Topology,
@@ -127,6 +126,4 @@ export const api = {
     call<RunRecord>("GET", `/sim/runs/${encodeURIComponent(id)}`, undefined, o),
   getLog: (id: string, q: LogQuery = {}, o: Opts = {}) =>
     call<LogPage>("GET", `/sim/runs/${encodeURIComponent(id)}/log${query(q)}`, undefined, o),
-  sample: (endpoint: string, seed?: number, o: Opts = {}) =>
-    call<SampleResult>("POST", "/sample", { endpoint, seed }, o),
 };

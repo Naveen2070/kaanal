@@ -19,8 +19,7 @@ test("every_call_sends_the_token_header", async () => {
   await api.getTopology();
   await api.getRun("s1");
   await api.getLog("s1", { node: "db" });
-  await api.sample("GET /x");
-  expect(sent).toHaveLength(9);
+  expect(sent).toHaveLength(8);
   for (const s of sent) expect(s.headers.Authorization).toBe("Bearer tok123");
   expect(sent[7]?.url).toBe("/__kaanal/sim/runs/s1/log?node=db");
 });

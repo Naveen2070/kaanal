@@ -2,6 +2,16 @@
 
 Studio is Kaanal's graphical editor: a React single-page app that the binary serves from its own port. This page covers how it is served, how to start it and how to build it. The status page (`/__kaanal/ui`) stays as it is; see [web-ui.md](web-ui.md).
 
+## Status and what is next
+
+Studio can be used end to end today: build a system on the canvas (or load the starter), watch the cards and the top bar update after every edit, break things on purpose, read the log and the results, then Apply or Save. What it does not do yet:
+
+- It shows the numbers of a **finished** run, not a live stream (a later release adds live updates, pause, step and reset).
+- If the file on disk changes while Studio is open, Save refuses and the only recovery is copy, restart, paste (a reload button is planned).
+- Not built yet: editing an edge (latency, bandwidth, probability), scenarios, pins and the traffic mix as panels, sample requests, a "saved to disk" indicator, and a visual design pass.
+- Chaos acts on the system that is **applied**, while the canvas draws the **draft**: apply first to break something you just added.
+- It has been tested with an automated suite but not yet by hand in every browser; expect rough edges and please report them.
+
 ## Start it
 
 ```
@@ -52,18 +62,18 @@ File names are fixed (no hashes) because the server embeds exactly these three f
 - **Canvas:** drag a component from the palette (or click it), draw a line between two to connect them; the server checks every connection and a refused one is taken back with its reason.
 - **Cards:** each node shows its busy bar (with the peak as a tick), a queue-depth sparkline, the longest queue, and "saturates near N req/s" (requests, not visits). A saturated card turns red and says so in words. Instances can be edited on the card, and service time on the kinds that have one (not databases or caches, which price their work per operation).
 - **First run:** a loading page (a rotating quote and a small bar loader, no counter) stays until the draft has loaded and at least 0.6 s. Then, for a draft with no components yet (a project that already has some gets no card, so the demo can never replace real work), a welcome card (Draw, Break, Run, Save) offers **Start blank**, **Try the demo** (replaces the draft with Studio's starter system, after any edit still on its way) and **Don't show again**; closing it starts a three-stop tour (palette, panel, Run) that puts keyboard focus on Next and gives it back to Run when it ends. The card is a real modal dialog: the rest of the page is inert while it is open. The card shows once per project (the browser remembers, so another browser shows it again); "Don't show again" is global and also skips the tour; the **?** in the top bar replays the tour whatever was chosen. Browsers that block storage simply show it every time.
-- **Details panel:** select a component for its Controls tab: name, slots, instances, service time, queue limit, timeout, break it on purpose (the node, one instance or a link; it acts on the running system, so a component that is only in the draft is blocked with a reason until it is applied, and setting chaos starts a run), what that works out to, a suggested fix, and Delete. Log and Results arrive in a later part.
-- **Auto re-run:** every edit of the system, after a 600 ms pause, runs the simulator on the draft (never Apply). One run at a time; a busy server is waited out; a result from an older draft is thrown away; a draft that does not build keeps the last numbers dimmed with the reason. Values are checked before they are sent (whole numbers, ranges the loader accepts), and an edit that still leaves the draft unparseable is undone with the reason shown, so the canvas never goes blank. The top bar's offered-load slider edits the first traffic profile's rate and goes through the same loop.
+- **Details panel:** select a component for its Controls tab: name, slots, instances, service time, queue limit, timeout, break it on purpose (the node, one instance or a link; it acts on the running system, so a component that is only in the draft is blocked with a reason until it is applied, and setting chaos starts a run), what that works out to, a suggested fix, and Delete. The **Log** tab pages through a bounded sample of the newest run (errors only, instance, endpoint, this component; a click opens that request hop by hop as a waterfall); its times are virtual, simulated trace events, not process output. The **Results** tab shows the report label and warnings, a latency heatmap for one component (time across, slower hops higher, with a table for screen readers), instances, links, errors by kind and the order things break in.
+- **Auto re-run:** every edit of the system, after a 600 ms pause, runs the simulator on the draft (never Apply). One run at a time; a busy server is waited out; a result from an older draft is thrown away; a draft that does not build keeps the last numbers dimmed with the reason. Values are checked before they are sent (whole numbers, ranges the loader accepts), and an edit that still leaves the draft unparseable is undone with the reason shown, so the canvas never goes blank. The **Apply** and **Save** buttons are the only things that leave the draft: Apply makes the draft the running system (the run loop never does), and shows what it kept and dropped; Save writes `kaanal.yaml` (and the positions file), asks first when comments would be lost, and on a conflict with the file on disk writes nothing and offers to copy your draft. The top bar says whether the draft is applied. The top bar's offered-load slider edits the first traffic profile's rate and goes through the same loop.
 
 ## Size budget
 
 The bundle is part of every binary, so it has a budget (a plan call, checked by hand for now).
 
-| Part            | Budget (vite's kB = 1000 bytes) | Measured after Part D (first run) |
-| --------------- | ------------------------------- | --------------------------------- |
-| `app.js`        | 650 kB minified                 | 475 kB                            |
-| `app.js` (gzip) | 200 kB                          | 154 kB                            |
-| `app.css`       | 60 kB                           | 33 kB                             |
+| Part            | Budget (vite's kB = 1000 bytes) | Measured after Part E (log, results, save) |
+| --------------- | ------------------------------- | ------------------------------------------ |
+| `app.js`        | 650 kB minified                 | 493 kB                                     |
+| `app.js` (gzip) | 200 kB                          | 159 kB                                     |
+| `app.css`       | 60 kB                           | 35 kB                                      |
 
 The first budget (450 / 140 / 40) was set for a bare shell; the canvas library and React Compiler used it up in Part B, so it was raised once, with room for the panel, log and results (R1.97). Re-measure at the end of each part and when a dependency is added.
 

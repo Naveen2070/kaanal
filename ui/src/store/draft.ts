@@ -21,6 +21,8 @@ interface DraftState {
   /** True once a load saw a different server `boot` than the one before: the server restarted. */
   restarted: boolean;
   load: () => Promise<void>;
+  /** Resolves when every edit queued so far has been answered (Apply and Save wait for it). */
+  settled: () => Promise<unknown>;
   /** Applies `ops` locally, sends them, and rolls them back if the server refuses. */
   patch: (ops: Op[], positions?: Layout) => Promise<boolean>;
   /** Moves nodes: `positions` replaces the entries of those names; the whole map is sent. */
@@ -111,6 +113,7 @@ export const useDraft = create<DraftState>((set, get) => {
         set({ error: e instanceof ApiError ? e.message : String(e) });
       }
     },
+    settled: () => tail,
     replaceText: (text) => enqueue({ kind: "text", text }),
     patch: (ops, positions) =>
       enqueue({
