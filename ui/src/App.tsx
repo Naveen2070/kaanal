@@ -3,6 +3,8 @@
 
 import { useEffect } from "react";
 import { Canvas } from "./canvas/Canvas";
+import { FirstRun } from "./first-run/FirstRun";
+import { Loading } from "./first-run/Loading";
 import { FeedContext, type StatsFeed } from "./canvas/feed";
 import { Panel } from "./panel/Panel";
 import { useDraft } from "./store/draft";
@@ -21,21 +23,24 @@ export function App() {
   // the loop starts listening before the first draft arrives, so that arrival starts the first run
   useEffect(() => startStudioLoop(), []);
 
-  if (!view) return <p className="p-4">{error ?? "Loading the draft..."}</p>;
+  if (!view && error) return <p className="p-4">{error}</p>;
   // the cards read the finished run through this feed and never import the run store
   const nodes = latest?.summary?.nodes ?? [];
   const feed: StatsFeed = { node: (name) => nodes.find((n) => n.name === name), dimmed };
   return (
-    <FeedContext.Provider value={feed}>
-      <div className="flex h-full flex-col">
-        <TopBar onRun={runNow} />
-        <div className="flex min-h-0 flex-1">
-          <div className="min-w-0 flex-1">
-            <Canvas />
+    <Loading ready={view !== null}>
+      <FeedContext.Provider value={feed}>
+        <div className="flex h-full flex-col">
+          <TopBar onRun={runNow} />
+          <FirstRun />
+          <div className="flex min-h-0 flex-1">
+            <div className="min-w-0 flex-1">
+              <Canvas />
+            </div>
+            <Panel />
           </div>
-          <Panel />
         </div>
-      </div>
-    </FeedContext.Provider>
+      </FeedContext.Provider>
+    </Loading>
   );
 }

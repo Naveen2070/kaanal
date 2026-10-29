@@ -4,6 +4,7 @@
 
 import { useId, useState } from "react";
 import { LIMITS, setRate } from "../panel/fields";
+import { useFirstRun } from "../first-run/store";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
 
@@ -25,6 +26,7 @@ function dash(n: number | undefined, digits = 1): string {
 export function TopBar({ onRun }: { onRun: () => void }) {
   const view = useDraft((s) => s.view);
   const patch = useDraft((s) => s.patch);
+  const replayTour = useFirstRun((s) => s.replayTour);
   const { status, latest, dimmed, lastError } = useRun();
   const id = useId();
   /** The slider while it is being moved, before it is committed. */
@@ -97,12 +99,21 @@ export function TopBar({ onRun }: { onRun: () => void }) {
           <dd className="inline">{dropped ?? "–"}</dd>
         </div>
       </dl>
-      <button type="button" onClick={onRun} className="rounded border px-2">
+      <button type="button" data-tour="run" onClick={onRun} className="rounded border px-2">
         Run
       </button>
       <output className={`text-xs ${lastError ? "text-red-700" : "text-neutral-500"}`}>
         {line}
       </output>
+      <button
+        type="button"
+        aria-label="Show the tour"
+        title="Show the tour"
+        onClick={replayTour}
+        className="ml-auto rounded-full border px-2"
+      >
+        ?
+      </button>
     </header>
   );
 }

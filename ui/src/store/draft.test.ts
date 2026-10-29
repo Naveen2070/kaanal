@@ -123,3 +123,16 @@ test("append_adds_an_item_to_a_list_at_once", async () => {
   await done;
   expect(useDraft.getState().view?.doc?.edges).toHaveLength(1);
 });
+
+test("replacing_the_text_waits_for_the_edits_already_queued", async () => {
+  await loaded(view());
+  const sent = mockFetch([
+    { json: view({ rev: 1 }), delayMs: 30 },
+    { json: view({ rev: 2, text: "new: text\n" }) },
+  ]);
+  void useDraft.getState().setLayout({ gw: [1, 2] });
+  const done = await useDraft.getState().replaceText("new: text\n");
+  expect(done).toBe(true);
+  expect(sent.map((s) => s.body)).toEqual([{ layout: { gw: [1, 2] } }, { text: "new: text\n" }]);
+  expect(useDraft.getState().view?.text).toBe("new: text\n");
+});

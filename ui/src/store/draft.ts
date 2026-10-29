@@ -9,7 +9,10 @@ import { connectOps, lastEdgeIndex, uniqueName } from "../canvas/edges";
 import { applyOps } from "./optimistic";
 
 /** A patch may carry the layout it goes with (a new node and its spot are one edit). */
-type Edit = { kind: "patch"; ops: Op[]; layout?: Layout } | { kind: "layout"; layout: Layout };
+type Edit =
+  | { kind: "patch"; ops: Op[]; layout?: Layout }
+  | { kind: "layout"; layout: Layout }
+  | { kind: "text"; text: string };
 
 interface DraftState {
   view: DraftView | null;
@@ -22,6 +25,8 @@ interface DraftState {
   patch: (ops: Op[], positions?: Layout) => Promise<boolean>;
   /** Moves nodes: `positions` replaces the entries of those names; the whole map is sent. */
   setLayout: (positions: Layout) => Promise<boolean>;
+  /** Replaces the whole draft text (the demo), after every edit already queued. */
+  replaceText: (text: string) => Promise<boolean>;
   /** Adds a node of `kind` under a name not used yet; returns the name, or null when refused. */
   addNode: (kind: string, at?: [number, number]) => Promise<string | null>;
   /**
@@ -36,6 +41,8 @@ export type ConnectResult = { ok: true; warning?: string } | { ok: false; messag
 
 function replay(confirmed: DraftView, pending: Edit[]): DraftView {
   return pending.reduce((v, e) => {
+    // a whole-text replace has no local preview: the view keeps the old text until the answer
+    if (e.kind === "text") return v;
     const next = e.kind === "patch" ? applyOps(v, e.ops) : v;
     return e.layout ? { ...next, layout: e.layout } : next;
   }, confirmed);
@@ -58,7 +65,9 @@ export const useDraft = create<DraftState>((set, get) => {
         const answer = await api.putDraft(
           edit.kind === "patch"
             ? { patch: edit.ops, ...(edit.layout && { layout: edit.layout }) }
-            : { layout: edit.layout },
+            : edit.kind === "text"
+              ? { text: edit.text }
+              : { layout: edit.layout },
         );
         pending = pending.filter((e) => e !== edit);
         // the server stores any text, so an edit can leave a draft that is not a config at all and
@@ -102,6 +111,7 @@ export const useDraft = create<DraftState>((set, get) => {
         set({ error: e instanceof ApiError ? e.message : String(e) });
       }
     },
+    replaceText: (text) => enqueue({ kind: "text", text }),
     patch: (ops, positions) =>
       enqueue({
         kind: "patch",

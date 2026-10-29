@@ -7,7 +7,11 @@ export const KIND_MIME = "application/x-kaanal-kind";
 
 export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
   return (
-    <aside aria-label="Add a node" className="flex w-48 flex-col gap-2 border-r p-2">
+    <aside
+      data-tour="palette"
+      aria-label="Add a node"
+      className="flex w-48 flex-col gap-2 border-r p-2"
+    >
       <h2 className="text-xs font-semibold uppercase text-neutral-500">Add a node</h2>
       {NODE_KINDS.map(({ kind, label, icon: Icon, accent, description }) => (
         <button

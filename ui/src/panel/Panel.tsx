@@ -15,7 +15,11 @@ export function Panel() {
   const config = selected !== null ? view?.doc?.nodes?.[selected] : undefined;
 
   return (
-    <aside aria-label="Details" className="flex w-80 flex-col overflow-y-auto border-l">
+    <aside
+      data-tour="panel"
+      aria-label="Details"
+      className="flex w-80 flex-col overflow-y-auto border-l"
+    >
       <div role="tablist" className="flex border-b">
         {TABS.map((t) => (
           <button
