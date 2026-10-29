@@ -110,6 +110,9 @@ export const api = {
     ),
   save: (body: SaveBody = {}, o: Opts = {}) => call<SaveResult>("POST", "/draft/save", body, o),
   demo: (o: Opts = {}) => call<{ text: string }>("GET", "/demo", undefined, o),
+  /** Sets live chaos (merged into what is there); the body names a structured target. */
+  setChaos: (body: Record<string, unknown>, o: Opts = {}) =>
+    call<Record<string, unknown>>("PUT", "/chaos", body, o),
   getTopology: (o: Opts = {}) => call<Topology>("GET", "/topology", undefined, o),
   /** A busy simulator (409, or 429 while draft builds are in progress) is a result, not an error. */
   async startRun(body: RunBody, o: Opts = {}): Promise<StartRun> {

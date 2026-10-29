@@ -96,6 +96,23 @@ test("rename_node_moves_edges_and_the_position", async () => {
   await done;
 });
 
+test("an_edit_that_leaves_a_draft_that_is_not_a_config_is_undone", async () => {
+  await loaded(view({ text: "good: text\n" }));
+  const broken = view({
+    doc: null,
+    doc_error: { file: null, line: 3, col: 1, path: [], message: "unknown field 'proc'" },
+  });
+  const sent = mockFetch([{ json: broken }, { json: view({ text: "good: text\n" }) }]);
+  const done = await useDraft
+    .getState()
+    .patch([{ op: "set", path: ["nodes", "db", "proc"], value: "5ms" }]);
+  expect(done).toBe(false);
+  // the last good text was put back, and the canvas never goes blank
+  expect(sent[1]?.body).toEqual({ text: "good: text\n" });
+  expect(useDraft.getState().view?.doc).not.toBeNull();
+  expect(useDraft.getState().error).toMatch(/undone: unknown field 'proc'/);
+});
+
 test("append_adds_an_item_to_a_list_at_once", async () => {
   await loaded(view());
   mockFetch([{ status: 400, json: { error: "x" }, delayMs: 20 }]);

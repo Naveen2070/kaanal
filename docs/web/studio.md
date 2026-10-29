@@ -47,15 +47,22 @@ cargo build     # picks the bundle up (build.rs re-runs when ui-dist changes)
 
 File names are fixed (no hashes) because the server embeds exactly these three files. CI runs the same steps in its `ui` job and keeps `ui-dist` as the `studio-ui-dist` artifact.
 
+## What the page does
+
+- **Canvas:** drag a component from the palette (or click it), draw a line between two to connect them; the server checks every connection and a refused one is taken back with its reason.
+- **Cards:** each node shows its busy bar (with the peak as a tick), a queue-depth sparkline, the longest queue, and "saturates near N req/s" (requests, not visits). A saturated card turns red and says so in words. Instances can be edited on the card, and service time on the kinds that have one (not databases or caches, which price their work per operation).
+- **Details panel:** select a component for its Controls tab: name, slots, instances, service time, queue limit, timeout, break it on purpose (the node, one instance or a link; it acts on the running system, so a component that is only in the draft is blocked with a reason until it is applied, and setting chaos starts a run), what that works out to, a suggested fix, and Delete. Log and Results arrive in a later part.
+- **Auto re-run:** every edit of the system, after a 600 ms pause, runs the simulator on the draft (never Apply). One run at a time; a busy server is waited out; a result from an older draft is thrown away; a draft that does not build keeps the last numbers dimmed with the reason. Values are checked before they are sent (whole numbers, ranges the loader accepts), and an edit that still leaves the draft unparseable is undone with the reason shown, so the canvas never goes blank. The top bar's offered-load slider edits the first traffic profile's rate and goes through the same loop.
+
 ## Size budget
 
 The bundle is part of every binary, so it has a budget (a plan call, checked by hand for now).
 
-| Part            | Budget (vite's kB = 1000 bytes) | Measured after B3 (canvas, React Compiler) |
+| Part            | Budget (vite's kB = 1000 bytes) | Measured after Part C (cards, panel, loop) |
 | --------------- | ------------------------------- | ------------------------------------------ |
-| `app.js`        | 650 kB minified                 | 433.4 kB                                   |
-| `app.js` (gzip) | 200 kB                          | 139.0 kB                                   |
-| `app.css`       | 60 kB                           | 25.8 kB                                    |
+| `app.js`        | 650 kB minified                 | 462 kB                                     |
+| `app.js` (gzip) | 200 kB                          | 149 kB                                     |
+| `app.css`       | 60 kB                           | 30 kB                                      |
 
 The first budget (450 / 140 / 40) was set for a bare shell; the canvas library and React Compiler used it up in Part B, so it was raised once, with room for the panel, log and results (R1.97). Re-measure at the end of each part and when a dependency is added.
 

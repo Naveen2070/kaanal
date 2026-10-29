@@ -68,7 +68,7 @@ function Flow() {
       })(),
       selected: name === selected,
       measured: measured[name],
-      data: { name, kind: n.type } satisfies CardData,
+      data: { name, kind: n.type, config: n } satisfies CardData,
     }));
     const edges: Edge[] = (doc?.edges ?? []).map((e, i) => ({
       id: `e${i}`,

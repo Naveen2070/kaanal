@@ -60,8 +60,17 @@ export const useDraft = create<DraftState>((set, get) => {
             ? { patch: edit.ops, ...(edit.layout && { layout: edit.layout }) }
             : { layout: edit.layout },
         );
-        confirmed = answer;
         pending = pending.filter((e) => e !== edit);
+        // the server stores any text, so an edit can leave a draft that is not a config at all and
+        // the canvas would go blank with no way back: put the last good text back and say why
+        if (edit.kind === "patch" && confirmed?.doc && answer.doc === null) {
+          const why = answer.doc_error?.message ?? "the draft no longer parses";
+          confirmed = await api.putDraft({ text: confirmed.text });
+          set({ error: `That change makes the draft invalid, so it was undone: ${why}` });
+          show();
+          return false;
+        }
+        confirmed = answer;
         set({ error: null });
         show();
         return true;

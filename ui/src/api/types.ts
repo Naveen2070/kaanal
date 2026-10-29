@@ -157,7 +157,7 @@ export interface Summary {
   failed: number;
   errors: Record<string, number>;
   warnings: string[];
-  latency: { max_ms: number; buckets: Bucket[]; [k: string]: unknown };
+  latency: { p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; buckets: Bucket[] };
   streams: { endpoint: string; requests: number; failed: number; [k: string]: unknown }[];
   nodes: NodeSummary[];
   links: { from: string; to: string; saturated: boolean; [k: string]: unknown }[];
