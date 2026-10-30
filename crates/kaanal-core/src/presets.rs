@@ -56,18 +56,21 @@ pub fn cache_defaults(flavor: CacheFlavor) -> CacheParams {
 
 /// The node a user adds in Studio, as flow-style YAML: its `type`, a default capacity so the
 /// bottleneck report can rank it (gateway 256, service 32, monolith 64, database pool 20,
-/// external-api pool 10, auth 32; a cache has none) and what that kind needs to be valid
+/// external-api pool 10, auth 32; a cache has none) and a service time `proc` (gateway 2 ms,
+/// service 25, monolith 40, external-api 100, auth 10; a database and a cache take theirs from
+/// the flavor), because a node with slots and no time has infinite capacity and can never
+/// saturate, so offered load would break nothing. And what that kind needs to be valid
 /// (a database and a cache take a flavor, whose preset fills the costs). **Estimates**, like
 /// every preset here: typical sizes for a small deployment, to be edited.
 pub fn starter(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::Gateway => "{ type: gateway, concurrency: 256 }",
-        NodeKind::Service => "{ type: service, concurrency: 32 }",
-        NodeKind::Monolith => "{ type: monolith, concurrency: 64 }",
+        NodeKind::Gateway => "{ type: gateway, concurrency: 256, proc: 2ms }",
+        NodeKind::Service => "{ type: service, concurrency: 32, proc: 25ms }",
+        NodeKind::Monolith => "{ type: monolith, concurrency: 64, proc: 40ms }",
         NodeKind::Database => "{ type: database, flavor: postgres, pool: { size: 20 } }",
         NodeKind::Cache => "{ type: cache, flavor: redis }",
-        NodeKind::ExternalApi => "{ type: external-api, pool: { size: 10 } }",
-        NodeKind::Auth => "{ type: auth, concurrency: 32 }",
+        NodeKind::ExternalApi => "{ type: external-api, pool: { size: 10 }, proc: 100ms }",
+        NodeKind::Auth => "{ type: auth, concurrency: 32, proc: 10ms }",
     }
 }
 

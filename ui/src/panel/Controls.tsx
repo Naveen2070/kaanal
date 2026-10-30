@@ -198,7 +198,11 @@ export function Controls({
         ) : serviceMs !== null || !("proc" in config) ? (
           <NumberField
             label="Service time (ms)"
-            hint="How long one request takes once it has a slot."
+            hint={
+              serviceMs === null && slots.value !== null
+                ? "Not set: this component never saturates, however much load you add. Set a time."
+                : "How long one request takes once it has a slot."
+            }
             value={serviceMs}
             min={LIMITS.serviceMs.min}
             max={LIMITS.serviceMs.max}

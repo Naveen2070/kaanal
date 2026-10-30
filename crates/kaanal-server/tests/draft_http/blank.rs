@@ -89,13 +89,13 @@ async fn the_first_apply_creates_the_first_generation() {
 async fn add_node_gets_a_default_capacity_and_validates() {
     // (kind, what the new node's line must contain)
     let table = [
-        ("gateway", "concurrency: 256"),
-        ("service", "concurrency: 32"),
-        ("monolith", "concurrency: 64"),
+        ("gateway", "proc: 2ms"),
+        ("service", "proc: 25ms"),
+        ("monolith", "proc: 40ms"),
         ("database", "size: 20"),
         ("cache", "flavor: redis"),
-        ("external-api", "size: 10"),
-        ("auth", "concurrency: 32"),
+        ("external-api", "proc: 100ms"),
+        ("auth", "proc: 10ms"),
     ];
     for (kind, has) in table {
         let s = start_blank().await;
