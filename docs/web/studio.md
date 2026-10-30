@@ -81,7 +81,7 @@ The scratch project defaults to `<tmp>/kaanal-studio-dev` and is **kept between 
 Two details that are easy to get wrong, both already handled in `ui/vite.config.ts`:
 
 - **The proxy sets `changeOrigin: true`.** The control guard (`kaanal-server/src/control/guard.rs`) rejects a `Host` that is not loopback **with the bound port**, so without it every API call gets a confusing `403 bad Host header`. The port comes from the `KAANAL_DEV_PORT` environment variable, which the runner sets, so the two cannot disagree.
-- **`base` is `/` in dev and `/__kaanal/studio/assets/` only for the build.** Vite's own asset requests go through the same `/__kaanal` prefix the API uses; if the base applied in dev, they would be proxied to the server and answered by the *embedded* bundle — you would be editing code that never loads. Note this keys off Vite's `command` (`serve`/`build`), not its `mode` (`development`/`production`).
+- **`base` is `/` in dev and `/__kaanal/studio/assets/` only for the build.** Vite's own asset requests go through the same `/__kaanal` prefix the API uses; if the base applied in dev, they would be proxied to the server and answered by the _embedded_ bundle — you would be editing code that never loads. Note this keys off Vite's `command` (`serve`/`build`), not its `mode` (`development`/`production`).
 
 This page is not the embedded bundle: it has no CSP, and it is served by Vite rather than by the three exempt routes. It is for iterating on markup and logic — the hand acceptance pass still belongs on `kaanal studio`'s embedded page, which is the artifact under test.
 
