@@ -17,9 +17,34 @@ export function uniqueName(base: string, taken: Iterable<string>): string {
 /** The patch that draws an edge: one more item of `edges`, or the key itself when there is none. */
 export function connectOps(doc: Doc, from: string, to: string): Op[] {
   const edge = { from, to };
-  if (Array.isArray(doc.edges)) return [{ op: "append", path: ["edges"], value: edge }];
-  // `edges:` written with no value is a key that is there: it is set, not inserted
-  return [{ op: "edges" in doc ? "set" : "insert", path: ["edges"], value: [edge] }];
+  const ops: Op[] = Array.isArray(doc.edges)
+    ? [{ op: "append", path: ["edges"], value: edge }]
+    : [{ op: "edges" in doc ? "set" : "insert", path: ["edges"], value: [edge] }];
+
+  const fromNode = doc.nodes?.[from];
+  const toNode = doc.nodes?.[to];
+  const isGateway = fromNode?.type === "gateway";
+  const canReceiveTraffic = !toNode || toNode.type === "service" || toNode.type === "monolith";
+
+  if (isGateway && canReceiveTraffic && doc.endpoints && typeof doc.endpoints === "object") {
+    for (const [epKey, epVal] of Object.entries(doc.endpoints)) {
+      if (epVal && typeof epVal === "object") {
+        const epObj = epVal as Record<string, unknown>;
+        const hasChain = Array.isArray(epObj.chain) && epObj.chain.length > 0;
+        if (!hasChain) {
+          const opKind = "chain" in epObj ? "set" : "insert";
+          ops.push({
+            op: opKind,
+            path: ["endpoints", epKey, "chain"],
+            value: [{ call: to }],
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return ops;
 }
 
 /** Index of the last edge from `from` to `to` (a bare YAML end may be a number: compare as text). */

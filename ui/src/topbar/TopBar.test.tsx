@@ -59,6 +59,7 @@ test("a_draft_with_no_profile_has_a_disabled_slider_and_dashes", async () => {
   await show(null);
   expect((screen.getByLabelText("Offered load") as HTMLInputElement).disabled).toBe(true);
   expect(screen.getByText(/P99/).nextElementSibling?.textContent).toBe("– ms");
+  expect(screen.getByText(/Max threshold/).nextElementSibling?.textContent).toBe("–");
 });
 
 test("the_figures_come_from_the_newest_run_and_the_run_button_runs", async () => {
@@ -84,9 +85,9 @@ test("the_figures_come_from_the_newest_run_and_the_run_button_runs", async () =>
         warnings: [],
         latency: { p50_ms: 1, p95_ms: 5, p99_ms: 12.34, max_ms: 20, buckets: [] },
         streams: [],
-        nodes: [nodeSummary({ limited: 3, overflowed: 4 })],
+        nodes: [nodeSummary({ limited: 3, overflowed: 4, saturates_at_req_s: 120.4 })],
         links: [],
-        bottlenecks: [],
+        bottlenecks: [0],
       },
     },
   });
@@ -94,6 +95,14 @@ test("the_figures_come_from_the_newest_run_and_the_run_button_runs", async () =>
   expect(screen.getByText("90/s")).toBeTruthy(); // (1000 - 100) / 10 s
   expect(screen.getByText("100")).toBeTruthy(); // errors
   expect(screen.getByText("7")).toBeTruthy(); // dropped: 3 + 4
+  expect(screen.getByText("120/s")).toBeTruthy(); // max threshold rounded to integer
+  expect(screen.getByTitle("Threshold limit: 120/s")).toBeTruthy(); // the | marker on bar
+  expect(screen.getByText("(limit 120/s)")).toBeTruthy();
+
+  // Slider max scales a few thousand from threshold (ceil(2120 / 1000) * 1000 = 3000)
+  const slider = screen.getByLabelText("Offered load") as HTMLInputElement;
+  expect(Number(slider.max)).toBe(3000);
+
   fireEvent.click(screen.getByRole("button", { name: "Run" }));
   expect(onRun).toHaveBeenCalledTimes(1);
 });
@@ -104,13 +113,15 @@ test("a_blocked_run_says_why_in_the_status_line", async () => {
   expect((await screen.findByRole("status")).textContent).toBe("no entry node");
 });
 
-test("tabbing_onto_the_slider_patches_nothing_and_keeps_a_fractional_rate", async () => {
+test("tabbing_onto_the_slider_patches_nothing_and_rounds_to_integer", async () => {
   await show(0.5);
   const slider = screen.getByLabelText("Offered load") as HTMLInputElement;
-  const sent = mockFetch([{ json: view(0.5) }]);
+  const sent = mockFetch([{ json: view(1) }]);
   fireEvent.keyUp(slider, { key: "Tab" });
   fireEvent.pointerUp(slider);
-  expect(Number(slider.value)).toBe(0.5);
+  // Displays only integer, no float
+  expect(Number(slider.value)).toBe(1);
+  expect(screen.getByText("1/s")).toBeTruthy();
   expect(sent).toHaveLength(0);
 });
 

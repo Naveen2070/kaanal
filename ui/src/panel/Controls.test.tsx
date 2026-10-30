@@ -287,3 +287,45 @@ test("a_chaos_error_is_shown", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Take down" }));
   expect((await screen.findByRole("alert")).textContent).toBe("unknown node 'app'");
 });
+
+test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
+  const gwCfg: NodeDoc = { type: "gateway", concurrency: 256 };
+  mockFetch([
+    {
+      json: view({
+        doc: {
+          nodes: { gw: gwCfg, app, db: { type: "database" } },
+          edges,
+          endpoints: {
+            "GET /": { override: { body: { ok: true } } },
+          },
+        },
+      }),
+    },
+    { json: topology },
+  ]);
+  await useDraft.getState().load();
+  const calls = { onDeleted: vi.fn(), onRenamed: vi.fn(), onChaos: vi.fn() };
+  render(
+    <FeedContext.Provider value={{ node: () => undefined, dimmed: false }}>
+      <Controls name="gw" config={gwCfg} edges={edges} {...calls} />
+    </FeedContext.Provider>,
+  );
+
+  expect(screen.getByText("Traffic routes")).toBeTruthy();
+  const select = screen.getByLabelText("GET /") as HTMLSelectElement;
+  expect(select.value).toBe("");
+
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(select, { target: { value: "app" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [
+      {
+        op: "insert",
+        path: ["endpoints", "GET /", "chain"],
+        value: [{ call: "app" }],
+      },
+    ],
+  });
+});

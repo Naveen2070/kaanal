@@ -63,6 +63,7 @@ export function Controls({
     node && capacity !== null && capacity > 0 ? 1 - node.visits_per_s / capacity : out?.spare;
   const fix = suggestedFix(node);
   const calls = edges.filter((e) => String(e.from) === name).map((e) => String(e.to));
+  const doc = useDraft((s) => s.view?.doc);
 
   return (
     <div className="p-3 text-sm">
@@ -92,6 +93,71 @@ export function Controls({
           {info ? `${info.label}: ${info.description}.` : config.type}
         </p>
       </Section>
+
+      {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
+        <Section title="Traffic routes">
+          <p className="mb-2 text-xs text-neutral-500">
+            Where incoming endpoints forward requests.
+          </p>
+          {Object.entries(doc.endpoints).map(([epKey, epVal]) => {
+            const epObj =
+              epVal && typeof epVal === "object" ? (epVal as Record<string, unknown>) : {};
+            const chain = Array.isArray(epObj.chain) ? epObj.chain : [];
+            const firstCall =
+              chain[0] && typeof chain[0] === "object"
+                ? (chain[0] as { call?: unknown }).call
+                : undefined;
+            const currentTarget = typeof firstCall === "string" ? firstCall : "";
+            const options = Array.from(
+              new Set(["", ...calls, ...(currentTarget ? [currentTarget] : [])]),
+            );
+            const selectId = `route-${epKey}`;
+
+            return (
+              <div key={epKey} className="mb-2">
+                <label
+                  htmlFor={selectId}
+                  className="block text-xs font-mono font-medium text-neutral-700"
+                >
+                  {epKey}
+                </label>
+                <select
+                  id={selectId}
+                  className="mt-1 w-full rounded border bg-white px-1 py-0.5 text-xs"
+                  value={currentTarget}
+                  onChange={(e) => {
+                    const to = e.currentTarget.value;
+                    if (to === currentTarget) return;
+                    if (to === "") {
+                      if ("chain" in epObj) {
+                        void patch([{ op: "remove", path: ["endpoints", epKey, "chain"] }]);
+                      }
+                    } else {
+                      const opKind = "chain" in epObj ? "set" : "insert";
+                      void patch([
+                        {
+                          op: opKind,
+                          path: ["endpoints", epKey, "chain"],
+                          value: [{ call: to }],
+                        },
+                      ]);
+                    }
+                  }}
+                >
+                  <option value="">(Gateway answers directly)</option>
+                  {options
+                    .filter((target): target is string => Boolean(target))
+                    .map((target) => (
+                      <option key={target} value={target}>
+                        Forward to {target}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            );
+          })}
+        </Section>
+      ) : null}
 
       <Section title="How busy it is">
         <p>

@@ -21,7 +21,8 @@ pub const MAX_DRAFT_BODY: usize = MAX_DRAFT_BYTES * 6 + 4096;
 
 /// The text a blank start's draft begins with: no nodes, so Apply refuses it until one is added
 /// (the topology's own rules about an entry node apply).
-pub const BLANK_TEXT: &str = "version: 1\nnodes: {}\n";
+pub const BLANK_TEXT: &str =
+    "version: 1\nnodes: {}\nendpoints:\n  \"GET /\":\n    override: { body: { ok: true } }\ntraffic:\n  default:\n    rps: 100\n    duration: 30s\n    journeys:\n      - { endpoint: \"GET /\" }\n";
 
 /// What a draft is started from: the config file and its text, as `kaanal up` read them.
 pub struct DraftSource {

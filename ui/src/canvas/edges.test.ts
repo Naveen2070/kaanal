@@ -38,6 +38,20 @@ test("connecting_appends_to_a_list_and_otherwise_writes_the_key", () => {
   ]);
 });
 
+test("connecting_gateway_to_service_wires_unchained_endpoints", () => {
+  const d: Doc = {
+    nodes: { gw: { type: "gateway" }, app: { type: "service" } },
+    edges: [],
+    endpoints: {
+      "GET /": { override: { body: { ok: true } } },
+    },
+  };
+  expect(connectOps(d, "gw", "app")).toEqual([
+    { op: "append", path: ["edges"], value: { from: "gw", to: "app" } },
+    { op: "insert", path: ["endpoints", "GET /", "chain"], value: [{ call: "app" }] },
+  ]);
+});
+
 test("the_last_matching_edge_is_found_even_when_an_end_is_a_number", () => {
   const d: Doc = {
     edges: [
