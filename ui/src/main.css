@@ -71,8 +71,8 @@ body {
 
 /* the mirage loader (brand/Loader.tsx): sky, water and art tones, flat, one per theme */
 .kaanal-loader {
-  --kl-sky: light-dark(#eef3f9, #070707);
-  --kl-water: light-dark(#e8eef6, #0b0b0b);
+  --kl-sky: light-dark(#f1f6fc, #000000);
+  --kl-water: light-dark(#d6e2f0, #141414);
   --kl-art: light-dark(#bcc8da, #333333);
   background: var(--ground);
   color: var(--text);

@@ -8,9 +8,9 @@
   color-scheme: light dark;
 
   /* surfaces: window ground, sheet (panels), well (inset areas), raised (hover), active (selected) */
-  --ground: light-dark(#f3f6fa, #000000);
+  --ground: light-dark(#faf6e8, #000000); /* light: a faint warm cream, the sheets stay white */
   --sheet: light-dark(#ffffff, #0e0e0e);
-  --well: light-dark(#f4f6f8, #161616);
+  --well: light-dark(#fbf8ee, #161616);
   --raised: light-dark(#f7f8fa, #1b1b1b);
   --active: light-dark(#e9edf3, #232323);
 

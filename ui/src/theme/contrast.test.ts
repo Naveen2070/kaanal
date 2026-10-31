@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
 // vitest runs from ui/ (jsdom gives import.meta.url a non-file scheme)
-const css = readFileSync("src/theme/tokens.css", "utf8");
+// the loader's sky and water live in main.css next to the loader rules
+const css = readFileSync("src/theme/tokens.css", "utf8") + readFileSync("src/main.css", "utf8");
 
 type Pair = [light: string, dark: string];
 
@@ -51,6 +52,16 @@ const PAIRS: [string, string, number][] = [
   ...["ground", "sheet", "well", "raised", "active"].flatMap((bg): [string, string, number][] => [
     ["text", bg, 4.5],
     ["muted", bg, 4.5],
+  ]),
+  ["text", "kl-sky", 4.5],
+  ["muted", "kl-sky", 4.5],
+  ["text", "kl-water", 4.5],
+  ["muted", "kl-water", 4.5],
+  // the top bar's text sits on the ground, data text on wells: status colours read there too
+  ["accent", "ground", 3],
+  ...["positive", "warn", "negative"].flatMap((fg): [string, string, number][] => [
+    [fg, "ground", 4.5],
+    [fg, "well", 4.5],
   ]),
   ["faint", "sheet", 4.5],
   ["faint", "well", 4.5],
@@ -106,10 +117,11 @@ describe("design tokens", () => {
   });
 
   it("uses the spec's surfaces and control borders", () => {
+    // light: a faint warm cream ground and wells, the sheets stay white (developer, 2026-10-31)
     expect([get("ground", 0), get("sheet", 0), get("well", 0)]).toEqual([
-      "#f3f6fa",
+      "#faf6e8",
       "#ffffff",
-      "#f4f6f8",
+      "#fbf8ee",
     ]);
     expect([get("ground", 1), get("sheet", 1), get("well", 1)]).toEqual([
       "#000000",

@@ -10,6 +10,7 @@ import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
 import { Mark } from "../brand/Mark";
 import { SaveFlow } from "./SaveFlow";
+import { ThemeToggle } from "./ThemeToggle";
 
 const SLIDER_KEYS = new Set([
   "ArrowLeft",
@@ -103,7 +104,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
   return (
     <header className="flex min-h-11 flex-wrap items-center gap-4 px-4 py-1 text-sm">
       <h1 className="flex items-center gap-2 text-base font-semibold">
-        <Mark size={20} variant="sun" className="text-accent" />
+        <Mark size={24} className="text-accent" />
         {view?.project_name ?? "Kaanal Studio"}
       </h1>
       <div className="flex items-center gap-2">
@@ -177,15 +178,18 @@ export function TopBar({ onRun }: { onRun: () => void }) {
         {line}
       </output>
       <SaveFlow />
-      <button
-        type="button"
-        aria-label="Show the tour"
-        title="Show the tour"
-        onClick={replayTour}
-        className="ml-auto rounded-full border px-2"
-      >
-        ?
-      </button>
+      <div className="ml-auto flex items-center gap-1">
+        <ThemeToggle />
+        <button
+          type="button"
+          aria-label="Show the tour"
+          title="Show the tour"
+          onClick={replayTour}
+          className="h-8 min-w-8 rounded-full border border-control px-2"
+        >
+          ?
+        </button>
+      </div>
     </header>
   );
 }

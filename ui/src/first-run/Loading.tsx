@@ -7,8 +7,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Loader, type LoaderStep } from "../brand/Loader";
+import { getMinLoadMs } from "../settings";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
+import { usePrefersReducedMotion } from "./motion";
 import { QUOTES } from "./quotes";
 
 export const FIRST_RUN_CAP_MS = 15000;
@@ -21,6 +23,7 @@ export function Loading({
   children,
   quotes = QUOTES,
   random = Math.random,
+  minMs = getMinLoadMs(),
 }: {
   /** The draft has loaded. */
   ready: boolean;
@@ -28,16 +31,28 @@ export function Loading({
   quotes?: string[];
   /** Where the quotes come from; a test passes a fixed one. */
   random?: () => number;
+  /** The loader stays at least this long (a setting, 10 s by default) so it is seen, not flashed. */
+  minMs?: number;
 }) {
   const error = useDraft((s) => s.error);
   const load = useDraft((s) => s.load);
   const status = useRun((s) => s.status);
   const settled = useRun((s) => s.latest !== null || s.status === "done" || s.status === "blocked");
   const [capped, setCapped] = useState(false);
+  const [minElapsed, setMinElapsed] = useState(false);
+  const still = usePrefersReducedMotion();
+  // no hold for reduced motion (a still picture gains nothing from waiting) or a hidden tab
+  const hold = still || document.hidden ? 0 : minMs;
   const [revealed, setRevealed] = useState(false);
   const [stalled, setStalled] = useState(false);
   /** A Retry in flight: back to step 1, and a second click cannot start a parallel load. */
   const [retrying, setRetrying] = useState(false);
+
+  useEffect(() => {
+    if (hold <= 0) return;
+    const t = setTimeout(() => setMinElapsed(true), hold);
+    return () => clearTimeout(t);
+  }, [hold]);
 
   useEffect(() => {
     if (!ready) return;
@@ -64,7 +79,9 @@ export function Loading({
       ? "failed"
       : 1
     : settled || capped
-      ? "ready"
+      ? hold > 0 && !minElapsed
+        ? 3 // all done early: stay on the last true step until the hold ends
+        : "ready"
       : status === "running"
         ? 3
         : 2;

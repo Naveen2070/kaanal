@@ -1,12 +1,16 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { useDraft } from "../store/draft";
+import { setMinLoadMs } from "../settings";
 import { useRun } from "../store/run";
 import { DRAFT_STALL_MS, FIRST_RUN_CAP_MS, Loading } from "./Loading";
 import { QUOTES } from "./quotes";
 
 beforeEach(() => {
   vi.useFakeTimers();
+  localStorage.clear();
+  setMinLoadMs(0); // the other tests are about the steps, not the hold
+
   useDraft.setState({ view: null, error: null });
   useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null });
 });
@@ -168,4 +172,39 @@ test("a_retry_that_hangs_again_is_named_again", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await wait(DRAFT_STALL_MS + 100);
   expect(step()).toContain("has not answered for 10 s");
+});
+
+// the hold: a fast start would flash the loader, and the loader is worth seeing
+test("the_loader_is_held_for_the_minimum_time_even_when_the_work_is_done", async () => {
+  setMinLoadMs(10_000);
+  useDraft.setState({ view: { doc: null } as never, error: null });
+  useRun.setState({ status: "done", latest: { id: "r" } as never, dimmed: false, lastError: null });
+  render(<Loading ready>{app}</Loading>);
+  await wait(9_900);
+  expect(screen.queryByText("the app")).toBeNull();
+  expect(step()).toContain("Step 3 of 3"); // still the last true step, not "Ready"
+  await wait(200); // the hold ends, then the 0.9 s reveal
+  await wait(1_000);
+  expect(screen.getByText("the app")).toBeTruthy();
+});
+
+test("a_failure_is_never_held", () => {
+  setMinLoadMs(10_000);
+  useDraft.setState({ error: "connection refused" });
+  render(<Loading ready={false}>{app}</Loading>);
+  expect(step()).toContain("connection refused");
+});
+
+test("reduced_motion_skips_the_hold_because_a_still_picture_gains_nothing", async () => {
+  setMinLoadMs(10_000);
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q.includes("reduce"),
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  useDraft.setState({ view: { doc: null } as never, error: null });
+  useRun.setState({ status: "done", latest: { id: "r" } as never, dimmed: false, lastError: null });
+  render(<Loading ready>{app}</Loading>);
+  await wait(50);
+  expect(screen.getByText("the app")).toBeTruthy();
 });

@@ -26,8 +26,9 @@ const STEPS = ["Starting the simulator", "Reading your draft", "Running the firs
 const REVEAL_MS = 900;
 const ROTATE_MS = 4000;
 const BANDS = 15;
-/** Band height and the 1 unit seam between bands, in picture units; the first starts 3 below. */
-const BAND_H = 9;
+/** Band height in picture units; the first starts 3 below the horizon. The bands abut: the only gaps
+ *  in the water are the sun's own (mirrored), so the reflection has the sun's rhythm, not extra seams. */
+const BAND_H = 10;
 const BAND_TOP = 3;
 
 const IMAGES: Record<Composition, Record<"light" | "dark", string>> = {
@@ -154,7 +155,7 @@ export function Loader({
       <div className="relative flex-[2] border-t border-(--kl-art) bg-(--kl-water)">
         <div aria-hidden className="absolute top-0 left-1/2 -translate-x-1/2" style={box}>
           {Array.from({ length: BANDS }, (_, i) => {
-            const top = BAND_TOP + i * (BAND_H + 1);
+            const top = BAND_TOP + i * BAND_H;
             return (
               <div
                 key={i}
@@ -163,7 +164,8 @@ export function Loader({
                 style={{
                   overflow: "hidden",
                   top: `${(top / pic.h) * 100}%`,
-                  height: `${(BAND_H / pic.h) * 100}%`,
+                  // +0.5px: abutting bands would show a hairline where the rounding leaves a gap
+                  height: `calc(${(BAND_H / pic.h) * 100}% + 0.5px)`,
                   opacity: +(0.92 - i * 0.055).toFixed(2),
                 }}
               >
