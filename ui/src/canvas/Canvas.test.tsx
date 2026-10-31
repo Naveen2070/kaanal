@@ -58,6 +58,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     layout: { gw: [0, 0], "a#b/c d": [280, 0] },
     layout_note: null,
     layout_dirty: false,
+    saved: true,
     ...over,
   };
 }

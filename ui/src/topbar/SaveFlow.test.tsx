@@ -20,6 +20,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     layout: {},
     layout_note: null,
     layout_dirty: false,
+    saved: true,
     ...over,
   };
 }

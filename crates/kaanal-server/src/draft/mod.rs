@@ -116,6 +116,15 @@ impl Draft {
         self.layout != self.saved_layout
     }
 
+    /// Whether a Save would change nothing: the draft has a file, its text is what the file held
+    /// when it was last read or written by us, and the layout is as saved. False on a blank start
+    /// until the first Save (or while the file on disk differs from the blank text).
+    pub fn saved(&self) -> bool {
+        self.file.is_some()
+            && self.base.as_deref() == Some(self.text.as_str())
+            && !self.layout_dirty()
+    }
+
     /// Whether the draft differs from what is applied.
     pub fn dirty(&self) -> bool {
         self.text != self.applied

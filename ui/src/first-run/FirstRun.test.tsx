@@ -24,6 +24,7 @@ function view(projectId: string, text = ""): DraftView {
     layout: {},
     layout_note: null,
     layout_dirty: false,
+    saved: true,
   };
 }
 

@@ -20,6 +20,7 @@ const view: DraftView = {
   layout: {},
   layout_note: null,
   layout_dirty: false,
+  saved: true,
 };
 
 async function show(url: string) {

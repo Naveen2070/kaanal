@@ -1336,15 +1336,28 @@ Starts a real server on an OS-chosen port (the gateway, a service and a database
 | `other_connections_still_drain_with_an_events_stream_open` | With an events stream open and an 800 ms request in flight, the request still completes with 200, the stream still ends with `event: shutdown`, and the server ends within 3 s.                                        |
 | `a_whitespace_body_is_no_body`                             | A body of a space, a newline and a tab answers `202` with `timeout_ms` 5000.                                                                                                                                           |
 
-## `crates/kaanal-server/tests/site_ui.rs` — Studio's page and assets
+## `crates/kaanal-server/tests/studio_assets/` — Studio's page and assets
 
-In a build without a bundle only the first runs; with one (`cfg(kaanal_ui)`) the second runs too.
+Uses a small fixture bundle (`tests/fixtures/studio-dist`, `studio-shapes`) and an injected table, so no build with `cfg(kaanal_ui)` is needed. `page.rs`: the page; `routes.rs`: the assets route.
 
-| Test                                                    | What it proves                                                                                                 |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `studio_serves_the_fallback_page_without_a_bundle`      | `/__kaanal/studio` is the status page and the assets are 404, with no bundle built in.                         |
-| `studio_serves_the_bundle_with_the_right_content_types` | With a bundle: the page, `app.js` and `app.css` answer 200 with `text/html`, `text/javascript` and `text/css`. |
-| `the_assets_need_no_token_but_the_api_still_does`       | The three exempt paths answer without a token; `/__kaanal/topology` still gets 401.                            |
+| Test                                                     | What it proves                                                                                                                                       |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `page_has_csp_and_no_referrer`                           | The page carries the CSP and `Referrer-Policy: no-referrer`.                                                                                         |
+| `build_without_bundle_serves_status_page`                | With no bundle `/__kaanal/studio` is the status page and assets are 404.                                                                             |
+| `studio_serves_the_bundle_with_the_right_content_types`  | The page and each asset answer 200 with the right `Content-Type`.                                                                                    |
+| `the_assets_need_no_token_but_the_api_still_does`        | A table hit needs no token; `/__kaanal/topology` still gets 401.                                                                                     |
+| `a_sibling_of_an_exempt_path_still_needs_the_token`      | Every other path under `/__kaanal/studio/` is exactly 401 without a token and 404 with one; the page is 200 and `studio2` unchanged.                 |
+| `the_exempt_paths_still_refuse_a_bad_host`               | A wrong `Host` is 403 even on the page and assets.                                                                                                   |
+| `table_hit_needs_no_token_get_and_head_only`             | `GET` and `HEAD` pass without a token; `POST` and `OPTIONS` get 401.                                                                                 |
+| `head_content_length_matches_get`                        | `HEAD` reports the `GET` length for identity and `br`.                                                                                               |
+| `svg_carries_its_own_csp`                                | An SVG answer has the restrictive CSP.                                                                                                               |
+| `miss_is_401_without_token_404_with_it`                  | A name not in the table: 401 without a token, 404 with one.                                                                                          |
+| `hashed_asset_is_immutable_and_vary_set`                 | A hashed file is `immutable` and every variant has `Vary: Accept-Encoding`; an unhashed icon is `no-cache`.                                          |
+| `if_none_match_gives_304`                                | A matching `If-None-Match` answers 304 with ETag, cache and Vary and no body.                                                                        |
+| `index_html_and_map_and_manifest_not_served_from_assets` | `index.html`, `.map` and the manifest are never served from the assets route.                                                                        |
+| `asset_path_variants_fall_through_to_auth`               | `..`, encoded dots and slashes, case, trailing and double slash and `?query` variants (raw socket, GET and HEAD) are all 401 or 404, never the file. |
+
+Unit tests in `src/control/assets.rs` (`lookup_is_exact`, `hit_needs_get_or_head_no_query_and_the_raw_prefix`, `negotiate_*`, `etags_differ_per_encoding`, `if_none_match_compares_weakly_and_takes_lists`, `cache_control_is_keyed_by_file`) and `src/control/manifest.rs` (allowlist, exclusions, hashed rules including the real Vite sample, a dot segment and a missing file failing the build, generation, content types). `src/control/tests.rs` adds `guard_keeps_a_cache_header_the_handler_set`.
 
 ## `crates/kaanal-server/tests/site.rs` — the `site:` folder
 

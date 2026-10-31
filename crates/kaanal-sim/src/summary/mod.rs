@@ -11,7 +11,7 @@ use serde::Serialize;
 
 mod series;
 
-pub use series::Series;
+pub use series::{Series, SystemSeries};
 
 use crate::{SimConfig, SimReport};
 
@@ -44,6 +44,8 @@ pub struct Summary {
     pub warnings: Vec<String>,
     /// All requests.
     pub latency: Latency,
+    /// Requests finished per window, split by outcome, with each window's p99; 60 windows.
+    pub series: SystemSeries,
     /// Per stream (endpoint), in [`SimConfig::streams`] order.
     pub streams: Vec<StreamSummary>,
     /// Per node, by node id.
@@ -131,6 +133,15 @@ pub struct NodeSummary {
     pub saturates_at_req_s: Option<f64>,
     /// `1 - offered_load`, at least 0; `None` without slots.
     pub headroom: Option<f64>,
+    /// Median hop duration in ms, as the upper bound of its latency bucket; `None` without
+    /// visits. A percentile in the overflow bucket reads 131072 ms (the next doubling): a floor,
+    /// not an exact bound.
+    pub p50_ms: Option<f64>,
+    /// 99th percentile of the hop duration in ms, as the upper bound of its latency bucket;
+    /// `None` without visits.
+    /// A percentile in the overflow bucket reads 131072 ms (the next doubling): a floor, not an
+    /// exact bound.
+    pub p99_ms: Option<f64>,
     /// Busy fraction, longest queue and hop latencies over time, 60 windows.
     pub series: Series,
     /// Refused by the rate limit.
@@ -505,6 +516,11 @@ pub fn summarize(
             let st = &report.nodes[i];
             let capacity = slots.and_then(|s| total.capacity(s * node_acc[i].len() as f64));
             let util = slots.map(|_| st.utilization);
+            let ns = series.next().expect("one series per node");
+            let merged = ns.latency.iter().fold(vec![0u32; BUCKETS + 1], |mut m, w| {
+                m.iter_mut().zip(w).for_each(|(a, b)| *a += b);
+                m
+            });
             NodeSummary {
                 name: n.name.clone(),
                 replicas,
@@ -526,7 +542,9 @@ pub fn summarize(
                     .filter(|_| expected[i] > 0.0)
                     .map(|c| c * mix_rate / expected[i]),
                 headroom: load.map(|l| (1.0 - l).max(0.0)),
-                series: series.next().expect("one series per node"),
+                p50_ms: series::percentile_bound(&merged, 0.50),
+                p99_ms: series::percentile_bound(&merged, 0.99),
+                series: ns,
                 limited: st.limited,
                 overflowed: st.overflowed,
                 timed_out: st.timed_out,
@@ -537,6 +555,7 @@ pub fn summarize(
     let requests = report.requests.len() as u64;
     let warnings = warnings(requests, &nodes, &links);
     let bottlenecks = bottlenecks(&nodes);
+    let sys_series = series::system_series(cfg, report);
     let streams = stream_summaries(cfg, &lat_by, &failed_by);
     Summary {
         label: LABEL,
@@ -546,6 +565,7 @@ pub fn summarize(
         errors,
         warnings,
         latency: latency(&lat_all),
+        series: sys_series,
         streams,
         nodes,
         links,

@@ -2,7 +2,7 @@
 //!
 //! Every `/__kaanal/*` request passes [`guard`] before any handler or extractor
 //! runs: Host must be loopback with the bound port, and every route except
-//! `health`/`ui`/`studio` (and its two assets) needs the bearer token.
+//! `health`/`ui`/`studio` (and a `GET`/`HEAD` of a name in its asset table) needs the bearer token.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -35,11 +35,14 @@ use crate::generation::{Gen, Generation};
 use crate::scenarios::{self, WriteError};
 use crate::state::{AppState, BusEvent, Control, Effective};
 mod admin;
+mod assets;
 mod chaos;
 mod doc;
 mod draft;
 mod guard;
 mod lease;
+#[cfg(test)]
+mod manifest;
 mod save;
 mod scenario;
 mod sim;
@@ -50,6 +53,7 @@ mod tests;
 mod view;
 
 pub use admin::{events, reset, shutdown, ui};
+pub use assets::{Asset, Bundle};
 pub use chaos::{clear_keyed, clear_node, get_chaos, set_chaos, set_chaos_keyed, topology};
 pub use doc::get_demo;
 pub use draft::{apply_draft, get_draft, put_draft, save_draft, validate_draft};
@@ -58,12 +62,12 @@ pub use lease::lease_task;
 pub use save::save_scenario;
 pub use sim::{get_run, get_run_log, list_runs, post_run, post_sample};
 pub use skeleton::get_skeleton;
-pub use studio::{app_css, app_js, studio};
+pub use studio::{studio, studio_asset};
 // What only the unit tests reach by `super::`.
 #[cfg(test)]
 use chaos::ChaosPatch;
 #[cfg(test)]
-use guard::{ct_eq, host_allowed, query_token};
+use guard::{ct_eq, host_allowed, mark_response, query_token};
 #[cfg(test)]
 use lease::{expire_due, next_deadline};
 use save::scenario_data;

@@ -24,20 +24,23 @@ The token rides in the URL **fragment**, which browsers never send to a server. 
 
 ## What is served, and without a token
 
-| Route                                 | Answer                                                                      | Token |
-| ------------------------------------- | --------------------------------------------------------------------------- | ----- |
-| `GET /__kaanal/studio`                | The bundle's `index.html`, or the status page when the binary has no bundle | No    |
-| `GET /__kaanal/studio/assets/app.js`  | The script (404 when the binary has no bundle)                              | No    |
-| `GET /__kaanal/studio/assets/app.css` | The style sheet (404 when the binary has no bundle)                         | No    |
+| Route                                | Answer                                                                                                | Token |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------- | ----- |
+| `GET /__kaanal/studio`               | The bundle's `index.html`, or the status page when the binary has no bundle                           | No    |
+| `GET /__kaanal/studio/assets/<name>` | One built file (script, style sheet, font, icon) by its exact name; 404 when the binary has no bundle | No    |
 
-These three exact paths are exempt from the token like `/__kaanal/ui` and `/__kaanal/health`, because the page has to load before it can read the token. Every API route behind them still needs the bearer token and a loopback `Host`.
+Only a file that is in the binary's table is served without a token, and only for `GET` and `HEAD` with no query string. The table is made at build time from the Vite manifest, so no file name is ever read from disk at run time. Anything else under `/__kaanal/studio/` (another method, a missing file, an encoded or oddly cased path, `..`) needs the bearer token like the rest of the API: 401 without it, 404 with it. Every API route behind the page still needs the bearer token and a loopback `Host`. The page and the assets are exempt only because the page has to load before it can read the token.
+
+Files are sent with the right `Content-Type`, `nosniff`, a long `immutable` cache lifetime for names that carry a content hash (and `no-cache` for any that do not), `Vary: Accept-Encoding`, a strong per-encoding `ETag` (`If-None-Match` answers 304), and pre-compressed Brotli or gzip when the client accepts it (`q=0` is honoured). There are no range requests.
 
 ## The bundle is built apart from the binary
 
-The frontend lives in `ui/` (Vite+, React, TypeScript). `cargo build` never runs Node or pnpm. `crates/kaanal-server/build.rs` only looks for `crates/kaanal-server/ui-dist/index.html`, `app.js` and `app.css`:
+The frontend lives in `ui/` (Vite+, React, TypeScript). `cargo build` never runs Node or pnpm. `crates/kaanal-server/build.rs` looks for `crates/kaanal-server/ui-dist/.vite/manifest.json` (written by the UI build) and embeds exactly the files that manifest references, under `assets/`:
 
-- All three exist: they are compiled into the binary (`include_bytes!`) and `/__kaanal/studio` serves them.
-- Any is missing: `cargo build` prints a warning, and `/__kaanal/studio` serves the same page as `/__kaanal/ui`. Every Rust build and test works without Node.
+- The manifest exists: those files, with their `.br` and `.gz` siblings when present, are compiled into the binary (`include_bytes!`) and served as above. A file the manifest names that is missing fails the build, so a half-built bundle never ships.
+- No manifest: `cargo build` prints a warning, and `/__kaanal/studio` serves the same page as `/__kaanal/ui`. Every Rust build and test works without Node.
+
+`index.html`, dot files, source maps and the manifest itself are never served from the assets route.
 
 `ui-dist/` is git-ignored (except its `.gitkeep`); the bundle is never committed.
 
@@ -50,12 +53,12 @@ cd ui
 pnpm install    # dependencies (pnpm-lock.yaml)
 pnpm check      # format, lint, type check (vp check)
 pnpm test       # Vitest, once (vp test run)
-pnpm build      # writes app.js, app.css and index.html into crates/kaanal-server/ui-dist/
+pnpm build      # writes index.html, assets/ (hashed, code-split) and .vite/manifest.json into crates/kaanal-server/ui-dist/, then precompresses
 cd ..
 cargo build     # picks the bundle up (build.rs re-runs when ui-dist changes)
 ```
 
-File names are fixed (no hashes) because the server embeds exactly these three files. CI runs the same steps in its `ui` job and keeps `ui-dist` as the `studio-ui-dist` artifact.
+File names carry a content hash (so a browser can cache them for a year) and the build empties `ui-dist/` first, so an old file never ends up in a binary. `pnpm size` checks the first-load budget below. CI runs the same steps in its `ui` job and keeps `ui-dist` as the `studio-ui-dist` artifact; the artifact step keeps hidden files, because the manifest lives in `ui-dist/.vite/` and a binary built without it would serve the fallback page.
 
 ## Develop against a running server
 
@@ -95,18 +98,17 @@ This page is not the embedded bundle: it has no CSP, and it is served by Vite ra
 
 ## Size budget
 
-The bundle is part of every binary, so it has a budget (a plan call, checked by hand for now).
+The bundle is part of every binary, and the first load is what a person waits for, so it has a budget that `pnpm size` (and CI) checks from the manifest. Lazy chunks (the Log and Results tabs, charts, the tour and the command palette) are not counted: they load when first used.
 
-| Part            | Budget (vite's kB = 1000 bytes) | Measured after Part E (log, results, save) |
-| --------------- | ------------------------------- | ------------------------------------------ |
-| `app.js`        | 650 kB minified                 | 493 kB                                     |
-| `app.js` (gzip) | 200 kB                          | 159 kB                                     |
-| `app.css`       | 60 kB                           | 35 kB                                      |
+| Part                                          | Budget | Measured |
+| --------------------------------------------- | ------ | -------- |
+| First-load JS + CSS (gzip, 1 kB = 1024 bytes) | 200 kB | 163 kB   |
+| First-load fonts (Latin text face, WOFF2)     | 60 kB  | none yet |
 
-The first budget (450 / 140 / 40) was set for a bare shell; the canvas library and React Compiler used it up in Part B, so it was raised once, with room for the panel, log and results (R1.97). Re-measure at the end of each part and when a dependency is added.
+The numbers are guesses to revisit once measured on the redesigned UI.
 
 ## Release
 
-The release workflow (`.github/workflows/release.yml`) builds the UI in its own `ui` job, hands `ui-dist` to every build job and fails before `cargo build` if `index.html`, `app.js` or `app.css` is missing, so a release never ships the fallback page.
+The release workflow (`.github/workflows/release.yml`) builds the UI in its own `ui` job, hands `ui-dist` to every build job and fails before `cargo build` if `index.html` or `.vite/manifest.json` is missing, so a release never ships the fallback page.
 
 To-do for a crates.io release (none exists yet; also listed in `RELEASE.md`): `cargo package` respects `.gitignore`, so the git-ignored `ui-dist/` would be left out of the published crate. Build the UI and make sure `ui-dist` is included before packaging. `Cargo.toml` deliberately has no `include = [...]` list (no crate here has one, and adding one would silently drop other files).

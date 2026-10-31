@@ -49,6 +49,8 @@ export interface DraftView {
   layout: Layout;
   layout_note: string | null;
   layout_dirty: boolean;
+  /** The text equals what Save last read or wrote and the layout is as saved. */
+  saved: boolean;
 }
 
 /** One edit of the draft text (`PUT /draft` with `patch`). */
@@ -121,6 +123,16 @@ export interface Series {
   latency: number[][];
 }
 
+export interface SystemSeries {
+  window_s: number;
+  /** Requests finished OK per window (60). */
+  done: number[];
+  /** Requests finished failed per window. */
+  failed: number[];
+  /** End-to-end p99 per window, a bucket upper bound; 0 for an empty window. */
+  p99_ms: number[];
+}
+
 export interface ReplicaSummary {
   replica: number;
   visits: number;
@@ -144,6 +156,9 @@ export interface NodeSummary {
   /** Requests per second the whole mix can reach before this node saturates. */
   saturates_at_req_s: number | null;
   headroom: number | null;
+  /** Hop-duration percentiles as bucket upper bounds; null without visits. One in the overflow bucket reads 131072 ms (the next doubling): a floor, not an exact bound. */
+  p50_ms: number | null;
+  p99_ms: number | null;
   series: Series;
   limited: number;
   overflowed: number;
@@ -158,6 +173,7 @@ export interface Summary {
   errors: Record<string, number>;
   warnings: string[];
   latency: { p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; buckets: Bucket[] };
+  series: SystemSeries;
   streams: { endpoint: string; requests: number; failed: number; [k: string]: unknown }[];
   nodes: NodeSummary[];
   links: {

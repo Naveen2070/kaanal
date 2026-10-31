@@ -16,6 +16,8 @@ export function nodeSummary(over: Partial<NodeSummary> = {}): NodeSummary {
     capacity_per_s: 200,
     saturates_at_req_s: 200,
     headroom: 0.5,
+    p50_ms: 10,
+    p99_ms: 20,
     series: { window_s: 1, busy: [0.2, 0.9, 0.4], queue: [0, 3, 1], latency: [] },
     limited: 0,
     overflowed: 0,

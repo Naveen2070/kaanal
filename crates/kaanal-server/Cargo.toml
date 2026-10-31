@@ -26,6 +26,10 @@ serde_urlencoded.workspace = true
 indexmap.workspace = true
 humantime.workspace = true
 
+# build.rs reads the Vite manifest (src/control/manifest.rs) to embed the Studio bundle.
+[build-dependencies]
+serde_json.workspace = true
+
 [dev-dependencies]
 reqwest.workspace = true
 jsonwebtoken.workspace = true

@@ -36,7 +36,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post, put};
+use axum::routing::{any, get, post, put};
 use axum::{Router, middleware};
 use kaanal_core::chain::RouteSpec;
 use kaanal_core::diagnostics::Located;
@@ -44,6 +44,7 @@ use kaanal_core::{Config, Topology};
 
 pub use auth::AuthKey;
 pub use collections::{Collections, MAX_ITEM_BYTES, MAX_ITEMS};
+pub use control::{Asset, Bundle};
 pub use draft::{BLANK_TEXT, DraftSource};
 
 /// Studio's starter text, one self-contained file (`GET /__kaanal/demo` serves it). The
@@ -170,8 +171,24 @@ pub fn new_token() -> String {
 /// building server state fails (bad config, specs or routes), or if the config has an auth
 /// node and `opts.auth_key` is `None`.
 pub async fn serve(cfg: &Config, base_dir: &Path, opts: ServeOpts) -> Result<BoundServer, Located> {
+    serve_with_studio(cfg, base_dir, opts, Bundle::embedded()).await
+}
+
+/// [`serve`] with `studio` as the Studio bundle instead of the one compiled in
+/// ([`Bundle::embedded`]); `None` serves the status page at `/__kaanal/studio` and no assets.
+/// Tests use it to serve a fixture bundle.
+///
+/// # Errors
+/// As [`serve`].
+pub async fn serve_with_studio(
+    cfg: &Config,
+    base_dir: &Path,
+    opts: ServeOpts,
+    studio: Option<Bundle>,
+) -> Result<BoundServer, Located> {
     let (listener, addr) = open(&opts).await?;
     let mut st = state::AppState::build(cfg, base_dir, opts.token, addr.port())?;
+    st.studio = studio;
     // X5: fail closed. `check` never builds an issuer, so `validate` never needs a key.
     st.draft = std::sync::Mutex::new(draft::Draft::from_source(opts.draft));
     st.auth_key.clone_from(&opts.auth_key);
@@ -346,8 +363,12 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/events", get(control::events))
         .route("/__kaanal/ui", get(control::ui))
         .route("/__kaanal/studio", get(control::studio))
-        .route("/__kaanal/studio/assets/app.js", get(control::app_js))
-        .route("/__kaanal/studio/assets/app.css", get(control::app_css))
+        // `any` + a catch-all so every method and every path under `studio/` (`assets%2Fx`,
+        // `assets/`, `x/../y`) reaches the guard (401 without a token) instead of a route-less
+        // 404/405; the handler serves only an exact table hit on GET/HEAD (R1.106).
+        .route("/__kaanal/studio/{*rest}", any(control::studio_asset))
+        // the catch-all never matches an empty rest
+        .route("/__kaanal/studio/", any(control::studio_asset))
         // route_layer: wraps only the control routes above, never the mock fallback.
         // Every control route is guarded here, so a new handler cannot forget authentication.
         .route_layer(middleware::from_fn_with_state(st.clone(), control::guard))

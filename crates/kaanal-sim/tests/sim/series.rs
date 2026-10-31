@@ -138,3 +138,69 @@ edges:
     // a node without slots has no figure
     assert_eq!(gw, None);
 }
+
+#[test]
+fn system_series_sums_match_the_summary() {
+    // half the requests fail (error rate 0.5 at app), warmup 0 so every request is in a window
+    let (t, e) = topo(QUEUED);
+    let chaos = kaanal_core::ChaosState::from([(
+        t.id("app").unwrap(),
+        kaanal_core::NodeChaos {
+            error_rate: 0.5,
+            error_status: 503,
+            ..kaanal_core::NodeChaos::default()
+        },
+    )]);
+    let cfg = one_stream(50.0, 30);
+    let rep = run(&t, &e, &chaos, &cfg).unwrap();
+    let s = summarize(&t, &e, &cfg, &rep);
+    assert!(s.failed > 0 && s.failed < s.requests);
+    let done: u64 = s.series.done.iter().map(|&n| u64::from(n)).sum();
+    let failed: u64 = s.series.failed.iter().map(|&n| u64::from(n)).sum();
+    assert_eq!(done + failed, s.requests);
+    assert_eq!(failed, s.failed);
+}
+
+#[test]
+fn system_series_has_sixty_windows() {
+    let (_, _, s) = go(QUEUED, &one_stream(50.0, 60));
+    assert_eq!(s.series.done.len(), 60);
+    assert_eq!(s.series.failed.len(), 60);
+    assert_eq!(s.series.p99_ms.len(), 60);
+    assert!((s.series.window_s - 1.0).abs() < 1e-12);
+    // 10 ms service at 50/s: every window with traffic has a p99 that is a bucket bound
+    assert!(s.series.p99_ms.iter().all(|&p| p > 0.0));
+}
+
+#[test]
+fn node_percentiles_are_bucket_bounds_and_none_without_visits() {
+    let (t, _, s) = go(QUEUED, &one_stream(50.0, 30));
+    let app = &s.nodes[t.id("app").unwrap()];
+    let (p50, p99) = (app.p50_ms.unwrap(), app.p99_ms.unwrap());
+    assert!(p50 <= p99);
+    let bounds: Vec<f64> = (0..19).map(|i| 0.25 * f64::from(1u32 << i)).collect();
+    assert!(
+        bounds.contains(&p50) && bounds.contains(&p99),
+        "{p50} {p99}"
+    );
+    // a service that no endpoint reaches is never visited
+    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 10ms }\n  idle: { type: service, proc: 10ms }\nedges:\n  - { from: gw, to: app }\n";
+    let (t, _, s) = go(y, &one_stream(50.0, 10));
+    let idle = &s.nodes[t.id("idle").unwrap()];
+    assert_eq!((idle.p50_ms, idle.p99_ms), (None, None));
+}
+
+#[test]
+fn zero_request_run_has_zero_series_and_no_nan() {
+    let (_, _, s) = go(QUEUED, &one_stream(1e-6, 10));
+    assert_eq!(s.requests, 0);
+    assert_eq!(s.series.done, vec![0; 60]);
+    assert_eq!(s.series.failed, vec![0; 60]);
+    assert_eq!(s.series.p99_ms, vec![0.0; 60]);
+    assert!(s.series.window_s.is_finite());
+    assert!(
+        s.nodes
+            .iter()
+            .all(|n| n.p50_ms.is_none() && n.p99_ms.is_none())
+    );
+}

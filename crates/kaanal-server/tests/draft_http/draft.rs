@@ -91,3 +91,32 @@ async fn the_demo_and_the_run_log_need_the_token() {
         assert_eq!(r.status(), 401, "{path}");
     }
 }
+
+#[tokio::test]
+async fn saved_is_true_on_a_fresh_start_and_false_after_an_edit() {
+    let s = start(BASE).await;
+    let v: Value = s.get(URL).await.json().await.unwrap();
+    assert_eq!(v["saved"], true, "the draft is the file as read");
+    let v: Value = s
+        .put(
+            URL,
+            json!({ "text": "version: 1
+nodes: {}
+" }),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["saved"], false, "an edit leaves the file behind");
+    let v: Value = s
+        .put(URL, json!({ "text": BASE }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        v["saved"], true,
+        "putting the file text back is saved again"
+    );
+}

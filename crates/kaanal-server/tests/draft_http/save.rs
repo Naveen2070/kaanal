@@ -296,3 +296,16 @@ fn with_spec(spec: &str) -> String {
         &format!("app:   {{ type: service, spec: {spec},"),
     )
 }
+
+#[tokio::test]
+async fn saved_is_true_again_after_save() {
+    let s = start(BASE).await;
+    let r = patch(&s, json!([{ "op": "set", "path": ["seed"], "value": 7 }])).await;
+    assert_eq!(r.status(), 200);
+    let v: Value = s.get(URL).await.json().await.unwrap();
+    assert_eq!(v["saved"], false);
+    let r = s.send(reqwest::Method::POST, SAVE, None).await;
+    assert_eq!(r.status(), 200);
+    let v: Value = s.get(URL).await.json().await.unwrap();
+    assert_eq!(v["saved"], true);
+}

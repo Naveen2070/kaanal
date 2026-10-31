@@ -161,3 +161,14 @@ async fn a_blank_start_saves_a_new_file_and_refuses_if_one_appeared() {
         "never overwrite a file the draft was not started from"
     );
 }
+
+#[tokio::test]
+async fn saved_is_false_on_a_blank_start_until_first_save() {
+    let s = start_blank().await;
+    let v: Value = s.get(URL).await.json().await.unwrap();
+    assert_eq!(v["saved"], false, "nothing is on disk yet");
+    let r = s.send(Method::POST, "/__kaanal/draft/save", None).await;
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let v: Value = s.get(URL).await.json().await.unwrap();
+    assert_eq!(v["saved"], true);
+}

@@ -8,18 +8,19 @@
     "dev:studio": "node ../scripts/studio-dev.mjs",
     "check": "vp check",
     "test": "vp test run",
-    "build": "vp build"
+    "build": "vp build && node scripts/postbuild.mjs",
+    "size": "node scripts/size.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.12.0",
-    "lucide-react": "^1.57.0",
+    "lucide-react": "^1.65.0",
     "nuqs": "^2.10.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
-    "@babel/core": "^8.0.9",
+    "@babel/core": "^8.0.10",
     "@rolldown/plugin-babel": "^0.2.4",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.3",

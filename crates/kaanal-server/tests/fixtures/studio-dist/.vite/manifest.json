@@ -1,0 +1,30 @@
+{
+  "index.html": {
+    "file": "assets/index-B7PI925R.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "css": ["assets/index-5UjPuW-k.css"],
+    "assets": [
+      "assets/favicon.svg",
+      "assets/inter-latin-Dx4kXJAl.woff2",
+      "assets/index-B7PI925R.js.map",
+      "assets/.secret.js",
+      "assets/notes.txt",
+      ".vite/manifest.json",
+      "index.html"
+    ]
+  },
+  "index.css": {
+    "file": "assets/index-5UjPuW-k.css",
+    "src": "index.css"
+  },
+  "src/favicon.svg": {
+    "file": "assets/favicon.svg",
+    "src": "src/favicon.svg"
+  },
+  "src/fonts/inter-latin.woff2": {
+    "file": "assets/inter-latin-Dx4kXJAl.woff2",
+    "src": "src/fonts/inter-latin.woff2"
+  }
+}

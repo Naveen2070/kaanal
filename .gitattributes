@@ -1,1 +1,5 @@
-*.md text eol=lf
+# LF everywhere, on every platform. The index is already all-LF, and eol=lf pins the
+# working tree too, so autocrlf never rewrites a checkout (the "LF will be replaced by
+# CRLF" warning). The .sh scripts need this: sh dies on CRLF with `^M: command not found`.
+# text=auto leaves detected binaries alone.
+* text=auto eol=lf

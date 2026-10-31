@@ -43,6 +43,7 @@ function run(id = "s1"): RunRecord {
       errors: {},
       warnings: [],
       latency: { p50_ms: 1, p95_ms: 2, p99_ms: 3, max_ms: 4, buckets: [] },
+      series: { window_s: 1, done: [], failed: [], p99_ms: [] },
       streams: [
         { endpoint: "POST /orders", requests: 5, failed: 0 },
         { endpoint: "GET /a b?c", requests: 5, failed: 0 },

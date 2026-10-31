@@ -2,7 +2,7 @@
 
 use super::{
     ChaosPatch, activate, clear_node, ct_eq, expire_due, host_allowed, lease_task, lock, lock_gen,
-    locked, next_deadline, query_token, scenario_data, set_chaos,
+    locked, mark_response, next_deadline, query_token, scenario_data, set_chaos,
 };
 use crate::chaos_lease::Unit;
 use crate::generation::Gen;
@@ -491,4 +491,25 @@ async fn locked_pairs_the_lock_with_the_generation_in_force_and_never_refuses_a_
     st.set_generation(None);
     let err = locked(&st).err().expect("no system");
     assert_eq!(err.0, StatusCode::CONFLICT);
+}
+
+#[test]
+fn guard_keeps_a_cache_header_the_handler_set() {
+    use axum::http::{HeaderMap, HeaderValue, header};
+    let mut own = HeaderMap::new();
+    own.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    mark_response(&mut own);
+    assert_eq!(
+        own[header::CACHE_CONTROL],
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(own[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+
+    let mut none = HeaderMap::new();
+    mark_response(&mut none);
+    assert_eq!(none[header::CACHE_CONTROL], "no-store");
+    assert_eq!(none[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
 }

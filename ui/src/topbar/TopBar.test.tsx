@@ -22,6 +22,7 @@ function view(rps: number | null): DraftView {
     layout: {},
     layout_note: null,
     layout_dirty: false,
+    saved: true,
   };
 }
 
@@ -84,6 +85,7 @@ test("the_figures_come_from_the_newest_run_and_the_run_button_runs", async () =>
         errors: {},
         warnings: [],
         latency: { p50_ms: 1, p95_ms: 5, p99_ms: 12.34, max_ms: 20, buckets: [] },
+        series: { window_s: 1, done: [], failed: [], p99_ms: [] },
         streams: [],
         nodes: [nodeSummary({ limited: 3, overflowed: 4, saturates_at_req_s: 120.4 })],
         links: [],

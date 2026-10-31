@@ -190,6 +190,9 @@ pub struct AppState {
     /// Permits for CPU-heavy control work outside a run (`/sample`, `/openapi/skeleton`): a few
     /// at once, so repeated calls cannot fill the blocking pool the mocks' neighbours share.
     pub work: Arc<tokio::sync::Semaphore>,
+    /// The Studio bundle served at `/__kaanal/studio` and its assets: the one compiled in, unless
+    /// `serve_with_studio` passed another (tests). `None`: the status page, no assets.
+    pub studio: Option<crate::control::Bundle>,
 }
 
 impl AppState {
@@ -319,6 +322,7 @@ impl AppState {
             collections: crate::collections::Collections::new(),
             sims: crate::sim::SimStore::default(),
             work: Arc::new(tokio::sync::Semaphore::new(crate::sim::WORK_PERMITS)),
+            studio: crate::control::Bundle::embedded(),
             gate: crate::draft::gate::Gate::default(),
             apply_lock: tokio::sync::Mutex::new(()),
             save_lock: Mutex::new(()),

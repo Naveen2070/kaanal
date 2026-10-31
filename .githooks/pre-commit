@@ -1,5 +1,6 @@
 #!/bin/sh
-# Runs fmt check + clippy + tests + markdown check before every commit. Enable: git config core.hooksPath .githooks
+# Runs fmt check + clippy + tests + markdown check + the ui check (format, lint, types) before every
+# commit. Enable: git config core.hooksPath .githooks
 [ -f Cargo.toml ] || exit 0
 echo "pre-commit: cargo fmt --check"
 cargo fmt --all --check || { echo "fmt failed: run 'cargo fmt --all'"; exit 1; }
@@ -12,4 +13,16 @@ if command -v dprint >/dev/null 2>&1; then
     dprint check || { echo "dprint failed: run 'dprint fmt'"; exit 1; }
 else
     echo "pre-commit: dprint not found, skipping markdown check (install: cargo install dprint)"
+fi
+if [ -f ui/package.json ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+        echo "pre-commit: ui check (vp check: format, lint, types)"
+        (cd ui && pnpm run check) || {
+            echo "ui check failed: 'cd ui && vp check --fix' fixes formatting, the rest is lint/types"
+            exit 1
+        }
+    else
+        echo "pre-commit: pnpm not found, skipping the ui check"
+        exit 1
+    fi
 fi

@@ -1,16 +1,20 @@
 //! The security guard in front of every `/__kaanal/*` route: Host check, bearer token, constant-time compare.
 
 use super::{
-    AppState, Arc, HeaderValue, IntoResponse, Next, Request, Response, State, StatusCode, header,
-    reject,
+    AppState, Arc, HeaderValue, IntoResponse, Next, Request, Response, State, StatusCode, assets,
+    header, reject,
 };
 
 /// Runs in front of every `/__kaanal/*` route, before any extractor parses a body or query,
 /// so unauthenticated callers never reach handler code:
 /// 1. `Host` must be loopback with our port (DNS-rebinding guard), for the whole namespace.
-/// 2. Everything except `health`, `ui`, `studio` and its two assets (`studio/assets/app.js`, `app.css`; the page must load before it has the token) needs the bearer token. `/events` alone may take it
-///    as `?token=`, because the browser `EventSource` cannot set headers.
-/// 3. Responses are marked uncacheable and non-sniffable.
+/// 2. Everything except `health`, `ui`, `studio` and a Studio asset needs the bearer token (the
+///    page must load before it has the token). An asset is exempt only when [`assets::hit`]
+///    says so: `GET`/`HEAD`, no query, and the raw path is `studio/assets/` plus a name in the
+///    table, exactly; every other method, miss or variant falls through to the token check
+///    (R1.106). `/events` alone may take the token as `?token=`, because the browser
+///    `EventSource` cannot set headers.
+/// 3. Responses are marked uncacheable (unless the handler set its own cache policy) and non-sniffable.
 pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     let headers = req.headers();
     let host = headers
@@ -21,14 +25,11 @@ pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) ->
         return reject(StatusCode::FORBIDDEN, "bad Host header").into_response();
     }
     let path = req.uri().path();
-    if !matches!(
+    let exempt = matches!(
         path,
-        "/__kaanal/health"
-            | "/__kaanal/ui"
-            | "/__kaanal/studio"
-            | "/__kaanal/studio/assets/app.js"
-            | "/__kaanal/studio/assets/app.css"
-    ) {
+        "/__kaanal/health" | "/__kaanal/ui" | "/__kaanal/studio"
+    ) || assets::hit(st.studio, req.method(), req.uri()).is_some();
+    if !exempt {
         let bearer = headers
             .get(header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
@@ -46,13 +47,21 @@ pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) ->
         }
     }
     let mut resp = next.run(req).await;
-    let h = resp.headers_mut();
-    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    mark_response(resp.headers_mut());
+    resp
+}
+
+/// **Private.** Marks a response non-sniffable, and uncacheable unless the handler chose its own
+/// cache policy (the Studio assets send `immutable` for hashed files; overwriting it with
+/// `no-store` would defeat their caching).
+pub(super) fn mark_response(h: &mut axum::http::HeaderMap) {
+    if !h.contains_key(header::CACHE_CONTROL) {
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
-    resp
 }
 
 /// **Private.** Extracts `token=` from a query string; `xtoken=` or a bare `token` do not match.

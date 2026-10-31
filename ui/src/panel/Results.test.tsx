@@ -28,6 +28,7 @@ function summary(over: Partial<Summary> = {}): Summary {
     errors: { overflow: 3, timeout: 2 },
     warnings: [],
     latency: { p50_ms: 1, p95_ms: 2, p99_ms: 3, max_ms: 4, buckets },
+    series: { window_s: 1, done: [], failed: [], p99_ms: [] },
     streams: [],
     nodes: [
       nodeSummary({ name: "gw", series: series() }),

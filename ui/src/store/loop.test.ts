@@ -20,6 +20,7 @@ function viewOf(rev: number, doc: DraftView["doc"] = { nodes: {}, traffic: { pea
     layout: {},
     layout_note: null,
     layout_dirty: false,
+    saved: true,
   } satisfies DraftView;
 }
 

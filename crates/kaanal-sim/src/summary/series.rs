@@ -4,7 +4,7 @@
 //! that arrived at or after warmup, so a run with a warmup under-counts early windows (their
 //! pre-warmup requests are missing); with warmup 0 the sums match the engine's figures.
 
-use kaanal_core::{HopKind, Topology};
+use kaanal_core::{ChainResult, HopKind, Topology};
 use serde::Serialize;
 
 use super::{BUCKETS, bucket_of};
@@ -140,4 +140,82 @@ pub(super) fn series(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Ve
             }
         })
         .collect()
+}
+
+/// The whole system over time, in the same [`WINDOWS`] windows as [`Series`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SystemSeries {
+    /// Width of one window in seconds (reporting window ÷ 60).
+    pub window_s: f64,
+    /// Requests that finished OK, by the window they finished in.
+    pub done: Vec<u32>,
+    /// Requests that finished failed, by the window they finished in.
+    pub failed: Vec<u32>,
+    /// End-to-end p99 in ms of the requests finished in the window, as the upper bound of its
+    /// bucket; 0 for a window with none.
+    pub p99_ms: Vec<f64>,
+}
+
+/// Upper bound in ms of the bucket holding the nearest-rank percentile `p` of `counts` (the
+/// summary's buckets, overflow last); `None` when `counts` is empty of samples. The overflow
+/// bucket has no bound, so it reports the next doubling, which keeps the figure finite.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "the rank is clamped to the total; counts are far below 2^52"
+)]
+pub(super) fn percentile_bound(counts: &[u32], p: f64) -> Option<f64> {
+    let total: u64 = counts.iter().map(|&c| u64::from(c)).sum();
+    if total == 0 {
+        return None;
+    }
+    let rank = ((p * total as f64).ceil() as u64).clamp(1, total);
+    let mut seen = 0u64;
+    let i = counts
+        .iter()
+        .position(|&c| {
+            seen += u64::from(c);
+            seen >= rank
+        })
+        .unwrap_or(COLS - 1);
+    Some(0.25 * (1u64 << i) as f64)
+}
+
+/// **Private.** The system series: requests finished per window, split by outcome, and each
+/// window's end-to-end p99. Same windows and same records as [`series`], so the same warmup
+/// caveat holds; a request finishing after the run's end counts in the last window.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "window indices are clamped to WINDOWS; counts are far below 2^52"
+)]
+pub(super) fn system_series(cfg: &SimConfig, report: &SimReport) -> SystemSeries {
+    let warm = cfg.warmup.as_secs_f64();
+    let w = cfg.duration.saturating_sub(cfg.warmup).as_secs_f64() / WINDOWS as f64;
+    let mut done = vec![0u32; WINDOWS];
+    let mut failed = vec![0u32; WINDOWS];
+    let mut lat = vec![0u32; WINDOWS * COLS];
+    for r in &report.requests {
+        let end = (r.arrival + r.latency).as_secs_f64();
+        // w is 0 for an empty window: the division gives NaN or inf, which the cast sends to 0
+        // or the clamp to the last window
+        let i = (((end - warm) / w).max(0.0) as usize).min(WINDOWS - 1);
+        if matches!(r.result, ChainResult::Err { .. }) {
+            failed[i] += 1;
+        } else {
+            done[i] += 1;
+        }
+        lat[i * COLS + bucket_of(r.latency.as_secs_f64() * 1000.0)] += 1;
+    }
+    SystemSeries {
+        window_s: w,
+        done,
+        failed,
+        p99_ms: lat
+            .chunks(COLS)
+            .map(|c| percentile_bound(c, 0.99).unwrap_or(0.0))
+            .collect(),
+    }
 }

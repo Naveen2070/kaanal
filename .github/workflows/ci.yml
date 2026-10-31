@@ -7,6 +7,10 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
+# Read-only token for every job; the bench job below widens it for itself.
+permissions:
+  contents: read
+
 # One run per branch or pull request: a newer push cancels the older run, so only the latest commit is
 # tested. Pushes to main are never cancelled (the benchmark baseline comes from main's push runs).
 concurrency:
@@ -19,14 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Run cargo fmt check
         run: cargo fmt --all --check
@@ -39,7 +43,7 @@ jobs:
         run: bash scripts/check-file-size.sh
 
       - name: Run dprint markdown check
-        uses: dprint/check@v2.5
+        uses: dprint/check@7dc032d8874778fc024f6f9b4a7e6d896782c330 # v2.5
 
   test:
     name: Tests (${{ matrix.os }})
@@ -51,12 +55,12 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Run cargo test
         run: cargo test --workspace
@@ -67,12 +71,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.99
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # Keep in sync with `rust-version` in Cargo.toml.
       - name: Build and test on the minimum supported Rust
@@ -92,12 +96,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: bench
 
@@ -132,14 +136,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep this run
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-run
           path: bench.json
 
       - name: Keep it as the baseline (push to main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-baseline
           path: bench.json
@@ -152,10 +156,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Vite+
-        uses: voidzero-dev/setup-vp@v1.21.2
+        uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
         with:
           version: "1.4.0"
           node-version: "26"
@@ -170,14 +174,27 @@ jobs:
         working-directory: ui
         run: vp test run
 
-      # Writes app.js, app.css and index.html into crates/kaanal-server/ui-dist.
+      # Writes index.html, assets/ (hashed, code-split) and .vite/manifest.json into crates/kaanal-server/ui-dist.
       - name: Build
         working-directory: ui
         run: vp build
 
+      # Precompresses the assets (.br, .gz) and restores ui-dist/.gitkeep.
+      - name: Precompress
+        working-directory: ui
+        run: node scripts/postbuild.mjs
+
+      # First-load budget (spec 11); fails over it.
+      - name: Size budget
+        working-directory: ui
+        run: node scripts/size.mjs
+
       - name: Keep the bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: studio-ui-dist
           path: crates/kaanal-server/ui-dist
           if-no-files-found: error
+          # the Vite manifest lives in ui-dist/.vite/ (a hidden folder): without this the artifact drops it
+          # and the binary would be built without Studio
+          include-hidden-files: true
