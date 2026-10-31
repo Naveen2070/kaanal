@@ -1,0 +1,168 @@
+// The key figures as type, not tiles (spec 3): what breaks first (the lead, largest), the offered
+// load (a log slider and a typed box, the control that moves it), then the system p99, goodput,
+// errors and dropped. Every figure comes from the newest run through the same selectors the cards
+// use. A slider commits on release, never on every move; a refused typed value puts the real one back.
+
+import { useState } from "react";
+import { rpsFromSlider, SLIDER_MAX, sliderFromRps } from "../canvas/logScale";
+import { breaksFirst, twoSignificant } from "../canvas/metrics";
+import { LIMITS, setRate } from "../panel/fields";
+import { useDraft } from "../store/draft";
+import { useRun } from "../store/run";
+
+const SLIDER_KEYS = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+]);
+
+const nf = (n: number, digits = 0) =>
+  n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
+
+function Cell({
+  label,
+  className = "",
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className={`m-0 tabular-nums ${className}`}>{children}</dd>
+    </div>
+  );
+}
+
+export function KpiStrip() {
+  const view = useDraft((s) => s.view);
+  const patch = useDraft((s) => s.patch);
+  const latest = useRun((s) => s.latest);
+  const dimmed = useRun((s) => s.dimmed);
+  /** The slider position while it is being moved, before it is committed. */
+  const [dragging, setDragging] = useState<number | null>(null);
+
+  const traffic = view?.doc?.traffic as Record<string, { rps?: unknown }> | undefined;
+  const profile = traffic ? Object.keys(traffic)[0] : undefined;
+  const rps = profile !== undefined ? traffic?.[profile]?.rps : undefined;
+  const rate = typeof rps === "number" ? Math.round(rps) : null;
+  const disabled = profile === undefined || rate === null;
+  const position = dragging ?? (rate === null ? 0 : sliderFromRps(rate));
+  const shown = dragging !== null ? rpsFromSlider(dragging) : rate;
+
+  const s = latest?.summary ?? undefined;
+  const hasRequests = s !== undefined && s.requests > 0 && Number.isFinite(s.latency.p99_ms);
+  const goodput = s && s.window_s > 0 ? (s.requests - s.failed) / s.window_s : undefined;
+  const dropped = s?.nodes.reduce((n, x) => n + x.limited + x.overflowed, 0);
+  const breaks = breaksFirst(s);
+
+  const write = (n: number) => {
+    if (profile === undefined) return;
+    void patch([setRate(profile, n)]);
+  };
+  const commitSlider = (v: number) => {
+    setDragging(null);
+    if (v === (rate === null ? 0 : sliderFromRps(rate))) return; // a Tab onto it, or no move
+    write(rpsFromSlider(v));
+  };
+  const commitTyped = (el: HTMLInputElement) => {
+    const n = Math.round(Number(el.value));
+    // zero, a negative or text is refused; a huge number is held to the top of the range (R1.100)
+    if (el.value.trim() === "" || !Number.isFinite(n) || n < 1) {
+      el.value = String(rate ?? "");
+      return;
+    }
+    const clamped = Math.min(n, LIMITS.rate.max);
+    el.value = String(clamped);
+    if (clamped !== rate) write(clamped);
+  };
+
+  const marker =
+    breaks !== null && breaks.atReqS >= 10 && breaks.atReqS <= 15000
+      ? (sliderFromRps(breaks.atReqS) / SLIDER_MAX) * 100
+      : null;
+
+  return (
+    <section
+      aria-label="Key figures"
+      className="flex flex-wrap items-end gap-x-8 gap-y-2 px-4 pb-2"
+    >
+      <dl className={`m-0 flex flex-wrap items-end gap-x-8 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
+        <Cell
+          label="Breaks first"
+          className={`text-2xl font-semibold ${
+            breaks === null ? "text-muted" : breaks.saturatedNow ? "text-negative" : "text-text"
+          }`}
+        >
+          {breaks === null
+            ? "nothing saturates"
+            : `${breaks.node} at ${twoSignificant(breaks.atReqS)} req/s`}
+        </Cell>
+        <Cell label="Offered load" className="text-xl font-semibold">
+          <span className="flex items-center gap-3">
+            <input
+              key={`${shown}`}
+              type="number"
+              aria-label="Offered load, typed (requests per second)"
+              min={1}
+              max={LIMITS.rate.max}
+              disabled={disabled}
+              defaultValue={shown ?? ""}
+              onBlur={(e) => commitTyped(e.currentTarget)}
+              onKeyDown={(e) => e.key === "Enter" && commitTyped(e.currentTarget)}
+              className="h-8 w-28 rounded-md border border-control bg-sheet px-2 text-right text-xl"
+            />
+            <span className="text-base text-muted">/s</span>
+            <span className="relative flex items-center">
+              <input
+                type="range"
+                aria-label="Offered load"
+                aria-valuetext={
+                  shown === null ? "no traffic profile" : `${nf(shown)} requests per second`
+                }
+                min={0}
+                max={SLIDER_MAX}
+                step={1}
+                disabled={disabled}
+                value={position}
+                onChange={(e) => setDragging(Number(e.currentTarget.value))}
+                onPointerUp={(e) => commitSlider(Number(e.currentTarget.value))}
+                onKeyUp={(e) => {
+                  if (SLIDER_KEYS.has(e.key)) commitSlider(Number(e.currentTarget.value));
+                }}
+                className="w-48 accent-accent"
+              />
+              {marker !== null && breaks !== null ? (
+                <span
+                  aria-hidden="true"
+                  title={`Breaks first at ${twoSignificant(breaks.atReqS)} req/s`}
+                  className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-negative"
+                  style={{ left: `${marker}%` }}
+                />
+              ) : null}
+            </span>
+          </span>
+        </Cell>
+        <Cell label="System p99" className={`text-base ${hasRequests ? "" : "text-muted"}`}>
+          {hasRequests && s ? `${nf(s.latency.p99_ms, 1)} ms` : "–"}
+        </Cell>
+        <Cell label="Goodput" className={`text-base ${goodput === undefined ? "text-muted" : ""}`}>
+          {goodput === undefined ? "–" : `${nf(goodput)}/s`}
+        </Cell>
+        <Cell label="Errors" className={`text-base ${s ? "" : "text-muted"}`}>
+          {s ? nf(s.failed) : "–"}
+        </Cell>
+        <Cell label="Dropped" className={`text-base ${dropped === undefined ? "text-muted" : ""}`}>
+          {dropped === undefined ? "–" : nf(dropped)}
+        </Cell>
+      </dl>
+    </section>
+  );
+}

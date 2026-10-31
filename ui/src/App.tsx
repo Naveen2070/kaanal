@@ -13,6 +13,7 @@ import { Panel } from "./panel/Panel";
 import { useDraft } from "./store/draft";
 import { runNow, startStudioLoop } from "./store/loopRuntime";
 import { useRun } from "./store/run";
+import { KpiStrip } from "./topbar/KpiStrip";
 import { TopBar } from "./topbar/TopBar";
 
 export function App() {
@@ -29,7 +30,11 @@ export function App() {
   // a draft that cannot be loaded is shown by <Loading> (the reason and a Retry), not here
   // the cards read the finished run through this feed and never import the run store
   const nodes = latest?.summary?.nodes ?? [];
-  const feed: StatsFeed = { node: (name) => nodes.find((n) => n.name === name), dimmed };
+  const feed: StatsFeed = {
+    node: (name) => nodes.find((n) => n.name === name),
+    dimmed,
+    peakVisits: Math.max(0, ...nodes.map((n) => n.visits_per_s).filter(Number.isFinite)),
+  };
   return (
     <Loading ready={view !== null}>
       <FeedContext.Provider value={feed}>
@@ -37,6 +42,7 @@ export function App() {
           top={
             <>
               <TopBar onRun={runNow} />
+              <KpiStrip />
               <FirstRun />
             </>
           }

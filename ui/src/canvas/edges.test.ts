@@ -1,6 +1,16 @@
 import { expect, test } from "vite-plus/test";
 import type { Doc } from "../api/types";
-import { autoLayout, connectOps, decodeId, encodeId, lastEdgeIndex, uniqueName } from "./edges";
+import {
+  autoLayout,
+  connectOps,
+  decodeId,
+  edgeSpeedS,
+  edgeTone,
+  edgeWidth,
+  encodeId,
+  lastEdgeIndex,
+  uniqueName,
+} from "./edges";
 
 const doc: Doc = {
   nodes: { gw: { type: "gateway" }, app: { type: "service" }, db: { type: "database" } },
@@ -91,4 +101,30 @@ test("a_cycle_and_a_loose_node_are_still_placed", () => {
     ],
   });
   expect(Object.keys(l).sort()).toEqual(["a", "b", "c"]);
+});
+
+test("edge_width_grows_with_load_between_1_5_and_4_5", () => {
+  expect(edgeWidth(0)).toBe(1.5);
+  expect(edgeWidth(1)).toBe(4.5);
+  expect(edgeWidth(0.5)).toBe(3);
+  expect(edgeWidth(0.2)).toBeLessThan(edgeWidth(0.8));
+  // out of range and junk are held to the ends, never NaN
+  expect(edgeWidth(-3)).toBe(1.5);
+  expect(edgeWidth(9)).toBe(4.5);
+  expect(edgeWidth(Number.NaN)).toBe(1.5);
+});
+
+test("edge_colour_follows_the_hotter_end_muted_amber_red", () => {
+  expect(edgeTone(0.2, 0.3)).toBe("muted");
+  expect(edgeTone(0.2, 0.75)).toBe("warn"); // the hotter end decides
+  expect(edgeTone(0.95, 0.1)).toBe("bad");
+  expect(edgeTone(null, 0.9)).toBe("bad");
+  expect(edgeTone(null, null)).toBe("muted");
+  expect(edgeTone(Number.NaN, 0.1)).toBe("muted");
+});
+
+test("the_flow_speeds_up_with_load_and_is_off_without_traffic", () => {
+  expect(edgeSpeedS(0)).toBeNull();
+  expect(edgeSpeedS(1)!).toBeLessThan(edgeSpeedS(0.1)!);
+  expect(edgeSpeedS(Number.NaN)).toBeNull();
 });

@@ -63,7 +63,7 @@ async function show(
   const calls = { onDeleted: vi.fn(), onRenamed: vi.fn(), onChaos: vi.fn() };
   render(
     <FeedContext.Provider
-      value={{ node: (n) => (n === name ? summary : undefined), dimmed: false }}
+      value={{ node: (n) => (n === name ? summary : undefined), dimmed: false, peakVisits: 0 }}
     >
       <Controls name={name} config={cfg} edges={edges} {...calls} />
     </FeedContext.Provider>,
@@ -309,7 +309,7 @@ test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
   await useDraft.getState().load();
   const calls = { onDeleted: vi.fn(), onRenamed: vi.fn(), onChaos: vi.fn() };
   render(
-    <FeedContext.Provider value={{ node: () => undefined, dimmed: false }}>
+    <FeedContext.Provider value={{ node: () => undefined, dimmed: false, peakVisits: 0 }}>
       <Controls name="gw" config={gwCfg} edges={edges} {...calls} />
     </FeedContext.Provider>,
   );

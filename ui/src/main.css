@@ -133,3 +133,33 @@ body {
     display: none;
   }
 }
+
+/* edges: a dash flowing along the path, speed set inline from the load; off under reduced motion */
+@keyframes kaanal-flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+.kaanal-flow {
+  stroke-dasharray: 8 8;
+  animation: kaanal-flow linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kaanal-flow {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+/* React Flow's own chrome on the tokens, so the canvas follows the theme */
+.react-flow {
+  --xy-controls-button-background-color: var(--sheet);
+  --xy-controls-button-background-color-hover: var(--raised);
+  --xy-controls-button-color: var(--text);
+  --xy-controls-button-color-hover: var(--text);
+  --xy-controls-button-border-color: var(--border);
+  --xy-background-color: transparent;
+  --xy-edge-stroke: var(--control);
+}

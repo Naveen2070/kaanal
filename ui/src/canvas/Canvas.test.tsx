@@ -20,19 +20,22 @@ interface Props {
   onNodesChange: (c: unknown[]) => void;
   onNodeDragStop: (e: unknown, n: unknown, dragged: DragNode[]) => void;
   onNodeClick: (e: unknown, n: { id: string }) => void;
+  fitView?: boolean;
+  edgeTypes?: Record<string, unknown>;
 }
 interface DragNode {
   id: string;
   position: { x: number; y: number };
 }
 let flow: Props;
+const fit = vi.hoisted(() => vi.fn());
 vi.mock("@xyflow/react", () => ({
   ReactFlow: (p: Props) => {
     flow = p;
     return <div data-testid="flow" />;
   },
   ReactFlowProvider: ({ children }: { children: unknown }) => <>{children}</>,
-  useReactFlow: () => ({ screenToFlowPosition: (p: { x: number; y: number }) => p }),
+  useReactFlow: () => ({ screenToFlowPosition: (p: { x: number; y: number }) => p, fitView: fit }),
   Background: () => null,
   Controls: () => null,
   Handle: () => null,
@@ -183,4 +186,31 @@ test("a_refused_edit_shows_its_message_on_the_canvas", async () => {
   mockFetch([{ status: 400, json: { error: "out of range" } }]);
   await act(async () => void useDraft.getState().addNode("cache"));
   expect(screen.getByRole("alert").textContent).toBe("out of range");
+});
+
+// ---- T2.3: fit view ----
+
+test("fit_view_runs_on_load_and_after_add_node", async () => {
+  fit.mockClear();
+  await show(view());
+  expect(flow.fitView).toBe(true); // on load, by React Flow itself
+  expect(fit).not.toHaveBeenCalled();
+
+  const doc = view().doc!;
+  const withCache = { ...doc, nodes: { ...doc.nodes, cache: { type: "cache" } } };
+  // a node arrives; the canvas gives it a position at once (optimistically) and then fits, once
+  await act(async () => useDraft.setState({ view: view({ doc: withCache }) }));
+  expect(fit).toHaveBeenCalledTimes(1);
+  expect(fit.mock.calls[0]?.[0]).toMatchObject({ padding: 0.2 });
+  // an unrelated change fits nothing
+  act(() => useDraft.setState({ view: view({ rev: 5 }) }));
+  expect(fit).toHaveBeenCalledTimes(1);
+});
+
+test("edges_are_drawn_by_the_load_edge_with_their_ends_named", async () => {
+  await show(view());
+  expect(flow.edgeTypes).toHaveProperty("load");
+  const e = (flow as unknown as { edges: { type: string; data: object }[] }).edges[0]!;
+  expect(e.type).toBe("load");
+  expect(e.data).toEqual({ from: "gw", to: "a#b/c d" });
 });

@@ -97,3 +97,24 @@ export function autoLayout(doc: Doc): Layout {
   }
   return layout;
 }
+
+const clamp01 = (x: number): number => (Number.isFinite(x) ? Math.min(Math.max(x, 0), 1) : 0);
+
+/** Stroke width in px: 1.5 with no load up to 4.5 at the busiest edge. */
+export function edgeWidth(load: number): number {
+  return Math.round((1.5 + 3 * clamp01(load)) * 100) / 100;
+}
+
+export type EdgeTone = "muted" | "warn" | "bad";
+
+/** The edge takes the colour of its hotter end: muted below 70% busy, amber from 70%, red from 90%. */
+export function edgeTone(a: number | null, b: number | null): EdgeTone {
+  const hot = Math.max(clamp01(a ?? 0), clamp01(b ?? 0));
+  return hot >= 0.9 ? "bad" : hot >= 0.7 ? "warn" : "muted";
+}
+
+/** Seconds for one turn of the flow: 2 s on a trickle down to 0.6 s at full load; null without traffic. */
+export function edgeSpeedS(load: number): number | null {
+  const l = clamp01(load);
+  return l > 0 ? Math.round((2 - 1.4 * l) * 100) / 100 : null;
+}

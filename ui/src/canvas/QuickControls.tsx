@@ -33,7 +33,7 @@ export function QuickControls({ name, config }: { name: string; config: NodeDoc 
 
   return (
     // nodrag/nopan: typing in a field must not drag or pan the canvas
-    <div className="nodrag nopan mt-1 flex gap-2 border-t pt-1 text-xs">
+    <div className="nodrag nopan mt-1 flex gap-2 border-t border-rule pt-2 text-xs">
       <label htmlFor={`${id}-replicas`} className="flex items-center gap-1">
         Instances
         <input
@@ -45,7 +45,7 @@ export function QuickControls({ name, config }: { name: string; config: NodeDoc 
           defaultValue={replicasOf(config)}
           onBlur={(e) => commitReplicas(e.currentTarget.value)}
           onKeyDown={commitOnEnter(commitReplicas)}
-          className="w-12 rounded border px-1"
+          className="w-12 rounded border border-control bg-sheet px-1 text-text"
         />
       </label>
       {canEditTime ? (
@@ -60,7 +60,7 @@ export function QuickControls({ name, config }: { name: string; config: NodeDoc 
             defaultValue={ms ?? ""}
             onBlur={(e) => commitTime(e.currentTarget.value)}
             onKeyDown={commitOnEnter(commitTime)}
-            className="w-16 rounded border px-1"
+            className="w-16 rounded border border-control bg-sheet px-1 text-text"
           />
         </label>
       ) : null}

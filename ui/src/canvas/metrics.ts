@@ -3,7 +3,8 @@
 // utilization, the peak is the highest of the ~60 windows, the sparkline is queue depth (exact),
 // and headroom is capacity, not a prediction.
 
-import type { NodeDoc, NodeSummary } from "../api/types";
+import type { NodeDoc, NodeSummary, Summary } from "../api/types";
+import { durationMs, hasProc, slotsOf } from "../panel/fields";
 
 export interface Figures {
   /** Measured utilization 0..1; null without a run or without slots. */
@@ -21,6 +22,14 @@ export interface Figures {
   replicas: number;
   /** True once a run has given any figure for this node. */
   hasRun: boolean;
+  /** The longest queue of the run (a peak, never a live count); 0 without a run. */
+  peakWaiting: number;
+  /** Requests per second reaching the node; null without a run. */
+  arrivingPerS: number | null;
+  /** The node's p99 hop time, as a bucket upper bound: "slowest requests under N ms". */
+  slowestUnderMs: number | null;
+  /** One line for the card, the details panel and anything else that says it in words. */
+  sentence: string;
 }
 
 /** Two significant digits: 122.4 gives 120, 1530 gives 1500, 7.46 gives 7.5. */
@@ -45,10 +54,16 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
       saturated: false,
       replicas,
       hasRun: false,
+      peakWaiting: 0,
+      arrivingPerS: null,
+      slowestUnderMs: null,
+      sentence: "No run yet",
     };
   }
   const busy = node.series.busy;
   const req = node.saturates_at_req_s;
+  const peakWaiting = finiteOrNull(node.max_queue) ?? 0;
+  const arrivingPerS = finiteOrNull(node.visits_per_s);
   return {
     busy: node.utilization,
     peak: busy.length > 0 ? Math.max(...busy) : null,
@@ -58,10 +73,70 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
     saturated: node.saturated,
     replicas,
     hasRun: true,
+    peakWaiting,
+    arrivingPerS,
+    slowestUnderMs: finiteOrNull(node.p99_ms),
+    sentence: sentenceOf(node, peakWaiting, arrivingPerS),
   };
+}
+
+const finiteOrNull = (x: number | null | undefined): number | null =>
+  typeof x === "number" && Number.isFinite(x) ? x : null;
+
+/** "78% busy · up to 12 waiting". The words carry the state; colour only repeats it. */
+function sentenceOf(node: NodeSummary, peakWaiting: number, arriving: number | null): string {
+  if (node.utilization === null) return "No slot limit · never saturates";
+  const waiting =
+    peakWaiting > 0 ? `up to ${peakWaiting.toLocaleString("en-US")} waiting` : "nothing waiting";
+  if (node.saturated) return `Saturated · ${waiting}`;
+  if (arriving === 0 && node.utilization === 0) return "Idle";
+  return `${percent(node.utilization)} busy · ${waiting}`;
+}
+
+/** The node that gives out first as load grows: the lowest saturation point (null without one). */
+export function breaksFirst(
+  summary: Summary | undefined,
+): { node: string; atReqS: number; saturatedNow: boolean } | null {
+  let best: { node: string; atReqS: number; saturatedNow: boolean } | null = null;
+  for (const n of summary?.nodes ?? []) {
+    const at = n.saturates_at_req_s;
+    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0) continue;
+    if (best === null || at < best.atReqS) {
+      best = { node: n.name, atReqS: at, saturatedNow: n.saturated };
+    }
+  }
+  return best;
 }
 
 /** A whole percent, or an en dash when there is nothing to show. */
 export function percent(x: number | null): string {
   return x === null ? "–" : `${Math.round(x * 100)}%`;
+}
+
+/** "Service · 1 copy × 32 slots · 25 ms": what the node is set to, in words. A database or cache has no Time. */
+export function configLine(label: string, config: NodeDoc | undefined): string {
+  const copies = replicasOf(config);
+  const slots = config ? slotsOf(config).value : null;
+  const parts = [
+    label,
+    `${copies} ${copies === 1 ? "copy" : "copies"}${
+      slots === null
+        ? " · no slot limit"
+        : ` × ${slots.toLocaleString("en-US")} ${slots === 1 ? "slot" : "slots"}`
+    }`,
+  ];
+  if (config && hasProc(String(config.type)) && "proc" in config) {
+    const ms = durationMs(config.proc);
+    parts.push(ms === null ? "time varies" : `${Number(ms.toFixed(3))} ms`);
+  }
+  return parts.join(" · ");
+}
+
+/** The state in words for a screen reader: "78 percent busy", "saturated", "idle", "no run yet". */
+export function stateWords(f: Figures): string {
+  if (!f.hasRun) return "no run yet";
+  if (f.busy === null) return "no slot limit";
+  if (f.saturated) return "saturated";
+  if (f.arrivingPerS === 0 && f.busy === 0) return "idle";
+  return `${Math.round(f.busy * 100)} percent busy`;
 }

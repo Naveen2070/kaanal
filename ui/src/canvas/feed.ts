@@ -9,9 +9,11 @@ export interface StatsFeed {
   node(name: string): NodeSummary | undefined;
   /** True while the figures are older than the draft (a run is in flight or was blocked). */
   dimmed: boolean;
+  /** The highest requests per second reaching any node: what an edge's load is measured against. */
+  peakVisits: number;
 }
 
-export const EMPTY_FEED: StatsFeed = { node: () => undefined, dimmed: false };
+export const EMPTY_FEED: StatsFeed = { node: () => undefined, dimmed: false, peakVisits: 0 };
 
 export const FeedContext = createContext<StatsFeed>(EMPTY_FEED);
 

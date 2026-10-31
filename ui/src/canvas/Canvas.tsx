@@ -18,11 +18,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Layout } from "../api/types";
 import { useDraft } from "../store/draft";
 import { useSelected } from "../store/view";
+import { usePrefersReducedMotion } from "../first-run/motion";
+import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { KIND_MIME } from "./Palette";
 import { autoLayout, decodeId, encodeId } from "./edges";
 
 const nodeTypes = { card: NodeCard };
+const edgeTypes = { load: LoadEdge };
 
 function Flow() {
   const view = useDraft((s) => s.view);
@@ -39,12 +42,28 @@ function Flow() {
    */
   const [measured, setMeasured] = useState<Record<string, { width?: number; height?: number }>>({});
   const storeError = useDraft((s) => s.error);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+  const still = usePrefersReducedMotion();
   /** Names given a first layout already, so a refused save cannot loop. */
   const placed = useRef(new Set<string>());
 
   const doc = view?.doc ?? null;
   const layout = view?.layout;
+
+  // fit view on load (the `fitView` prop) and after a node is added, once it has its position, so
+  // no card is left cut off at an edge
+  const count = Object.keys(doc?.nodes ?? {}).length;
+  const allPlaced = Object.keys(doc?.nodes ?? {}).every((n) => layout !== undefined && n in layout);
+  const lastCount = useRef(count);
+  const wantFit = useRef(false);
+  useEffect(() => {
+    if (count > lastCount.current) wantFit.current = true;
+    lastCount.current = count;
+    if (wantFit.current && allPlaced) {
+      wantFit.current = false;
+      void fitView({ padding: 0.2, duration: still ? 0 : 200 });
+    }
+  }, [count, allPlaced, fitView, still]);
 
   // nodes with no saved position get one, once
   useEffect(() => {
@@ -72,8 +91,10 @@ function Flow() {
     }));
     const edges: Edge[] = (doc?.edges ?? []).map((e, i) => ({
       id: `e${i}`,
+      type: "load",
       source: encodeId(String(e.from)),
       target: encodeId(String(e.to)),
+      data: { from: String(e.from), to: String(e.to) },
     }));
     return { nodes, edges };
   }, [doc, layout, live, measured, selected]);
@@ -144,6 +165,7 @@ function Flow() {
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onNodeDragStop={(_, __, dragged) => onDragStop(dragged)}
           onConnect={(c) => void onConnect(c)}
@@ -152,7 +174,7 @@ function Flow() {
           deleteKeyCode={null}
           fitView
         >
-          <Background />
+          <Background color="var(--border)" />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
