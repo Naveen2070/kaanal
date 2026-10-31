@@ -18,6 +18,7 @@ function view(rps: number | null): DraftView {
     doc: { nodes: {}, ...(rps === null ? {} : { traffic: { peak: { rps, journeys: [] } } }) },
     doc_error: null,
     project_id: "none",
+    project_name: null,
     kind_defaults: {},
     layout: {},
     layout_note: null,
@@ -141,4 +142,28 @@ test("an_arrow_key_patches_and_the_slider_keeps_focus", async () => {
   // the same element, still focused: a key repeat reaches it
   expect(screen.getByLabelText("Offered load")).toBe(slider);
   expect(document.activeElement).toBe(slider);
+});
+
+test("topbar_has_one_h1_with_the_project_name", async () => {
+  await show(300);
+  const h1 = screen.getAllByRole("heading", { level: 1 });
+  expect(h1).toHaveLength(1);
+  expect(h1[0]?.textContent).toBe("Kaanal Studio");
+});
+
+test("freshness_stamp_and_draft_state_are_separate_texts", async () => {
+  await show(300);
+  const draft = screen.getByText(/^Draft: /);
+  const stamp = screen.getByRole("status");
+  expect(draft).not.toBe(stamp);
+  expect(draft.contains(stamp) || stamp.contains(draft)).toBe(false);
+  expect(stamp.textContent).not.toMatch(/Draft/);
+  expect(draft.textContent).toBe("Draft: applied · saved");
+});
+
+test("the_h1_names_the_project_folder_when_there_is_one", async () => {
+  mockFetch([{ json: { ...view(300), project_name: "petstore" } }]);
+  await useDraft.getState().load();
+  render(<TopBar onRun={vi.fn()} />);
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("petstore");
 });

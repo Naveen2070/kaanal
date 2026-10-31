@@ -1,12 +1,34 @@
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
-import { defineConfig, type ConfigEnv, type PluginOption, type UserConfig } from "vite-plus";
+import {
+  defineConfig,
+  type ConfigEnv,
+  type Plugin,
+  type PluginOption,
+  type UserConfig,
+} from "vite-plus";
 // The server embeds exactly the files the Vite manifest references (crates/kaanal-server/build.rs),
 // served from one exact-match route, `/__kaanal/studio/assets/{name}`. So the build emits hashed
 // files flat under `assets/`, a manifest, and nothing else; `postbuild` precompresses them and
 // restores ui-dist/.gitkeep (emptyOutDir is on, so an old hash never piles up in the binary).
 const KAANAL_DEV_PORT = process.env.KAANAL_DEV_PORT ?? "7777";
+
+// theme/boot.js must run before the first paint and the CSP allows no inline script, so it is a second
+// build entry (hashed, in the manifest, in the asset table) and this plugin puts its <script> first
+// in <head>. Under `vp dev` it points at the source file.
+function themeBoot(): Plugin {
+  return {
+    name: "kaanal-theme-boot",
+    transformIndexHtml(_html, ctx) {
+      const chunk = ctx.bundle
+        ? Object.values(ctx.bundle).find((c) => c.type === "chunk" && c.name === "boot")
+        : undefined;
+      const src = chunk ? `/__kaanal/studio/${chunk.fileName}` : "/src/theme/boot.js";
+      return [{ tag: "script", attrs: { src }, injectTo: "head-prepend" }];
+    },
+  };
+}
 
 // The return type is annotated on purpose: left inferred, `defineConfig<T extends
 // ViteUserConfigExport>` compares this large object literal against the whole export union and
@@ -17,6 +39,7 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => ({
     react(),
     babel({ presets: [reactCompilerPreset({ target: "19" })] }),
     tailwindcss(),
+    themeBoot(),
   ] as PluginOption[],
   // Dev mode (`pnpm dev` / `scripts/studio-dev.mjs`): the page is served by Vite, but the control
   // API is served by a real `kaanal` on another port, so `/__kaanal/*` is proxied to it. The target
@@ -53,7 +76,8 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => ({
     singleQuote: false,
     semi: true,
     trailingComma: "all",
-    ignorePatterns: ["node_modules", "pnpm-lock.yaml"],
+    // FONTS.md is formatted by dprint (the docs formatter); the two disagree on the Tamil table row
+    ignorePatterns: ["node_modules", "pnpm-lock.yaml", "FONTS.md"],
   },
   test: { environment: "jsdom" },
   // `command` is "serve" | "build"; `mode` is "development" | "production" and is NOT the
@@ -65,9 +89,12 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => ({
     outDir: "../crates/kaanal-server/ui-dist",
     emptyOutDir: true,
     manifest: true,
+    // the CSP has no `data:` in font-src (and img-src data: is not for fonts): every asset is a file
+    assetsInlineLimit: 0,
     sourcemap: false,
     cssCodeSplit: false,
     rolldownOptions: {
+      input: { main: "index.html", boot: "src/theme/boot.js" },
       output: {
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",

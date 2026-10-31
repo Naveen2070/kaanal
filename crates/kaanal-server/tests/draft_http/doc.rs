@@ -91,6 +91,19 @@ async fn project_id_is_16_hex_and_does_not_contain_the_path() {
 }
 
 #[tokio::test]
+async fn project_name_is_the_config_folders_name_and_never_a_path() {
+    let s = start(BASE).await;
+    let name = draft(&s).await["project_name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(name, s.dir.file_name().unwrap().to_string_lossy());
+    assert!(!name.contains(['/', '\\']), "{name}");
+    let none = start_with(BASE, None).await;
+    assert!(draft(&none).await["project_name"].is_null());
+}
+
+#[tokio::test]
 async fn kind_defaults_has_an_entry_for_every_node_kind() {
     let s = start(BASE).await;
     let v = draft(&s).await;

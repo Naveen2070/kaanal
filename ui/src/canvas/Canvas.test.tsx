@@ -5,7 +5,7 @@ import type { DraftView } from "../api/types";
 import { mockFetch } from "../test/fetch";
 import { useDraft } from "../store/draft";
 import { Canvas } from "./Canvas";
-import { KIND_MIME } from "./Palette";
+import { KIND_MIME, Palette } from "./Palette";
 
 // React Flow needs a real layout engine; the canvas's own behaviour is what is tested, through the
 // props it hands to React Flow.
@@ -54,6 +54,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     },
     doc_error: null,
     project_id: "none",
+    project_name: null,
     kind_defaults: { cache: { type: "cache" } },
     layout: { gw: [0, 0], "a#b/c d": [280, 0] },
     layout_note: null,
@@ -145,8 +146,10 @@ test("a_palette_drop_adds_a_node_where_it_landed", async () => {
   });
 });
 
+// the palette is a Shell slot now (App wires its onAdd to the store); this is that wiring
 test("the_palette_lists_every_kind_and_a_click_adds_one", async () => {
   await show(view());
+  render(<Palette onAdd={(kind) => void useDraft.getState().addNode(kind)} />);
   const sent = mockFetch([{ json: view() }]);
   expect(screen.getAllByRole("button")).toHaveLength(7);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: /cache/i })));

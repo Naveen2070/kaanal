@@ -1,0 +1,76 @@
+/*
+ * Design tokens (spec 3). One value per theme in `light-dark()`, which follows the used
+ * `color-scheme`: the system setting by default, the saved choice through `data-theme` on <html>
+ * (set by boot.js before the first paint). contrast.test.ts reads this file, so keep every token as
+ * `--name: light-dark(#hex, #hex);` or a plain `--name: #hex;` and keep the pairs it checks passing.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* surfaces: window ground, sheet (panels), well (inset areas), raised (hover), active (selected) */
+  --ground: light-dark(#f3f6fa, #000000);
+  --sheet: light-dark(#ffffff, #0e0e0e);
+  --well: light-dark(#f4f6f8, #161616);
+  --raised: light-dark(#f7f8fa, #1b1b1b);
+  --active: light-dark(#e9edf3, #232323);
+
+  /* lines: panel border and row rule are decoration; --control is an input edge and needs 3:1 */
+  --border: light-dark(#e4e8ee, #232323);
+  --rule: light-dark(#eef1f5, #1a1a1a);
+  --control: light-dark(#8a93a3, #6b6b6b);
+
+  /* text; --faint is placeholder text and still reaches 4.5:1 */
+  --text: light-dark(#101418, #ffffff);
+  --muted: light-dark(#586070, #a8a8a8);
+  --faint: light-dark(#5f6877, #9a9a9a);
+
+  /* blue is the one data hue; status colours are for data only */
+  --accent: light-dark(#1f6fe0, #5aa2ff);
+  --positive: light-dark(#247b50, #3fc07a);
+  --warn: light-dark(#a85d00, #e0a13a);
+  --negative: light-dark(#c4242a, #e5566f);
+  --ok-fill: light-dark(#2f9e6b, #3fc07a);
+  --warn-fill: light-dark(#c07400, #e0a13a);
+  --bad-fill: light-dark(#d9363e, #e5566f);
+
+  /* the primary button and the tooltip invert in dark */
+  --primary: light-dark(#14181d, #ffffff);
+  --on-primary: light-dark(#ffffff, #000000);
+  --tip: light-dark(#14181d, #2a2a2a);
+  --on-tip: #ffffff;
+}
+
+/* a saved choice beats the system setting */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* the `bg-sheet`, `text-muted`, ... utilities */
+@theme inline {
+  --color-ground: var(--ground);
+  --color-sheet: var(--sheet);
+  --color-well: var(--well);
+  --color-raised: var(--raised);
+  --color-active: var(--active);
+  --color-border: var(--border);
+  --color-rule: var(--rule);
+  --color-control: var(--control);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-positive: var(--positive);
+  --color-warn: var(--warn);
+  --color-negative: var(--negative);
+  --color-ok-fill: var(--ok-fill);
+  --color-warn-fill: var(--warn-fill);
+  --color-bad-fill: var(--bad-fill);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-tip: var(--tip);
+  --color-on-tip: var(--on-tip);
+}

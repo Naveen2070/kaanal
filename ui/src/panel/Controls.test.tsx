@@ -24,6 +24,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     doc: { nodes: { gw: { type: "gateway" }, app, db: { type: "database" } }, edges },
     doc_error: null,
     project_id: "none",
+    project_name: null,
     kind_defaults: {},
     layout: {},
     layout_note: null,

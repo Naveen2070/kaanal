@@ -20,7 +20,7 @@ export function Panel() {
     <aside
       data-tour="panel"
       aria-label="Details"
-      className="flex w-80 flex-col overflow-y-auto border-l"
+      className="flex w-[300px] shrink-0 flex-col overflow-y-auto rounded-2xl border border-border bg-sheet"
     >
       <div role="tablist" className="flex border-b">
         {TABS.map((t) => (

@@ -41,6 +41,7 @@ function view(doc: DraftView["doc"]): DraftView {
     doc,
     doc_error: null,
     project_id: "none",
+    project_name: null,
     kind_defaults: {},
     layout: {},
     layout_note: null,

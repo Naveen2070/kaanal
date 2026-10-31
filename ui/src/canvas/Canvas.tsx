@@ -19,7 +19,7 @@ import type { Layout } from "../api/types";
 import { useDraft } from "../store/draft";
 import { useSelected } from "../store/view";
 import { NodeCard, type CardData } from "./NodeCard";
-import { KIND_MIME, Palette } from "./Palette";
+import { KIND_MIME } from "./Palette";
 import { autoLayout, decodeId, encodeId } from "./edges";
 
 const nodeTypes = { card: NodeCard };
@@ -118,10 +118,9 @@ function Flow() {
   };
 
   return (
-    <div className="flex h-full">
-      <Palette onAdd={(kind) => void addNode(kind)} />
+    <div className="relative h-full">
       <div
-        className="relative flex-1"
+        className="relative h-full"
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes(KIND_MIME)) e.preventDefault();
         }}

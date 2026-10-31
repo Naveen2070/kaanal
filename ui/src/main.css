@@ -1,4 +1,46 @@
 @import "tailwindcss";
+@import "./theme/tokens.css";
+
+/* Fonts (ui/FONTS.md). `swap` shows text at once; the metric-matched fallback keeps the swap from
+   moving anything. Only Inter is preloaded; the others load when a rule uses them. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./fonts/inter-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("./fonts/jetbrains-mono-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans Tamil";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./fonts/noto-sans-tamil-lockup.woff2") format("woff2");
+}
+
+/* Arial scaled to Inter's metrics, used until Inter arrives */
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial");
+  size-adjust: 107.4%;
+  ascent-override: 90.2%;
+  descent-override: 22.5%;
+  line-gap-override: 0%;
+}
+
+@theme {
+  --font-sans: "Inter", "Inter Fallback", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
 
 html,
 body,
@@ -8,20 +50,12 @@ body,
 
 body {
   margin: 0;
-  font-family: system-ui, sans-serif;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font-sans);
 }
 
 /* the loader and the quote's fade; a person who asked for less motion gets neither */
-@keyframes kaanal-bar {
-  0%,
-  100% {
-    transform: scaleY(0.25);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-
 @keyframes kaanal-fade {
   from {
     opacity: 0;
@@ -31,17 +65,71 @@ body {
   }
 }
 
-.kaanal-bar {
-  animation: kaanal-bar 1.1s ease-in-out infinite;
-}
-
 .kaanal-fade {
   animation: kaanal-fade 0.6s ease-out;
 }
 
+/* the mirage loader (brand/Loader.tsx): sky, water and art tones, flat, one per theme */
+.kaanal-loader {
+  --kl-sky: light-dark(#eef3f9, #070707);
+  --kl-water: light-dark(#e8eef6, #0b0b0b);
+  --kl-art: light-dark(#bcc8da, #333333);
+  background: var(--ground);
+  color: var(--text);
+}
+
+/* each band drifts sideways (by --a px) under the flip; transform only, so it is composited */
+@keyframes kaanal-shimmer {
+  from {
+    transform: translateX(calc(var(--a) * -1px)) scaleY(-1);
+  }
+  to {
+    transform: translateX(calc(var(--a) * 1px)) scaleY(-1);
+  }
+}
+
+.kaanal-loader [data-band] img {
+  transform: scaleY(-1);
+}
+
+.kaanal-shimmer {
+  animation: kaanal-shimmer 3.4s ease-in-out infinite alternate;
+}
+
+/* the request dash travels the node edges */
+@keyframes kaanal-dash {
+  from {
+    stroke-dashoffset: 44;
+  }
+  to {
+    stroke-dashoffset: -1500;
+  }
+}
+
+.kaanal-dash {
+  stroke-dasharray: 44 3000;
+  animation: kaanal-dash 6s linear infinite;
+}
+
+/* the reveal: the slices fade first, then the whole picture, 0.9 s in all, onto the ground */
+.kaanal-settle [data-band] {
+  opacity: 0 !important;
+  transition: opacity 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.kaanal-settle > * {
+  opacity: 0;
+  transition: opacity 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.4s;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .kaanal-bar,
-  .kaanal-fade {
+  .kaanal-fade,
+  .kaanal-shimmer,
+  .kaanal-dash {
     animation: none;
+  }
+
+  .kaanal-dash {
+    display: none;
   }
 }

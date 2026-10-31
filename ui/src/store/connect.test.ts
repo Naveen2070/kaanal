@@ -17,6 +17,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     },
     doc_error: null,
     project_id: "none",
+    project_name: null,
     kind_defaults: { service: { type: "service", concurrency: 32 } },
     layout: { gw: [0, 0], app: [280, 0], db: [560, 0] },
     layout_note: null,

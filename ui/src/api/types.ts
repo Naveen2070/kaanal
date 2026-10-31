@@ -44,6 +44,8 @@ export interface DraftView {
   doc: Doc | null;
   doc_error: Diagnostic | null;
   project_id: string;
+  /** The config file's folder name (a base name, never a path); null with no file. */
+  project_name: string | null;
   /** Per node kind, the node Studio creates. */
   kind_defaults: Record<string, NodeDoc>;
   layout: Layout;

@@ -5,9 +5,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./main.css";
+import { initTheme } from "./theme/theme";
 import { captureToken } from "./token";
 
 captureToken(window);
+// boot.js already did this before the first paint; this covers a dev page without it
+initTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

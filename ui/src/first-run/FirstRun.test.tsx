@@ -20,6 +20,7 @@ function view(projectId: string, text = ""): DraftView {
     doc: { nodes: {} },
     doc_error: null,
     project_id: projectId,
+    project_name: null,
     kind_defaults: {},
     layout: {},
     layout_note: null,

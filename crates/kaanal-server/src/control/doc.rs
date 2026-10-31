@@ -48,6 +48,14 @@ pub(super) fn project_id(file: Option<&std::path::Path>) -> String {
     })
 }
 
+/// **Private.** The name of the folder the config file sits in (a base name, never a path), cut
+/// to 80 characters, for the top bar's heading; `None` with no file or a folder with no name.
+pub(super) fn project_name(file: Option<&std::path::Path>) -> Option<String> {
+    let dir = file?.parent()?.file_name()?.to_string_lossy();
+    let name: String = dir.chars().take(80).collect();
+    (!name.trim().is_empty()).then_some(name)
+}
+
 /// **Private.** Per node kind, what a Studio-created node starts as: parsed from
 /// [`presets::starter`], the one place those capacities are defined.
 pub(super) fn kind_defaults() -> &'static Value {

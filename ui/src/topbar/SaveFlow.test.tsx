@@ -16,6 +16,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     doc: { nodes: {}, traffic: { peak: {} } },
     doc_error: null,
     project_id: "p",
+    project_name: null,
     kind_defaults: {},
     layout: {},
     layout_note: null,
@@ -48,9 +49,11 @@ afterEach(() => {
 
 test("the_applied_and_dirty_indicators_follow_the_draft_view", async () => {
   await show(view({ dirty: false }));
-  expect(screen.getByText("Applied")).toBeTruthy();
-  act(() => useDraft.setState({ view: view({ dirty: true, layout_dirty: true }) }));
-  expect(screen.getByText("Not applied, positions not saved")).toBeTruthy();
+  expect(screen.getByText("Draft: applied · saved")).toBeTruthy();
+  act(() => useDraft.setState({ view: view({ dirty: true, saved: false }) }));
+  expect(screen.getByText("Draft: not applied · not saved")).toBeTruthy();
+  act(() => useDraft.setState({ view: view({ dirty: false, saved: false }) }));
+  expect(screen.getByText("Draft: applied · not saved")).toBeTruthy();
 });
 
 test("save_checks_the_draft_then_writes_the_file_and_says_what_was_written", async () => {

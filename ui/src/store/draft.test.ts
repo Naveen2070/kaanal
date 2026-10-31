@@ -17,6 +17,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
     },
     doc_error: null,
     project_id: "none",
+    project_name: null,
     kind_defaults: { cache: { type: "cache", flavor: "redis" } },
     layout: {},
     layout_note: null,

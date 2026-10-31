@@ -16,6 +16,7 @@ const view: DraftView = {
   doc: { nodes: { app: { type: "service", concurrency: 4 } }, edges: [] },
   doc_error: null,
   project_id: "none",
+  project_name: null,
   kind_defaults: {},
   layout: {},
   layout_note: null,

@@ -4,7 +4,7 @@
 // what the screen shows. A result opens in a modal dialog: what Apply kept and dropped, what Save
 // would lose, a draft that would not start, a conflict with the file on disk, or a refusal.
 
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import type { ApplyResult, SaveResult, ValidateResult } from "../api/types";
 import { useDraft } from "../store/draft";
@@ -33,7 +33,9 @@ function Modal({
   children: React.ReactNode;
 }) {
   const box = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  // a layout effect: the dialog is open in the commit that adds it, so nothing (a screen reader, a
+  // role query) sees it closed for a tick
+  useLayoutEffect(() => {
     const d = box.current;
     if (!d) return;
     // when the dialog goes, focus goes back to the button that opened it
@@ -170,9 +172,8 @@ export function SaveFlow() {
 
   return (
     <>
-      <span className={`text-xs ${dirty ? "text-amber-700" : "text-neutral-500"}`}>
-        {dirty ? "Not applied" : "Applied"}
-        {view?.layout_dirty ? ", positions not saved" : ""}
+      <span className={`text-xs ${dirty ? "text-warn" : "text-muted"}`}>
+        {`Draft: ${dirty ? "not applied" : "applied"} · ${view?.saved === false ? "not saved" : "saved"}`}
       </span>
       <button
         type="button"

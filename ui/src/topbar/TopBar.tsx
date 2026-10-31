@@ -8,6 +8,7 @@ import { LIMITS, setRate } from "../panel/fields";
 import { useFirstRun } from "../first-run/store";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
+import { Mark } from "../brand/Mark";
 import { SaveFlow } from "./SaveFlow";
 
 const SLIDER_KEYS = new Set([
@@ -100,7 +101,11 @@ export function TopBar({ onRun }: { onRun: () => void }) {
           : "Edit anything: it re-runs after a short pause.";
 
   return (
-    <header className="flex flex-wrap items-center gap-4 border-b px-3 py-1 text-sm">
+    <header className="flex min-h-11 flex-wrap items-center gap-4 px-4 py-1 text-sm">
+      <h1 className="flex items-center gap-2 text-base font-semibold">
+        <Mark size={20} variant="sun" className="text-accent" />
+        {view?.project_name ?? "Kaanal Studio"}
+      </h1>
       <div className="flex items-center gap-2">
         <label htmlFor={id}>Offered load</label>
         <div className="relative flex items-center">
