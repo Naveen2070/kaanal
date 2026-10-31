@@ -4,7 +4,7 @@
 // and headroom is capacity, not a prediction.
 
 import type { NodeDoc, NodeSummary, Summary } from "../api/types";
-import { durationMs, hasProc, slotsOf } from "../panel/fields";
+import { durationMs, hasProc, slotsOf, worksOutTo } from "../panel/fields";
 
 export interface Figures {
   /** Measured utilization 0..1; null without a run or without slots. */
@@ -78,6 +78,25 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
     slowestUnderMs: finiteOrNull(node.p99_ms),
     sentence: sentenceOf(node, peakWaiting, arrivingPerS),
   };
+}
+
+const nf = (n: number, digits = 0) => n.toLocaleString("en-US", { maximumFractionDigits: digits });
+
+/**
+ * "Can finish up to 1,280/s · 32 at once ÷ 25 ms" (with copies: "3 × 32 at once"). Local arithmetic
+ * on the config, so the control bar shows it live while a slider moves; null without a time.
+ */
+export function capacityLine(
+  slots: number | null,
+  ms: number | null,
+  copies: number,
+): string | null {
+  if (ms === null) return null;
+  if (slots === null) return "No slot limit · never saturates";
+  const at = `${copies > 1 ? `${nf(copies)} × ` : ""}${nf(slots)} at once ÷ ${nf(ms, 3)} ms`;
+  if (ms <= 0) return `No limit · ${at}`;
+  const perS = worksOutTo(slots, ms, copies).capacityPerS;
+  return `Can finish up to ${perS < 10 ? twoSignificant(perS) : nf(perS)}/s · ${at}`;
 }
 
 const finiteOrNull = (x: number | null | undefined): number | null =>

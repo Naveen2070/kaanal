@@ -2,6 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { nodeSummary } from "../test/summary";
 import {
   chaosBody,
+  controlRows,
   deleteOps,
   durationMs,
   queueOf,
@@ -117,4 +118,63 @@ test("chaos_targets_are_structured_objects_never_strings", () => {
   for (const v of Object.values(chaosBody({ edge: { from: "a", to: "b" } }, { kind: "clear" }))) {
     expect(typeof v === "string" && v.includes("->")).toBe(false);
   }
+});
+
+// ---- T3.1: the rows the control bar shows, per node kind (R1.99) ----
+
+const ids = (kind: string, config: Record<string, unknown> = {}) =>
+  controlRows(kind, { type: kind, ...config }).map((r) => r.id);
+
+test("gateway_service_monolith_auth_get_time_slots_copies", () => {
+  for (const kind of ["gateway", "service", "monolith", "auth"]) {
+    expect(ids(kind, { proc: "5ms" }), kind).toEqual(["time", "slots", "copies"]);
+  }
+});
+
+test("external_api_gets_time_slots_copies", () => {
+  expect(ids("external-api", { proc: "120ms", pool: { size: 8 } })).toEqual([
+    "time",
+    "slots",
+    "copies",
+  ]);
+});
+
+test("database_and_cache_have_no_time_row", () => {
+  // their cost comes from the flavor (ops, hit, miss): a `proc` patch would make the draft invalid
+  expect(ids("database", { pool: { size: 10 } })).toEqual(["slots", "copies"]);
+  expect(ids("cache")).toEqual(["slots", "copies"]);
+});
+
+test("a_distribution_proc_is_read_only_with_the_yaml_note", () => {
+  const rows = controlRows("service", { type: "service", proc: { p50: "4ms", p99: "20ms" } });
+  const time = rows.find((r) => r.id === "time")!;
+  expect(time.editable).toBe(false);
+  expect(time.why).toBe("edit in kaanal.yaml");
+  // the others stay editable
+  expect(rows.filter((r) => r.id !== "time").every((r) => r.editable && r.why === undefined)).toBe(
+    true,
+  );
+});
+
+test("a_plain_duration_or_no_proc_at_all_is_editable", () => {
+  for (const cfg of [{ proc: "25ms" }, { proc: "2s" }, {}]) {
+    const time = controlRows("service", { type: "service", ...cfg }).find((r) => r.id === "time")!;
+    expect(time.editable, JSON.stringify(cfg)).toBe(true);
+  }
+  // text that is not a duration is not something the bar can rewrite safely
+  const odd = controlRows("service", { type: "service", proc: "fast" }).find(
+    (r) => r.id === "time",
+  )!;
+  expect(odd.editable).toBe(false);
+});
+
+test("slots_maps_to_concurrency_limit_or_pool_size", () => {
+  expect(slotsOf({ type: "service", concurrency: 12 }).value).toBe(12);
+  expect(slotsOf({ type: "service", concurrency: { limit: 7, queue: 3 } }).value).toBe(7);
+  expect(slotsOf({ type: "database", pool: { size: 10 } })).toEqual({ value: 10, from: "pool" });
+  expect(slotsOf({ type: "service" }).value).toBeNull();
+});
+
+test("an_unknown_kind_gets_no_time_row_rather_than_a_guess", () => {
+  expect(ids("mystery")).toEqual(["slots", "copies"]);
 });

@@ -1,14 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { NodeProps } from "@xyflow/react";
-import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView } from "../api/types";
+import { afterEach, expect, test, vi } from "vite-plus/test";
 import { expectNoViolations } from "../test/axe";
-import { mockFetch } from "../test/fetch";
 import { nodeSummary } from "../test/summary";
-import { useDraft } from "../store/draft";
 import { FeedContext, type StatsFeed } from "./feed";
 import { NodeCard } from "./NodeCard";
-import { durationMs } from "../panel/fields";
 
 vi.mock("@xyflow/react", () => ({
   Handle: () => null,
@@ -32,31 +28,7 @@ const feedOf = (n: ReturnType<typeof nodeSummary> | undefined, dimmed = false): 
   peakVisits: n?.visits_per_s ?? 0,
 });
 
-function view(doc: DraftView["doc"]): DraftView {
-  return {
-    text: "",
-    dirty: false,
-    generation: 1,
-    lost: [],
-    rev: 0,
-    boot: "b",
-    doc,
-    doc_error: null,
-    project_id: "none",
-    project_name: null,
-    kind_defaults: {},
-    layout: {},
-    layout_note: null,
-    layout_dirty: false,
-    saved: true,
-  };
-}
-
-beforeEach(() => useDraft.setState({ view: null, error: null, restarted: false }));
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+afterEach(cleanup);
 
 test("a_card_with_no_run_says_no_run_yet", () => {
   card(feedOf(undefined));
@@ -138,49 +110,6 @@ test("a_distribution_and_a_database_have_their_own_config_words", () => {
   expect(screen.getByText("Database · 1 copy × 10 slots")).toBeTruthy(); // no Time row for a database
 });
 
-/** The draft store with `doc` loaded from the (mocked) server, as the app does. */
-async function loaded(doc: DraftView["doc"]) {
-  mockFetch([{ json: view(doc) }]);
-  await useDraft.getState().load();
-}
-
-test("editing_replicas_in_the_quick_card_patches_the_draft", async () => {
-  await loaded({ nodes: { app: config } });
-  const sent = mockFetch([{ json: view({ nodes: { app: { ...config, replicas: 4 } } }) }]);
-  card(feedOf(undefined));
-  const input = screen.getByLabelText("Instances") as HTMLInputElement;
-  fireEvent.change(input, { target: { value: "4" } });
-  fireEvent.blur(input);
-  await vi.waitFor(() => expect(sent).toHaveLength(1));
-  expect(sent[0]?.body).toEqual({
-    patch: [{ op: "insert", path: ["nodes", "app", "replicas"], value: 4 }],
-  });
-});
-
-test("editing_the_service_time_sets_proc_and_a_bad_value_sends_nothing", async () => {
-  await loaded({ nodes: { app: config } });
-  const sent = mockFetch([{ json: view({ nodes: { app: { ...config, proc: "50ms" } } }) }]);
-  card(feedOf(undefined));
-  const time = screen.getByLabelText("Time (ms)") as HTMLInputElement;
-  fireEvent.change(time, { target: { value: "" } });
-  fireEvent.blur(time);
-  fireEvent.change(time, { target: { value: "-5" } });
-  fireEvent.blur(time);
-  expect(sent).toHaveLength(0);
-  fireEvent.change(time, { target: { value: "50" } });
-  fireEvent.keyDown(time, { key: "Enter" });
-  await vi.waitFor(() => expect(sent).toHaveLength(1));
-  expect(sent[0]?.body).toEqual({
-    patch: [{ op: "set", path: ["nodes", "app", "proc"], value: "50ms" }],
-  });
-});
-
-test("a_distribution_is_not_editable_in_the_quick_card", () => {
-  card(feedOf(undefined), { type: "service", proc: { p50: "4ms", p99: "20ms" } });
-  expect(screen.queryByLabelText("Time (ms)")).toBeNull();
-  expect(durationMs("1.5s")).toBe(1500);
-});
-
 // the card reads a feed; if it imported the run store a later live stream would have to rewrite it
 const sources = import.meta.glob("./*.{ts,tsx}", {
   query: "?raw",
@@ -189,7 +118,7 @@ const sources = import.meta.glob("./*.{ts,tsx}", {
 }) as Record<string, string>;
 
 test("the_card_does_not_import_the_run_store", () => {
-  for (const f of ["./NodeCard.tsx", "./QuickControls.tsx", "./Meter.tsx", "./metrics.ts"]) {
+  for (const f of ["./NodeCard.tsx", "./ControlBar.tsx", "./Meter.tsx", "./metrics.ts"]) {
     expect(sources[f], f).toBeDefined();
     expect(sources[f], f).not.toMatch(/store\/run|useRun/);
   }

@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { nodeSummary } from "../test/summary";
-import { nodeFigures, percent, twoSignificant } from "./metrics";
+import { capacityLine, nodeFigures, percent, twoSignificant } from "./metrics";
 
 test("figures_take_the_peak_from_the_busy_series", () => {
   const f = nodeFigures(nodeSummary(), { type: "service" });
@@ -133,4 +133,14 @@ test("figures_agree_between_card_sentence_and_kpi", () => {
   expect(card.headroomText).toBe(`saturates near ${twoSignificant(kpi.atReqS)} req/s`);
   expect(card.saturated).toBe(kpi.saturatedNow);
   expect(card.sentence.startsWith("Saturated")).toBe(kpi.saturatedNow);
+});
+
+test("capacity_line_reads_slots_copies_and_time_in_words", () => {
+  expect(capacityLine(32, 25, 1)).toBe("Can finish up to 1,280/s · 32 at once ÷ 25 ms");
+  expect(capacityLine(32, 25, 3)).toBe("Can finish up to 3,840/s · 3 × 32 at once ÷ 25 ms");
+  expect(capacityLine(1, 60_000, 1)).toBe("Can finish up to 0.017/s · 1 at once ÷ 60,000 ms");
+  expect(capacityLine(1, 400, 1)).toBe("Can finish up to 2.5/s · 1 at once ÷ 400 ms");
+  expect(capacityLine(4, 0, 1)).toBe("No limit · 4 at once ÷ 0 ms"); // never Infinity or NaN
+  expect(capacityLine(null, 25, 1)).toBe("No slot limit · never saturates");
+  expect(capacityLine(32, null, 1)).toBeNull();
 });

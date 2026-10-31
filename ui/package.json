@@ -12,6 +12,7 @@
     "size": "node scripts/size.mjs"
   },
   "dependencies": {
+    "@radix-ui/react-slider": "1.6.1",
     "@xyflow/react": "^12.12.0",
     "lucide-react": "^1.65.0",
     "nuqs": "^2.10.2",

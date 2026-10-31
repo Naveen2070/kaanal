@@ -176,3 +176,29 @@ export function chaosBody(target: ChaosTarget, action: ChaosAction): Record<stri
       return { ...target, down: false, latency_ms: 0, error_rate: 0 };
   }
 }
+
+export interface Row {
+  id: "time" | "slots" | "copies";
+  editable: boolean;
+  /** Why a row is read-only, shown in the row. */
+  why?: string;
+}
+
+/**
+ * The rows the control bar shows for a node (R1.99). Time is the node's `proc`: a database or cache
+ * has none (its cost comes from its flavor, and a `proc` patch would make the draft invalid), and a
+ * `proc` that is a distribution (or any text that is not a plain duration) is shown but not edited.
+ */
+export function controlRows(kind: string, config: NodeDoc): Row[] {
+  const rows: Row[] = [];
+  if (hasProc(kind)) {
+    const plain = !("proc" in config) || durationMs(config.proc) !== null;
+    rows.push(
+      plain
+        ? { id: "time", editable: true }
+        : { id: "time", editable: false, why: "edit in kaanal.yaml" },
+    );
+  }
+  rows.push({ id: "slots", editable: true }, { id: "copies", editable: true });
+  return rows;
+}
