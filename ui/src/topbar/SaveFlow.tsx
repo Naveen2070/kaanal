@@ -186,6 +186,7 @@ export function SaveFlow() {
       </button>
       <button
         type="button"
+        data-tour="save"
         disabled={busy !== null || view?.doc == null}
         onClick={() => void save({ check: true, confirmLoss: false })}
         title="Write the draft to kaanal.yaml"

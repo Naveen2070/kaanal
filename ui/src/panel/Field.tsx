@@ -2,9 +2,12 @@
 // not on every keystroke, so half-typed values never reach the draft.
 
 import { useId } from "react";
+import type { HelpId } from "../help/copy";
+import { HelpPopover } from "../help/HelpPopover";
 
 export function NumberField({
   label,
+  help,
   hint,
   value,
   onCommit,
@@ -14,6 +17,8 @@ export function NumberField({
   integer = false,
 }: {
   label: string;
+  /** The jargon behind the label, as a help popover. */
+  help?: HelpId;
   hint: string;
   value: number | null;
   /** May return whether the edit was accepted; a refusal puts the real value back in the box. */
@@ -43,9 +48,12 @@ export function NumberField({
   };
   return (
     <div className="mb-2">
-      <label htmlFor={id} className="block text-sm font-medium">
-        {label}
-      </label>
+      <div className="flex items-center gap-0.5">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        {help ? <HelpPopover id={help} label={label} /> : null}
+      </div>
       <input
         id={id}
         key={value ?? "none"}

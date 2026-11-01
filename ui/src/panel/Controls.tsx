@@ -174,6 +174,7 @@ export function Controls({
       <Section title="How much it can handle">
         <NumberField
           label="Slots"
+          help="slots"
           hint="How many requests it works on at once. More slots, more throughput."
           value={slots.value}
           min={LIMITS.slots.min}
@@ -183,6 +184,7 @@ export function Controls({
         />
         <NumberField
           label="Copies"
+          help="copies"
           hint="Copies of this component, each with its own slots and queue."
           value={replicas}
           min={LIMITS.instances.min}
@@ -198,6 +200,7 @@ export function Controls({
         ) : serviceMs !== null || !("proc" in config) ? (
           <NumberField
             label="Service time (ms)"
+            help="time"
             hint={
               serviceMs === null && slots.value !== null
                 ? "Not set: this component never saturates, however much load you add. Set a time."
@@ -218,6 +221,7 @@ export function Controls({
         {queue !== null ? (
           <NumberField
             label="Queue limit"
+            help="queue"
             hint="Requests that may wait for a slot. Past it they are turned away."
             value={queue}
             min={LIMITS.queue.min}

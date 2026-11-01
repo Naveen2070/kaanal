@@ -3,6 +3,8 @@
 // errors and dropped. Every figure comes from the newest run through the same selectors the cards
 // use. A slider commits on release, never on every move; a refused typed value puts the real one back.
 
+import { HelpPopover } from "../help/HelpPopover";
+import type { HelpId } from "../help/copy";
 import { useState } from "react";
 import { rpsFromSlider, SLIDER_MAX, sliderFromRps } from "../canvas/logScale";
 import { breaksFirst, twoSignificant } from "../canvas/metrics";
@@ -26,16 +28,21 @@ const nf = (n: number, digits = 0) =>
 
 function Cell({
   label,
+  help,
   className = "",
   children,
 }: {
   label: string;
+  help?: HelpId;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-xs text-muted">{label}</dt>
+      <dt className="flex items-center gap-0.5 text-xs text-muted">
+        {label}
+        {help ? <HelpPopover id={help} label={label} /> : null}
+      </dt>
       <dd className={`m-0 tabular-nums ${className}`}>{children}</dd>
     </div>
   );
@@ -92,11 +99,13 @@ export function KpiStrip() {
   return (
     <section
       aria-label="Key figures"
+      data-tour="load"
       className="flex flex-wrap items-end gap-x-8 gap-y-2 px-4 pb-2"
     >
       <dl className={`m-0 flex flex-wrap items-end gap-x-8 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
         <Cell
           label="Breaks first"
+          help="saturation"
           className={`text-2xl font-semibold ${
             breaks === null ? "text-muted" : breaks.saturatedNow ? "text-negative" : "text-text"
           }`}
@@ -150,10 +159,18 @@ export function KpiStrip() {
             </span>
           </span>
         </Cell>
-        <Cell label="System p99" className={`text-base ${hasRequests ? "" : "text-muted"}`}>
+        <Cell
+          label="System p99"
+          help="p99"
+          className={`text-base ${hasRequests ? "" : "text-muted"}`}
+        >
           {hasRequests && s ? `${nf(s.latency.p99_ms, 1)} ms` : "–"}
         </Cell>
-        <Cell label="Goodput" className={`text-base ${goodput === undefined ? "text-muted" : ""}`}>
+        <Cell
+          label="Goodput"
+          help="goodput"
+          className={`text-base ${goodput === undefined ? "text-muted" : ""}`}
+        >
           {goodput === undefined ? "–" : `${nf(goodput)}/s`}
         </Cell>
         <Cell label="Errors" className={`text-base ${s ? "" : "text-muted"}`}>

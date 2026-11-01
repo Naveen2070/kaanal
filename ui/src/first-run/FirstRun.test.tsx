@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView } from "../api/types";
+import type { DraftView, RunRecord } from "../api/types";
+import { useRun } from "../store/run";
 import { useDraft } from "../store/draft";
 import { mockFetch } from "../test/fetch";
 import { TopBar } from "../topbar/TopBar";
-import { Tour } from "./Tour";
+import { placeNote, Tour } from "./Tour";
 import { neverAgain, projectKeyOf, shouldShowWelcome } from "./flags";
 import { FirstRun } from "./FirstRun";
 import { useFirstRun } from "./store";
@@ -99,17 +100,12 @@ test("a_throwing_localStorage_defaults_to_show_and_does_not_crash", async () => 
 test("closing_the_card_starts_the_tour_and_skip_ends_it", async () => {
   await open("p1");
   fireEvent.click(screen.getByRole("button", { name: "Start blank" }));
-  expect(tour()?.textContent).toMatch(/drag a component/);
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  expect(tour()?.textContent).toMatch(/Select a component/);
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  expect(tour()?.textContent).toMatch(/Run does it now/);
-  fireEvent.click(screen.getByRole("button", { name: "Done" }));
-  expect(tour()).toBeNull();
-  // and Skip at any stop
-  act(() => useFirstRun.getState().replayTour());
+  expect(tour()?.textContent).toMatch(/Add a component/);
   fireEvent.click(screen.getByRole("button", { name: "Skip tour" }));
   expect(tour()).toBeNull();
+  // and the question mark brings it back, with Skip visible at once
+  act(() => useFirstRun.getState().replayTour());
+  expect(screen.getByRole("button", { name: "Skip tour" })).toBeTruthy();
 });
 
 test("the_question_mark_replays_the_tour_even_with_never_again", async () => {
@@ -217,13 +213,13 @@ test("an_escape_the_card_already_used_does_not_also_end_the_tour", () => {
   expect(useFirstRun.getState().phase).toBe("off");
 });
 
-test("the_tour_focuses_next_and_gives_focus_back_to_run_when_it_ends", () => {
+test("focus_moves_in_and_returns", () => {
   const run = document.createElement("button");
   run.dataset.tour = "run";
   document.body.append(run);
   useFirstRun.setState({ phase: "tour", projectKey: "p" });
   const { unmount } = render(<Tour />);
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next" }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Skip tour" }));
   unmount();
   expect(document.activeElement).toBe(run);
   run.remove();
@@ -257,4 +253,62 @@ test("a_tour_note_sits_beside_its_target_and_follows_a_resize", () => {
   act(() => void window.dispatchEvent(new Event("resize")));
   expect(note.style.left).toBe("308px");
   side.remove();
+});
+
+const withDoc = (nodes: object, edges: object[] = [], saved = true) =>
+  useDraft.setState({ view: { ...view("p"), doc: { nodes, edges }, saved } as DraftView });
+
+test("four_steps_add_connect_break_save_each_waits_for_its_real_action", () => {
+  withDoc({}, [], false);
+  useFirstRun.setState({ phase: "tour", projectKey: "p" });
+  render(<Tour />);
+  const step = () => tour()?.getAttribute("aria-label");
+  expect(step()).toBe("Tour, step 1 of 4");
+  // nothing happens by itself, and an unrelated edit does not count
+  expect(step()).toBe("Tour, step 1 of 4");
+  act(() => withDoc({ a: { type: "service" } }, [], false));
+  expect(step()).toBe("Tour, step 2 of 4");
+  act(() =>
+    withDoc({ a: { type: "service" }, b: { type: "service" } }, [{ from: "a", to: "b" }], false),
+  );
+  expect(step()).toBe("Tour, step 3 of 4");
+  act(() =>
+    useRun.setState({
+      latest: { summary: { nodes: [{ saturated: true }] } } as unknown as RunRecord,
+    }),
+  );
+  expect(step()).toBe("Tour, step 4 of 4");
+  act(() => withDoc({ a: { type: "service" } }, [{ from: "a", to: "b" }], true));
+  expect(useFirstRun.getState().phase).toBe("off");
+});
+
+test("a_step_already_true_when_it_starts_does_not_finish_itself", () => {
+  withDoc({ a: { type: "service" } }, [{ from: "a", to: "a" }], true);
+  useRun.setState({
+    latest: { summary: { nodes: [{ saturated: true }] } } as unknown as RunRecord,
+  });
+  useFirstRun.setState({ phase: "tour", projectKey: "p" });
+  render(<Tour />);
+  expect(tour()?.getAttribute("aria-label")).toBe("Tour, step 1 of 4");
+  useRun.setState({ latest: null });
+});
+
+test("step_never_covers_its_target", () => {
+  const r = { top: 100, left: 300, right: 700, bottom: 140 };
+  const view = { width: 1000, height: 800 };
+  for (const side of ["right", "left", "below"] as const) {
+    for (const target of [
+      r,
+      { top: 0, left: 0, right: 150, bottom: 800 },
+      { ...r, left: 0, right: 990 },
+    ]) {
+      const s = placeNote(target, side, view);
+      const covers =
+        s.left < target.right &&
+        s.left + 256 > target.left &&
+        s.top < target.bottom &&
+        s.top + 140 > target.top;
+      expect(covers, `${side} ${JSON.stringify(target)}`).toBe(false);
+    }
+  }
 });

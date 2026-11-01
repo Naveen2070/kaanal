@@ -4,10 +4,10 @@
 // move, and while it moves only the capacity line is live; a typed box commits on Enter or blur; a
 // refused or out-of-range number puts the real value back and sends nothing. 0 ms is allowed.
 
-import { CircleHelp } from "lucide-react";
 import { useRef, useState } from "react";
 import type { NodeDoc, Op } from "../api/types";
 import { Slider } from "../components/ui/slider";
+import { HelpPopover } from "../help/HelpPopover";
 import {
   controlRows,
   durationMs,
@@ -231,15 +231,7 @@ export function ControlBar({
             <div className="flex items-center justify-between gap-2">
               <span className="flex items-center gap-1 font-medium text-text">
                 {s.label}
-                {/* T6.1 makes this a help popover; the id names its copy */}
-                <button
-                  type="button"
-                  aria-label={`About ${s.label}`}
-                  data-help={row.id}
-                  className="inline-flex size-6 items-center justify-center rounded-full text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  <CircleHelp size={14} aria-hidden />
-                </button>
+                <HelpPopover id={row.id} label={s.label} />
               </span>
               {row.editable ? (
                 <span className="flex items-center gap-1 text-muted">
