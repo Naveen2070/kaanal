@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { ApiError, api } from "../api/client";
 import type { DraftView, Layout, Op } from "../api/types";
 import { connectOps, lastEdgeIndex, uniqueName } from "../canvas/edges";
+import { notify } from "../toast/toasts";
 import { history, invertOps } from "./history";
 import { applyOps } from "./optimistic";
 
@@ -41,6 +42,13 @@ interface DraftState {
   /** Steps back / forward through the recorded edits; false when there is nothing to step to or it was refused. */
   undo: () => Promise<boolean>;
   redo: () => Promise<boolean>;
+}
+
+/** A step through the history worked: the problems it may have fixed are cleared at once, and it is said. */
+function stepDone(word: string) {
+  notify.clear("run");
+  notify.clear("draft");
+  notify.info(word, "history-step");
 }
 
 export type ConnectResult = { ok: true; warning?: string } | { ok: false; message: string };
@@ -189,6 +197,7 @@ export const useDraft = create<DraftState>((set, get) => {
       const ok = await get().patch(ops, undefined, { record: false });
       // a step the draft refuses means the history is stale: drop it rather than offer more
       if (!ok) history.clear();
+      else stepDone("Undone");
       return ok;
     },
     async redo() {
@@ -196,6 +205,7 @@ export const useDraft = create<DraftState>((set, get) => {
       if (!ops) return false;
       const ok = await get().patch(ops, undefined, { record: false });
       if (!ok) history.clear();
+      else stepDone("Redone");
       return ok;
     },
     setLayout(positions) {

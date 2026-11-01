@@ -45,6 +45,22 @@ export function visibleCentre(canvas: Box, pads: Pads): { x: number; y: number }
   };
 }
 
+/** A card's size in flow units plus a gap, for keeping new cards off old ones. */
+const SLOT_W = 260;
+const SLOT_H = 210;
+
+/** `at`, or the nearest free slot to the right of it, when a card already sits there. */
+export function freeSpot(at: [number, number], taken: [number, number][]): [number, number] {
+  const hit = (p: [number, number]) =>
+    taken.some((t) => Math.abs(t[0] - p[0]) < SLOT_W && Math.abs(t[1] - p[1]) < SLOT_H);
+  let p = at;
+  for (let n = 0; n < 50 && hit(p); n++) {
+    p = [p[0] + SLOT_W, p[1]];
+    if (n % 6 === 5) p = [at[0], p[1] + SLOT_H]; // a row full: the next row
+  }
+  return p;
+}
+
 /** True when `box` (screen coordinates) lies wholly in the visible area. */
 export function isVisible(box: Box, canvas: Box, pads: Pads): boolean {
   return (

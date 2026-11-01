@@ -2,7 +2,7 @@
 // top bar, canvas and panel. main.tsx only mounts this.
 
 import { useEffect } from "react";
-import { canvasBridge } from "./canvas/bridge";
+import { useAddNode } from "./canvas/useAddNode";
 import { ControlDock } from "./canvas/ControlDock";
 import { ZoomPill } from "./canvas/ZoomPill";
 import { Canvas } from "./canvas/Canvas";
@@ -28,7 +28,7 @@ import { ToastHost } from "./toast/ToastHost";
 export function App() {
   const view = useDraft((s) => s.view);
   const load = useDraft((s) => s.load);
-  const addNode = useDraft((s) => s.addNode);
+  const addNode = useAddNode();
   const latest = useRun((s) => s.latest);
   const dimmed = useRun((s) => s.dimmed);
 
@@ -62,7 +62,7 @@ export function App() {
           topRight={<TopTools />}
           zoom={<ZoomPill />}
           toasts={<ToastHost />}
-          palette={<Palette onAdd={(kind) => void addNode(kind, canvasBridge.centre())} />}
+          palette={<Palette onAdd={addNode} />}
           canvas={<Canvas />}
           dock={<ControlDock />}
           bottom={

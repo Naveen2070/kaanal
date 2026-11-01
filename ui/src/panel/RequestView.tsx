@@ -2,7 +2,7 @@
 // (amber) then its work. The finding sentence appears only when the lines carry `wait_ms`; a failed
 // request (`wait_ms: null`) lists its hops and the failure, with no wait split. Escape closes.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { LogLine } from "../api/types";
 import { eventWords, waterfall } from "./logFormat";
@@ -27,6 +27,11 @@ export function RequestView({
   const key = `${runId}|${stream}|${request}`;
   const [hops, setHops] = useState<Hops | null>(null);
 
+  // opened under a long list, it would sit off screen: bring it into view
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    box.current?.scrollIntoView?.({ block: "nearest" });
+  }, [request, stream]);
   useEffect(() => {
     const ctl = new AbortController();
     api
@@ -49,7 +54,11 @@ export function RequestView({
   const w = lines && lines.length > 0 ? waterfall(lines) : null;
 
   return (
-    <section aria-label={`Request r-${request}`} className="mt-3 border-t border-border pt-2">
+    <section
+      ref={box}
+      aria-label={`Request r-${request}`}
+      className="mt-3 border-t border-border pt-2"
+    >
       <div className="mb-1 flex items-center">
         <h3 className="text-xs font-semibold">
           r-{request} {stream}

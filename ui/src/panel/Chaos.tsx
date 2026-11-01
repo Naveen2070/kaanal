@@ -93,7 +93,7 @@ export function Chaos({
       <div className="flex flex-wrap items-center gap-1 text-sm">
         <button
           type="button"
-          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
+          className="min-h-7 rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "down", down: true })}
@@ -102,7 +102,7 @@ export function Chaos({
         </button>
         <button
           type="button"
-          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
+          className="min-h-7 rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "down", down: false })}
@@ -111,7 +111,7 @@ export function Chaos({
         </button>
         <button
           type="button"
-          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
+          className="min-h-7 rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "clear" })}
@@ -132,7 +132,7 @@ export function Chaos({
         />
         <button
           type="button"
-          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
+          className="min-h-7 rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() =>
@@ -155,7 +155,7 @@ export function Chaos({
         />
         <button
           type="button"
-          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
+          className="min-h-7 rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() =>

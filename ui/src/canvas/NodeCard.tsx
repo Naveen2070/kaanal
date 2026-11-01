@@ -9,7 +9,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect } from "react";
 import type { NodeDoc } from "../api/types";
 import { useFeed } from "./feed";
-import { configLine, nodeFigures, stateWords } from "./metrics";
+import { configLine, fmtMs, nodeFigures, stateWords } from "./metrics";
 import { Meter } from "./Meter";
 import { catColour, kindInfo } from "./nodeKinds";
 import { setUpdating, useUpdating } from "./updating";
@@ -74,9 +74,11 @@ export function NodeCard({ data, selected }: NodeProps) {
           <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-2 gap-y-0.5 text-xs">
             <dt className="text-muted">Arriving</dt>
             <dd className="m-0 text-right tabular-nums">{perSecond(f.arrivingPerS)}</dd>
-            <dt className="text-muted">Slowest requests under</dt>
+            <dt className="text-muted" title="Time spent working here, not waiting in line">
+              Slowest work under
+            </dt>
             <dd className="m-0 text-right tabular-nums">
-              {f.slowestUnderMs === null ? "–" : `${f.slowestUnderMs.toLocaleString("en-US")} ms`}
+              {f.slowestUnderMs === null ? "–" : fmtMs(f.slowestUnderMs)}
             </dd>
           </dl>
         </div>

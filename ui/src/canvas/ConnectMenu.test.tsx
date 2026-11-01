@@ -37,12 +37,21 @@ beforeEach(() => {
 afterEach(cleanup);
 
 test("connect_menu_lists_only_valid_targets", () => {
-  expect(targetsFor("gw", ["gw", "api", odd], [{ from: "gw", to: "api" }])).toEqual([odd]);
-  render(<ConnectMenu from="gw" />);
-  const items = within(screen.getByRole("list", { name: "Connect gw to" }))
+  const nodes = view().doc?.nodes ?? {};
+  // a gateway may call services, not a database
+  expect(targetsFor("gw", nodes, [])).toEqual(["api"]);
+  expect(targetsFor("api", nodes, [])).toEqual([odd]);
+  render(<ConnectMenu from="api" />);
+  const items = within(screen.getByRole("list", { name: "Connect api to" }))
     .getAllByRole("button")
     .map((b) => b.textContent);
-  expect(items).toEqual([odd]); // not itself, not api (already called); odd names work as labels
+  expect(items).toEqual([odd]); // not a gateway (a service cannot call one); odd names work as labels
+});
+
+test("a_service_is_never_offered_a_gateway", () => {
+  const nodes = { gw: { type: "gateway" }, s: { type: "service" }, d: { type: "database" } };
+  expect(targetsFor("s", nodes, [])).toEqual(["d"]);
+  expect(targetsFor("d", nodes, [])).toEqual([]);
 });
 
 test("nothing_valid_says_why", () => {
@@ -56,9 +65,9 @@ test("nothing_valid_says_why", () => {
 test("a_click_connects_and_a_refusal_is_shown", async () => {
   const connect = vi.fn().mockResolvedValue({ ok: false, message: "the edge was refused" });
   useDraft.setState({ connect });
-  render(<ConnectMenu from="gw" />);
+  render(<ConnectMenu from="api" />);
   fireEvent.click(screen.getByRole("button", { name: odd }));
-  expect(connect).toHaveBeenCalledWith("gw", odd);
+  expect(connect).toHaveBeenCalledWith("api", odd);
   await vi.waitFor(() =>
     expect(useToasts.getState().toasts.map((t) => t.text)).toContain("the edge was refused"),
   );

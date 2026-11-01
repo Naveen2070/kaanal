@@ -19,7 +19,7 @@ export function commands(ctx: CommandContext): Command[] {
   return [
     ...NODE_KINDS.map((k) => ({
       id: `add-${k.kind}`,
-      label: `Add a ${k.label.toLowerCase()}`,
+      label: `Add ${/^[aeiou]/i.test(k.label) ? "an" : "a"} ${k.label.toLowerCase()}`,
       run: () => ctx.add(k.kind),
     })),
     { id: "run", label: "Run now", run: ctx.run },

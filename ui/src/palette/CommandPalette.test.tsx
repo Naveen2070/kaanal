@@ -4,6 +4,8 @@ import { CommandPalette } from "./CommandPalette";
 import { commands, filterCommands } from "./commands";
 import { PaletteHost } from "./PaletteHost";
 
+vi.mock("../store/view", () => ({ useSelected: () => [null, vi.fn()] }));
+
 afterEach(cleanup);
 
 const ctx = () => ({

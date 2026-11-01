@@ -8,18 +8,25 @@ import { Unplug } from "lucide-react";
 import type { EdgeDoc } from "../api/types";
 import { useDraft } from "../store/draft";
 import { notify } from "../toast/toasts";
+import { mayCall } from "./rules";
+import { removeWires } from "./wires";
 
-/** The names `from` could still call. */
-export function targetsFor(from: string, names: string[], edges: EdgeDoc[]): string[] {
+/** The names `from` could still call: not itself, not one it calls, and only kinds it may call. */
+export function targetsFor(
+  from: string,
+  nodes: Record<string, { type?: string }>,
+  edges: EdgeDoc[],
+): string[] {
   const called = new Set(edges.filter((e) => String(e.from) === from).map((e) => String(e.to)));
-  return names.filter((n) => n !== from && !called.has(n));
+  return Object.keys(nodes).filter(
+    (n) => n !== from && !called.has(n) && mayCall(nodes[from]?.type, nodes[n]?.type),
+  );
 }
 
 export function ConnectMenu({ from }: { from: string }) {
   const doc = useDraft((s) => s.view?.doc);
   const connect = useDraft((s) => s.connect);
-  const patch = useDraft((s) => s.patch);
-  const targets = targetsFor(from, Object.keys(doc?.nodes ?? {}), doc?.edges ?? []);
+  const targets = targetsFor(from, doc?.nodes ?? {}, doc?.edges ?? []);
   /** The wires leaving this component, with their place in `edges` (which is what a delete needs). */
   const wires = (doc?.edges ?? [])
     .map((e, i) => ({ to: String(e.to), from: String(e.from), i }))
@@ -28,8 +35,8 @@ export function ConnectMenu({ from }: { from: string }) {
     <div>
       {targets.length === 0 ? (
         <p className="text-xs text-muted">
-          Nothing to connect to: a component cannot call itself, and this one already calls every
-          other.
+          Nothing to connect to: a component cannot call itself or one it already calls, and some
+          kinds cannot call others (a service cannot call a gateway).
         </p>
       ) : (
         <ul aria-label={`Connect ${from} to`} className="flex flex-wrap gap-1">
@@ -44,7 +51,7 @@ export function ConnectMenu({ from }: { from: string }) {
                     else if (r.warning) notify.warn(r.warning, "connect");
                   })
                 }
-                className="rounded-full border border-control px-2 py-0.5 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+                className="inline-flex min-h-7 min-w-6 items-center justify-center rounded-full border border-control px-2.5 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
               >
                 {to}
               </button>
@@ -62,7 +69,7 @@ export function ConnectMenu({ from }: { from: string }) {
               <button
                 type="button"
                 aria-label={`Delete the wire from ${from} to ${w.to}`}
-                onClick={() => void patch([{ op: "remove", path: ["edges", w.i] }])}
+                onClick={() => void removeWires([w.i])}
                 className="flex size-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-negative focus-visible:outline-2 focus-visible:outline-accent"
               >
                 <Unplug size={14} aria-hidden />

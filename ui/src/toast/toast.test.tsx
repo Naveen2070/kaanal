@@ -112,3 +112,24 @@ test("the_stack_has_no_axe_violations", async () => {
   });
   await expectNoViolations(document.body);
 });
+
+test("a_toast_with_an_action_runs_it_and_closes", () => {
+  const run = vi.fn();
+  notify.info("Wire deleted.", "wire", { label: "Undo", run });
+  render(<ToastHost />);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(useToasts.getState().toasts).toHaveLength(0);
+});
+
+test("a_toast_under_the_pointer_does_not_close_itself", () => {
+  vi.useFakeTimers();
+  notify.success("Saved.");
+  render(<ToastHost />);
+  fireEvent.mouseEnter(screen.getByRole("status"));
+  act(() => void vi.advanceTimersByTime(AUTO_DISMISS_MS * 2));
+  expect(useToasts.getState().toasts).toHaveLength(1);
+  fireEvent.mouseLeave(screen.getByRole("status"));
+  act(() => void vi.advanceTimersByTime(AUTO_DISMISS_MS + 10));
+  expect(useToasts.getState().toasts).toHaveLength(0);
+});

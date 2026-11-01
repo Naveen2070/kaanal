@@ -26,3 +26,11 @@ test("a_box_behind_a_panel_is_not_visible", () => {
   expect(isVisible({ left: 500, top: 100, right: 740, bottom: 280 }, canvas, pads)).toBe(false); // under the top bar
   expect(isVisible({ left: 1200, top: 300, right: 1400, bottom: 480 }, canvas, pads)).toBe(false); // under the rail
 });
+
+test("a_new_card_goes_to_free_space_and_an_empty_spot_stays_put", async () => {
+  const { freeSpot } = await import("./viewport");
+  expect(freeSpot([100, 100], [])).toEqual([100, 100]);
+  const p = freeSpot([100, 100], [[100, 100]]);
+  expect(p).not.toEqual([100, 100]);
+  expect(Math.abs(p[0] - 100) >= 260 || Math.abs(p[1] - 100) >= 210).toBe(true);
+});

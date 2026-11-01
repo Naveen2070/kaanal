@@ -142,6 +142,11 @@ test("nothing_saturates_is_grey_text_not_a_number", async () => {
   expect(value("Breaks first").className).toMatch(/text-muted/);
 });
 
+test("before_any_run_the_lead_says_to_run_not_that_nothing_saturates", async () => {
+  await show(300);
+  expect(value("Breaks first").textContent).toBe("Run to find out");
+});
+
 test("null_p99_prints_a_grey_dash_not_zero", async () => {
   await show(300);
   expect(value("System p99").textContent).toBe("–"); // no run yet

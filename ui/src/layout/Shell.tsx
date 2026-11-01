@@ -45,13 +45,30 @@ export function Shell({
       className="relative h-full overflow-hidden bg-ground text-text"
       style={{ "--palette-w": mode === "full" ? "232px" : "48px" } as CSSProperties}
     >
+      {/* the canvas comes first in the page, so a keyboard gets a way past its wires and cards */}
+      {editing ? (
+        <a
+          href="#studio-top"
+          onClick={(e) => {
+            e.preventDefault();
+            document.getElementById("studio-top")?.focus();
+          }}
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-on-primary"
+        >
+          Skip the canvas
+        </a>
+      ) : null}
       {editing ? <div className="absolute inset-0">{canvas}</div> : null}
       <div
         className={`relative z-10 flex h-full flex-col gap-3 p-3 ${
           editing ? "pointer-events-none" : "overflow-y-auto"
         }`}
       >
-        <div className="relative flex shrink-0 justify-center">
+        <header
+          id="studio-top"
+          tabIndex={-1}
+          className="relative flex shrink-0 justify-center outline-none"
+        >
           <div className="pointer-events-auto w-fit max-w-full rounded-2xl border border-border bg-sheet shadow-float">
             {top}
           </div>
@@ -60,7 +77,7 @@ export function Shell({
               {topRight}
             </div>
           ) : null}
-        </div>
+        </header>
         {editing ? (
           <div className="flex min-h-0 flex-1 gap-3">
             <div className="pointer-events-auto flex max-h-full self-start">{palette}</div>

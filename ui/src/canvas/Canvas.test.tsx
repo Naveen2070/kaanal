@@ -307,3 +307,28 @@ test("deleted_wires_leave_the_edge_list_highest_index_first_in_one_patch", async
     ],
   });
 });
+
+test("arrow_keys_on_a_button_outside_the_canvas_do_not_move_the_node", async () => {
+  history.replaceState(null, "", "/__kaanal/studio?node=gw");
+  await show(view());
+  const sent = mockFetch([{ json: view() }]);
+  const tab = document.createElement("button"); // a rail tab: the arrows are the tab list's
+  document.body.append(tab);
+  fireEvent.keyDown(tab, { key: "ArrowRight" });
+  tab.remove();
+  expect(sent).toHaveLength(0);
+  expect(flow.nodes.find((n) => n.data.name === "gw")?.position).toEqual({ x: 0, y: 0 });
+});
+
+test("a_wire_picked_on_the_canvas_stays_selected_so_delete_can_find_it", async () => {
+  await show(view());
+  const f = flow as unknown as {
+    onEdgesChange: (c: { type: string; id: string; selected: boolean }[]) => void;
+    edges: { id: string; selected?: boolean }[];
+  };
+  expect(f.edges.some((e) => e.selected)).toBe(false);
+  act(() => f.onEdgesChange([{ type: "select", id: "e0", selected: true }]));
+  expect((flow as unknown as typeof f).edges.find((e) => e.id === "e0")?.selected).toBe(true);
+  act(() => f.onEdgesChange([{ type: "select", id: "e0", selected: false }]));
+  expect((flow as unknown as typeof f).edges.find((e) => e.id === "e0")?.selected).toBe(false);
+});

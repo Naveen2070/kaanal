@@ -35,7 +35,7 @@ test("a_card_with_no_run_says_no_run_yet", () => {
   expect(screen.getByText("No run yet")).toBeTruthy();
   expect(screen.queryByRole("meter")).toBeNull();
   expect(screen.getByText("Arriving").nextElementSibling?.textContent).toBe("–");
-  expect(screen.getByText("Slowest requests under").nextElementSibling?.textContent).toBe("–");
+  expect(screen.getByText("Slowest work under").nextElementSibling?.textContent).toBe("–");
 });
 
 test("card_shows_config_line_and_up_to_n_waiting", () => {
@@ -43,7 +43,7 @@ test("card_shows_config_line_and_up_to_n_waiting", () => {
   expect(screen.getByText("Service · 1 copy × 12 slots · 98 ms")).toBeTruthy();
   expect(screen.getByText("78% busy · up to 12 waiting")).toBeTruthy();
   expect(screen.getByText("Arriving").nextElementSibling?.textContent).toBe("1,000/s");
-  expect(screen.getByText("Slowest requests under").nextElementSibling?.textContent).toBe("120 ms");
+  expect(screen.getByText("Slowest work under").nextElementSibling?.textContent).toBe("120 ms");
   expect(screen.getByRole("meter").getAttribute("value")).toBe("78");
 });
 

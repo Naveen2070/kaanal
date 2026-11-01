@@ -10,6 +10,7 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeChange,
   type Node,
   type NodeChange,
 } from "@xyflow/react";
@@ -25,6 +26,8 @@ import { NodeCard, type CardData } from "./NodeCard";
 import { canvasBridge } from "./bridge";
 import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
+import { mayCall } from "./rules";
+import { removeWires } from "./wires";
 import { autoLayout, decodeId, encodeId } from "./edges";
 import { notify } from "../toast/toasts";
 import { useZoom } from "./zoom";
@@ -152,7 +155,10 @@ function Flow() {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if ((e.target as HTMLElement | null)?.closest?.(NOT_FOR_NUDGE)) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(NOT_FOR_NUDGE)) return;
+      // only when focus is on the canvas (or nowhere): on a rail tab or a dock button the arrows are theirs
+      if (t && t !== document.body && !t.closest?.(".react-flow")) return;
       const from = pos ?? useDraft.getState().view?.layout?.[selected];
       const to = from && nudge(from, e.key, e.shiftKey);
       if (!to) return;
@@ -170,6 +176,9 @@ function Flow() {
     };
   }, [selected, setLayout]);
 
+  /** Wires picked on the canvas (click, or focus and Enter): React Flow needs them to delete one. */
+  const [pickedEdges, setPickedEdges] = useState<ReadonlySet<string>>(new Set());
+
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = Object.entries(doc?.nodes ?? {}).map(([name, n]) => ({
       id: encodeId(name),
@@ -185,12 +194,25 @@ function Flow() {
     const edges: Edge[] = (doc?.edges ?? []).map((e, i) => ({
       id: `e${i}`,
       type: "load",
+      selected: pickedEdges.has(`e${i}`),
       source: encodeId(String(e.from)),
       target: encodeId(String(e.to)),
       data: { from: String(e.from), to: String(e.to), index: i },
     }));
     return { nodes, edges };
-  }, [doc, layout, live, measured, selected]);
+  }, [doc, layout, live, measured, selected, pickedEdges]);
+
+  const onEdgesChange = (changes: EdgeChange[]) => {
+    for (const c of changes) {
+      if (c.type !== "select") continue;
+      setPickedEdges((s) => {
+        const next = new Set(s);
+        if (c.selected) next.add(c.id);
+        else next.delete(c.id);
+        return next;
+      });
+    }
+  };
 
   const onNodesChange = (changes: NodeChange[]) => {
     for (const c of changes) {
@@ -225,13 +247,11 @@ function Flow() {
   };
 
   /** Delete or Backspace on a selected wire: its entries leave `edges`, highest index first. */
-  const patch = useDraft((s) => s.patch);
   const onEdgesDelete = (gone: Edge[]) => {
     const at = gone.map((e) => Number(e.id.slice(1))).filter(Number.isInteger);
     if (at.length === 0) return;
-    void patch(
-      [...new Set(at)].sort((a, b) => b - a).map((i) => ({ op: "remove", path: ["edges", i] })),
-    );
+    setPickedEdges(new Set()); // wire ids are their place in the list, which shifts
+    void removeWires(at);
   };
 
   const onConnect = async (c: Connection) => {
@@ -262,6 +282,11 @@ function Flow() {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          isValidConnection={(c) => {
+            const kinds = doc?.nodes ?? {};
+            return mayCall(kinds[decodeId(c.source)]?.type, kinds[decodeId(c.target)]?.type);
+          }}
           onNodeDragStop={(_, __, dragged) => onDragStop(dragged)}
           onConnect={(c) => void onConnect(c)}
           onNodeClick={(_, n) => void setSelected(decodeId(n.id))}

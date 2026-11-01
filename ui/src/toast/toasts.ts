@@ -14,6 +14,13 @@ export interface Toast {
   text: string;
   /** Names the source, so a later message from it replaces this one (or its recovery clears it). */
   key: string;
+  /** One button on the toast, such as "Undo". */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 /** How long an information or success toast stays; errors and warnings stay until closed. */
@@ -21,7 +28,7 @@ export const AUTO_DISMISS_MS = 6000;
 
 interface ToastState {
   toasts: Toast[];
-  push: (kind: ToastKind, text: string, key?: string) => void;
+  push: (kind: ToastKind, text: string, key?: string, action?: ToastAction) => void;
   dismiss: (id: number) => void;
   /** Closes the toast a source put up (its recovery). */
   dismissKey: (key: string) => void;
@@ -31,13 +38,13 @@ let next = 1;
 
 export const useToasts = create<ToastState>((set) => ({
   toasts: [],
-  push(kind, text, key = text) {
+  push(kind, text, key = text, action) {
     set((s) => {
       // the same words are already up: say nothing twice
       if (s.toasts.some((t) => t.text === text && t.kind === kind)) return s;
       // a newer message from the same source replaces its older one
       const rest = s.toasts.filter((t) => t.key !== key);
-      return { toasts: [...rest, { id: next++, kind, text, key }].slice(-5) };
+      return { toasts: [...rest, { id: next++, kind, text, key, action }].slice(-5) };
     });
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
@@ -48,7 +55,8 @@ export const useToasts = create<ToastState>((set) => ({
 export const notify = {
   error: (text: string, key?: string) => useToasts.getState().push("error", text, key),
   warn: (text: string, key?: string) => useToasts.getState().push("warn", text, key),
-  info: (text: string, key?: string) => useToasts.getState().push("info", text, key),
+  info: (text: string, key?: string, action?: ToastAction) =>
+    useToasts.getState().push("info", text, key, action),
   success: (text: string, key?: string) => useToasts.getState().push("success", text, key),
   clear: (key: string) => useToasts.getState().dismissKey(key),
 };

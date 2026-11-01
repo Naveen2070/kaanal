@@ -219,6 +219,7 @@ export function TrafficBuilder() {
                         <label className="flex items-center gap-2 font-medium">
                           <input
                             type="checkbox"
+                            className="size-5"
                             checked={services.every((s) => r.targets?.includes(s))}
                             onChange={(e) =>
                               set(i, { targets: e.currentTarget.checked ? [...services] : [] })
@@ -235,6 +236,7 @@ export function TrafficBuilder() {
                               <label key={s} className="flex items-center gap-2">
                                 <input
                                   type="checkbox"
+                                  className="size-5"
                                   checked={r.targets?.includes(s) ?? false}
                                   onChange={() => toggle(i, s)}
                                 />

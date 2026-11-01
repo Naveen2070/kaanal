@@ -37,6 +37,12 @@ export function twoSignificant(n: number): string {
   return Number(n.toPrecision(2)).toLocaleString("en-US");
 }
 
+/** Milliseconds for a person: "32 ms" up to a second, then "15.3 s". */
+export function fmtMs(ms: number, digits = 0): string {
+  if (ms >= 1000) return `${(ms / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })} s`;
+  return `${ms.toLocaleString("en-US", { maximumFractionDigits: digits })} ms`;
+}
+
 export function replicasOf(config: NodeDoc | undefined): number {
   const r = config?.replicas;
   return typeof r === "number" && Number.isInteger(r) && r >= 1 ? r : 1;

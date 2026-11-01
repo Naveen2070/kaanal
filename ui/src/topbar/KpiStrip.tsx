@@ -9,7 +9,7 @@ import { HelpPopover } from "../help/HelpPopover";
 import type { HelpId } from "../help/copy";
 import { useState } from "react";
 import { rpsFromSlider, SLIDER_MAX, sliderFromRps } from "../canvas/logScale";
-import { breaksFirst, twoSignificant } from "../canvas/metrics";
+import { breaksFirst, fmtMs, twoSignificant } from "../canvas/metrics";
 import { LIMITS, setRate } from "../panel/fields";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
@@ -111,12 +111,14 @@ export function KpiStrip() {
         <Cell
           label="Breaks first"
           help="saturation"
-          className={`text-2xl font-semibold ${
+          className={`min-w-60 text-2xl font-semibold ${
             breaks === null ? "text-muted" : breaks.saturatedNow ? "text-negative" : "text-text"
           }`}
         >
           {breaks === null
-            ? "nothing saturates"
+            ? s === undefined
+              ? "Run to find out"
+              : "nothing saturates"
             : `${breaks.node} at ${twoSignificant(breaks.atReqS)} req/s`}
         </Cell>
         <Cell label="Offered load" divider className="text-xl font-semibold">
@@ -180,7 +182,7 @@ export function KpiStrip() {
           help="p99"
           className={`text-base ${hasRequests ? "" : "text-muted"}`}
         >
-          {hasRequests && s ? `${nf(s.latency.p99_ms, 1)} ms` : "–"}
+          {hasRequests && s ? fmtMs(s.latency.p99_ms, 1) : "–"}
         </Cell>
         <Cell
           label="Goodput"
