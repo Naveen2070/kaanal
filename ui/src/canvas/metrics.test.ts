@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { nodeSummary } from "../test/summary";
-import { capacityLine, nodeFigures, percent, twoSignificant } from "./metrics";
+import { capacityLine, nodeFigures, percent, plainSentence, twoSignificant } from "./metrics";
 
 test("figures_take_the_peak_from_the_busy_series", () => {
   const f = nodeFigures(nodeSummary(), { type: "service" });
@@ -143,4 +143,25 @@ test("capacity_line_reads_slots_copies_and_time_in_words", () => {
   expect(capacityLine(4, 0, 1)).toBe("No limit · 4 at once ÷ 0 ms"); // never Infinity or NaN
   expect(capacityLine(null, 25, 1)).toBe("No slot limit · never saturates");
   expect(capacityLine(32, null, 1)).toBeNull();
+});
+
+test("plain_sentence_reads_like_the_spec_example", () => {
+  const n = nodeSummary({
+    capacity_per_s: 1280,
+    visits_per_s: 1000,
+    utilization: 0.78,
+    max_queue: 12,
+  });
+  expect(plainSentence(n)).toBe(
+    "Handles up to 1,280 requests a second. It gets 1,000, so it is 78% busy and up to 12 wait.",
+  );
+  expect(plainSentence({ ...n, saturated: true, max_queue: 0 })).toBe(
+    "Handles up to 1,280 requests a second. It gets 1,000, so it is saturated.",
+  );
+  expect(plainSentence(undefined)).toBe("No run yet.");
+  expect(plainSentence({ ...n, utilization: null })).toMatch(/never saturates/);
+  expect(plainSentence({ ...n, capacity_per_s: null })).toBe(
+    "It gets 1,000, so it is 78% busy and up to 12 wait.",
+  );
+  expect(plainSentence(n)).not.toMatch(/NaN|undefined|null/);
 });

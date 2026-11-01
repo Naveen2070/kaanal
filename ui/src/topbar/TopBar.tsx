@@ -8,6 +8,7 @@ import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
 import { SaveFlow } from "./SaveFlow";
 import { ThemeToggle } from "./ThemeToggle";
+import { UndoRedo } from "./UndoRedo";
 
 export function TopBar({ onRun }: { onRun: () => void }) {
   const view = useDraft((st) => st.view);
@@ -38,6 +39,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
         Run
       </button>
       <output className={`text-xs ${lastError ? "text-negative" : "text-muted"}`}>{line}</output>
+      <UndoRedo />
       <SaveFlow />
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />

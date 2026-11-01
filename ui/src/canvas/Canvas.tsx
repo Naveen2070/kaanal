@@ -26,6 +26,9 @@ import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
 import { autoLayout, decodeId, encodeId } from "./edges";
 
+/** Arrow-key moves are saved this long after the last press. */
+const NUDGE_SAVE_MS = 300;
+
 const nodeTypes = { card: NodeCard };
 const edgeTypes = { load: LoadEdge };
 
@@ -96,22 +99,40 @@ function Flow() {
     };
   }, [screenToFlowPosition, fitView, still]);
 
-  // arrow keys move the selected node (8 px, Shift 40 px) and save where it ends; captured so React
-  // Flow's own key move, which never saves, does not also run
+  // arrow keys move the selected node (8 px, Shift 40 px); the node moves on screen at once and the
+  // position is saved once the keys pause, not per press. Captured so React Flow's own key move,
+  // which never saves, does not also run
   useEffect(() => {
+    if (selected === null) return;
+    let pos: [number, number] | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      clearTimeout(timer);
+      if (pos === null) return;
+      const to = pos;
+      pos = null;
+      setLive({});
+      void setLayout({ [selected]: to });
+    };
     const onKey = (e: KeyboardEvent) => {
-      if (selected === null || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if ((e.target as HTMLElement | null)?.closest?.(NOT_FOR_NUDGE)) return;
-      const at = layout?.[selected];
-      const to = at && nudge(at, e.key, e.shiftKey);
+      const from = pos ?? useDraft.getState().view?.layout?.[selected];
+      const to = from && nudge(from, e.key, e.shiftKey);
       if (!to) return;
       e.preventDefault();
       e.stopPropagation();
-      void setLayout({ [selected]: to });
+      pos = to;
+      setLive((l) => ({ ...l, [selected]: to }));
+      clearTimeout(timer);
+      timer = setTimeout(flush, NUDGE_SAVE_MS);
     };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [selected, layout, setLayout]);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      flush(); // another node was selected, or the canvas left: nothing is lost
+    };
+  }, [selected, setLayout]);
 
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = Object.entries(doc?.nodes ?? {}).map(([name, n]) => ({

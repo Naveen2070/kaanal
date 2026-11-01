@@ -1,7 +1,7 @@
 // The right-hand panel: the selected node's sentence and its tabs (Controls, Log, Results).
 
 import { useFeed } from "../canvas/feed";
-import { nodeFigures } from "../canvas/metrics";
+import { plainSentence } from "../canvas/metrics";
 import { LazyBoundary } from "../states/LazyBoundary";
 import { useDraft } from "../store/draft";
 import { runNow } from "../store/loopRuntime";
@@ -18,10 +18,7 @@ export function Panel() {
   const [selected, setSelected] = useSelected();
   const config = selected !== null ? view?.doc?.nodes?.[selected] : undefined;
   // from the finished run, so it changes when a run lands (after a release), never mid-drag
-  const sentence =
-    selected !== null && config
-      ? `${selected}: ${nodeFigures(feed.node(selected), config).sentence}`
-      : "";
+  const sentence = selected !== null && config ? plainSentence(feed.node(selected)) : "";
 
   return (
     <Rail

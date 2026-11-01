@@ -181,3 +181,22 @@ export function rankedByPeak(
     .sort((a, b) => b.peak - a.peak || order(a.i) - order(b.i) || a.i - b.i)
     .map(({ name, peak, saturatesAtReqS }) => ({ name, peak, saturatesAtReqS }));
 }
+
+const rate = (n: number) => (n < 10 ? twoSignificant(n) : nf(n));
+
+/**
+ * The details panel's sentence (spec 5.1), in plain words:
+ * "Handles up to 1,280 requests a second. It gets 1,000, so it is 78% busy and up to 12 wait."
+ */
+export function plainSentence(node: NodeSummary | undefined): string {
+  if (!node) return "No run yet.";
+  if (node.utilization === null) return "It has no slot limit, so it never saturates.";
+  const gets = finiteOrNull(node.visits_per_s);
+  const cap = finiteOrNull(node.capacity_per_s);
+  const waiting = finiteOrNull(node.max_queue) ?? 0;
+  const state = node.saturated ? "saturated" : `${percent(node.utilization)} busy`;
+  const tail = waiting > 0 ? ` and up to ${nf(waiting)} wait` : "";
+  const handles = cap !== null && cap > 0 ? `Handles up to ${rate(cap)} requests a second. ` : "";
+  const getsText = gets !== null ? `It gets ${rate(gets)}, so it is ` : "It is ";
+  return `${handles}${getsText}${state}${tail}.`;
+}

@@ -214,3 +214,42 @@ test("edges_are_drawn_by_the_load_edge_with_their_ends_named", async () => {
   expect(e.type).toBe("load");
   expect(e.data).toEqual({ from: "gw", to: "a#b/c d" });
 });
+
+test("arrow_keys_move_a_selected_node_on_screen_at_once_and_save_once_after_a_pause", async () => {
+  vi.useFakeTimers();
+  try {
+    history.replaceState(null, "", "/__kaanal/studio?node=gw");
+    mockFetch([{ json: view() }]);
+    await useDraft.getState().load();
+    render(
+      <NuqsAdapter>
+        <Canvas />
+      </NuqsAdapter>,
+    );
+    const sent = mockFetch([{ json: view({ layout: { gw: [24, 0], "a#b/c d": [280, 0] } }) }]);
+    for (const k of ["ArrowRight", "ArrowRight", "ArrowRight"]) {
+      act(() => void fireEvent.keyDown(document.body, { key: k }));
+    }
+    // moved on screen already, nothing sent yet
+    expect(flow.nodes.find((n) => n.data.name === "gw")?.position).toEqual({ x: 24, y: 0 });
+    expect(sent).toHaveLength(0);
+    await act(async () => void vi.advanceTimersByTimeAsync(400));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toEqual({ layout: { gw: [24, 0], "a#b/c d": [280, 0] } });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("arrow_keys_in_a_slider_or_field_do_not_move_the_node", async () => {
+  history.replaceState(null, "", "/__kaanal/studio?node=gw");
+  await show(view());
+  const sent = mockFetch([{ json: view() }]);
+  const slider = document.createElement("span");
+  slider.setAttribute("role", "slider");
+  document.body.append(slider);
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  slider.remove();
+  expect(sent).toHaveLength(0);
+  expect(flow.nodes.find((n) => n.data.name === "gw")?.position).toEqual({ x: 0, y: 0 });
+});

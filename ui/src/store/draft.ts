@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { ApiError, api } from "../api/client";
 import type { DraftView, Layout, Op } from "../api/types";
 import { connectOps, lastEdgeIndex, uniqueName } from "../canvas/edges";
+import { history, invertOps } from "./history";
 import { applyOps } from "./optimistic";
 
 /** A patch may carry the layout it goes with (a new node and its spot are one edit). */
@@ -24,7 +25,7 @@ interface DraftState {
   /** Resolves when every edit queued so far has been answered (Apply and Save wait for it). */
   settled: () => Promise<unknown>;
   /** Applies `ops` locally, sends them, and rolls them back if the server refuses. */
-  patch: (ops: Op[], positions?: Layout) => Promise<boolean>;
+  patch: (ops: Op[], positions?: Layout, opts?: { record?: boolean }) => Promise<boolean>;
   /** Moves nodes: `positions` replaces the entries of those names; the whole map is sent. */
   setLayout: (positions: Layout) => Promise<boolean>;
   /** Replaces the whole draft text (the demo), after every edit already queued. */
@@ -37,6 +38,9 @@ interface DraftState {
    * as a warning and the edge stays.
    */
   connect: (from: string, to: string) => Promise<ConnectResult>;
+  /** Steps back / forward through the recorded edits; false when there is nothing to step to or it was refused. */
+  undo: () => Promise<boolean>;
+  redo: () => Promise<boolean>;
 }
 
 export type ConnectResult = { ok: true; warning?: string } | { ok: false; message: string };
@@ -105,6 +109,8 @@ export const useDraft = create<DraftState>((set, get) => {
       try {
         const v = await api.getDraft();
         const restarted = confirmed !== null && confirmed.boot !== v.boot;
+        // a draft that changed under us (reload, file edit, restart) is not the one the history describes
+        if (confirmed !== null && (restarted || confirmed.rev !== v.rev)) history.clear();
         confirmed = v;
         pending = [];
         set((s) => ({ error: null, restarted: s.restarted || restarted }));
@@ -115,12 +121,20 @@ export const useDraft = create<DraftState>((set, get) => {
     },
     settled: () => tail,
     replaceText: (text) => enqueue({ kind: "text", text }),
-    patch: (ops, positions) =>
-      enqueue({
+    async patch(ops, positions, opts) {
+      const before = get().view;
+      const inverse = before && opts?.record !== false ? invertOps(before, ops) : null;
+      const ok = await enqueue({
         kind: "patch",
         ops,
         layout: positions && { ...get().view?.layout, ...positions },
-      }),
+      });
+      if (ok && opts?.record !== false) {
+        if (inverse) history.push(inverse, ops);
+        else history.skip();
+      }
+      return ok;
+    },
     async addNode(kind, at) {
       const doc = get().view?.doc;
       if (!doc) return null;
@@ -134,16 +148,27 @@ export const useDraft = create<DraftState>((set, get) => {
     async connect(from, to) {
       const doc = get().view?.doc;
       if (!doc) return { ok: false, message: "the draft is not a valid config yet" };
-      if (!(await get().patch(connectOps(doc, from, to)))) {
+      const ops = connectOps(doc, from, to);
+      const inverse = invertOps(get().view as DraftView, ops);
+      if (!(await get().patch(ops, undefined, { record: false }))) {
         return { ok: false, message: get().error ?? "the edge was refused" };
       }
+      // the edge stays in every `ok: true` exit below, so the edit is recorded; a refused one never is
+      const keep = () => {
+        if (inverse) history.push(inverse, ops);
+        else history.skip();
+      };
       let check;
       try {
         check = await api.validate();
       } catch (e) {
+        keep();
         return { ok: true, warning: e instanceof ApiError ? e.message : String(e) };
       }
-      if (check.ok) return { ok: true };
+      if (check.ok) {
+        keep();
+        return { ok: true };
+      }
       const message = check.diagnostics[0]?.message ?? "the draft does not build";
       // the edge is taken back only when the problem is about it: its own entry, or the edge list
       // as a whole (too many edges); a problem in another edge or elsewhere was already there
@@ -151,9 +176,27 @@ export const useDraft = create<DraftState>((set, get) => {
       const i = now ? lastEdgeIndex(now, from, to) : -1;
       const path = check.diagnostics[0]?.path ?? [];
       const aboutThis = path[0] === "edges" && (path.length === 1 || path[1] === i);
-      if (!aboutThis || i < 0) return { ok: true, warning: message };
-      await get().patch([{ op: "remove", path: ["edges", i] }]);
+      if (!aboutThis || i < 0) {
+        keep();
+        return { ok: true, warning: message };
+      }
+      await get().patch([{ op: "remove", path: ["edges", i] }], undefined, { record: false });
       return { ok: false, message };
+    },
+    async undo() {
+      const ops = history.undo();
+      if (!ops) return false;
+      const ok = await get().patch(ops, undefined, { record: false });
+      // a step the draft refuses means the history is stale: drop it rather than offer more
+      if (!ok) history.clear();
+      return ok;
+    },
+    async redo() {
+      const ops = history.redo();
+      if (!ops) return false;
+      const ok = await get().patch(ops, undefined, { record: false });
+      if (!ok) history.clear();
+      return ok;
     },
     setLayout(positions) {
       const view = get().view;

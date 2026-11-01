@@ -16,3 +16,8 @@ test("charts_band_is_a_lazy_chunk", () => {
   expect(read("../App.tsx")).not.toMatch(/from "\.\/charts\/ChartsBand"/);
   expect(read("../charts/ChartsBand.lazy.ts")).toMatch(/import\("\.\/ChartsBand"\)/);
 });
+
+test("tour_is_a_lazy_chunk", () => {
+  expect(read("../first-run/FirstRun.tsx")).not.toMatch(/from "\.\/Tour"/);
+  expect(read("../first-run/FirstRun.tsx")).toMatch(/import\("\.\/Tour"\)/);
+});
