@@ -331,3 +331,11 @@ test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
     ],
   });
 });
+
+test("chaos_chips_disabled_until_apply_with_the_reason", async () => {
+  await show(nodeSummary(), app, { applied: false });
+  const take = await screen.findByRole("button", { name: "Take down" });
+  await vi.waitFor(() => expect(take.hasAttribute("disabled")).toBe(true));
+  const why = document.getElementById(take.getAttribute("aria-describedby") ?? "");
+  expect(why?.textContent).toMatch(/Apply the draft first/);
+});

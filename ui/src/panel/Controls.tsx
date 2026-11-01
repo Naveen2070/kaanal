@@ -4,6 +4,7 @@
 
 import { useId } from "react";
 import type { EdgeDoc, NodeDoc } from "../api/types";
+import { ConnectMenu } from "../canvas/ConnectMenu";
 import { useFeed } from "../canvas/feed";
 import { nodeFigures, percent, replicasOf, twoSignificant } from "../canvas/metrics";
 import { kindInfo } from "../canvas/nodeKinds";
@@ -92,6 +93,10 @@ export function Controls({
         <p className="mt-1 text-xs text-neutral-500">
           {info ? `${info.label}: ${info.description}.` : config.type}
         </p>
+      </Section>
+
+      <Section title="Connect to…">
+        <ConnectMenu from={name} />
       </Section>
 
       {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (

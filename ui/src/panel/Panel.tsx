@@ -2,11 +2,11 @@
 
 import { useFeed } from "../canvas/feed";
 import { nodeFigures } from "../canvas/metrics";
+import { LazyBoundary } from "../states/LazyBoundary";
 import { useDraft } from "../store/draft";
 import { runNow } from "../store/loopRuntime";
 import { useSelected } from "../store/view";
 import { Controls } from "./Controls";
-import { Suspense } from "react";
 import { LogTab } from "./LogTab.lazy";
 import { Rail } from "./Rail";
 import { Results } from "./Results.lazy";
@@ -41,14 +41,14 @@ export function Panel() {
             <p className="p-3 text-sm text-muted">Select a component to see and change it.</p>
           ),
         log: (
-          <Suspense fallback={<LogSkeleton />}>
+          <LazyBoundary fallback={<LogSkeleton />}>
             <LogTab />
-          </Suspense>
+          </LazyBoundary>
         ),
         results: (
-          <Suspense fallback={<ResultsSkeleton />}>
+          <LazyBoundary fallback={<ResultsSkeleton />}>
             <Results />
-          </Suspense>
+          </LazyBoundary>
         ),
       }}
     />

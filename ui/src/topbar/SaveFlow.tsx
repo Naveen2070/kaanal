@@ -177,6 +177,7 @@ export function SaveFlow() {
       </span>
       <button
         type="button"
+        data-command="apply"
         disabled={busy !== null || view?.doc == null}
         onClick={() => void apply()}
         title="Make the draft the running system (the mocks switch to it)"
@@ -187,6 +188,7 @@ export function SaveFlow() {
       <button
         type="button"
         data-tour="save"
+        data-command="save"
         disabled={busy !== null || view?.doc == null}
         onClick={() => void save({ check: true, confirmLoss: false })}
         title="Write the draft to kaanal.yaml"

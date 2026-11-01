@@ -208,3 +208,11 @@ test("reduced_motion_skips_the_hold_because_a_still_picture_gains_nothing", asyn
   await wait(50);
   expect(screen.getByText("the app")).toBeTruthy();
 });
+
+test("first_run_failure_ends_the_loader_and_the_app_shows_the_reason_to_retry", async () => {
+  render(<Loading ready>{app}</Loading>);
+  act(() => useRun.setState({ status: "blocked", lastError: "The run failed." }));
+  await wait(900);
+  expect(screen.getByText("the app")).toBeTruthy();
+  expect(useRun.getState().lastError).toBe("The run failed."); // the top bar prints it beside Run
+});

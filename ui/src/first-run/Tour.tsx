@@ -36,7 +36,7 @@ const STEPS: {
     id: "connect",
     target: "panel",
     side: "left",
-    text: "Connect two components so requests flow between them: drag from one card to another, or use Connect to… on its card.",
+    text: "Connect two components so requests flow between them: drag from one card to another, or pick Connect to… in the details panel.",
     waiting: "Waiting for a connection.",
     done: (n, s) => n.edges > s.edges,
   },

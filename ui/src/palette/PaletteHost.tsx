@@ -1,0 +1,45 @@
+// Ctrl/Cmd+K opens the command palette. This part is first-load code and tiny; the palette itself
+// is a lazy chunk fetched on the first press.
+
+import { lazy, useEffect, useState } from "react";
+import { canvasBridge } from "../canvas/bridge";
+import { useFirstRun } from "../first-run/store";
+import { useDraft } from "../store/draft";
+import { LazyBoundary } from "../states/LazyBoundary";
+import { runNow } from "../store/loopRuntime";
+import { commands } from "./commands";
+
+const CommandPalette = lazy(() =>
+  import("./CommandPalette").then((m) => ({ default: m.CommandPalette })),
+);
+
+export function PaletteHost() {
+  const [open, setOpen] = useState(false);
+  const addNode = useDraft((s) => s.addNode);
+  const replayTour = useFirstRun((s) => s.replayTour);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  if (!open) return null;
+  const all = commands({
+    add: (kind) => void addNode(kind, canvasBridge.centre()),
+    run: runNow,
+    press: (name) => document.querySelector<HTMLElement>(`[data-command="${name}"]`)?.click(),
+    tour: replayTour,
+    fit: () => canvasBridge.fit(),
+  });
+  return (
+    <LazyBoundary fallback={null}>
+      <CommandPalette all={all} onClose={() => setOpen(false)} />
+    </LazyBoundary>
+  );
+}

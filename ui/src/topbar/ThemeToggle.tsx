@@ -15,6 +15,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
+      data-command="theme"
       aria-label={label}
       title={label}
       onClick={() => {

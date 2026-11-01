@@ -21,6 +21,8 @@ import { useSelected } from "../store/view";
 import { usePrefersReducedMotion } from "../first-run/motion";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
+import { canvasBridge } from "./bridge";
+import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
 import { autoLayout, decodeId, encodeId } from "./edges";
 
@@ -76,6 +78,40 @@ function Flow() {
     const all = autoLayout(doc);
     void setLayout(Object.fromEntries(missing.map((n) => [n, all[n] ?? [0, 0]])));
   }, [doc, layout, setLayout]);
+
+  // what the page outside the canvas may ask of it: the visible middle (a clicked palette item lands
+  // there, not at the far right) and fit-to-view (the command palette)
+  useEffect(() => {
+    canvasBridge.centre = () => {
+      const r = document.querySelector(".react-flow")?.getBoundingClientRect();
+      if (!r) return undefined;
+      const p = screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+      // the card's top-left, so its middle is the middle of the view
+      return [p.x - 118, p.y - 55];
+    };
+    canvasBridge.fit = () => void fitView({ padding: 0.2, duration: still ? 0 : 200 });
+    return () => {
+      canvasBridge.centre = () => undefined;
+      canvasBridge.fit = () => {};
+    };
+  }, [screenToFlowPosition, fitView, still]);
+
+  // arrow keys move the selected node (8 px, Shift 40 px) and save where it ends; captured so React
+  // Flow's own key move, which never saves, does not also run
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (selected === null || e.ctrlKey || e.metaKey || e.altKey) return;
+      if ((e.target as HTMLElement | null)?.closest?.(NOT_FOR_NUDGE)) return;
+      const at = layout?.[selected];
+      const to = at && nudge(at, e.key, e.shiftKey);
+      if (!to) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void setLayout({ [selected]: to });
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [selected, layout, setLayout]);
 
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = Object.entries(doc?.nodes ?? {}).map(([name, n]) => ({

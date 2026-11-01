@@ -95,6 +95,7 @@ export function Chaos({
           type="button"
           className="rounded border px-2 disabled:opacity-40"
           disabled={!nodeKnown}
+          aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "down", down: true })}
         >
           Take down
@@ -103,6 +104,7 @@ export function Chaos({
           type="button"
           className="rounded border px-2 disabled:opacity-40"
           disabled={!nodeKnown}
+          aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "down", down: false })}
         >
           Bring back
@@ -111,6 +113,7 @@ export function Chaos({
           type="button"
           className="rounded border px-2 disabled:opacity-40"
           disabled={!nodeKnown}
+          aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "clear" })}
         >
           Clear
@@ -131,6 +134,7 @@ export function Chaos({
           type="button"
           className="rounded border px-2 disabled:opacity-40"
           disabled={!nodeKnown}
+          aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() =>
             void run({ kind: "slow", ms: ms.trim() === "" ? NaN : Math.trunc(Number(ms)) })
           }
@@ -153,6 +157,7 @@ export function Chaos({
           type="button"
           className="rounded border px-2 disabled:opacity-40"
           disabled={!nodeKnown}
+          aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() =>
             void run({ kind: "drop", rate: percent.trim() === "" ? NaN : Number(percent) / 100 })
           }
@@ -160,7 +165,7 @@ export function Chaos({
           Apply
         </button>
       </div>
-      <p className="mt-1 text-xs text-neutral-500">
+      <p id={`${id}-why`} className="mt-1 text-xs text-muted">
         {nodeKnown
           ? "Live chaos, not part of the file. A run follows."
           : applied === undefined
