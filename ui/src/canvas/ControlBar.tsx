@@ -75,6 +75,7 @@ export function ControlBar({
   config,
   onClose,
   onPending,
+  dock = false,
 }: {
   name: string;
   config: NodeDoc;
@@ -82,6 +83,8 @@ export function ControlBar({
   onClose?: () => void;
   /** True while a slider moves and until its edit is sent; the card marks its meter "updating". */
   onPending?: (pending: boolean) => void;
+  /** In the dock the rows sit side by side; otherwise they stack, as in a drawer. */
+  dock?: boolean;
 }) {
   const patch = useDraft((s) => s.patch);
   /** The value of the slider being moved, before it is committed. */
@@ -203,7 +206,7 @@ export function ControlBar({
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- keys bubbling from its controls
     <fieldset
       aria-label={`${name} settings`}
-      className="nodrag nopan m-0 flex min-w-0 flex-col gap-2 rounded-b-xl border-t border-rule bg-sheet px-3 pt-2 pb-3 text-xs"
+      className={`nodrag nopan m-0 flex min-w-0 flex-col gap-2 border-0 p-0 text-xs ${dock ? "" : "rounded-b-xl border-t border-rule bg-sheet px-3 pt-2 pb-3"}`}
       onKeyDown={(e) => {
         // keys stay here: an arrow on a slider must not also move the selected node
         e.stopPropagation();
@@ -223,59 +226,61 @@ export function ControlBar({
       }}
     >
       {line === null ? null : <p className="m-0 text-text tabular-nums">{line}</p>}
-      {rows.map((row) => {
-        const s = specs[row.id];
-        const v = shown(row.id);
-        return (
-          <div key={row.id} className="flex flex-col gap-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1 font-medium text-text">
-                {s.label}
-                <HelpPopover id={row.id} label={s.label} />
-              </span>
-              {row.editable ? (
-                <span className="flex items-center gap-1 text-muted">
-                  <input
-                    type="number"
-                    aria-label={`${s.label}, typed (${s.unit})`}
-                    min={row.id === "time" ? 0 : 1}
-                    step={row.id === "time" ? "any" : 1}
-                    value={texts[row.id] ?? String(v ?? "")}
-                    onChange={(e) => {
-                      const text = e.currentTarget.value;
-                      setTexts((t) => ({ ...t, [row.id]: text }));
-                    }}
-                    onBlur={() => commitTyped(row.id)}
-                    onKeyDown={(e) => e.key === "Enter" && commitTyped(row.id)}
-                    className="h-6 w-20 rounded border border-control bg-sheet px-1 text-right text-text tabular-nums"
-                  />
-                  {row.id === "time" ? "ms" : null}
+      <div className={dock ? "flex flex-wrap items-start gap-x-8 gap-y-3" : "contents"}>
+        {rows.map((row) => {
+          const s = specs[row.id];
+          const v = shown(row.id);
+          return (
+            <div key={row.id} className={`flex flex-col gap-1 ${dock ? "w-64" : ""}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1 font-medium text-text">
+                  {s.label}
+                  <HelpPopover id={row.id} label={s.label} />
                 </span>
-              ) : (
-                <span className="text-muted">time varies · {row.why}</span>
-              )}
+                {row.editable ? (
+                  <span className="flex items-center gap-1 text-muted">
+                    <input
+                      type="number"
+                      aria-label={`${s.label}, typed (${s.unit})`}
+                      min={row.id === "time" ? 0 : 1}
+                      step={row.id === "time" ? "any" : 1}
+                      value={texts[row.id] ?? String(v ?? "")}
+                      onChange={(e) => {
+                        const text = e.currentTarget.value;
+                        setTexts((t) => ({ ...t, [row.id]: text }));
+                      }}
+                      onBlur={() => commitTyped(row.id)}
+                      onKeyDown={(e) => e.key === "Enter" && commitTyped(row.id)}
+                      className="h-6 w-20 rounded border border-control bg-sheet px-1 text-right text-text tabular-nums"
+                    />
+                    {row.id === "time" ? "ms" : null}
+                  </span>
+                ) : (
+                  <span className="text-muted">time varies · {row.why}</span>
+                )}
+              </div>
+              {row.editable ? (
+                <Slider
+                  aria-label={s.label}
+                  aria-valuetext={s.words(v)}
+                  min={s.min}
+                  max={s.max}
+                  step={1}
+                  value={[v === null ? s.min : s.pos(v)]}
+                  onValueChange={([p]) => p !== undefined && move(row.id, p)}
+                  onKeyDown={(e) => step(row.id, e)}
+                  onPointerUp={() => commitSlider(row.id)}
+                  onLostPointerCapture={() => commitSlider(row.id)}
+                  onKeyUp={(e) => SLIDER_KEYS.has(e.key) && commitSlider(row.id)}
+                />
+              ) : null}
+              {row.id === "time" && time === 0 ? (
+                <p className="m-0 text-warn">0 ms never saturates</p>
+              ) : null}
             </div>
-            {row.editable ? (
-              <Slider
-                aria-label={s.label}
-                aria-valuetext={s.words(v)}
-                min={s.min}
-                max={s.max}
-                step={1}
-                value={[v === null ? s.min : s.pos(v)]}
-                onValueChange={([p]) => p !== undefined && move(row.id, p)}
-                onKeyDown={(e) => step(row.id, e)}
-                onPointerUp={() => commitSlider(row.id)}
-                onLostPointerCapture={() => commitSlider(row.id)}
-                onKeyUp={(e) => SLIDER_KEYS.has(e.key) && commitSlider(row.id)}
-              />
-            ) : null}
-            {row.id === "time" && time === 0 ? (
-              <p className="m-0 text-warn">0 ms never saturates</p>
-            ) : null}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </fieldset>
   );
 }

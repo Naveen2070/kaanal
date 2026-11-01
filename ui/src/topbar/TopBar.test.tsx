@@ -49,10 +49,11 @@ test("the_run_button_runs", async () => {
   expect(onRun).toHaveBeenCalledTimes(1);
 });
 
-test("a_blocked_run_says_why_in_the_status_line", async () => {
+test("a_blocked_run_says_so_in_the_status_line_and_the_reason_is_a_notice", async () => {
   await show(300);
   useRun.setState({ status: "blocked", lastError: "no entry node", dimmed: true });
-  expect((await screen.findByRole("status")).textContent).toBe("no entry node");
+  expect((await screen.findByRole("status")).textContent).toBe("Not up to date");
+  expect(screen.queryByText("no entry node")).toBeNull(); // the reason is a toast (toast/bind.ts)
 });
 
 test("topbar_has_one_h1_with_the_project_name", async () => {

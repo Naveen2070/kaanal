@@ -95,7 +95,7 @@ export function Results() {
                 id={pickId}
                 value={node.name}
                 onChange={(e) => setPicked({ name: e.currentTarget.value, under: selected })}
-                className="rounded border px-1"
+                className="rounded border border-control bg-sheet text-text px-1"
               >
                 {names.map((n) => (
                   <option key={n} value={n}>

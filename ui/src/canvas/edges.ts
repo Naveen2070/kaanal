@@ -58,7 +58,7 @@ export function lastEdgeIndex(doc: Doc, from: string, to: string): number {
 }
 
 const COL_W = 280;
-const ROW_H = 150;
+const ROW_H = 220;
 
 /**
  * Left to right by depth from the nodes nothing points at, rows in the order of `nodes`. Returns

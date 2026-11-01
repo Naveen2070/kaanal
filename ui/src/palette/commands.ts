@@ -12,6 +12,7 @@ export interface CommandContext {
   press: (name: "apply" | "save" | "theme") => void;
   tour: () => void;
   fit: () => void;
+  traffic: () => void;
 }
 
 export function commands(ctx: CommandContext): Command[] {
@@ -27,6 +28,7 @@ export function commands(ctx: CommandContext): Command[] {
     { id: "theme", label: "Switch theme", run: () => ctx.press("theme") },
     { id: "tour", label: "Replay the tour", run: ctx.tour },
     { id: "fit", label: "Fit the view", run: ctx.fit },
+    { id: "traffic", label: "Build traffic", run: ctx.traffic },
   ];
 }
 

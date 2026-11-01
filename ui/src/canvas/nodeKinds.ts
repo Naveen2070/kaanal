@@ -78,3 +78,20 @@ export const NODE_KINDS: KindInfo[] = [
 export function kindInfo(kind: string | undefined): KindInfo | undefined {
   return NODE_KINDS.find((k) => k.kind === kind);
 }
+
+/** Kinds with a hue of their own (tokens.css `--cat-*`); `external-api` is `--cat-external`. */
+const HUE: Record<string, string> = {
+  gateway: "gateway",
+  service: "service",
+  monolith: "monolith",
+  database: "database",
+  cache: "cache",
+  "external-api": "external",
+  auth: "auth",
+};
+
+/** The CSS colour of a kind: its own hue, or a neutral for a kind the Studio does not know. */
+export function catColour(kind: string): string {
+  const h = HUE[kind];
+  return h ? `var(--cat-${h})` : "var(--muted)";
+}

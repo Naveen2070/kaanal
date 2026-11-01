@@ -71,9 +71,9 @@ body {
 
 /* the mirage loader (brand/Loader.tsx): sky, water and art tones, flat, one per theme */
 .kaanal-loader {
-  --kl-sky: light-dark(#f1f6fc, #000000);
-  --kl-water: light-dark(#d6e2f0, #141414);
-  --kl-art: light-dark(#bcc8da, #333333);
+  --kl-sky: light-dark(#e2eaf5, #24232e);
+  --kl-water: light-dark(#cbd8ea, #1b1a23);
+  --kl-art: light-dark(#a9b8cf, #3c3a49);
   background: var(--ground);
   color: var(--text);
 }
@@ -134,22 +134,23 @@ body {
   }
 }
 
-/* edges: a dash flowing along the path, speed set inline from the load; off under reduced motion */
-@keyframes kaanal-flow {
+/* a lane: a pulse of dashes travelling toward the arrowhead; speed is set inline from that copy's load */
+@keyframes kaanal-lane {
   to {
-    stroke-dashoffset: -16;
+    stroke-dashoffset: -20;
   }
 }
 
-.kaanal-flow {
-  stroke-dasharray: 8 8;
-  animation: kaanal-flow linear infinite;
+.kaanal-lane {
+  stroke-dasharray: 3 17;
+  animation: kaanal-lane linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .kaanal-flow {
+  .kaanal-lane {
     animation: none;
     stroke-dasharray: none;
+    stroke-opacity: 0.8;
   }
 }
 
@@ -162,4 +163,67 @@ body {
   --xy-controls-button-border-color: var(--border);
   --xy-background-color: transparent;
   --xy-edge-stroke: var(--control);
+}
+
+/* the attribution link keeps its text but meets contrast (4.5:1) and the 24 px target size */
+.react-flow__attribution {
+  background: var(--sheet);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0;
+  border-radius: 8px 0 0 0;
+}
+
+.react-flow__attribution a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  color: var(--muted);
+}
+
+/* panels that float over the canvas; the shadow is only for things that really float */
+@utility shadow-float {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 10px 28px -8px rgb(0 0 0 / 0.28);
+}
+
+/* thin, compact scrollbars everywhere: a slim thumb on a clear track */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Tailwind's reset zeroes every margin, which pins a modal dialog to the top left; a modal is centred
+   again here. Dialogs that place themselves (the tour, the command palette) set `m-0` and win. */
+@layer base {
+  dialog:modal {
+    margin: auto;
+  }
 }

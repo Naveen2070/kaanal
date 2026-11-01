@@ -17,6 +17,7 @@ import {
 } from "./logSlider";
 import { capacityLine } from "./metrics";
 import { NodeCard } from "./NodeCard";
+import { setUpdating, useUpdating } from "./updating";
 
 vi.mock("@xyflow/react", () => ({
   Handle: ({ type }: { type: string }) => <div data-handle={type} />,
@@ -106,26 +107,11 @@ const typed = (name: string) =>
   screen.getByRole("spinbutton", { name: new RegExp(`^${name}, typed`) }) as HTMLInputElement;
 const settings = () => screen.queryByRole("group", { name: "app settings" });
 
-beforeEach(() => useDraft.setState({ view: null, error: null, restarted: false }));
-afterEach(cleanup);
-
-test("bar_opens_on_selection_and_focus_not_hover", () => {
-  const c = card(false);
-  const group = screen.getByRole("group", { name: /^app, Service/ });
-  fireEvent.pointerEnter(group);
-  fireEvent.mouseOver(group);
-  expect(settings()).toBeNull();
-  // keyboard focus within the card opens it, focus leaving closes it
-  const header = screen.getByRole("button", { name: "app" });
-  act(() => header.focus());
-  expect(settings()).not.toBeNull();
-  act(() => header.blur());
-  expect(settings()).toBeNull();
-  c.select(true);
-  expect(settings()).not.toBeNull();
-  c.select(false);
-  expect(settings()).toBeNull();
+beforeEach(() => {
+  useDraft.setState({ view: null, error: null, restarted: false });
+  useUpdating.setState({ name: null });
 });
+afterEach(cleanup);
 
 test("drag_moves_only_the_capacity_line_commit_on_release", async () => {
   const sent = await loaded();
@@ -153,34 +139,6 @@ test("drag_moves_only_the_capacity_line_commit_on_release", async () => {
   expect(sent[1]?.body).toEqual({
     patch: [{ op: "insert", path: ["nodes", "app", "replicas"], value: 2 }],
   });
-});
-
-test("dragging_marks_the_meter_updating_until_the_run_starts", async () => {
-  await loaded();
-  const ran = nodeSummary({ name: "app" });
-  const feed = (dimmed: boolean, n = ran): StatsFeed => ({
-    node: (name) => (name === "app" ? n : undefined),
-    dimmed,
-    peakVisits: 0,
-  });
-  const c = card(true, config, feed(false));
-  expect(screen.queryByText("updating")).toBeNull();
-  fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
-  expect(screen.getByText("updating")).toBeTruthy();
-  fireEvent.keyUp(slider("Slots"), { key: "ArrowRight" });
-  await useDraft.getState().settled();
-  expect(screen.getByText("updating")).toBeTruthy(); // the debounced run has not started yet
-  c.select(true, feed(true)); // it starts: the feed marks the figures
-  expect(screen.getByText("updating")).toBeTruthy();
-  c.select(true, feed(false, nodeSummary({ name: "app" }))); // it landed
-  expect(screen.queryByText("updating")).toBeNull();
-});
-
-test("without_figures_there_is_no_updating_marker_to_get_stuck", async () => {
-  await loaded();
-  card(true); // no run at all (a draft with no traffic never runs)
-  fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
-  expect(screen.queryByText("updating")).toBeNull();
 });
 
 test("typed_zero_ms_is_accepted_and_warns_never_saturates", async () => {
@@ -365,62 +323,7 @@ test("capacity_line_text_matches_the_nodeFigures_selector", () => {
   expect(screen.getByText(line!)).toBeTruthy();
 });
 
-test("bar_closes_on_escape_and_returns_focus_to_the_card", () => {
-  const c = card(true);
-  const thumb = slider("Copies");
-  act(() => thumb.focus());
-  fireEvent.keyDown(thumb, { key: "Escape" });
-  expect(settings()).toBeNull();
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "app" }));
-  // a click on the header, or a new selection, opens it again
-  fireEvent.click(screen.getByRole("button", { name: "app" }));
-  expect(settings()).not.toBeNull();
-  fireEvent.keyDown(slider("Copies"), { key: "Escape" });
-  c.select(false);
-  expect(settings()).toBeNull(); // focus is still on the header, but Escape said closed
-  c.select(true);
-  expect(settings()).not.toBeNull();
-});
-
-test("opening_the_bar_leaves_the_handles_in_the_card_part", () => {
-  const c = card(false);
-  const parts = () =>
-    [...document.querySelectorAll("[data-handle]")].map(
-      (h) => h.parentElement?.getAttribute("data-part") ?? "elsewhere",
-    );
-  expect(parts()).toEqual(["card", "card"]);
-  c.select(true);
-  expect(settings()).not.toBeNull();
-  expect(parts()).toEqual(["card", "card"]);
-  expect(settings()?.querySelector("[data-handle]")).toBeNull();
-  expect(settings()?.className).toMatch(/\bnodrag\b.*\bnopan\b/);
-});
-
-test("an_open_bar_has_no_axe_violations", async () => {
-  card(true);
-  await expectNoViolations(document.body);
-  cleanup();
-  card(true, { ...config, proc: "0ms" });
-  await expectNoViolations(document.body);
-  cleanup();
-  card(true, { type: "service", proc: { p50: "4ms", p99: "20ms" } });
-  await expectNoViolations(document.body);
-});
-
 // ---- review fixes ----
-
-test("escape_in_a_typed_box_cancels_it_and_writes_nothing", async () => {
-  const sent = await loaded();
-  const c = card(true);
-  void c;
-  const time = typed("Time");
-  act(() => time.focus());
-  fireEvent.change(time, { target: { value: "500" } });
-  fireEvent.keyDown(time, { key: "Escape" });
-  await act(async () => {}); // the card moves focus to its header: that blurs the box
-  expect(sent).toHaveLength(0);
-  expect(settings()).toBeNull(); // and the bar is closed
-});
 
 test("enter_in_a_typed_box_keeps_keyboard_focus_there", async () => {
   const sent = await loaded();
@@ -471,18 +374,110 @@ test("a_time_below_a_microsecond_is_refused_and_the_slider_shows_only_what_it_ca
   await vi.waitFor(() => expect(sent).toHaveLength(1));
 });
 
+/** A card and the dock's bar for the same node, the way the page puts them together. */
+function cardAndBar(feed: StatsFeed, cfg: NodeDoc = config) {
+  const el = (f: StatsFeed) => (
+    <FeedContext.Provider value={f}>
+      <NodeCard
+        {...({
+          data: { name: "app", kind: cfg.type, config: cfg },
+          selected: true,
+        } as unknown as NodeProps)}
+      />
+      <ControlBar dock name="app" config={cfg} onPending={(on) => setUpdating("app", on)} />
+    </FeedContext.Provider>
+  );
+  const r = render(el(feed));
+  return { feed: (f: StatsFeed) => r.rerender(el(f)) };
+}
+
+test("the_card_holds_no_settings_and_no_bar_opens_under_it", () => {
+  card(true);
+  expect(settings()).toBeNull();
+  expect(screen.queryByRole("slider")).toBeNull();
+});
+
+test("the_card_keeps_its_handles_in_one_part_whatever_is_selected", () => {
+  card(true);
+  const parts = [...document.querySelectorAll("[data-handle]")].map(
+    (h) => h.parentElement?.getAttribute("data-part") ?? "elsewhere",
+  );
+  expect(parts).toEqual(["card", "card"]);
+});
+
+test("the_dock_lays_the_rows_side_by_side_and_the_drawer_stacks_them", () => {
+  const r = bar();
+  expect(settings()?.querySelector(".flex-wrap")).toBeNull();
+  r.unmount();
+  render(<ControlBar dock name="app" config={config} />);
+  expect(settings()?.querySelector(".flex-wrap")).not.toBeNull();
+  expect(settings()?.classList.contains("nodrag") && settings()?.classList.contains("nopan")).toBe(
+    true,
+  );
+});
+
+test("dragging_marks_the_meter_updating_until_the_run_starts", async () => {
+  await loaded();
+  const ran = nodeSummary({ name: "app" });
+  const feed = (dimmed: boolean, n = ran): StatsFeed => ({
+    node: (name) => (name === "app" ? n : undefined),
+    dimmed,
+    peakVisits: 0,
+  });
+  const c = cardAndBar(feed(false));
+  expect(screen.queryByText("updating")).toBeNull();
+  fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
+  expect(screen.getByText("updating")).toBeTruthy();
+  fireEvent.keyUp(slider("Slots"), { key: "ArrowRight" });
+  await useDraft.getState().settled();
+  expect(screen.getByText("updating")).toBeTruthy(); // the debounced run has not started yet
+  c.feed(feed(true)); // it starts: the feed marks the figures
+  expect(screen.getByText("updating")).toBeTruthy();
+  c.feed(feed(false, nodeSummary({ name: "app" }))); // it landed
+  expect(screen.queryByText("updating")).toBeNull();
+});
+
+test("without_figures_there_is_no_updating_marker_to_get_stuck", async () => {
+  await loaded();
+  cardAndBar(EMPTY_FEED); // no run at all (a draft with no traffic never runs)
+  fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
+  expect(screen.queryByText("updating")).toBeNull();
+});
+
+test("escape_in_a_typed_box_cancels_it_writes_nothing_and_asks_to_close", async () => {
+  const sent = await loaded();
+  const onClose = vi.fn();
+  render(<ControlBar dock name="app" config={config} onClose={onClose} />);
+  const time = typed("Time");
+  act(() => time.focus());
+  fireEvent.change(time, { target: { value: "500" } });
+  fireEvent.keyDown(time, { key: "Escape" });
+  act(() => time.blur()); // the dock closing moves focus away, and a blur would commit
+  await act(async () => {});
+  expect(sent).toHaveLength(0);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
 test("escape_does_not_clear_updating_while_an_edit_is_on_its_way", async () => {
   await loaded();
   const ran = nodeSummary({ name: "app" });
-  const feed: StatsFeed = {
-    node: (n) => (n === "app" ? ran : undefined),
-    dimmed: false,
-    peakVisits: 0,
-  };
-  card(true, config, feed);
+  cardAndBar({ node: (n) => (n === "app" ? ran : undefined), dimmed: false, peakVisits: 0 });
   fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
   fireEvent.keyUp(slider("Slots"), { key: "ArrowRight" }); // committed: the run is pending
   expect(screen.getByText("updating")).toBeTruthy();
   fireEvent.keyDown(slider("Slots"), { key: "Escape" });
   expect(screen.getByText("updating")).toBeTruthy();
+});
+
+test("an_open_bar_has_no_axe_violations", async () => {
+  render(<ControlBar dock name="app" config={config} />);
+  await expectNoViolations(document.body);
+  cleanup();
+  render(<ControlBar dock name="app" config={{ ...config, proc: "0ms" }} />);
+  await expectNoViolations(document.body);
+  cleanup();
+  render(
+    <ControlBar dock name="app" config={{ type: "service", proc: { p50: "4ms", p99: "20ms" } }} />,
+  );
+  await expectNoViolations(document.body);
 });

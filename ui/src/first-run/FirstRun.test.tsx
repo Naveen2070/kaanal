@@ -4,7 +4,7 @@ import type { DraftView, RunRecord } from "../api/types";
 import { useRun } from "../store/run";
 import { useDraft } from "../store/draft";
 import { mockFetch } from "../test/fetch";
-import { TopBar } from "../topbar/TopBar";
+import { TopTools } from "../topbar/TopBar";
 import { placeNote, Tour } from "./Tour";
 import { neverAgain, projectKeyOf, shouldShowWelcome } from "./flags";
 import { FirstRun } from "./FirstRun";
@@ -111,7 +111,7 @@ test("closing_the_card_starts_the_tour_and_skip_ends_it", async () => {
 test("the_question_mark_replays_the_tour_even_with_never_again", async () => {
   await open("p1");
   fireEvent.click(screen.getByRole("button", { name: "Don't show again" }));
-  render(<TopBar onRun={() => {}} />);
+  render(<TopTools />);
   fireEvent.click(screen.getByRole("button", { name: "Show the tour" }));
   expect(tour()).toBeTruthy();
   fireEvent.keyDown(window, { key: "Escape" });

@@ -67,9 +67,9 @@ export function NumberField({
         onKeyDown={(e) => {
           if (e.key === "Enter") commit(e.currentTarget);
         }}
-        className="w-28 rounded border px-1"
+        className="h-7 w-28 rounded border border-control bg-sheet text-text px-1"
       />
-      <p id={`${id}-hint`} className="text-xs text-neutral-500">
+      <p id={`${id}-hint`} className="text-xs text-muted">
         {hint}
       </p>
     </div>
@@ -79,7 +79,7 @@ export function NumberField({
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-4 border-b pb-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase text-neutral-500">{title}</h3>
+      <h3 className="mb-2 text-xs font-semibold uppercase text-muted">{title}</h3>
       {children}
     </section>
   );

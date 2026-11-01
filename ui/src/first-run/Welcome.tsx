@@ -84,7 +84,7 @@ export function Welcome() {
         }}
         aria-labelledby={titleId}
         onKeyDown={trap}
-        className="w-full max-w-md rounded-lg border-0 bg-white p-5 text-neutral-900 shadow-xl backdrop:bg-black/40 dark:bg-neutral-900 dark:text-neutral-100"
+        className="w-full max-w-md rounded-lg border border-border bg-sheet p-5 text-text shadow-xl backdrop:bg-black/40"
       >
         <h2 id={titleId} className="mb-3 text-lg font-semibold">
           Welcome to Kaanal Studio
@@ -95,19 +95,19 @@ export function Welcome() {
               <span className="font-medium">
                 {i + 1}. {title}
               </span>{" "}
-              <span className="text-neutral-600 dark:text-neutral-300">{text}</span>
+              <span className="text-muted">{text}</span>
             </li>
           ))}
         </ol>
         {problem ? (
-          <p role="alert" className="mb-2 text-sm text-red-700">
+          <p role="alert" className="mb-2 text-sm text-negative">
             {problem}
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="rounded border px-3 py-1"
+            className="rounded border border-control bg-sheet text-text px-3 py-1"
             disabled={busy}
             onClick={closeWelcome}
           >

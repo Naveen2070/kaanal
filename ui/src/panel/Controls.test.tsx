@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView, EdgeDoc, NodeDoc } from "../api/types";
 import { FeedContext } from "../canvas/feed";
 import { useDraft } from "../store/draft";
+import { useToasts } from "../toast/toasts";
 import { mockFetch } from "../test/fetch";
 import { nodeSummary } from "../test/summary";
 import { Controls } from "./Controls";
@@ -71,7 +72,10 @@ async function show(
   return calls;
 }
 
-beforeEach(() => useDraft.setState({ view: null, error: null, restarted: false }));
+beforeEach(() => {
+  useDraft.setState({ view: null, error: null, restarted: false });
+  useToasts.setState({ toasts: [] });
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -287,7 +291,11 @@ test("a_chaos_error_is_shown", async () => {
   await chaosReady();
   mockFetch([{ status: 404, json: { error: "unknown node 'app'" } }]);
   fireEvent.click(screen.getByRole("button", { name: "Take down" }));
-  expect((await screen.findByRole("alert")).textContent).toBe("unknown node 'app'");
+  // a failure is a notice (a toast), not text in the panel
+  await vi.waitFor(() =>
+    expect(useToasts.getState().toasts.map((t) => t.text)).toContain("unknown node 'app'"),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {

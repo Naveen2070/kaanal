@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView } from "../api/types";
 import { useDraft } from "../store/draft";
+import { mockFetch } from "../test/fetch";
+import { useToasts } from "../toast/toasts";
 import { ConnectMenu, targetsFor } from "./ConnectMenu";
 
 const odd = "db #1/ü x";
@@ -28,13 +30,18 @@ function view(): DraftView {
   };
 }
 
-beforeEach(() => useDraft.setState({ view: view(), error: null }));
+beforeEach(() => {
+  useDraft.setState({ view: view(), error: null });
+  useToasts.setState({ toasts: [] });
+});
 afterEach(cleanup);
 
 test("connect_menu_lists_only_valid_targets", () => {
   expect(targetsFor("gw", ["gw", "api", odd], [{ from: "gw", to: "api" }])).toEqual([odd]);
   render(<ConnectMenu from="gw" />);
-  const items = screen.getAllByRole("button").map((b) => b.textContent);
+  const items = within(screen.getByRole("list", { name: "Connect gw to" }))
+    .getAllByRole("button")
+    .map((b) => b.textContent);
   expect(items).toEqual([odd]); // not itself, not api (already called); odd names work as labels
 });
 
@@ -52,5 +59,23 @@ test("a_click_connects_and_a_refusal_is_shown", async () => {
   render(<ConnectMenu from="gw" />);
   fireEvent.click(screen.getByRole("button", { name: odd }));
   expect(connect).toHaveBeenCalledWith("gw", odd);
-  expect((await screen.findByRole("alert")).textContent).toBe("the edge was refused");
+  await vi.waitFor(() =>
+    expect(useToasts.getState().toasts.map((t) => t.text)).toContain("the edge was refused"),
+  );
+});
+
+test("each_wire_leaving_the_component_has_a_delete_button_that_removes_that_entry", async () => {
+  mockFetch([{ json: view() }]);
+  await useDraft.getState().load();
+  render(<ConnectMenu from="gw" />);
+  expect(screen.getByText("gw to api")).toBeTruthy();
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.click(screen.getByRole("button", { name: "Delete the wire from gw to api" }));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0] }] });
+});
+
+test("a_component_with_no_outgoing_wires_lists_none", () => {
+  render(<ConnectMenu from="api" />);
+  expect(screen.queryByRole("list", { name: "Wires from api" })).toBeNull();
 });

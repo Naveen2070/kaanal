@@ -12,11 +12,12 @@ const ctx = () => ({
   press: vi.fn(),
   tour: vi.fn(),
   fit: vi.fn(),
+  traffic: vi.fn(),
 });
 
 test("commands_cover_add_run_apply_save_theme_tour_fit", () => {
   const ids = commands(ctx()).map((c) => c.id);
-  for (const id of ["add-service", "run", "apply", "save", "theme", "tour", "fit"])
+  for (const id of ["add-service", "run", "apply", "save", "theme", "tour", "fit", "traffic"])
     expect(ids).toContain(id);
 });
 

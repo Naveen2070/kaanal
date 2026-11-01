@@ -7,6 +7,7 @@ import { useFirstRun } from "../first-run/store";
 import { useDraft } from "../store/draft";
 import { LazyBoundary } from "../states/LazyBoundary";
 import { runNow } from "../store/loopRuntime";
+import { openTrafficBuilder } from "../traffic/store";
 import { commands } from "./commands";
 
 const CommandPalette = lazy(() =>
@@ -36,6 +37,7 @@ export function PaletteHost() {
     press: (name) => document.querySelector<HTMLElement>(`[data-command="${name}"]`)?.click(),
     tour: replayTour,
     fit: () => canvasBridge.fit(),
+    traffic: openTrafficBuilder,
   });
   return (
     <LazyBoundary fallback={null}>

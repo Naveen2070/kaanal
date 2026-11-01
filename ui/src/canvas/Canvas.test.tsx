@@ -29,14 +29,23 @@ interface DragNode {
 }
 let flow: Props;
 const fit = vi.hoisted(() => vi.fn());
+const center = vi.hoisted(() =>
+  vi.fn(async (_x: number, _y: number, _o: { zoom: number; duration: number }) => true),
+);
 vi.mock("@xyflow/react", () => ({
   ReactFlow: (p: Props) => {
     flow = p;
     return <div data-testid="flow" />;
   },
   ReactFlowProvider: ({ children }: { children: unknown }) => <>{children}</>,
-  useReactFlow: () => ({ screenToFlowPosition: (p: { x: number; y: number }) => p, fitView: fit }),
+  useReactFlow: () => ({
+    screenToFlowPosition: (p: { x: number; y: number }) => p,
+    fitView: fit,
+    getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+    setCenter: center,
+  }),
   Background: () => null,
+  BackgroundVariant: { Lines: "lines" },
   Controls: () => null,
   Handle: () => null,
   Position: { Left: "left", Right: "right" },
@@ -181,30 +190,41 @@ test("selecting_with_the_keyboard_selects_the_node", async () => {
   await vi.waitFor(() => expect(new URLSearchParams(location.search).get("node")).toBe("gw"));
 });
 
-test("a_refused_edit_shows_its_message_on_the_canvas", async () => {
+test("the_canvas_draws_no_notice_of_its_own", async () => {
   await show(view());
   mockFetch([{ status: 400, json: { error: "out of range" } }]);
   await act(async () => void useDraft.getState().addNode("cache"));
-  expect(screen.getByRole("alert").textContent).toBe("out of range");
+  // a refused edit is reported by the notifications (toast/bind.ts), never as a box on the canvas
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 // ---- T2.3: fit view ----
 
-test("fit_view_runs_on_load_and_after_add_node", async () => {
+test("the_view_fits_on_load_and_never_zooms_again_when_a_node_is_added", async () => {
   fit.mockClear();
+  center.mockClear();
   await show(view());
   expect(flow.fitView).toBe(true); // on load, by React Flow itself
+  expect((flow as unknown as { fitViewOptions: { maxZoom: number } }).fitViewOptions.maxZoom).toBe(
+    0.9,
+  );
   expect(fit).not.toHaveBeenCalled();
 
   const doc = view().doc!;
   const withCache = { ...doc, nodes: { ...doc.nodes, cache: { type: "cache" } } };
-  // a node arrives; the canvas gives it a position at once (optimistically) and then fits, once
-  await act(async () => useDraft.setState({ view: view({ doc: withCache }) }));
-  expect(fit).toHaveBeenCalledTimes(1);
-  expect(fit.mock.calls[0]?.[0]).toMatchObject({ padding: 0.2 });
-  // an unrelated change fits nothing
+  // a node arrives with its position (jsdom has no layout, so it counts as out of view): the view
+  // moves to it and keeps its zoom; it is never fitted again
+  await act(async () =>
+    useDraft.setState({
+      view: view({ doc: withCache, layout: { ...view().layout, cache: [560, 0] } }),
+    }),
+  );
+  expect(fit).not.toHaveBeenCalled();
+  expect(center).toHaveBeenCalledTimes(1);
+  expect(center.mock.calls[0]?.[2]).toMatchObject({ zoom: 1 });
+  // an unrelated change moves nothing
   act(() => useDraft.setState({ view: view({ rev: 5 }) }));
-  expect(fit).toHaveBeenCalledTimes(1);
+  expect(center).toHaveBeenCalledTimes(1);
 });
 
 test("edges_are_drawn_by_the_load_edge_with_their_ends_named", async () => {
@@ -212,7 +232,7 @@ test("edges_are_drawn_by_the_load_edge_with_their_ends_named", async () => {
   expect(flow.edgeTypes).toHaveProperty("load");
   const e = (flow as unknown as { edges: { type: string; data: object }[] }).edges[0]!;
   expect(e.type).toBe("load");
-  expect(e.data).toEqual({ from: "gw", to: "a#b/c d" });
+  expect(e.data).toEqual({ from: "gw", to: "a#b/c d", index: 0 });
 });
 
 test("arrow_keys_move_a_selected_node_on_screen_at_once_and_save_once_after_a_pause", async () => {
@@ -234,6 +254,9 @@ test("arrow_keys_move_a_selected_node_on_screen_at_once_and_save_once_after_a_pa
     expect(flow.nodes.find((n) => n.data.name === "gw")?.position).toEqual({ x: 24, y: 0 });
     expect(sent).toHaveLength(0);
     await act(async () => void vi.advanceTimersByTimeAsync(400));
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(sent).toHaveLength(1);
     expect(sent[0]?.body).toEqual({ layout: { gw: [24, 0], "a#b/c d": [280, 0] } });
   } finally {
@@ -252,4 +275,35 @@ test("arrow_keys_in_a_slider_or_field_do_not_move_the_node", async () => {
   slider.remove();
   expect(sent).toHaveLength(0);
   expect(flow.nodes.find((n) => n.data.name === "gw")?.position).toEqual({ x: 0, y: 0 });
+});
+
+interface Deletable {
+  deleteKeyCode: string[] | null;
+  onBeforeDelete: (d: {
+    nodes: unknown[];
+    edges: unknown[];
+  }) => Promise<{ nodes: unknown[]; edges: unknown[] }>;
+  onEdgesDelete: (e: { id: string }[]) => void;
+}
+
+test("delete_and_backspace_remove_a_selected_wire_and_never_a_component", async () => {
+  await show(view());
+  const f = flow as unknown as Deletable;
+  expect(f.deleteKeyCode).toEqual(["Backspace", "Delete"]);
+  const kept = await f.onBeforeDelete({ nodes: [{ id: "n" }], edges: [{ id: "e0" }] });
+  expect(kept).toEqual({ nodes: [], edges: [{ id: "e0" }] });
+});
+
+test("deleted_wires_leave_the_edge_list_highest_index_first_in_one_patch", async () => {
+  await show(view());
+  const sent = mockFetch([{ json: view() }]);
+  (flow as unknown as Deletable).onEdgesDelete([{ id: "e0" }, { id: "e2" }, { id: "e1" }]);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [
+      { op: "remove", path: ["edges", 2] },
+      { op: "remove", path: ["edges", 1] },
+      { op: "remove", path: ["edges", 0] },
+    ],
+  });
 });

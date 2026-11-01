@@ -88,9 +88,9 @@ export function Controls({
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
           }}
-          className="w-full rounded border px-1"
+          className="h-7 w-full rounded border border-control bg-sheet text-text px-1"
         />
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="mt-1 text-xs text-muted">
           {info ? `${info.label}: ${info.description}.` : config.type}
         </p>
       </Section>
@@ -101,9 +101,7 @@ export function Controls({
 
       {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
         <Section title="Traffic routes">
-          <p className="mb-2 text-xs text-neutral-500">
-            Where incoming endpoints forward requests.
-          </p>
+          <p className="mb-2 text-xs text-muted">Where incoming endpoints forward requests.</p>
           {Object.entries(doc.endpoints).map(([epKey, epVal]) => {
             const epObj =
               epVal && typeof epVal === "object" ? (epVal as Record<string, unknown>) : {};
@@ -122,13 +120,13 @@ export function Controls({
               <div key={epKey} className="mb-2">
                 <label
                   htmlFor={selectId}
-                  className="block text-xs font-mono font-medium text-neutral-700"
+                  className="block text-xs font-mono font-medium text-muted"
                 >
                   {epKey}
                 </label>
                 <select
                   id={selectId}
-                  className="mt-1 w-full rounded border bg-white px-1 py-0.5 text-xs"
+                  className="mt-1 w-full rounded border border-control bg-sheet text-text px-1 py-0.5 text-xs"
                   value={currentTarget}
                   onChange={(e) => {
                     const to = e.currentTarget.value;
@@ -169,7 +167,7 @@ export function Controls({
           {percent(f.busy)} busy
           {f.peak !== null ? `, peaking at ${percent(f.peak)}` : ""}
         </p>
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-muted">
           {f.hasRun
             ? "Measured over the run: the share of its slots in use."
             : "Nothing to show until a run has finished."}
@@ -198,7 +196,7 @@ export function Controls({
           onCommit={(n) => patch([setReplicas(name, config, n)])}
         />
         {!hasProc(config.type) ? (
-          <p className="mb-2 text-xs text-neutral-500">
+          <p className="mb-2 text-xs text-muted">
             This kind prices its work per operation (reads, writes, hits), not with one service
             time. Edit those in kaanal.yaml for now.
           </p>
@@ -218,7 +216,7 @@ export function Controls({
             onCommit={(n) => patch([setDuration(name, config, "proc", n)])}
           />
         ) : (
-          <p className="mb-2 text-xs text-neutral-500">
+          <p className="mb-2 text-xs text-muted">
             Service time is a spread of values (for example p50 and p99). Edit it in kaanal.yaml for
             now.
           </p>
@@ -259,7 +257,7 @@ export function Controls({
               ? ` (the run measured ${twoSignificant(node.capacity_per_s)} visits/s: payload and own hops cost extra)`
               : ""}
           </p>
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-muted">
             {node && spare !== undefined
               ? spare >= 0
                 ? `${percent(spare)} spare at ${twoSignificant(node.visits_per_s)} visits/s.`
@@ -294,7 +292,7 @@ export function Controls({
 
       <button
         type="button"
-        className="rounded border border-red-600 px-2 py-1 text-red-700"
+        className="rounded border border-negative px-2 py-1 text-negative"
         onClick={() => {
           void patch(deleteOps(name, edges)).then((ok) => ok && onDeleted());
         }}

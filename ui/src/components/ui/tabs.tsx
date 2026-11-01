@@ -32,6 +32,9 @@ export function TabsContent({
   ...props
 }: ComponentProps<typeof TabsPrimitive.Content>) {
   return (
-    <TabsPrimitive.Content className={`min-h-0 flex-1 overflow-y-auto ${className}`} {...props} />
+    <TabsPrimitive.Content
+      className={`relative min-h-0 flex-1 overflow-y-auto ${className}`}
+      {...props}
+    />
   );
 }

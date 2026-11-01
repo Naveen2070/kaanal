@@ -87,3 +87,12 @@ test("controls_tab_has_no_slots_per_instance_jargon_label", async () => {
   expect(screen.queryByText(/per instance/i)).toBeNull();
   expect(screen.getByLabelText("Slots")).toBeTruthy();
 });
+
+test("tab_panels_contain_their_absolutely_positioned_children", () => {
+  // the screen-reader-only heatmap table is absolute: without a positioned panel it sits against the
+  // page and gives the whole window a scrollbar
+  show("controls");
+  const panel = screen.getByRole("tabpanel");
+  expect(panel.className).toMatch(/\brelative\b/);
+  expect(panel.className).toMatch(/overflow-y-auto/);
+});

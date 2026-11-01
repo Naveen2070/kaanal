@@ -1,10 +1,13 @@
 // "Connect to…" (WCAG 2.5.7, a way to draw an edge without dragging): the components this one can
 // call, as buttons. Only valid targets are listed: not itself, not one it already calls. A refusal
-// from the draft is shown beside the list with its reason.
+// from the draft is shown beside the list with its reason. Below it, the wires that leave this
+// component, each with a button to delete it (the other way to delete a wire; Delete on a selected
+// wire and its own button are the others).
 
-import { useState } from "react";
+import { Unplug } from "lucide-react";
 import type { EdgeDoc } from "../api/types";
 import { useDraft } from "../store/draft";
+import { notify } from "../toast/toasts";
 
 /** The names `from` could still call. */
 export function targetsFor(from: string, names: string[], edges: EdgeDoc[]): string[] {
@@ -15,8 +18,12 @@ export function targetsFor(from: string, names: string[], edges: EdgeDoc[]): str
 export function ConnectMenu({ from }: { from: string }) {
   const doc = useDraft((s) => s.view?.doc);
   const connect = useDraft((s) => s.connect);
-  const [note, setNote] = useState<string | null>(null);
+  const patch = useDraft((s) => s.patch);
   const targets = targetsFor(from, Object.keys(doc?.nodes ?? {}), doc?.edges ?? []);
+  /** The wires leaving this component, with their place in `edges` (which is what a delete needs). */
+  const wires = (doc?.edges ?? [])
+    .map((e, i) => ({ to: String(e.to), from: String(e.from), i }))
+    .filter((w) => w.from === from);
   return (
     <div>
       {targets.length === 0 ? (
@@ -31,9 +38,11 @@ export function ConnectMenu({ from }: { from: string }) {
               <button
                 type="button"
                 onClick={() =>
-                  void connect(from, to).then((r) =>
-                    setNote(r.ok ? (r.warning ?? null) : r.message),
-                  )
+                  void connect(from, to).then((r) => {
+                    notify.clear("connect");
+                    if (!r.ok) notify.error(r.message, "connect");
+                    else if (r.warning) notify.warn(r.warning, "connect");
+                  })
                 }
                 className="rounded-full border border-control px-2 py-0.5 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
               >
@@ -43,10 +52,24 @@ export function ConnectMenu({ from }: { from: string }) {
           ))}
         </ul>
       )}
-      {note ? (
-        <p role="alert" className="mt-1 text-xs text-negative">
-          {note}
-        </p>
+      {wires.length > 0 ? (
+        <ul aria-label={`Wires from ${from}`} className="mt-2 flex flex-col gap-1">
+          {wires.map((w) => (
+            <li key={w.i} className="flex items-center gap-2 text-xs">
+              <span className="min-w-0 flex-1 truncate">
+                {from} to {w.to}
+              </span>
+              <button
+                type="button"
+                aria-label={`Delete the wire from ${from} to ${w.to}`}
+                onClick={() => void patch([{ op: "remove", path: ["edges", w.i] }])}
+                className="flex size-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-negative focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <Unplug size={14} aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </div>
   );

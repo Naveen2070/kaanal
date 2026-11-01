@@ -1,87 +1,168 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { EdgeProps } from "@xyflow/react";
-import { afterEach, expect, test, vi } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
+import type { DraftView } from "../api/types";
+import { useDraft } from "../store/draft";
+import { mockFetch } from "../test/fetch";
 import { nodeSummary } from "../test/summary";
 import { FeedContext, type StatsFeed } from "./feed";
 import { LoadEdge } from "./LoadEdge";
 
 vi.mock("@xyflow/react", () => ({
-  BaseEdge: (p: { path: string; className?: string; style?: object }) => (
-    <path data-testid="edge" d={p.path} className={p.className} style={p.style} />
+  BaseEdge: (p: { path: string; style?: object }) => (
+    <path data-testid="wire" d={p.path} style={p.style} />
   ),
-  getSmoothStepPath: (o: { borderRadius: number }) => [`M0 0 r${o.borderRadius}`, 0, 0],
+  EdgeLabelRenderer: ({ children }: { children: unknown }) => <>{children}</>,
+  getSmoothStepPath: (o: { borderRadius: number; centerX?: number }) => [
+    `M0 0 r${o.borderRadius} c${o.centerX ?? "mid"}`,
+    5,
+    5,
+  ],
 }));
 
+const rep = (replica: number, visits_per_s: number) => ({
+  replica,
+  visits: 0,
+  visits_per_s,
+  mean_wait_ms: 0,
+  offered_load: null,
+  utilization: null,
+});
+
+function view(copies: number): DraftView {
+  return {
+    text: "",
+    dirty: false,
+    generation: 1,
+    lost: [],
+    rev: 0,
+    boot: "b",
+    doc: {
+      nodes: { gw: { type: "gateway" }, app: { type: "service", replicas: copies } },
+      edges: [{ from: "gw", to: "app" }],
+    },
+    doc_error: null,
+    project_id: "none",
+    project_name: null,
+    kind_defaults: {},
+    layout: {},
+    layout_note: null,
+    layout_dirty: false,
+    saved: true,
+  };
+}
+
+beforeEach(() => useDraft.setState({ view: view(1), error: null }));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-const feed = (busyFrom: number, busyTo: number, visits = 100): StatsFeed => ({
+const feed = (busyTo: number, replicas = [rep(0, 100)], visits = 100): StatsFeed => ({
   node: (name) =>
     name === "gw"
-      ? nodeSummary({ name: "gw", utilization: busyFrom, visits_per_s: 100 })
+      ? nodeSummary({ name: "gw", utilization: 0.1, visits_per_s: 100 })
       : name === "app"
-        ? nodeSummary({ name: "app", utilization: busyTo, visits_per_s: visits })
+        ? nodeSummary({ name: "app", utilization: busyTo, visits_per_s: visits, replicas })
         : undefined,
   dimmed: false,
   peakVisits: 100,
 });
 
-function edge(f: StatsFeed) {
+function edge(f: StatsFeed, selected = false) {
   const props = {
     id: "e0",
     sourceX: 0,
     sourceY: 0,
-    targetX: 10,
+    targetX: 100,
     targetY: 10,
     sourcePosition: "right",
     targetPosition: "left",
-    data: { from: "gw", to: "app" },
+    selected,
+    data: { from: "gw", to: "app", index: 0 },
   };
-  render(
+  return render(
     <svg>
       <FeedContext.Provider value={f}>
         <LoadEdge {...(props as unknown as EdgeProps)} />
       </FeedContext.Provider>
     </svg>,
   );
-  return document.querySelector("[data-testid=edge]") as SVGPathElement;
 }
 
-test("the_path_has_six_pixel_rounded_elbows", () => {
-  expect(edge(feed(0.1, 0.1)).getAttribute("d")).toBe("M0 0 r6");
+/** The moving part of each lane (the one that carries the arrowhead). */
+const lanes = () => [...document.querySelectorAll("path[marker-end]")] as SVGPathElement[];
+
+test("a_single_copy_gets_one_lane_with_an_arrowhead_toward_the_target", () => {
+  edge(feed(0.2));
+  expect(lanes()).toHaveLength(1);
+  expect(lanes()[0]?.getAttribute("marker-end")).toBe("url(#e0-arrow-0)");
+  expect(document.querySelector("marker#e0-arrow-0")?.getAttribute("orient")).toBe("auto");
 });
 
-test("a_busy_edge_is_thicker_amber_or_red_and_flows", () => {
-  const calm = edge(feed(0.1, 0.1, 10));
-  expect(calm.style.strokeWidth).toBe("1.8");
-  expect(calm.style.stroke).toBe("var(--control)");
-  cleanup();
-  const hot = edge(feed(0.95, 0.2, 100));
-  expect(hot.style.strokeWidth).toBe("4.5");
-  expect(hot.style.stroke).toBe("var(--bad-fill)");
-  expect(hot.getAttribute("class")).toMatch(/kaanal-flow/);
+test("each_copy_of_the_target_is_its_own_lane_in_its_own_colour", () => {
+  useDraft.setState({ view: view(3) });
+  edge(feed(0.2, [rep(0, 10), rep(1, 50), rep(2, 100)]));
+  expect(lanes().map((l) => l.getAttribute("stroke"))).toEqual([
+    "var(--lane-0)",
+    "var(--lane-1)",
+    "var(--lane-2)",
+  ]);
+  // lanes bend at their own x, so they run side by side and never over each other
+  const bends = [...document.querySelectorAll("path")]
+    .map((p) => p.getAttribute("d") ?? "")
+    .filter((d) => d.includes("c") && /c-?\d/.test(d));
+  expect(new Set(bends).size).toBe(3);
 });
 
-test("an_edge_with_no_traffic_does_not_flow", () => {
-  const e = edge(feed(0.1, 0.1, 0));
-  expect(e.getAttribute("class") ?? "").not.toMatch(/kaanal-flow/);
+test("a_lane_pulses_faster_and_heavier_the_more_its_copy_takes", () => {
+  useDraft.setState({ view: view(2) });
+  edge(feed(0.2, [rep(0, 10), rep(1, 100)]));
+  const [slow, fast] = lanes();
+  expect(slow?.getAttribute("class")).toMatch(/kaanal-lane/);
+  expect(Number.parseFloat(slow?.style.animationDuration ?? "0")).toBeGreaterThan(
+    Number.parseFloat(fast?.style.animationDuration ?? "0"),
+  );
+  expect(Number(fast?.getAttribute("stroke-width"))).toBeGreaterThan(
+    Number(slow?.getAttribute("stroke-width")),
+  );
 });
 
-test("edge_flow_stops_under_reduced_motion", () => {
+test("a_lane_with_no_traffic_does_not_pulse", () => {
+  edge(feed(0.1, [rep(0, 0)], 0));
+  expect(lanes()[0]?.getAttribute("class") ?? "").not.toMatch(/kaanal-lane/);
+});
+
+test("lanes_stand_still_under_reduced_motion_and_the_state_stays_in_the_halo", () => {
   vi.stubGlobal("matchMedia", (q: string) => ({
     matches: q.includes("reduce"),
     addEventListener() {},
     removeEventListener() {},
   }));
-  const e = edge(feed(0.9, 0.9, 100));
-  expect(e.getAttribute("class") ?? "").not.toMatch(/kaanal-flow/);
-  expect(e.style.stroke).toBe("var(--bad-fill)"); // the state is still in the colour
+  edge(feed(0.95));
+  expect(lanes()[0]?.getAttribute("class") ?? "").not.toMatch(/kaanal-lane/);
+  expect(document.querySelector('path[stroke="var(--bad-fill)"]')).not.toBeNull();
 });
 
-test("an_edge_with_no_run_is_the_muted_default", () => {
-  const e = edge({ node: () => undefined, dimmed: false, peakVisits: 0 });
-  expect(e.style.strokeWidth).toBe("1.5");
-  expect(e.style.stroke).toBe("var(--control)");
+test("a_hot_target_puts_a_halo_under_the_wire_and_a_calm_one_does_not", () => {
+  edge(feed(0.8));
+  expect(document.querySelector('path[stroke="var(--warn-fill)"]')).not.toBeNull();
+  cleanup();
+  edge(feed(0.2));
+  expect(
+    document.querySelector('path[stroke="var(--warn-fill)"], path[stroke="var(--bad-fill)"]'),
+  ).toBeNull();
+});
+
+test("a_selected_wire_shows_a_button_that_deletes_exactly_that_entry", async () => {
+  edge(feed(0.2));
+  expect(screen.queryByRole("button", { name: /Delete the wire/ })).toBeNull();
+  cleanup();
+  mockFetch([{ json: view(1) }]);
+  await useDraft.getState().load(); // the store must hold a confirmed draft before it takes an edit
+  edge(feed(0.2), true);
+  const sent = mockFetch([{ json: view(1) }]);
+  fireEvent.click(screen.getByRole("button", { name: "Delete the wire from gw to app" }));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0] }] });
 });

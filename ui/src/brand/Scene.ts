@@ -25,8 +25,8 @@ export interface Palette {
 
 /** The fixed colours of the reflection images; the inline picture uses the tokens instead. */
 export const PALETTES: Record<"light" | "dark", Palette> = {
-  light: { sun: "#1f6fe0", ink: "#101418", art: "#bcc8da", sky: "#f1f6fc" },
-  dark: { sun: "#5aa2ff", ink: "#ffffff", art: "#333333", sky: "#000000" },
+  light: { sun: "#2d5cc4", ink: "#211e19", art: "#a9b8cf", sky: "#e2eaf5" },
+  dark: { sun: "#7ba3ff", ink: "#ece9f3", art: "#3c3a49", sky: "#24232e" },
 };
 
 export interface Wordmark {

@@ -1,5 +1,6 @@
 // Undo and redo (spec 9): two icon buttons and Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (and Ctrl+Y). The keys
-// leave text fields alone, where they mean the field's own undo.
+// leave text fields alone, where they mean the field's own undo. An edit that cannot be undone is
+// said in a notice (toast/bind.ts).
 
 import { Redo2, Undo2 } from "lucide-react";
 import { useEffect } from "react";
@@ -11,7 +12,6 @@ const TEXT = "input,textarea,select,[contenteditable=true],[contenteditable=''],
 export function UndoRedo() {
   const canUndo = useHistory((s) => s.past.length > 0);
   const canRedo = useHistory((s) => s.future.length > 0);
-  const note = useHistory((s) => s.note);
   const undo = useDraft((s) => s.undo);
   const redo = useDraft((s) => s.redo);
 
@@ -53,7 +53,6 @@ export function UndoRedo() {
       >
         <Redo2 size={16} aria-hidden />
       </button>
-      {note ? <output className="ml-1 text-xs text-muted">{note}</output> : null}
     </div>
   );
 }

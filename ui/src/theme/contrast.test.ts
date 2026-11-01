@@ -14,7 +14,7 @@ type Pair = [light: string, dark: string];
 function tokens(): Map<string, Pair> {
   const out = new Map<string, Pair>();
   for (const m of css.matchAll(
-    /--([a-z-]+):\s*(?:light-dark\(\s*(#\w+)\s*,\s*(#\w+)\s*\)|(#\w+))\s*;/g,
+    /--([a-z0-9-]+):\s*(?:light-dark\(\s*(#\w+)\s*,\s*(#\w+)\s*\)|(#\w+))\s*;/g,
   )) {
     out.set(m[1]!, [(m[2] ?? m[4])!, (m[3] ?? m[4])!]);
   }
@@ -75,6 +75,17 @@ const PAIRS: [string, string, number][] = [
   ["warn-fill", "well", 3],
   ["bad-fill", "well", 3],
   ["on-primary", "primary", 4.5],
+  // every kind's hue is an icon on a sheet and on a card (non-text, 3:1), and a lane is a line on the canvas
+  ...["gateway", "service", "monolith", "database", "cache", "external", "auth"].flatMap(
+    (k): [string, string, number][] => [
+      [`cat-${k}`, "sheet", 3],
+      [`cat-${k}`, "card", 3],
+    ],
+  ),
+  ...[0, 1, 2, 3, 4, 5, 6, 7].map((i): [string, string, number] => [`lane-${i}`, "ground", 3]),
+  ["text", "card", 4.5],
+  ["muted", "card", 4.5],
+  ["control", "card", 3],
   ["on-tip", "tip", 4.5],
 ];
 
@@ -116,19 +127,25 @@ describe("design tokens", () => {
     }
   });
 
-  it("uses the spec's surfaces and control borders", () => {
-    // light: a faint warm cream ground and wells, the sheets stay white (developer, 2026-10-31)
-    expect([get("ground", 0), get("sheet", 0), get("well", 0)]).toEqual([
-      "#faf6e8",
-      "#ffffff",
-      "#fbf8ee",
+  it("uses the soft palettes: warm paper in light, violet-tinted charcoal in dark", () => {
+    // developer, 2026-11-01: both themes were too stark (pure white sheets, pure black ground)
+    expect([get("ground", 0), get("sheet", 0), get("card", 0), get("well", 0)]).toEqual([
+      "#ece7de",
+      "#f8f5ef",
+      "#fffdf9",
+      "#f0ebe3",
     ]);
-    expect([get("ground", 1), get("sheet", 1), get("well", 1)]).toEqual([
-      "#000000",
-      "#0e0e0e",
-      "#161616",
+    expect([get("ground", 1), get("sheet", 1), get("card", 1), get("well", 1)]).toEqual([
+      "#17161c",
+      "#201f27",
+      "#282731",
+      "#1a1920",
     ]);
-    expect([get("control", 0), get("control", 1)]).toEqual(["#8a93a3", "#6b6b6b"]);
-    expect([get("accent", 0), get("accent", 1)]).toEqual(["#1f6fe0", "#5aa2ff"]);
+    // neither theme uses pure white or pure black anywhere on a surface
+    for (const name of ["ground", "sheet", "card", "well", "raised", "active"]) {
+      for (const theme of [0, 1] as const) {
+        expect(["#ffffff", "#000000"], `${name} ${theme}`).not.toContain(get(name, theme));
+      }
+    }
   });
 });

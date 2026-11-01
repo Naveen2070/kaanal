@@ -60,6 +60,7 @@ const run = {
 
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("kaanal.studio.charts.open", "1");
   history.replaceState(null, "", "/__kaanal/studio?node=app");
   useDraft.setState({ view, error: null, restarted: false });
   useRun.setState({ status: "done", latest: run, dimmed: false, lastError: null });
@@ -117,7 +118,7 @@ test("the_command_palette_has_no_axe_violations", async () => {
   const noop = () => {};
   const { container } = render(
     <CommandPalette
-      all={commands({ add: noop, run: noop, press: noop, tour: noop, fit: noop })}
+      all={commands({ add: noop, run: noop, press: noop, tour: noop, fit: noop, traffic: noop })}
       onClose={noop}
     />,
   );

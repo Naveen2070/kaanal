@@ -31,7 +31,7 @@ export function Rail({
       <aside
         aria-label="Details"
         style={{ width }}
-        className={`flex flex-col overflow-hidden rounded-2xl border border-border bg-sheet transition-[width] duration-200 motion-reduce:transition-none ${
+        className={`flex flex-col overflow-hidden rounded-2xl border border-border bg-sheet shadow-float transition-[width] duration-200 motion-reduce:transition-none ${
           overlay ? "absolute inset-y-0 right-0 z-10" : "h-full"
         }`}
       >
@@ -39,7 +39,7 @@ export function Rail({
         <p
           data-testid="rail-sentence"
           aria-live="polite"
-          className="min-h-9 shrink-0 px-3 py-2 text-sm font-medium"
+          className="min-h-9 shrink-0 border-b border-border px-3 py-2.5 text-sm font-medium"
         >
           {sentence}
         </p>

@@ -10,9 +10,9 @@ import { linePoints, niceTicks } from "./line";
 const KEY = "kaanal.studio.charts.open";
 const open0 = () => {
   try {
-    return localStorage.getItem(KEY) !== "0";
+    return localStorage.getItem(KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 };
 
@@ -94,12 +94,15 @@ export function ChartsBand() {
   };
   const win = series ? `${Number(series.window_s.toPrecision(3))} s` : "";
   return (
-    <section aria-label="Charts" className="shrink-0 border-t border-border">
+    <section
+      aria-label="Charts"
+      className={`pointer-events-auto shrink-0 rounded-2xl border border-border bg-sheet shadow-float ${open ? "w-full" : "w-fit"}`}
+    >
       <button
         type="button"
         aria-expanded={open}
         onClick={toggle}
-        className="flex h-9 w-full items-center px-3 text-xs font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        className="flex h-9 w-full items-center rounded-2xl px-4 text-xs font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
         {open ? "Hide charts" : "Show charts"}
       </button>

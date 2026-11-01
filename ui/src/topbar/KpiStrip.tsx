@@ -3,6 +3,8 @@
 // errors and dropped. Every figure comes from the newest run through the same selectors the cards
 // use. A slider commits on release, never on every move; a refused typed value puts the real one back.
 
+import { Workflow } from "lucide-react";
+import { openTrafficBuilder } from "../traffic/store";
 import { HelpPopover } from "../help/HelpPopover";
 import type { HelpId } from "../help/copy";
 import { useState } from "react";
@@ -29,16 +31,19 @@ const nf = (n: number, digits = 0) =>
 function Cell({
   label,
   help,
+  divider = false,
   className = "",
   children,
 }: {
   label: string;
+  /** A rule down its left edge: the start of a new group of figures. */
+  divider?: boolean;
   help?: HelpId;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className={`flex flex-col gap-0.5 ${divider ? "border-l border-border pl-6" : ""}`}>
       <dt className="flex items-center gap-0.5 text-xs text-muted">
         {label}
         {help ? <HelpPopover id={help} label={label} /> : null}
@@ -100,9 +105,9 @@ export function KpiStrip() {
     <section
       aria-label="Key figures"
       data-tour="load"
-      className="flex flex-wrap items-end gap-x-8 gap-y-2 px-4 pb-2"
+      className="flex flex-wrap items-end gap-x-6 gap-y-2 border-t border-border px-4 py-3"
     >
-      <dl className={`m-0 flex flex-wrap items-end gap-x-8 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
+      <dl className={`m-0 flex flex-wrap items-end gap-x-6 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
         <Cell
           label="Breaks first"
           help="saturation"
@@ -114,7 +119,7 @@ export function KpiStrip() {
             ? "nothing saturates"
             : `${breaks.node} at ${twoSignificant(breaks.atReqS)} req/s`}
         </Cell>
-        <Cell label="Offered load" className="text-xl font-semibold">
+        <Cell label="Offered load" divider className="text-xl font-semibold">
           <span className="flex items-center gap-3">
             <input
               key={`${shown}`}
@@ -157,10 +162,21 @@ export function KpiStrip() {
                 />
               ) : null}
             </span>
+            <button
+              type="button"
+              disabled={view?.doc == null}
+              onClick={openTrafficBuilder}
+              title="Build the traffic: endpoints, payload sizes and which services they reach"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-2.5 text-sm font-medium text-text hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <Workflow size={14} aria-hidden />
+              Build traffic
+            </button>
           </span>
         </Cell>
         <Cell
           label="System p99"
+          divider
           help="p99"
           className={`text-base ${hasRequests ? "" : "text-muted"}`}
         >

@@ -56,7 +56,7 @@ function Modal({
         onClose();
       }}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
-      className="w-full max-w-md rounded-lg border-0 bg-white p-4 text-sm text-neutral-900 shadow-xl backdrop:bg-black/40 dark:bg-neutral-900 dark:text-neutral-100"
+      className="w-full max-w-md rounded-lg border border-border bg-sheet p-4 text-sm text-text shadow-xl backdrop:bg-black/40"
     >
       <h2 className="mb-2 text-base font-semibold">{title}</h2>
       {children}
@@ -77,7 +77,11 @@ function CopyDraft({ text }: { text: string }) {
   };
   return (
     <>
-      <button type="button" className="rounded border px-2" onClick={() => void copy()}>
+      <button
+        type="button"
+        className="rounded border border-control bg-sheet text-text px-2"
+        onClick={() => void copy()}
+      >
         {state === "copied" ? "Copied" : "Copy my draft"}
       </button>
       {state === "manual" ? (
@@ -171,8 +175,12 @@ export function SaveFlow() {
   const dirty = view?.dirty ?? false;
 
   return (
-    <>
-      <span className={`text-xs ${dirty ? "text-warn" : "text-muted"}`}>
+    <div className="flex flex-wrap items-center gap-2.5">
+      <span className={`flex items-center gap-1.5 text-xs ${dirty ? "text-warn" : "text-muted"}`}>
+        <span
+          aria-hidden
+          className={`size-1.5 rounded-full ${dirty ? "bg-warn-fill" : "bg-ok-fill"}`}
+        />
         {`Draft: ${dirty ? "not applied" : "applied"} · ${view?.saved === false ? "not saved" : "saved"}`}
       </span>
       <button
@@ -181,7 +189,7 @@ export function SaveFlow() {
         disabled={busy !== null || view?.doc == null}
         onClick={() => void apply()}
         title="Make the draft the running system (the mocks switch to it)"
-        className="rounded border px-2"
+        className="h-8 rounded-lg border border-control bg-sheet px-3 font-medium text-text hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
       >
         Apply
       </button>
@@ -192,7 +200,7 @@ export function SaveFlow() {
         disabled={busy !== null || view?.doc == null}
         onClick={() => void save({ check: true, confirmLoss: false })}
         title="Write the draft to kaanal.yaml"
-        className="rounded border px-2"
+        className="h-8 rounded-lg bg-primary px-3.5 font-medium text-on-primary hover:opacity-90 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         Save
       </button>
@@ -210,7 +218,11 @@ export function SaveFlow() {
               </li>
             ) : null}
           </ul>
-          <button type="button" onClick={close} className="rounded border px-2">
+          <button
+            type="button"
+            onClick={close}
+            className="rounded border border-control bg-sheet text-text px-2"
+          >
             Close
           </button>
         </Modal>
@@ -222,12 +234,16 @@ export function SaveFlow() {
           {dialog.result.removed.length > 0 ? (
             <p>Removed: {names(dialog.result.removed)}.</p>
           ) : null}
-          <p className="text-xs text-neutral-600">
+          <p className="text-xs text-muted">
             {dialog.result.layout_written
               ? "Positions saved beside it (kaanal.layout.json)."
               : (dialog.result.layout_note ?? "Positions were not changed.")}
           </p>
-          <button type="button" onClick={close} className="mt-2 rounded border px-2">
+          <button
+            type="button"
+            onClick={close}
+            className="mt-2 rounded border border-control bg-sheet text-text px-2"
+          >
             Close
           </button>
         </Modal>
@@ -246,7 +262,7 @@ export function SaveFlow() {
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded border border-red-600 px-2 text-red-700"
+              className="rounded border border-negative px-2 text-negative"
               onClick={() => {
                 close();
                 void save({ check: false, confirmLoss: false });
@@ -254,7 +270,11 @@ export function SaveFlow() {
             >
               Save anyway
             </button>
-            <button type="button" onClick={close} className="rounded border px-2">
+            <button
+              type="button"
+              onClick={close}
+              className="rounded border border-control bg-sheet text-text px-2"
+            >
               Cancel
             </button>
           </div>
@@ -272,7 +292,7 @@ export function SaveFlow() {
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded border border-red-600 px-2 text-red-700"
+              className="rounded border border-negative px-2 text-negative"
               onClick={() => {
                 close();
                 void save({ check: false, confirmLoss: true });
@@ -280,7 +300,11 @@ export function SaveFlow() {
             >
               Save anyway
             </button>
-            <button type="button" onClick={close} className="rounded border px-2">
+            <button
+              type="button"
+              onClick={close}
+              className="rounded border border-control bg-sheet text-text px-2"
+            >
               Cancel
             </button>
           </div>
@@ -290,7 +314,7 @@ export function SaveFlow() {
       {dialog?.kind === "conflict" ? (
         <Modal title="The file changed on disk" onClose={close}>
           <p>{dialog.message}</p>
-          <p className="my-2 text-xs text-neutral-600">
+          <p className="my-2 text-xs text-muted">
             Nothing was written and your draft is still here. Studio cannot read the file again
             while it runs: copy your draft first, then stop and restart <code>kaanal studio</code>{" "}
             (the draft in memory is lost on restart) and paste your changes into the file as it is
@@ -298,7 +322,11 @@ export function SaveFlow() {
           </p>
           <div className="flex flex-wrap items-start gap-2">
             <CopyDraft text={view?.text ?? ""} />
-            <button type="button" onClick={close} className="rounded border px-2">
+            <button
+              type="button"
+              onClick={close}
+              className="rounded border border-control bg-sheet text-text px-2"
+            >
               Close
             </button>
           </div>
@@ -308,13 +336,17 @@ export function SaveFlow() {
       {dialog?.kind === "error" ? (
         <Modal title={dialog.title} onClose={close}>
           <p role="alert">{dialog.message}</p>
-          <p className="my-2 text-xs text-neutral-600">The draft is unchanged.</p>
-          <button type="button" onClick={close} className="rounded border px-2">
+          <p className="my-2 text-xs text-muted">The draft is unchanged.</p>
+          <button
+            type="button"
+            onClick={close}
+            className="rounded border border-control bg-sheet text-text px-2"
+          >
             Close
           </button>
         </Modal>
       ) : null}
-    </>
+    </div>
   );
 }
 

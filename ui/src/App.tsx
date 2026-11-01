@@ -3,6 +3,8 @@
 
 import { useEffect } from "react";
 import { canvasBridge } from "./canvas/bridge";
+import { ControlDock } from "./canvas/ControlDock";
+import { ZoomPill } from "./canvas/ZoomPill";
 import { Canvas } from "./canvas/Canvas";
 import { ChartsBand } from "./charts/ChartsBand.lazy";
 import { FirstRun } from "./first-run/FirstRun";
@@ -18,7 +20,10 @@ import { useDraft } from "./store/draft";
 import { runNow, startStudioLoop } from "./store/loopRuntime";
 import { useRun } from "./store/run";
 import { KpiStrip } from "./topbar/KpiStrip";
-import { TopBar } from "./topbar/TopBar";
+import { TrafficHost } from "./traffic/TrafficHost";
+import { TopBar, TopTools } from "./topbar/TopBar";
+import { startNotifications } from "./toast/bind";
+import { ToastHost } from "./toast/ToastHost";
 
 export function App() {
   const view = useDraft((s) => s.view);
@@ -30,6 +35,8 @@ export function App() {
   useEffect(() => void load(), [load]);
   // the loop starts listening before the first draft arrives, so that arrival starts the first run
   useEffect(() => startStudioLoop(), []);
+  // what the stores report about the state of things becomes notices
+  useEffect(() => startNotifications(), []);
 
   // a draft that cannot be loaded is shown by <Loading> (the reason and a Retry), not here
   // the cards read the finished run through this feed and never import the run store
@@ -49,18 +56,19 @@ export function App() {
               <KpiStrip />
               <FirstRun />
               <PaletteHost />
+              <TrafficHost />
             </>
           }
+          topRight={<TopTools />}
+          zoom={<ZoomPill />}
+          toasts={<ToastHost />}
           palette={<Palette onAdd={(kind) => void addNode(kind, canvasBridge.centre())} />}
-          canvas={
-            <div className="flex h-full flex-col">
-              <div className="relative min-h-0 flex-1">
-                <Canvas />
-              </div>
-              <LazyBoundary fallback={<div className="h-9 shrink-0 border-t border-border" />}>
-                <ChartsBand />
-              </LazyBoundary>
-            </div>
+          canvas={<Canvas />}
+          dock={<ControlDock />}
+          bottom={
+            <LazyBoundary fallback={null}>
+              <ChartsBand />
+            </LazyBoundary>
           }
           rail={<Panel />}
           readonly={<ReadonlyNodes />}

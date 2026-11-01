@@ -6,6 +6,7 @@ import { useEffect, useId, useState } from "react";
 import { ApiError, api } from "../api/client";
 import type { Topology } from "../api/types";
 import { useDraft } from "../store/draft";
+import { notify } from "../toast/toasts";
 import { chaosBody, type ChaosAction, type ChaosTarget } from "./fields";
 
 export function Chaos({
@@ -43,7 +44,6 @@ export function Chaos({
   const [target, setTarget] = useState("node");
   const [ms, setMs] = useState("100");
   const [percent, setPercent] = useState("10");
-  const [msg, setMsg] = useState<string | null>(null);
 
   const resolve = (): ChaosTarget => {
     if (target.startsWith("replica:")) return { node: name, replica: Number(target.slice(8)) };
@@ -60,10 +60,10 @@ export function Chaos({
       return;
     try {
       await api.setChaos(chaosBody(resolve(), action));
-      setMsg(null);
+      notify.clear("chaos");
       onApplied();
     } catch (e) {
-      setMsg(e instanceof ApiError ? e.message : String(e));
+      notify.error(e instanceof ApiError ? e.message : String(e), "chaos");
     }
   };
 
@@ -76,7 +76,7 @@ export function Chaos({
         id={`${id}-t`}
         value={target}
         onChange={(e) => setTarget(e.currentTarget.value)}
-        className="mb-1 rounded border px-1 text-sm"
+        className="mb-1 rounded border border-control bg-sheet text-text px-1 text-sm"
       >
         <option value="node">the whole node</option>
         {Array.from({ length: replicas > 1 ? replicas : 0 }, (_, i) => (
@@ -93,7 +93,7 @@ export function Chaos({
       <div className="flex flex-wrap items-center gap-1 text-sm">
         <button
           type="button"
-          className="rounded border px-2 disabled:opacity-40"
+          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "down", down: true })}
@@ -102,7 +102,7 @@ export function Chaos({
         </button>
         <button
           type="button"
-          className="rounded border px-2 disabled:opacity-40"
+          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "down", down: false })}
@@ -111,7 +111,7 @@ export function Chaos({
         </button>
         <button
           type="button"
-          className="rounded border px-2 disabled:opacity-40"
+          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() => void run({ kind: "clear" })}
@@ -128,11 +128,11 @@ export function Chaos({
           max={300000}
           value={ms}
           onChange={(e) => setMs(e.currentTarget.value)}
-          className="w-20 rounded border px-1"
+          className="h-7 w-20 rounded border border-control bg-sheet text-text px-1"
         />
         <button
           type="button"
-          className="rounded border px-2 disabled:opacity-40"
+          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() =>
@@ -151,11 +151,11 @@ export function Chaos({
           max={100}
           value={percent}
           onChange={(e) => setPercent(e.currentTarget.value)}
-          className="w-20 rounded border px-1"
+          className="h-7 w-20 rounded border border-control bg-sheet text-text px-1"
         />
         <button
           type="button"
-          className="rounded border px-2 disabled:opacity-40"
+          className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
           onClick={() =>
@@ -172,11 +172,6 @@ export function Chaos({
             ? "Checking the running system..."
             : "Chaos acts on the running system, and this component is not in it yet (it is only in the draft). Apply the draft first."}
       </p>
-      {msg ? (
-        <p role="alert" className="text-xs text-red-700">
-          {msg}
-        </p>
-      ) : null}
     </div>
   );
 }

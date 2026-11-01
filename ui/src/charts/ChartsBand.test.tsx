@@ -15,6 +15,7 @@ function setRun(done: number[] = [10, 20, 87], p99: number[] = [5, 48, 12]) {
 
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("kaanal.studio.charts.open", "1"); // the band starts closed; most tests want it open
   useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null });
 });
 afterEach(cleanup);
@@ -49,4 +50,14 @@ test("band_is_collapsible_and_remembers_state", () => {
   render(<ChartsBand />);
   const b = screen.getByRole("button", { name: "Show charts" });
   expect(b.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("the_band_starts_closed_so_the_canvas_stays_clear", () => {
+  localStorage.clear();
+  setRun();
+  render(<ChartsBand />);
+  expect(screen.getByRole("button", { name: "Show charts" }).getAttribute("aria-expanded")).toBe(
+    "false",
+  );
+  expect(document.querySelectorAll("svg")).toHaveLength(0);
 });

@@ -7,37 +7,63 @@
 :root {
   color-scheme: light dark;
 
-  /* surfaces: window ground, sheet (panels), well (inset areas), raised (hover), active (selected) */
-  --ground: light-dark(#faf6e8, #000000); /* light: a faint warm cream, the sheets stay white */
-  --sheet: light-dark(#ffffff, #0e0e0e);
-  --well: light-dark(#fbf8ee, #161616);
-  --raised: light-dark(#f7f8fa, #1b1b1b);
-  --active: light-dark(#e9edf3, #232323);
+  /*
+   * Surfaces. Neither theme uses pure white or pure black: light is warm paper, dark is a soft
+   * charcoal with a trace of violet, so long sessions are easy on the eyes. The canvas is the
+   * ground; panels float on it as sheets; a card is a step lighter than a sheet so it reads as an
+   * object on the canvas and not as another panel.
+   */
+  --ground: light-dark(#ece7de, #17161c);
+  --sheet: light-dark(#f8f5ef, #201f27);
+  --card: light-dark(#fffdf9, #282731);
+  --well: light-dark(#f0ebe3, #1a1920);
+  --raised: light-dark(#f3efe8, #2a2933);
+  --active: light-dark(#e6dfd3, #33313d);
+  --grid: light-dark(#d9d2c6, #2a2933);
 
   /* lines: panel border and row rule are decoration; --control is an input edge and needs 3:1 */
-  --border: light-dark(#e4e8ee, #232323);
-  --rule: light-dark(#eef1f5, #1a1a1a);
-  --control: light-dark(#8a93a3, #6b6b6b);
+  --border: light-dark(#d9d2c6, #34323f);
+  --rule: light-dark(#e3ddd1, #2b2a34);
+  --control: light-dark(#80786b, #7e7b8c);
 
   /* text; --faint is placeholder text and still reaches 4.5:1 */
-  --text: light-dark(#101418, #ffffff);
-  --muted: light-dark(#586070, #a8a8a8);
-  --faint: light-dark(#5f6877, #9a9a9a);
+  --text: light-dark(#211e19, #ece9f3);
+  --muted: light-dark(#554f46, #aca8b9);
+  --faint: light-dark(#5c564c, #a29eae);
 
-  /* blue is the one data hue; status colours are for data only */
-  --accent: light-dark(#1f6fe0, #5aa2ff);
-  --positive: light-dark(#247b50, #3fc07a);
-  --warn: light-dark(#a85d00, #e0a13a);
-  --negative: light-dark(#c4242a, #e5566f);
-  --ok-fill: light-dark(#2f9e6b, #3fc07a);
-  --warn-fill: light-dark(#c07400, #e0a13a);
-  --bad-fill: light-dark(#d9363e, #e5566f);
+  /* blue is the one action colour; status colours are for data only */
+  --accent: light-dark(#2d5cc4, #7ba3ff);
+  --positive: light-dark(#1d7549, #5ccb92);
+  --warn: light-dark(#8f5200, #e8ae4d);
+  --negative: light-dark(#b5212f, #f07088);
+  --ok-fill: light-dark(#2c9467, #45b985);
+  --warn-fill: light-dark(#bf7506, #dc9a35);
+  --bad-fill: light-dark(#cf3342, #e85b74);
 
   /* the primary button and the tooltip invert in dark */
-  --primary: light-dark(#14181d, #ffffff);
-  --on-primary: light-dark(#ffffff, #000000);
-  --tip: light-dark(#14181d, #2a2a2a);
+  --primary: light-dark(#211e19, #ece9f3);
+  --on-primary: light-dark(#f8f5ef, #17161c);
+  --tip: light-dark(#211e19, #34323f);
   --on-tip: #ffffff;
+
+  /* one hue per kind of component: its icon, its card edge, its palette entry */
+  --cat-gateway: light-dark(#7440b0, #b891ff);
+  --cat-service: light-dark(#2457b8, #7aa5ff);
+  --cat-monolith: light-dark(#0f7c75, #43cdc2);
+  --cat-database: light-dark(#13708f, #55c7ea);
+  --cat-cache: light-dark(#a8480d, #f39055);
+  --cat-external: light-dark(#ac3569, #f283b4);
+  --cat-auth: light-dark(#1b7547, #63d48f);
+
+  /* a wire carries one lane per copy of the node it feeds; copy 0 takes the first colour, and so on */
+  --lane-0: light-dark(#2d5cc4, #7ba3ff);
+  --lane-1: light-dark(#c2410c, #fb923c);
+  --lane-2: light-dark(#0f766e, #2dd4bf);
+  --lane-3: light-dark(#a21caf, #e879f9);
+  --lane-4: light-dark(#4d7c0f, #a3e635);
+  --lane-5: light-dark(#be123c, #fb7185);
+  --lane-6: light-dark(#7c3aed, #a78bfa);
+  --lane-7: light-dark(#a16207, #facc15);
 }
 
 /* a saved choice beats the system setting */
@@ -53,6 +79,7 @@
 @theme inline {
   --color-ground: var(--ground);
   --color-sheet: var(--sheet);
+  --color-card: var(--card);
   --color-well: var(--well);
   --color-raised: var(--raised);
   --color-active: var(--active);
@@ -71,6 +98,13 @@
   --color-bad-fill: var(--bad-fill);
   --color-primary: var(--primary);
   --color-on-primary: var(--on-primary);
+  --color-cat-gateway: var(--cat-gateway);
+  --color-cat-service: var(--cat-service);
+  --color-cat-monolith: var(--cat-monolith);
+  --color-cat-database: var(--cat-database);
+  --color-cat-cache: var(--cat-cache);
+  --color-cat-external: var(--cat-external);
+  --color-cat-auth: var(--cat-auth);
   --color-tip: var(--tip);
   --color-on-tip: var(--on-tip);
 }

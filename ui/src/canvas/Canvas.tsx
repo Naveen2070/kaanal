@@ -4,7 +4,7 @@
 
 import {
   Background,
-  Controls,
+  BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -19,15 +19,25 @@ import type { Layout } from "../api/types";
 import { useDraft } from "../store/draft";
 import { useSelected } from "../store/view";
 import { usePrefersReducedMotion } from "../first-run/motion";
+import { useLayout } from "../layout/useLayout";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { canvasBridge } from "./bridge";
 import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
 import { autoLayout, decodeId, encodeId } from "./edges";
+import { notify } from "../toast/toasts";
+import { useZoom } from "./zoom";
+import { fitPadding, isVisible, padsFor, visibleCentre } from "./viewport";
 
 /** Arrow-key moves are saved this long after the last press. */
 const NUDGE_SAVE_MS = 300;
+
+/** A fitted view never zooms in past this: a lone card should look like part of a canvas, not fill it. */
+const MAX_FIT_ZOOM = 0.9;
+/** A card's size in flow units, for deciding whether a new one is in view. */
+const CARD_W = 236;
+const CARD_H = 190;
 
 const nodeTypes = { card: NodeCard };
 const edgeTypes = { load: LoadEdge };
@@ -38,7 +48,6 @@ function Flow() {
   const connect = useDraft((s) => s.connect);
   const setLayout = useDraft((s) => s.setLayout);
   const [selected, setSelected] = useSelected();
-  const [notice, setNotice] = useState<string | null>(null);
   /** Positions of nodes being dragged right now; not saved until the drag ends. */
   const [live, setLive] = useState<Layout>({});
   /**
@@ -46,29 +55,48 @@ function Flow() {
    * without it is treated as unmeasured, and it and its edges are hidden until measured again.
    */
   const [measured, setMeasured] = useState<Record<string, { width?: number; height?: number }>>({});
-  const storeError = useDraft((s) => s.error);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setCenter, zoomIn, zoomOut } = useReactFlow();
   const still = usePrefersReducedMotion();
+  const mode = useLayout();
+  const pads = padsFor(mode);
+  const fitOptions = { padding: fitPadding(mode), maxZoom: MAX_FIT_ZOOM };
   /** Names given a first layout already, so a refused save cannot loop. */
   const placed = useRef(new Set<string>());
 
   const doc = view?.doc ?? null;
   const layout = view?.layout;
 
-  // fit view on load (the `fitView` prop) and after a node is added, once it has its position, so
-  // no card is left cut off at an edge
-  const count = Object.keys(doc?.nodes ?? {}).length;
-  const allPlaced = Object.keys(doc?.nodes ?? {}).every((n) => layout !== undefined && n in layout);
-  const lastCount = useRef(count);
-  const wantFit = useRef(false);
+  // the view is fitted once, on load (the `fitView` prop). A node added later never changes the zoom:
+  // the view only moves, and only when the new card would land behind a panel or off screen
+  const names = Object.keys(doc?.nodes ?? {});
+  const allPlaced = names.every((n) => layout !== undefined && n in layout);
+  const known = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (count > lastCount.current) wantFit.current = true;
-    lastCount.current = count;
-    if (wantFit.current && allPlaced) {
-      wantFit.current = false;
-      void fitView({ padding: 0.2, duration: still ? 0 : 200 });
+    if (!allPlaced) return;
+    if (known.current === null) {
+      known.current = new Set(names);
+      return;
     }
-  }, [count, allPlaced, fitView, still]);
+    const fresh = names.filter((n) => !known.current?.has(n));
+    known.current = new Set(names);
+    const last = fresh[fresh.length - 1];
+    const at = last === undefined ? undefined : layout?.[last];
+    if (!at) return;
+    const rect = document.querySelector(".react-flow")?.getBoundingClientRect();
+    const vp = getViewport();
+    const left = (rect?.left ?? 0) + vp.x + at[0] * vp.zoom;
+    const top = (rect?.top ?? 0) + vp.y + at[1] * vp.zoom;
+    const box = { left, top, right: left + CARD_W * vp.zoom, bottom: top + CARD_H * vp.zoom };
+    const canvas = rect ?? { left: 0, top: 0, right: 0, bottom: 0 };
+    if (!isVisible(box, canvas, pads)) {
+      void setCenter(at[0] + CARD_W / 2, at[1] + CARD_H / 2, {
+        zoom: vp.zoom,
+        duration: still ? 0 : 200,
+      });
+    }
+    // `names` and `pads` are rebuilt every render; the node set and the layout are what matter
+    // eslint-disable-next-line react/exhaustive-deps
+  }, [JSON.stringify(names), allPlaced, layout]);
 
   // nodes with no saved position get one, once
   useEffect(() => {
@@ -88,16 +116,24 @@ function Flow() {
     canvasBridge.centre = () => {
       const r = document.querySelector(".react-flow")?.getBoundingClientRect();
       if (!r) return undefined;
-      const p = screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-      // the card's top-left, so its middle is the middle of the view
-      return [p.x - 118, p.y - 55];
+      // the middle of what shows between the panels, not of the whole window
+      const c = visibleCentre(r, pads);
+      const p = screenToFlowPosition(c);
+      // the card's top-left, so its middle is the middle of the visible area
+      return [p.x - CARD_W / 2, p.y - CARD_H / 2];
     };
-    canvasBridge.fit = () => void fitView({ padding: 0.2, duration: still ? 0 : 200 });
+    canvasBridge.fit = () => void fitView({ ...fitOptions, duration: still ? 0 : 200 });
+    canvasBridge.zoomIn = () => void zoomIn({ duration: still ? 0 : 150 });
+    canvasBridge.zoomOut = () => void zoomOut({ duration: still ? 0 : 150 });
     return () => {
       canvasBridge.centre = () => undefined;
       canvasBridge.fit = () => {};
+      canvasBridge.zoomIn = () => {};
+      canvasBridge.zoomOut = () => {};
     };
-  }, [screenToFlowPosition, fitView, still]);
+    // `pads` and `fitOptions` follow the layout mode, which is what `mode` carries
+    // eslint-disable-next-line react/exhaustive-deps
+  }, [screenToFlowPosition, fitView, zoomIn, zoomOut, still, mode]);
 
   // arrow keys move the selected node (8 px, Shift 40 px); the node moves on screen at once and the
   // position is saved once the keys pause, not per press. Captured so React Flow's own key move,
@@ -151,7 +187,7 @@ function Flow() {
       type: "load",
       source: encodeId(String(e.from)),
       target: encodeId(String(e.to)),
-      data: { from: String(e.from), to: String(e.to) },
+      data: { from: String(e.from), to: String(e.to), index: i },
     }));
     return { nodes, edges };
   }, [doc, layout, live, measured, selected]);
@@ -188,11 +224,21 @@ function Flow() {
     );
   };
 
+  /** Delete or Backspace on a selected wire: its entries leave `edges`, highest index first. */
+  const patch = useDraft((s) => s.patch);
+  const onEdgesDelete = (gone: Edge[]) => {
+    const at = gone.map((e) => Number(e.id.slice(1))).filter(Number.isInteger);
+    if (at.length === 0) return;
+    void patch(
+      [...new Set(at)].sort((a, b) => b - a).map((i) => ({ op: "remove", path: ["edges", i] })),
+    );
+  };
+
   const onConnect = async (c: Connection) => {
-    setNotice(null);
+    notify.clear("connect");
     const r = await connect(decodeId(c.source), decodeId(c.target));
-    if (!r.ok) setNotice(r.message);
-    else if (r.warning) setNotice(r.warning);
+    if (!r.ok) notify.error(r.message, "connect");
+    else if (r.warning) notify.warn(r.warning, "connect");
   };
 
   return (
@@ -210,14 +256,6 @@ function Flow() {
           void addNode(kind, [p.x, p.y]);
         }}
       >
-        {(notice ?? storeError) ? (
-          <div
-            role="alert"
-            className="absolute left-2 top-2 z-10 max-w-md rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 shadow"
-          >
-            {notice ?? storeError}
-          </div>
-        ) : null}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -228,11 +266,32 @@ function Flow() {
           onConnect={(c) => void onConnect(c)}
           onNodeClick={(_, n) => void setSelected(decodeId(n.id))}
           onPaneClick={() => void setSelected(null)}
-          deleteKeyCode={null}
+          // only wires can be deleted from the keyboard; a component goes through its panel (with its wires)
+          deleteKeyCode={["Backspace", "Delete"]}
+          onBeforeDelete={async ({ edges }) => ({ nodes: [], edges })}
+          onEdgesDelete={onEdgesDelete}
           fitView
+          fitViewOptions={fitOptions}
+          minZoom={0.2}
+          maxZoom={2}
+          attributionPosition="bottom-center"
+          onMove={(_, vp) => useZoom.setState({ zoom: vp.zoom })}
         >
-          <Background color="var(--border)" />
-          <Controls showInteractive={false} />
+          <Background
+            id="minor"
+            variant={BackgroundVariant.Lines}
+            gap={28}
+            lineWidth={1}
+            color="var(--grid)"
+          />
+          <Background
+            id="major"
+            variant={BackgroundVariant.Lines}
+            gap={140}
+            lineWidth={1}
+            color="var(--grid)"
+            style={{ opacity: 0.9 }}
+          />
         </ReactFlow>
       </div>
     </div>
