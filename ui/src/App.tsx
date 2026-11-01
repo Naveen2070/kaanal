@@ -1,8 +1,9 @@
 // The Studio app: load the draft, keep the numbers fresh with the auto re-run loop, and show the
 // top bar, canvas and panel. main.tsx only mounts this.
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Canvas } from "./canvas/Canvas";
+import { ChartsBand } from "./charts/ChartsBand.lazy";
 import { FirstRun } from "./first-run/FirstRun";
 import { Loading } from "./first-run/Loading";
 import { FeedContext, type StatsFeed } from "./canvas/feed";
@@ -47,7 +48,16 @@ export function App() {
             </>
           }
           palette={<Palette onAdd={(kind) => void addNode(kind)} />}
-          canvas={<Canvas />}
+          canvas={
+            <div className="flex h-full flex-col">
+              <div className="relative min-h-0 flex-1">
+                <Canvas />
+              </div>
+              <Suspense fallback={<div className="h-9 shrink-0 border-t border-border" />}>
+                <ChartsBand />
+              </Suspense>
+            </div>
+          }
           rail={<Panel />}
           readonly={<ReadonlyNodes />}
         />

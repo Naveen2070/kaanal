@@ -3,12 +3,12 @@
 // and a click on a line opens that one request as a waterfall. Everything here is virtual time and
 // simulated trace events, and the tab says so.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { ApiError, api } from "../api/client";
 import type { LogLine, LogQuery } from "../api/types";
 import { useRun } from "../store/run";
 import { useSelected } from "../store/view";
-import { formatLine } from "./logFormat";
+import { clock, eventWords, formatLine, hopMs } from "./logFormat";
 import { RequestView } from "./RequestView";
 
 interface Page {
@@ -16,6 +16,7 @@ interface Page {
   key: string;
   lines: LogLine[];
   next: number | null;
+  total: number;
   note: string;
   /** A message instead of lines: the run is not readable (yet). */
   problem: string | null;
@@ -32,6 +33,7 @@ export function LogTab() {
   const [thisNode, setThisNode] = useState(false);
   const [page, setPage] = useState<Page | null>(null);
   const [more, setMore] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [open, setOpen] = useState<{ runId: string; stream: string; request: number } | null>(null);
   const dimmed = useRun((s) => s.dimmed);
 
@@ -46,7 +48,7 @@ export function LogTab() {
     ...(endpointNow !== "" && { endpoint: endpointNow }),
     ...(thisNode && selected !== null && { node: selected }),
   };
-  const key = `${runId}|${JSON.stringify(query)}`;
+  const key = `${runId}|${attempt}|${JSON.stringify(query)}`;
   const loading = runId !== null && page?.key !== key;
 
   // the first page, again whenever the run or a filter changes; an answer for an older key is dropped
@@ -58,11 +60,11 @@ export function LogTab() {
       .then((p) => {
         // an answer that arrives after this effect was replaced belongs to an older key
         if (ctl.signal.aborted) return;
-        setPage({ key, lines: p.lines, next: p.next, note: p.note, problem: null });
+        setPage({ key, lines: p.lines, next: p.next, total: p.total, note: p.note, problem: null });
       })
       .catch((e: unknown) => {
         if (ctl.signal.aborted) return;
-        setPage({ key, lines: [], next: null, note: "", problem: problemOf(e) });
+        setPage({ key, lines: [], next: null, total: 0, note: "", problem: problemOf(e) });
       });
     return () => ctl.abort();
     // `query` is rebuilt every render; `key` is what it is made of
@@ -84,26 +86,55 @@ export function LogTab() {
     }
   };
 
+  const none = !errorsOnly && endpointNow === "" && !thisNode && replicaNow === null;
+  const clearAll = () => {
+    setErrorsOnly(false);
+    setEndpoint("");
+    setThisNode(false);
+    setReplica("");
+  };
+  const count = (n: number) => n.toLocaleString("en-US");
+
   return (
     <div className="p-3 text-sm">
       {dimmed ? (
-        <p className="mb-2 text-xs text-amber-700">
+        <p className="mb-2 text-xs text-warn">
           Out of date: the newest run could not finish, so this is the last one that did.
         </p>
       ) : null}
-      <p className="mb-2 text-xs text-neutral-500">
-        Virtual time inside the simulation, not wall-clock time. These are simulated trace events,
-        not process output, and only a sample of the run.
+      <p className="text-xs font-medium">
+        {runId === null ? "No run yet" : `Run ${runId.replace(/^s/, "")}`} · simulated, virtual time
       </p>
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={errorsOnly}
-            onChange={(e) => setErrorsOnly(e.currentTarget.checked)}
-          />
+      <p className="mb-2 text-xs text-muted">
+        {page && !loading && !page.problem
+          ? `${count(page.lines.length)} of ${count(page.total)} hops sampled. `
+          : ""}
+        Simulated trace events, not process output, and only a sample of the run.
+      </p>
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <Chip on={none} onClick={clearAll}>
+          All
+        </Chip>
+        <Chip on={errorsOnly} onClick={() => setErrorsOnly((v) => !v)}>
           Errors only
-        </label>
+        </Chip>
+        <Chip
+          on={thisNode && selected !== null}
+          disabled={selected === null}
+          title={selected ?? "Select a component first"}
+          onClick={() => setThisNode((v) => !v)}
+        >
+          This component
+        </Chip>
+        {streams.map((s) => (
+          <Chip
+            key={s}
+            on={endpointNow === s}
+            onClick={() => setEndpoint(endpointNow === s ? "" : s)}
+          >
+            {s}
+          </Chip>
+        ))}
         <label className="flex items-center gap-1">
           Instance
           <input
@@ -113,83 +144,108 @@ export function LogTab() {
             value={replica}
             aria-invalid={replica !== "" && replicaNow === null}
             onChange={(e) => setReplica(e.currentTarget.value)}
-            className="w-14 rounded border px-1"
+            className="w-14 rounded border border-control bg-sheet px-1"
           />
-        </label>
-        <label className="flex items-center gap-1">
-          Endpoint
-          <select
-            value={endpointNow}
-            onChange={(e) => setEndpoint(e.currentTarget.value)}
-            className="max-w-40 rounded border px-1"
-          >
-            <option value="">all</option>
-            {streams.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={thisNode && selected !== null}
-            disabled={selected === null}
-            onChange={(e) => setThisNode(e.currentTarget.checked)}
-          />
-          Only {selected ?? "the selected component"}
         </label>
       </div>
+      {endpoint !== "" && endpointNow === "" && runId !== null ? (
+        <p className="mb-2 text-xs text-warn">
+          The newest run has no endpoint “{endpoint}”, so that filter was dropped.
+        </p>
+      ) : null}
 
-      {runId === null ? (
-        <p className="text-neutral-500">
-          No finished run yet. The log appears after the first run.
-        </p>
-      ) : loading ? (
-        <p className="text-neutral-500">Loading the log...</p>
-      ) : page?.problem ? (
-        <p role="alert" className="text-neutral-600">
-          {page.problem}
-        </p>
-      ) : page && page.lines.length === 0 ? (
-        <p className="text-neutral-500">Nothing in the sample matches those filters.</p>
-      ) : page ? (
-        <>
-          <p className="mb-1 text-xs text-neutral-500">{page.note}</p>
-          <ul className="font-mono text-xs">
-            {page.lines.map((l, i) => (
-              <li key={i}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpen({ runId: runId as string, stream: l.stream, request: l.request })
-                  }
-                  title="Show this request hop by hop"
-                  className={`w-full text-left hover:bg-neutral-100 ${
-                    l.level === "error"
-                      ? "text-red-700"
-                      : l.level === "warn"
-                        ? "text-amber-700"
-                        : ""
-                  }`}
-                >
-                  {formatLine(l)}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {page.next !== null ? (
+      {/* every state stays inside this frame, so the tab does not jump */}
+      <div className="min-h-40 rounded-lg border border-border">
+        {runId === null ? (
+          <Say>No finished run yet. The log appears after the first run.</Say>
+        ) : loading ? (
+          <Say>Loading the log...</Say>
+        ) : page?.problem ? (
+          <div role="alert" className="p-3 text-muted">
+            <p>{page.problem}</p>
             <button
               type="button"
-              disabled={more}
-              onClick={() => void loadMore()}
-              className="mt-2 rounded border px-2"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="mt-2 rounded border border-control px-2 py-0.5"
             >
-              {more ? "Loading..." : "Load more"}
+              Retry
             </button>
-          ) : null}
-        </>
+          </div>
+        ) : page && page.lines.length === 0 ? (
+          <Say>No lines match these filters.</Say>
+        ) : page ? (
+          <table className="w-full text-xs">
+            <caption className="sr-only">{page.note}</caption>
+            <thead className="sticky top-0 bg-sheet text-left text-muted">
+              <tr>
+                <th scope="col" className="px-2 py-1 font-normal">
+                  Time
+                </th>
+                <th scope="col" className="px-1 py-1 font-normal">
+                  Level
+                </th>
+                <th scope="col" className="px-1 py-1 font-normal">
+                  Component
+                </th>
+                <th scope="col" className="px-1 py-1 font-normal">
+                  Event
+                </th>
+                <th scope="col" className="px-2 py-1 text-right font-normal">
+                  ms
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {page.lines.map((l, i) => {
+                const shown =
+                  open !== null &&
+                  open.runId === runId &&
+                  open.stream === l.stream &&
+                  open.request === l.request;
+                const t = hopMs(l);
+                return (
+                  <tr key={i} className={`h-8 border-t border-rule ${shown ? "bg-active" : ""}`}>
+                    <td className="px-2 tabular-nums">{clock(l.t_ms)}</td>
+                    <td className="px-1">
+                      <Level level={l.level} />
+                    </td>
+                    <td className="max-w-20 truncate px-1 font-mono">
+                      {l.replica === null ? l.node : `${l.node}#${l.replica}`}
+                    </td>
+                    <td className="px-1">
+                      <button
+                        type="button"
+                        aria-label={formatLine(l)}
+                        aria-pressed={shown}
+                        onClick={() =>
+                          setOpen({ runId: runId as string, stream: l.stream, request: l.request })
+                        }
+                        className="text-left hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        r-{l.request} · {eventWords(l)}
+                      </button>
+                    </td>
+                    <td className="px-2 text-right tabular-nums">
+                      {t === null ? "–" : Number(t.toFixed(t < 10 ? 2 : 1))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : null}
+      </div>
+      {page && !page.problem && page.next !== null ? (
+        <button
+          type="button"
+          disabled={more}
+          onClick={() => void loadMore()}
+          className="mt-2 rounded border border-control px-2 py-0.5 text-xs"
+        >
+          {more
+            ? "Loading..."
+            : `Load more (${count(page.lines.length)} of ${count(page.total)} shown)`}
+        </button>
       ) : null}
 
       {/* an opened request belongs to the run it was opened in: a newer run closes it */}
@@ -200,10 +256,44 @@ export function LogTab() {
   );
 }
 
+function Chip({
+  on,
+  children,
+  ...rest
+}: { on: boolean } & Omit<ComponentProps<"button">, "aria-pressed">) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      {...rest}
+      className={`rounded-full border px-2 py-0.5 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent ${
+        on ? "border-accent bg-active font-medium" : "border-control"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+const Say = ({ children }: { children: ReactNode }) => <p className="p-3 text-muted">{children}</p>;
+
+const LEVEL: Record<LogLine["level"], string> = {
+  info: "border-border text-muted",
+  warn: "border-warn text-warn",
+  error: "border-negative text-negative",
+};
+
+/** The level as a badge; the word is always there, colour only repeats it. */
+function Level({ level }: { level: LogLine["level"] }) {
+  return (
+    <span className={`rounded border px-1 text-[11px] uppercase ${LEVEL[level]}`}>{level}</span>
+  );
+}
+
 /** A readable message for a log that cannot be shown. A busy run is waiting, not an error. */
 function problemOf(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.status === 409) return "The run is still going. The log appears when it finishes.";
+    if (e.status === 409) return "Waiting for the run to finish. The log appears when it does.";
     if (e.status === 404) return "That run is no longer kept (only the last eight are).";
     return e.message;
   }

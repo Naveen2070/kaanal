@@ -173,7 +173,7 @@ export function Controls({
 
       <Section title="How much it can handle">
         <NumberField
-          label="Slots per instance"
+          label="Slots"
           hint="How many requests it works on at once. More slots, more throughput."
           value={slots.value}
           min={LIMITS.slots.min}
@@ -182,7 +182,7 @@ export function Controls({
           onCommit={(n) => patch(setSlots(name, config, n))}
         />
         <NumberField
-          label="Instances"
+          label="Copies"
           hint="Copies of this component, each with its own slots and queue."
           value={replicas}
           min={LIMITS.instances.min}

@@ -2,9 +2,11 @@
 // the eye; a table of the buckets below it is what a screen reader gets.
 
 import type { Bucket, Series } from "../api/types";
+import { HEAT_ASPECT } from "./Skeletons";
 import { bucketLabel, heatmapData, intensity } from "./heatmapData";
 
 const CELL = 8;
+const secs = (n: number) => `${Number(n.toPrecision(3))} s`;
 
 export function Heatmap({
   name,
@@ -18,7 +20,7 @@ export function Heatmap({
   const d = heatmapData(series);
   if (d.max === 0) {
     return (
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted">
         No requests reached {name} in this run, so there is no latency to draw.
       </p>
     );
@@ -27,7 +29,7 @@ export function Heatmap({
     <figure>
       <svg
         viewBox={`0 0 ${d.cols * CELL} ${d.rows * CELL}`}
-        className="w-full rounded border bg-neutral-50"
+        className={`w-full rounded border border-border bg-well ${HEAT_ASPECT}`}
       >
         <title>{`Latency of ${name} over the run: time across, slower hops higher up`}</title>
         {d.cells.map((row, r) =>
@@ -40,7 +42,7 @@ export function Heatmap({
                 y={(d.rows - 1 - r) * CELL}
                 width={CELL}
                 height={CELL}
-                fill="rgb(37 99 235)"
+                className="fill-accent"
                 fillOpacity={0.1 + 0.9 * intensity(count, d.max)}
               >
                 <title>{`${bucketLabel(buckets, r)}, window ${c + 1}: ${count}`}</title>
@@ -49,7 +51,12 @@ export function Heatmap({
           ),
         )}
       </svg>
-      <figcaption className="text-xs text-neutral-500">
+      <div aria-hidden className="mt-0.5 flex justify-between text-[11px] tabular-nums text-muted">
+        <span>0 s</span>
+        <span>{secs((d.cols * series.window_s) / 2)}</span>
+        <span>{secs(d.cols * series.window_s)}</span>
+      </div>
+      <figcaption className="text-xs text-muted">
         Time runs left to right ({d.cols} windows of {Number(series.window_s.toPrecision(3))} s),
         slower hops are higher. Colour is the number of hops, on a log scale.
       </figcaption>

@@ -1,57 +1,56 @@
-// The right-hand panel: the selected node's tabs. Controls is built; Log and Results arrive with
-// Part E and say so rather than sit empty.
+// The right-hand panel: the selected node's sentence and its tabs (Controls, Log, Results).
 
+import { useFeed } from "../canvas/feed";
+import { nodeFigures } from "../canvas/metrics";
 import { useDraft } from "../store/draft";
 import { runNow } from "../store/loopRuntime";
-import { TABS, useSelected, useTab, type Tab } from "../store/view";
+import { useSelected } from "../store/view";
 import { Controls } from "./Controls";
-import { LogTab } from "./LogTab";
-import { Results } from "./Results";
-
-const LABEL: Record<Tab, string> = { controls: "Controls", log: "Log", results: "Results" };
+import { Suspense } from "react";
+import { LogTab } from "./LogTab.lazy";
+import { Rail } from "./Rail";
+import { Results } from "./Results.lazy";
+import { LogSkeleton, ResultsSkeleton } from "./Skeletons";
 
 export function Panel() {
   const view = useDraft((s) => s.view);
+  const feed = useFeed();
   const [selected, setSelected] = useSelected();
-  const [tab, setTab] = useTab();
   const config = selected !== null ? view?.doc?.nodes?.[selected] : undefined;
+  // from the finished run, so it changes when a run lands (after a release), never mid-drag
+  const sentence =
+    selected !== null && config
+      ? `${selected}: ${nodeFigures(feed.node(selected), config).sentence}`
+      : "";
 
   return (
-    <aside
-      data-tour="panel"
-      aria-label="Details"
-      className="flex w-[300px] shrink-0 flex-col overflow-y-auto rounded-2xl border border-border bg-sheet"
-    >
-      <div role="tablist" className="flex border-b">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            role="tab"
-            type="button"
-            aria-selected={tab === t}
-            onClick={() => void setTab(t)}
-            className={`flex-1 px-2 py-1 text-sm ${tab === t ? "border-b-2 border-blue-500 font-medium" : ""}`}
-          >
-            {LABEL[t]}
-          </button>
-        ))}
-      </div>
-      {tab === "log" ? (
-        <LogTab />
-      ) : tab === "results" ? (
-        <Results />
-      ) : selected !== null && config ? (
-        <Controls
-          name={selected}
-          config={config}
-          edges={view?.doc?.edges ?? []}
-          onDeleted={() => void setSelected(null)}
-          onRenamed={(to) => void setSelected(to)}
-          onChaos={runNow}
-        />
-      ) : (
-        <p className="p-3 text-sm text-neutral-500">Select a component to see and change it.</p>
-      )}
-    </aside>
+    <Rail
+      sentence={sentence}
+      panels={{
+        controls:
+          selected !== null && config ? (
+            <Controls
+              name={selected}
+              config={config}
+              edges={view?.doc?.edges ?? []}
+              onDeleted={() => void setSelected(null)}
+              onRenamed={(to) => void setSelected(to)}
+              onChaos={runNow}
+            />
+          ) : (
+            <p className="p-3 text-sm text-muted">Select a component to see and change it.</p>
+          ),
+        log: (
+          <Suspense fallback={<LogSkeleton />}>
+            <LogTab />
+          </Suspense>
+        ),
+        results: (
+          <Suspense fallback={<ResultsSkeleton />}>
+            <Results />
+          </Suspense>
+        ),
+      }}
+    />
   );
 }

@@ -159,3 +159,25 @@ export function stateWords(f: Figures): string {
   if (f.arrivingPerS === 0 && f.busy === 0) return "idle";
   return `${Math.round(f.busy * 100)} percent busy`;
 }
+
+/**
+ * The Results tab's "What breaks first": components by their peak utilisation, highest first.
+ * Ties keep the server's bottleneck order. A component with no slot limit has no peak and is left out.
+ */
+export function rankedByPeak(
+  summary: Summary,
+): { name: string; peak: number; saturatesAtReqS: number | null }[] {
+  const order = (i: number) => {
+    const at = summary.bottlenecks.indexOf(i);
+    return at === -1 ? Number.MAX_SAFE_INTEGER : at;
+  };
+  return summary.nodes
+    .map((n, i) => {
+      const busy = n.series.busy.filter(Number.isFinite);
+      const peak = busy.length > 0 ? Math.max(...busy) : n.utilization;
+      return { i, name: n.name, peak, saturatesAtReqS: finiteOrNull(n.saturates_at_req_s) };
+    })
+    .filter((r): r is typeof r & { peak: number } => r.peak !== null)
+    .sort((a, b) => b.peak - a.peak || order(a.i) - order(b.i) || a.i - b.i)
+    .map(({ name, peak, saturatesAtReqS }) => ({ name, peak, saturatesAtReqS }));
+}

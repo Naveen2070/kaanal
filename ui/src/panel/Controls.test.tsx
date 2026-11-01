@@ -81,8 +81,8 @@ test("every_field_has_a_visible_label_and_hint", async () => {
   await show();
   for (const label of [
     "Name",
-    "Slots per instance",
-    "Instances",
+    "Slots",
+    "Copies",
     "Service time (ms)",
     "Queue limit",
     "Timeout (ms)",
@@ -112,10 +112,10 @@ async function change(label: string, value: string) {
 
 test("each_field_in_the_panel_patches_its_path", async () => {
   await show();
-  expect(await change("Slots per instance", "16")).toEqual({
+  expect(await change("Slots", "16")).toEqual({
     patch: [{ op: "set", path: ["nodes", "app", "concurrency"], value: 16 }],
   });
-  expect(await change("Instances", "3")).toEqual({
+  expect(await change("Copies", "3")).toEqual({
     patch: [{ op: "set", path: ["nodes", "app", "replicas"], value: 3 }],
   });
   expect(await change("Service time (ms)", "50")).toEqual({
@@ -209,11 +209,11 @@ test("a_value_the_loader_would_reject_is_never_sent_and_the_box_shows_the_real_v
   await show();
   const sent = mockFetch([{ json: view() }]);
   const cases: [string, string, string][] = [
-    ["Slots per instance", "2.5", "12"],
-    ["Slots per instance", "5000000000", "12"],
-    ["Slots per instance", "0", "12"],
-    ["Instances", "65", "2"],
-    ["Instances", "1.5", "2"],
+    ["Slots", "2.5", "12"],
+    ["Slots", "5000000000", "12"],
+    ["Slots", "0", "12"],
+    ["Copies", "65", "2"],
+    ["Copies", "1.5", "2"],
     ["Timeout (ms)", "400000", ""],
     ["Service time (ms)", "-1", "98"],
     ["Queue limit", "-3", "0"],
@@ -240,7 +240,7 @@ test("a_tiny_service_time_is_written_without_an_exponent", async () => {
 test("a_refused_edit_puts_the_old_value_back_in_the_box", async () => {
   await show();
   mockFetch([{ status: 400, json: { error: "no" } }]);
-  const input = screen.getByLabelText("Slots per instance") as HTMLInputElement;
+  const input = screen.getByLabelText("Slots") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "20" } });
   fireEvent.blur(input);
   await vi.waitFor(() => expect(input.value).toBe("12"));

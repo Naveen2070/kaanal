@@ -7,7 +7,8 @@ import { useRun } from "../store/run";
 import { useSelected } from "../store/view";
 import { Heatmap } from "./Heatmap";
 import { Section } from "./Field";
-import { twoSignificant } from "../canvas/metrics";
+import { rankedByPeak, twoSignificant } from "../canvas/metrics";
+import { ResultsSkeleton, RANK_ROW } from "./Skeletons";
 
 const pct = (x: number | null) => (x === null ? "–" : `${Math.round(x * 100)}%`);
 
@@ -17,18 +18,21 @@ export function Results() {
   // a pick holds only for the selection it was made under: selecting on the canvas moves the heatmap
   const [picked, setPicked] = useState<{ name: string; under: string | null } | null>(null);
   const dimmed = useRun((s) => s.dimmed);
+  const status = useRun((s) => s.status);
   const pickId = useId();
   const s = run?.summary;
 
+  if (!s && status === "running") return <ResultsSkeleton />;
   if (!s) {
     return (
-      <p className="p-3 text-sm text-neutral-500">
+      <p className="p-3 text-sm text-muted">
         No finished run yet. The results appear after the first run.
       </p>
     );
   }
 
   // the heatmap follows the selected component, else the first bottleneck, else the first node
+  const ranked = rankedByPeak(s);
   const names = s.nodes.map((n) => n.name);
   const fallback = s.bottlenecks[0] !== undefined ? s.nodes[s.bottlenecks[0]]?.name : names[0];
   const pick = picked && picked.under === selected ? picked.name : null;
@@ -39,18 +43,48 @@ export function Results() {
     <div className="p-3 text-sm">
       {/* always present: a number from this tool is a relative what-if, never a prediction */}
       {dimmed ? (
-        <p className="mb-2 text-xs text-amber-700">
+        <p className="mb-2 text-xs text-warn">
           Out of date: the newest run could not finish, so these are the last figures that did.
         </p>
       ) : null}
-      <p className="mb-2 text-xs font-medium text-neutral-700">{s.label}</p>
+      <p className="mb-2 text-xs font-medium">
+        {run ? `Run ${run.id.replace(/^s/, "")} · ` : ""}A what-if, not a prediction
+      </p>
       {s.warnings.length > 0 ? (
-        <ul className="mb-2 space-y-1 rounded border border-amber-400 bg-amber-50 p-2 text-xs text-amber-900">
+        <ul className="mb-3 space-y-1 rounded-lg border border-warn p-2 text-xs text-warn">
           {s.warnings.map((w, i) => (
             <li key={i}>{w}</li>
           ))}
         </ul>
       ) : null}
+
+      <Section title="What breaks first">
+        {ranked.length === 0 ? (
+          <p className="text-xs text-muted">No traffic reached any component.</p>
+        ) : (
+          <ol className="text-xs">
+            {ranked.map((r, i) => (
+              <li key={r.name} className={`flex flex-col justify-center ${RANK_ROW}`}>
+                <div className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
+                  <span className="tabular-nums text-muted">
+                    peak {pct(r.peak)}
+                    {r.saturatesAtReqS !== null
+                      ? ` · saturates at ${twoSignificant(r.saturatesAtReqS)} req/s`
+                      : ""}
+                  </span>
+                </div>
+                <div aria-hidden className="h-1 rounded-full bg-well">
+                  <div
+                    className={`h-1 rounded-full ${i === 0 ? "bg-bad-fill" : "bg-text"}`}
+                    style={{ width: `${Math.min(r.peak, 1) * 100}%` }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Section>
 
       <Section title="Latency over the run">
         {node ? (
@@ -73,7 +107,7 @@ export function Results() {
             <Heatmap name={node.name} series={node.series} buckets={s.latency.buckets} />
           </>
         ) : (
-          <p className="text-xs text-neutral-500">This run has no components.</p>
+          <p className="text-xs text-muted">This run has no components.</p>
         )}
       </Section>
 
@@ -117,7 +151,7 @@ export function Results() {
 
       <Section title="Errors by kind">
         {Object.keys(s.errors).length === 0 ? (
-          <p className="text-xs text-neutral-500">None in this run.</p>
+          <p className="text-xs tabular-nums">0</p>
         ) : (
           <ul className="text-xs">
             {Object.entries(s.errors).map(([kind, n]) => (
@@ -126,24 +160,6 @@ export function Results() {
               </li>
             ))}
           </ul>
-        )}
-      </Section>
-
-      <Section title="Where it breaks first">
-        {s.bottlenecks.length === 0 ? (
-          <p className="text-xs text-neutral-500">No traffic reached any component.</p>
-        ) : (
-          <ol className="list-decimal pl-4 text-xs">
-            {s.bottlenecks.map((i) => {
-              const n = s.nodes[i];
-              return n ? (
-                <li key={i}>
-                  {n.name}
-                  {n.offered_load !== null ? ` (${pct(n.offered_load)} offered load)` : ""}
-                </li>
-              ) : null;
-            })}
-          </ol>
         )}
       </Section>
     </div>

@@ -6,6 +6,7 @@ import { useRun } from "../store/run";
 import { nodeSummary } from "../test/summary";
 import { bucketLabel, heatmapData, intensity } from "./heatmapData";
 import { Results } from "./Results";
+import { HEAT_ASPECT, RANK_ROW } from "./Skeletons";
 
 const buckets = Array.from({ length: 20 }, (_, i) => ({
   le_ms: i < 19 ? 2 ** i / 8 : null,
@@ -138,19 +139,94 @@ test("the_warning_text_is_visible_above_the_heatmap", () => {
   expect(warning.compareDocumentPosition(svg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-test("bottlenecks_are_listed_in_server_order", () => {
+test("breaks_first_list_ranks_by_peak_with_saturates_at", () => {
+  setRun(
+    summary({
+      nodes: [
+        nodeSummary({ name: "gw", series: series(), saturates_at_req_s: null }),
+        nodeSummary({
+          name: "db",
+          saturates_at_req_s: 1280,
+          series: { ...series(), busy: [0.4, 0.95] },
+        }),
+      ],
+    }),
+  );
+  mount();
+  const items = Array.from(document.querySelectorAll("section ol li")).map((l) => l.textContent);
+  expect(items[0]).toBe("dbpeak 95% · saturates at 1,300 req/s");
+  expect(items[1]).toMatch(/^gw/);
+  expect(items[1]).not.toMatch(/saturates at/);
+});
+
+test("first_row_red_others_ink", () => {
   setRun(summary());
   mount();
-  const items = Array.from(document.querySelectorAll("ol.list-decimal li")).map(
-    (l) => l.textContent,
+  const fills = Array.from(document.querySelectorAll("section ol li div[aria-hidden] > div"));
+  expect(fills[0]?.className).toMatch(/bg-bad-fill/);
+  expect(fills[1]?.className).toMatch(/bg-text/);
+});
+
+test("by_instance_shows_only_visits_utilisation_wait_and_hides_for_one_copy", () => {
+  const rep = {
+    replica: 0,
+    visits: 5,
+    visits_per_s: 5,
+    mean_wait_ms: 1,
+    offered_load: 0.5,
+    utilization: 0.5,
+  };
+  setRun(
+    summary({
+      nodes: [nodeSummary({ name: "db", replicas: [rep, { ...rep, replica: 1 }] })],
+      bottlenecks: [0],
+    }),
   );
-  expect(items).toEqual(["db (140% offered load)", "gw (50% offered load)"]);
+  mount();
+  const heads = Array.from(document.querySelectorAll("table:not(.sr-only) th")).map(
+    (h) => h.textContent,
+  );
+  expect(heads).toEqual(["Instance", "Visits/s", "Busy", "Wait"]);
+  cleanup();
+  setRun(summary({ nodes: [nodeSummary({ name: "db", replicas: [rep] })], bottlenecks: [0] }));
+  mount();
+  expect(screen.queryByText(/Instances of/)).toBeNull();
+});
+
+test("zero_errors_print_a_zero", () => {
+  setRun(summary({ errors: {} }));
+  mount();
+  const section = screen.getByText("Errors by kind").closest("section") as HTMLElement;
+  expect(section.textContent).toContain("0");
+  expect(section.textContent).not.toMatch(/none|no errors/i);
+});
+
+test("heatmap_axis_has_start_middle_and_end", () => {
+  setRun(summary());
+  mount();
+  expect(screen.getByText("0 s")).toBeTruthy();
+  expect(screen.getByText("15 s")).toBeTruthy(); // 60 windows of 0.5 s
+  expect(screen.getByText("30 s")).toBeTruthy();
+});
+
+test("loading_skeleton_has_the_final_layout_size", () => {
+  useRun.setState({ status: "running", latest: null });
+  mount();
+  const heat = screen
+    .getByLabelText("Loading the results")
+    .querySelector(`[class*="${HEAT_ASPECT}"]`);
+  expect(heat).toBeTruthy();
+  cleanup();
+  setRun(summary());
+  mount();
+  expect(document.querySelector("svg")?.getAttribute("class")).toContain(HEAT_ASPECT);
+  expect(document.querySelector("section ol li")?.className).toContain(RANK_ROW);
 });
 
 test("the_report_label_is_always_present", () => {
-  setRun(summary({ label: "relative what-if, not a prediction", nodes: [], bottlenecks: [] }));
+  setRun(summary({ nodes: [], bottlenecks: [] }));
   mount();
-  expect(screen.getByText("relative what-if, not a prediction")).toBeTruthy();
+  expect(screen.getByText(/Run 1 · A what-if, not a prediction/)).toBeTruthy();
   expect(screen.getByText(/This run has no components/)).toBeTruthy();
 });
 

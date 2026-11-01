@@ -1,9 +1,11 @@
-// One request, hop by hop: every log line of that request as a bar on a shared time axis (a
-// waterfall). The sample keeps whole requests, so the hops shown are all there were.
+// One request, hop by hop: a waterfall on a shared time axis (spec 6.1). A hop is its wait in line
+// (amber) then its work. The finding sentence appears only when the lines carry `wait_ms`; a failed
+// request (`wait_ms: null`) lists its hops and the failure, with no wait split. Escape closes.
 
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { LogLine } from "../api/types";
+import { eventWords, waterfall } from "./logFormat";
 
 interface Hops {
   key: string;
@@ -36,13 +38,18 @@ export function RequestView({
     return () => ctl.abort();
   }, [runId, stream, request, key]);
 
+  // Escape closes the open request, wherever focus is inside the tab
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const lines = hops?.key === key ? hops.lines : null;
-  const start = lines ? Math.min(...lines.map((l) => l.t_ms)) : 0;
-  const end = lines ? Math.max(...lines.map((l) => l.t_ms + (l.service_ms ?? 0))) : 0;
-  const span = Math.max(end - start, 0.001);
+  const w = lines && lines.length > 0 ? waterfall(lines) : null;
 
   return (
-    <section aria-label={`Request r-${request}`} className="mt-3 border-t pt-2">
+    <section aria-label={`Request r-${request}`} className="mt-3 border-t border-border pt-2">
       <div className="mb-1 flex items-center">
         <h3 className="text-xs font-semibold">
           r-{request} {stream}
@@ -52,48 +59,48 @@ export function RequestView({
         </button>
       </div>
       {lines === null ? (
-        <p className="text-xs text-neutral-500">Loading...</p>
+        <p className="text-xs text-muted">Loading...</p>
       ) : hops?.problem ? (
-        <p role="alert" className="text-xs text-red-700">
+        <p role="alert" className="text-xs text-negative">
           {hops.problem}
         </p>
-      ) : lines.length === 0 ? (
-        <p className="text-xs text-neutral-500">
-          This request is not in the sample of this run (only whole requests that were kept are).
-        </p>
-      ) : lines.length === 0 ? (
-        <p className="text-xs text-neutral-500">
+      ) : w === null ? (
+        <p className="text-xs text-muted">
           This request is not in the sample of this run (only whole requests that were kept are).
         </p>
       ) : (
-        <ol className="space-y-1 text-xs">
-          {lines.map((l, i) => (
-            <li key={i} className="flex items-center gap-2">
-              <span className="w-24 truncate font-mono">
-                {l.replica === null ? l.node : `${l.node}#${l.replica}`}
-              </span>
-              <span className="relative h-3 flex-1 rounded bg-neutral-100">
-                <span
-                  className={`absolute top-0 h-3 rounded ${
-                    l.level === "error"
-                      ? "bg-red-500"
-                      : l.level === "warn"
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                  }`}
-                  style={{
-                    left: `${((l.t_ms - start) / span) * 100}%`,
-                    width: `${Math.max(((l.service_ms ?? 0) / span) * 100, 1)}%`,
-                  }}
-                />
-              </span>
-              <span className="w-28 text-right">
-                {l.event}
-                {l.service_ms !== null ? ` ${Number(l.service_ms.toFixed(2))}ms` : ""}
-              </span>
-            </li>
-          ))}
-        </ol>
+        <>
+          {w.finding ? <p className="mb-1 text-xs font-medium">{w.finding}</p> : null}
+          <ol className="space-y-1 text-xs">
+            {w.rows.map(({ line: l, label, left, wait, work }, i) => (
+              <li key={i} className="flex items-center gap-2">
+                <span className="w-24 truncate font-mono">{label}</span>
+                <span className="relative h-3 flex-1 rounded bg-well">
+                  {l.wait_ms === null && l.service_ms === null ? (
+                    <span
+                      className="absolute top-0 h-3 w-1 rounded bg-bad-fill"
+                      style={{ left: `${Math.min(left, 99)}%` }}
+                    />
+                  ) : (
+                    <>
+                      {wait > 0 ? (
+                        <span
+                          className="absolute top-0 h-3 rounded-l bg-warn-fill"
+                          style={{ left: `${left}%`, width: `${wait}%` }}
+                        />
+                      ) : null}
+                      <span
+                        className={`absolute top-0 h-3 rounded-r ${l.level === "error" ? "bg-bad-fill" : "bg-ok-fill"}`}
+                        style={{ left: `${left + wait}%`, width: `${Math.max(work, 1)}%` }}
+                      />
+                    </>
+                  )}
+                </span>
+                <span className="w-36 text-right">{eventWords(l)}</span>
+              </li>
+            ))}
+          </ol>
+        </>
       )}
     </section>
   );
