@@ -246,3 +246,47 @@ export function newConnections(doc: Doc | null | undefined, rows: Row[]): string
   );
   return [...new Set(rows.flatMap((r) => r.targets ?? []))].filter((t) => !have.has(t));
 }
+
+/**
+ * The patch that points one endpoint at `targets` (several run in parallel, none leaves the gateway
+ * to answer) and wires the gateway to any service it has no edge to. Empty for an endpoint whose chain
+ * was written by hand, or whose endpoints live in another file: those are not edited from a list.
+ */
+export function routeOps(doc: Doc, key: string, targets: string[]): Op[] {
+  if (!isObj(doc.endpoints)) return [];
+  const entry = (doc.endpoints as Obj)[key];
+  const prev = isObj(entry) ? entry : {};
+  const before = callSteps(prev.chain);
+  if (before === null) return [];
+  const kept = new Map(before.map((st) => [callOf(st) as string, st]));
+  const calls = targets.map((t) => kept.get(t) ?? { call: t });
+  const ops: Op[] = [];
+  const path = ["endpoints", key, "chain"];
+  if (calls.length === 0) {
+    if ("chain" in prev) ops.push({ op: "remove", path });
+  } else {
+    ops.push({
+      op: "chain" in prev ? "set" : "insert",
+      path,
+      value: calls.length === 1 ? calls : [{ parallel: calls }],
+    });
+  }
+  const gateway = gatewayOf(doc);
+  if (gateway !== null) {
+    const have = new Set(
+      (doc.edges ?? []).filter((e) => String(e.from) === gateway).map((e) => String(e.to)),
+    );
+    const fresh = targets.filter((t) => !have.has(t));
+    if (Array.isArray(doc.edges)) {
+      for (const to of fresh)
+        ops.push({ op: "append", path: ["edges"], value: { from: gateway, to } });
+    } else if (fresh.length > 0) {
+      ops.push({
+        op: "edges" in doc ? "set" : "insert",
+        path: ["edges"],
+        value: fresh.map((to) => ({ from: gateway, to })),
+      });
+    }
+  }
+  return ops;
+}

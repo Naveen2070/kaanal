@@ -15,7 +15,7 @@ export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
     <aside
       data-tour="palette"
       aria-label="Add a node"
-      className={`flex shrink-0 flex-col gap-0.5 overflow-y-auto rounded-2xl border border-border bg-sheet p-2 shadow-float ${rail ? "w-12 items-center" : "w-[232px]"}`}
+      className={`flex shrink-0 flex-col gap-0.5 overflow-y-auto rounded-2xl border border-border bg-sheet p-2 shadow-float ${rail ? "w-12 items-center" : "w-76"}`}
     >
       {rail ? null : (
         <h2 className="px-2 pt-1 pb-1.5 text-xs font-semibold text-muted">Add a node</h2>

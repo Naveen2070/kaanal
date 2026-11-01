@@ -56,6 +56,7 @@ export function NodeCard({ data, selected }: NodeProps) {
         <Handle type="target" position={Position.Left} />
         <button
           type="button"
+          data-node-name={name}
           className="flex items-center gap-2 rounded-md text-left focus-visible:outline-2 focus-visible:outline-accent"
         >
           {Icon ? (

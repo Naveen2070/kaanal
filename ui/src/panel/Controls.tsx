@@ -8,9 +8,11 @@ import { ConnectMenu } from "../canvas/ConnectMenu";
 import { useFeed } from "../canvas/feed";
 import { nodeFigures, percent, replicasOf, twoSignificant } from "../canvas/metrics";
 import { kindInfo } from "../canvas/nodeKinds";
+import { LazyBoundary } from "../states/LazyBoundary";
 import { useDraft } from "../store/draft";
 import { Chaos } from "./Chaos";
 import { NumberField, Section } from "./Field";
+import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import {
   deleteOps,
   durationMs,
@@ -100,66 +102,9 @@ export function Controls({
       </Section>
 
       {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
-        <Section title="Traffic routes">
-          <p className="mb-2 text-xs text-muted">Where incoming endpoints forward requests.</p>
-          {Object.entries(doc.endpoints).map(([epKey, epVal]) => {
-            const epObj =
-              epVal && typeof epVal === "object" ? (epVal as Record<string, unknown>) : {};
-            const chain = Array.isArray(epObj.chain) ? epObj.chain : [];
-            const firstCall =
-              chain[0] && typeof chain[0] === "object"
-                ? (chain[0] as { call?: unknown }).call
-                : undefined;
-            const currentTarget = typeof firstCall === "string" ? firstCall : "";
-            const options = Array.from(
-              new Set(["", ...calls, ...(currentTarget ? [currentTarget] : [])]),
-            );
-            const selectId = `route-${epKey}`;
-
-            return (
-              <div key={epKey} className="mb-2">
-                <label
-                  htmlFor={selectId}
-                  className="block text-xs font-mono font-medium text-muted"
-                >
-                  {epKey}
-                </label>
-                <select
-                  id={selectId}
-                  className="mt-1 w-full rounded border border-control bg-sheet text-text px-1 py-0.5 text-xs"
-                  value={currentTarget}
-                  onChange={(e) => {
-                    const to = e.currentTarget.value;
-                    if (to === currentTarget) return;
-                    if (to === "") {
-                      if ("chain" in epObj) {
-                        void patch([{ op: "remove", path: ["endpoints", epKey, "chain"] }]);
-                      }
-                    } else {
-                      const opKind = "chain" in epObj ? "set" : "insert";
-                      void patch([
-                        {
-                          op: opKind,
-                          path: ["endpoints", epKey, "chain"],
-                          value: [{ call: to }],
-                        },
-                      ]);
-                    }
-                  }}
-                >
-                  <option value="">(Gateway answers directly)</option>
-                  {options
-                    .filter((target): target is string => Boolean(target))
-                    .map((target) => (
-                      <option key={target} value={target}>
-                        Forward to {target}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            );
-          })}
-        </Section>
+        <LazyBoundary fallback={<p className="mb-3 text-xs text-muted">Loading the routes...</p>}>
+          <TrafficRoutes gateway={name} doc={doc} edges={edges} />
+        </LazyBoundary>
       ) : null}
 
       <Section title="How busy it is">

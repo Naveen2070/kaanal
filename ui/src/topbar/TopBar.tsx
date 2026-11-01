@@ -1,5 +1,5 @@
-// The top bar, in groups with a divider between them: the title (mark and project), Run with a plain
-// line saying what the loop is doing, undo and redo, then the draft's state with Apply and Save.
+// The top-left card, stacked: the title (mark and project) with undo and redo; Run, Apply and Save in one row; then
+// what the loop is doing over the draft's state. Undo and redo sit on the title row.
 // Theme and help are a small sheet of their own at the top right (TopTools). Why a run could not
 // give numbers is a notice (a toast), not a line in the bar. The key figures and the offered load
 // are the strip under it (KpiStrip.tsx).
@@ -12,8 +12,6 @@ import { useRun } from "../store/run";
 import { SaveFlow } from "./SaveFlow";
 import { ThemeToggle } from "./ThemeToggle";
 import { UndoRedo } from "./UndoRedo";
-
-const Divider = () => <span aria-hidden className="hidden h-6 w-px bg-border sm:block" />;
 
 export function TopBar({ onRun }: { onRun: () => void }) {
   const view = useDraft((st) => st.view);
@@ -29,30 +27,32 @@ export function TopBar({ onRun }: { onRun: () => void }) {
           : "Edits re-run on their own";
 
   return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm">
-      <h1 className="m-0 flex items-center gap-2 text-base font-semibold">
-        <Mark size={24} className="text-accent" />
-        {view?.project_name ?? "Kaanal Studio"}
-      </h1>
-      <Divider />
-      <div className="flex items-center gap-2.5">
-        <button
-          type="button"
-          data-tour="run"
-          onClick={onRun}
-          className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-3 font-medium hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          <Play size={14} aria-hidden />
-          Run
-        </button>
-        <output className={`min-w-28 text-xs ${status === "blocked" ? "text-warn" : "text-muted"}`}>
-          {line}
-        </output>
+    <header className="flex w-76 flex-col gap-2 p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="m-0 flex min-w-0 items-center gap-2 text-base font-semibold">
+          <Mark size={24} className="shrink-0 text-accent" />
+          <span className="truncate">{view?.project_name ?? "Kaanal Studio"}</span>
+        </h1>
+        <UndoRedo />
       </div>
-      <Divider />
-      <UndoRedo />
-      <Divider />
-      <SaveFlow />
+      <SaveFlow
+        lead={
+          <button
+            type="button"
+            data-tour="run"
+            onClick={onRun}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-3 font-medium hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <Play size={14} aria-hidden />
+            Run
+          </button>
+        }
+        note={
+          <output className={`text-xs ${status === "blocked" ? "text-warn" : "text-muted"}`}>
+            {line}
+          </output>
+        }
+      />
     </header>
   );
 }

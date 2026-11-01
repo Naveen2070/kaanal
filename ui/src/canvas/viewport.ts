@@ -23,7 +23,7 @@ export interface Box {
  * icon rail in the middle layout), the details rail on the right (a slim handle when folded), and room for the dock below.
  */
 export function padsFor(mode: LayoutMode, railOpen = true): Pads {
-  return { top: 176, right: railOpen ? 392 : 72, bottom: 96, left: mode === "full" ? 272 : 84 };
+  return { top: 168, right: railOpen ? 392 : 72, bottom: 96, left: mode === "full" ? 328 : 84 };
 }
 
 /** The padding option of React Flow's `fitView`, in pixels. */

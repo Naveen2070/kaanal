@@ -70,7 +70,7 @@ export function HelpPopover({ id, label = HELP_LABEL[id] }: { id: HelpId; label?
           open
           aria-label={label}
           style={{ top: at.top, left: at.left, width: WIDTH }}
-          className="fixed z-50 m-0 rounded-lg border border-border bg-sheet p-3 text-xs font-normal text-text"
+          className="fixed z-50 m-0 rounded-lg border border-border bg-sheet p-3 text-xs font-normal whitespace-normal text-text"
         >
           {HELP[id]}
         </dialog>

@@ -45,7 +45,7 @@ test("band_is_collapsible_and_remembers_state", () => {
   setRun();
   const { unmount } = render(<ChartsBand />);
   fireEvent.click(screen.getByRole("button", { name: "Hide charts" }));
-  expect(document.querySelectorAll("svg")).toHaveLength(0);
+  expect(document.querySelectorAll("figure")).toHaveLength(0);
   unmount();
   render(<ChartsBand />);
   const b = screen.getByRole("button", { name: "Show charts" });
@@ -59,5 +59,13 @@ test("the_band_starts_closed_so_the_canvas_stays_clear", () => {
   expect(screen.getByRole("button", { name: "Show charts" }).getAttribute("aria-expanded")).toBe(
     "false",
   );
-  expect(document.querySelectorAll("svg")).toHaveLength(0);
+  expect(document.querySelectorAll("figure")).toHaveLength(0);
+});
+
+test("the_stats_pill_sits_beside_the_toggle_open_or_closed", () => {
+  render(<ChartsBand />);
+  const pill = document.querySelector('[data-testid="system-stats"]');
+  expect(pill).not.toBeNull();
+  expect(pill?.textContent).toMatch(/components?/i);
+  expect(pill?.textContent).toMatch(/connections?/i);
 });

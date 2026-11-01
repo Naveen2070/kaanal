@@ -12,6 +12,7 @@ vi.mock("@xyflow/react", () => ({
   BaseEdge: (p: { path: string; style?: object }) => (
     <path data-testid="wire" d={p.path} style={p.style} />
   ),
+  useNodes: () => [],
   EdgeLabelRenderer: ({ children }: { children: unknown }) => <>{children}</>,
   getSmoothStepPath: (o: { borderRadius: number; centerX?: number }) => [
     `M0 0 r${o.borderRadius} c${o.centerX ?? "mid"}`,

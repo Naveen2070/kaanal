@@ -50,9 +50,9 @@ export function App() {
     <Loading ready={view !== null}>
       <FeedContext.Provider value={feed}>
         <Shell
+          topLeft={<TopBar onRun={runNow} />}
           top={
             <>
-              <TopBar onRun={runNow} />
               <KpiStrip />
               <FirstRun />
               <PaletteHost />

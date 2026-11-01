@@ -96,3 +96,16 @@ test("stack_is_bounded_at_100", () => {
   // the oldest went, the newest stayed
   expect(history.undo()).toEqual([{ op: "remove", path: [HISTORY_LIMIT + 19] }]);
 });
+
+test("the_stack_comes_back_after_a_reload_only_for_the_same_draft", () => {
+  history.clear();
+  history.push([{ op: "remove", path: ["a"] }], [{ op: "set", path: ["a"], value: 1 }]);
+  history.save("boot-1", 7);
+  history.clear();
+  history.restore("boot-1", 8); // the draft moved on: stale
+  expect(useHistory.getState().past).toHaveLength(0);
+  history.restore("boot-2", 7); // the server restarted
+  expect(useHistory.getState().past).toHaveLength(0);
+  history.restore("boot-1", 7);
+  expect(useHistory.getState().past).toHaveLength(1);
+});

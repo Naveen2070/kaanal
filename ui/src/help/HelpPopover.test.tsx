@@ -62,3 +62,13 @@ test("a_press_outside_closes_it_and_escape_does_not_reach_the_parent", async () 
   fireEvent.pointerDown(document.body);
   expect(screen.queryByText(HELP.slots)).toBeNull();
 });
+
+test("the_bubble_wraps_its_words_even_inside_a_nowrap_figure", () => {
+  render(
+    <div className="whitespace-nowrap">
+      <HelpPopover id="p99" />
+    </div>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /About/ }));
+  expect(screen.getByRole("dialog").className).toMatch(/whitespace-normal/);
+});

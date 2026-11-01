@@ -24,3 +24,14 @@ export function useLayout(): LayoutMode {
     ),
   );
 }
+
+/** From this width the rail can stand in its own column from the top of the page. */
+export const WIDE_PX = 1600;
+
+export function useWide(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => window.innerWidth >= WIDE_PX,
+    () => false,
+  );
+}

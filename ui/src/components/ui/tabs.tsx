@@ -21,7 +21,7 @@ export function TabsTrigger({
 }: ComponentProps<typeof TabsPrimitive.Trigger>) {
   return (
     <TabsPrimitive.Trigger
-      className={`flex-1 border-b-2 border-transparent px-2 py-2 text-sm text-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent data-[state=active]:border-accent data-[state=active]:font-medium data-[state=active]:text-text ${className}`}
+      className={`min-h-12 flex-1 border-b-2 border-transparent px-2 py-3 text-sm text-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent data-[state=active]:border-accent data-[state=active]:font-medium data-[state=active]:text-text ${className}`}
       {...props}
     />
   );

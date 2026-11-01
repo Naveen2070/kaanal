@@ -4,7 +4,7 @@
 // what the screen shows. A result opens in a modal dialog: what Apply kept and dropped, what Save
 // would lose, a draft that would not start, a conflict with the file on disk, or a refusal.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "../api/client";
 import type { ApplyResult, SaveResult, ValidateResult } from "../api/types";
 import { useDraft } from "../store/draft";
@@ -110,7 +110,11 @@ function problemsOf(v: ValidateResult): string[] {
   ];
 }
 
-export function SaveFlow() {
+/**
+ * Apply and Save, with `lead` (Run) before them on one row; below it, `note` (what the loop is
+ * doing) over the draft's state.
+ */
+export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode }) {
   const view = useDraft((s) => s.view);
   const load = useDraft((s) => s.load);
   const settled = useDraft((s) => s.settled);
@@ -175,35 +179,45 @@ export function SaveFlow() {
   const dirty = view?.dirty ?? false;
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5">
-      <span className={`flex items-center gap-1.5 text-xs ${dirty ? "text-warn" : "text-muted"}`}>
-        <span
-          aria-hidden
-          className={`size-1.5 rounded-full ${dirty ? "bg-warn-fill" : "bg-ok-fill"}`}
-        />
-        {`Draft: ${dirty ? "not applied" : "applied"} · ${view?.saved === false ? "not saved" : "saved"}`}
-      </span>
-      <button
-        type="button"
-        data-command="apply"
-        disabled={busy !== null || view?.doc == null}
-        onClick={() => void apply()}
-        title="Make the draft the running system (the mocks switch to it)"
-        className="h-8 rounded-lg border border-control bg-sheet px-3 font-medium text-text hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        Apply
-      </button>
-      <button
-        type="button"
-        data-tour="save"
-        data-command="save"
-        disabled={busy !== null || view?.doc == null}
-        onClick={() => void save({ check: true, confirmLoss: false })}
-        title="Write the draft to kaanal.yaml"
-        className="h-8 rounded-lg bg-primary px-3.5 font-medium text-on-primary hover:opacity-90 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      >
-        Save
-      </button>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        {lead}
+        <button
+          type="button"
+          data-command="apply"
+          disabled={busy !== null || view?.doc == null}
+          onClick={() => void apply()}
+          title="Make the draft the running system (the mocks switch to it)"
+          className="h-8 rounded-lg border border-control bg-sheet px-3 font-medium text-text hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          data-tour="save"
+          data-command="save"
+          disabled={busy !== null || view?.doc == null}
+          onClick={() => void save({ check: true, confirmLoss: false })}
+          title="Write the draft to kaanal.yaml"
+          className="h-8 rounded-lg bg-primary px-3.5 font-medium text-on-primary hover:opacity-90 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          Save
+        </button>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-nowrap items-center gap-x-3 whitespace-nowrap">
+          {note}
+          <span
+            className={`flex items-start gap-1.5 text-xs ${dirty ? "text-warn" : "text-muted"}`}
+          >
+            <span
+              aria-hidden
+              className={`mt-1 size-1.5 shrink-0 rounded-full ${dirty ? "bg-warn-fill" : "bg-ok-fill"}`}
+            />
+            {`Draft: ${dirty ? "not applied" : "applied"} · ${view?.saved === false ? "not saved" : "saved"}`}
+          </span>
+        </div>
+      </div>
 
       {dialog?.kind === "applied" ? (
         <Modal title="Applied" onClose={close}>

@@ -313,21 +313,22 @@ function Flow() {
           fitViewOptions={fitOptions}
           minZoom={0.2}
           maxZoom={2}
-          attributionPosition="bottom-center"
+          // the developer chose to hide the corner credit (2026-11-01); React Flow is MIT, and it is credited in docs/web/studio.md
+          proOptions={{ hideAttribution: true }}
           onMove={(_, vp) => useZoom.setState({ zoom: vp.zoom })}
         >
           <Background
             id="minor"
             variant={BackgroundVariant.Lines}
-            gap={28}
-            lineWidth={1}
+            gap={56}
+            lineWidth={0.5}
             color="var(--grid)"
           />
           <Background
             id="major"
             variant={BackgroundVariant.Lines}
-            gap={140}
-            lineWidth={1}
+            gap={280}
+            lineWidth={0.75}
             color="var(--grid)"
             style={{ opacity: 0.9 }}
           />

@@ -4,7 +4,10 @@
 // remembered. A separate chunk.
 
 import { useState } from "react";
+import { PanelBottomClose, PanelBottomOpen } from "lucide-react";
+import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
+import { systemCounts } from "./counts";
 import { linePoints, niceTicks, smooth } from "./line";
 
 const KEY = "kaanal.studio.charts.open";
@@ -98,6 +101,35 @@ function Chart({
   );
 }
 
+/** The system at a glance: how many parts, of what sort, how many wires, and the run's simulated time. */
+function StatsPill() {
+  const doc = useDraft((s) => s.view?.doc);
+  const windowS = useRun((s) => s.latest?.summary?.window_s);
+  const c = systemCounts(doc);
+  const parts = [
+    c.traffic > 0 && `${c.traffic} traffic`,
+    c.compute > 0 && `${c.compute} compute`,
+    c.data > 0 && `${c.data} data`,
+    c.external > 0 && `${c.external} external`,
+  ].filter(Boolean);
+  return (
+    <p
+      data-testid="system-stats"
+      title="What the draft holds. The time is how much simulated time the last run covered."
+      className="m-0 flex items-center gap-3 text-[11px] font-medium tracking-wide text-muted uppercase tabular-nums"
+    >
+      <span>
+        {c.components} {c.components === 1 ? "component" : "components"}
+      </span>
+      {parts.length > 0 ? <span>{parts.join(", ")}</span> : null}
+      <span>
+        {c.connections} {c.connections === 1 ? "connection" : "connections"}
+      </span>
+      {windowS ? <span>{Number(windowS.toPrecision(3))}s</span> : null}
+    </p>
+  );
+}
+
 export function ChartsBand() {
   const series = useRun((s) => s.latest?.summary?.series);
   const [open, setOpen] = useState(open0);
@@ -115,14 +147,23 @@ export function ChartsBand() {
       aria-label="Charts"
       className={`pointer-events-auto shrink-0 rounded-2xl border border-border bg-sheet shadow-float ${open ? "w-full" : "w-fit"}`}
     >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={toggle}
-        className="flex h-9 w-full items-center rounded-2xl px-4 text-xs font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-      >
-        {open ? "Hide charts" : "Show charts"}
-      </button>
+      <div className="flex items-center gap-3 pr-4">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={toggle}
+          className="flex h-9 shrink-0 items-center gap-2 rounded-2xl px-4 text-xs font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        >
+          {open ? (
+            <PanelBottomClose size={15} aria-hidden />
+          ) : (
+            <PanelBottomOpen size={15} aria-hidden />
+          )}
+          {open ? "Hide charts" : "Show charts"}
+        </button>
+        <span aria-hidden className="h-4 w-px bg-border" />
+        <StatsPill />
+      </div>
       {open ? (
         series ? (
           <div className="flex gap-4 px-3 pb-3">

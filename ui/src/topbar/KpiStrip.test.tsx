@@ -119,9 +119,9 @@ test("breaks_first_is_the_largest_figure_and_red_only_when_saturated_now", async
   await show(300);
   run(summary());
   const lead = value("Breaks first");
-  expect(lead.className).toMatch(/text-2xl/);
+  expect(lead.className).toMatch(/text-xl/);
   for (const other of ["System p99", "Goodput", "Errors", "Dropped"]) {
-    expect(value(other).className).not.toMatch(/text-2xl/);
+    expect(value(other).className).not.toMatch(/text-xl/);
   }
   expect(lead.className).not.toMatch(/text-negative/);
   run(

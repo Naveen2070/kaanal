@@ -13,6 +13,16 @@ export function ControlDock() {
   const [selected, setSelected] = useSelected();
   const config = useDraft((s) => (selected === null ? undefined : s.view?.doc?.nodes?.[selected]));
   if (selected === null || !config) return null;
+  // closing the dock hands focus back to the card it was for, not to the page
+  const close = () => {
+    void setSelected(null);
+    const name = selected;
+    requestAnimationFrame(() =>
+      [...document.querySelectorAll<HTMLElement>("[data-node-name]")]
+        .find((b) => b.dataset.nodeName === name)
+        ?.focus(),
+    );
+  };
   const info = kindInfo(config.type);
   const Icon = info?.icon;
   return (
@@ -34,7 +44,7 @@ export function ControlDock() {
         <button
           type="button"
           aria-label="Close settings"
-          onClick={() => void setSelected(null)}
+          onClick={close}
           className="ml-auto flex size-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
         >
           <X size={14} aria-hidden />
@@ -45,7 +55,7 @@ export function ControlDock() {
         name={selected}
         config={config}
         onPending={(on) => setUpdating(selected, on)}
-        onClose={() => void setSelected(null)}
+        onClose={close}
       />
     </section>
   );

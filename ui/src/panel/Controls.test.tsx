@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView, EdgeDoc, NodeDoc } from "../api/types";
 import { FeedContext } from "../canvas/feed";
@@ -322,20 +322,19 @@ test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
     </FeedContext.Provider>,
   );
 
-  expect(screen.getByText("Traffic routes")).toBeTruthy();
-  const select = screen.getByLabelText("GET /") as HTMLSelectElement;
-  expect(select.value).toBe("");
+  expect(await screen.findByText("Traffic routes")).toBeTruthy();
+  const group = screen.getByRole("group", { name: "GET /" });
+  expect((within(group).getByLabelText("All services") as HTMLInputElement).checked).toBe(false);
 
   const sent = mockFetch([{ json: view() }]);
-  fireEvent.change(select, { target: { value: "app" } });
+  fireEvent.click(within(group).getByLabelText(/^app/));
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({
     patch: [
-      {
-        op: "insert",
-        path: ["endpoints", "GET /", "chain"],
-        value: [{ call: "app" }],
-      },
+      { op: "insert", path: ["endpoints", "GET /", "chain"], value: [{ call: "app" }] },
+      ...(edges.some((e) => e.from === "gw" && e.to === "app")
+        ? []
+        : [{ op: "append", path: ["edges"], value: { from: "gw", to: "app" } }]),
     ],
   });
 });

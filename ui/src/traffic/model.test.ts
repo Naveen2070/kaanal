@@ -9,6 +9,7 @@ import {
   keyOf,
   newConnections,
   problems,
+  routeOps,
   rowsFrom,
   serviceNames,
   targetsOfChain,
@@ -231,4 +232,25 @@ test("what_cannot_be_applied_is_said_in_words", () => {
     /separate file/,
   );
   expect(problems([row({ path: "/a", targets: ["shop"] })], d)).toEqual([]);
+});
+
+test("an_endpoints_route_is_set_to_one_service_several_in_parallel_or_none", () => {
+  const d = doc();
+  const set = (targets: string[]) =>
+    (
+      after(d, routeOps(d, "GET /products", targets)).endpoints as Record<
+        string,
+        { chain?: unknown }
+      >
+    )["GET /products"]?.chain;
+  expect(set(["shop"])).toEqual([{ call: "shop" }]);
+  expect(set(["shop", "search"])).toEqual([{ parallel: [{ call: "shop" }, { call: "search" }] }]);
+  expect(set([])).toBeUndefined();
+  // the gateway is wired to a service it had no wire to
+  expect(after(d, routeOps(d, "GET /products", ["shop", "search"])).edges).toEqual([
+    { from: "gw", to: "shop" },
+    { from: "gw", to: "search" },
+  ]);
+  // a chain written by hand is not touched
+  expect(routeOps(d, "POST /orders", ["shop"])).toEqual([]);
 });

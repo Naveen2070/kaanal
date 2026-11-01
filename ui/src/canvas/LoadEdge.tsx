@@ -5,7 +5,13 @@
 // copy takes more load. With reduced motion the lanes stand still. A selected wire shows a button
 // to delete it (Delete or Backspace does the same).
 
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from "@xyflow/react";
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getSmoothStepPath,
+  useNodes,
+  type EdgeProps,
+} from "@xyflow/react";
 import { X } from "lucide-react";
 import { usePrefersReducedMotion } from "../first-run/motion";
 import { useDraft } from "../store/draft";
@@ -13,6 +19,8 @@ import { edgeSpeedS, edgeTone } from "./edges";
 import { useFeed } from "./feed";
 import { laneColour, laneCount, laneLoads, laneOffsets } from "./lanes";
 import { replicasOf } from "./metrics";
+import { bendX } from "./routing";
+import { removeWires } from "./wires";
 
 const HALO = { muted: null, warn: "var(--warn-fill)", bad: "var(--bad-fill)" } as const;
 
@@ -29,7 +37,6 @@ export function LoadEdge({
 }: EdgeProps) {
   const feed = useFeed();
   const still = usePrefersReducedMotion();
-  const patch = useDraft((s) => s.patch);
   const { from, to, index } = (data ?? {}) as { from?: string; to?: string; index?: number };
   const copies = useDraft((s) => (to === undefined ? 1 : replicasOf(s.view?.doc?.nodes?.[to])));
   const a = from === undefined ? undefined : feed.node(from);
@@ -40,9 +47,20 @@ export function LoadEdge({
   const halo = HALO[edgeTone(a?.utilization ?? null, b?.utilization ?? null)];
 
   const geometry = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
-  const [path, labelX, labelY] = getSmoothStepPath({ ...geometry, borderRadius: 8 });
-  // each lane bends at its own x, so parallel lanes never run over each other
-  const midX = (sourceX + targetX) / 2;
+  // bend in a gap between the cards, not through one
+  const boxes = useNodes().map((nd) => ({
+    x: nd.position.x,
+    y: nd.position.y,
+    w: nd.measured?.width ?? 236,
+    h: nd.measured?.height ?? 190,
+  }));
+  const midX = bendX(sourceX, targetX, sourceY, targetY, boxes);
+  const [path, labelX, labelY] = getSmoothStepPath({
+    ...geometry,
+    borderRadius: 8,
+    centerX: midX,
+  });
+  // each lane bends at its own x beside that, so parallel lanes never run over each other
   const lanes = offsets.map(
     (o) => getSmoothStepPath({ ...geometry, borderRadius: 8, centerX: midX + o })[0],
   );
@@ -121,11 +139,11 @@ export function LoadEdge({
             type="button"
             aria-label={`Delete the wire from ${from} to ${to}`}
             title="Delete this wire"
-            onClick={() => void patch([{ op: "remove", path: ["edges", index] }])}
-            className="nodrag nopan pointer-events-auto absolute flex size-6 items-center justify-center rounded-full border border-negative bg-sheet text-negative shadow-float hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={() => void removeWires([index])}
+            className="nodrag nopan pointer-events-auto absolute flex size-7 items-center justify-center rounded-full border border-negative bg-sheet text-negative shadow-float hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
           >
-            <X size={14} aria-hidden />
+            <X size={15} aria-hidden />
           </button>
         </EdgeLabelRenderer>
       ) : null}

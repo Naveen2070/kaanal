@@ -9,6 +9,7 @@ import type { Doc, DraftView, Op } from "../api/types";
 import { applyOps } from "./optimistic";
 
 export const HISTORY_LIMIT = 100;
+const KEY = "kaanal-history";
 
 interface Entry {
   inverse: Op[];
@@ -50,6 +51,36 @@ export const history = {
   },
   clear(): void {
     useHistory.setState({ past: [], future: [], note: null });
+  },
+  /**
+   * Keeps the stack in this tab's session storage next to the draft's boot id and revision, so a
+   * reload does not lose it. `restore` takes it back only when both still match: any other change to
+   * the draft makes the recorded patches stale.
+   */
+  save(boot: string, rev: number): void {
+    const { past, future } = useHistory.getState();
+    try {
+      sessionStorage.setItem(KEY, JSON.stringify({ boot, rev, past, future }));
+    } catch {
+      // no storage: the history lives until the page does
+    }
+  },
+  restore(boot: string, rev: number): void {
+    try {
+      const raw = sessionStorage.getItem(KEY);
+      if (raw === null) return;
+      const s = JSON.parse(raw) as {
+        boot?: unknown;
+        rev?: unknown;
+        past?: Entry[];
+        future?: Entry[];
+      };
+      if (s.boot !== boot || s.rev !== rev || !Array.isArray(s.past) || !Array.isArray(s.future))
+        return;
+      useHistory.setState({ past: s.past, future: s.future, note: null });
+    } catch {
+      // unreadable: start with none
+    }
   },
   /** An edit that cannot be undone: nothing is recorded, and the bar says so. */
   skip(): void {

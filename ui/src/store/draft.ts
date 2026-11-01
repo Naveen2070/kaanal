@@ -7,7 +7,7 @@ import { ApiError, api } from "../api/client";
 import type { DraftView, Layout, Op } from "../api/types";
 import { connectOps, lastEdgeIndex, uniqueName } from "../canvas/edges";
 import { notify } from "../toast/toasts";
-import { history, invertOps } from "./history";
+import { history, invertOps, useHistory } from "./history";
 import { applyOps } from "./optimistic";
 
 /** A patch may carry the layout it goes with (a new node and its spot are one edit). */
@@ -67,6 +67,9 @@ export const useDraft = create<DraftState>((set, get) => {
   let pending: Edit[] = [];
   let tail: Promise<unknown> = Promise.resolve();
 
+  // the stack changed (an edit, an undo): keep it with the draft it describes
+  useHistory.subscribe(() => confirmed && history.save(confirmed.boot, confirmed.rev));
+
   const show = () => confirmed && set({ view: replay(confirmed, pending) });
 
   /** Queues `edit`: shown now, sent after the edits before it. */
@@ -94,6 +97,7 @@ export const useDraft = create<DraftState>((set, get) => {
           return false;
         }
         confirmed = answer;
+        history.save(answer.boot, answer.rev);
         set({ error: null });
         show();
         return true;
@@ -119,6 +123,8 @@ export const useDraft = create<DraftState>((set, get) => {
         const restarted = confirmed !== null && confirmed.boot !== v.boot;
         // a draft that changed under us (reload, file edit, restart) is not the one the history describes
         if (confirmed !== null && (restarted || confirmed.rev !== v.rev)) history.clear();
+        // the first load of a page: take back the history this tab kept, if the draft is as it left it
+        else if (confirmed === null) history.restore(v.boot, v.rev);
         confirmed = v;
         pending = [];
         set((s) => ({ error: null, restarted: s.restarted || restarted }));

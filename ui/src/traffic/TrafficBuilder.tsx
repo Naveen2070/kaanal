@@ -21,6 +21,7 @@ import {
   type Method,
   type Row,
 } from "./model";
+import { ServicePicker } from "./ServicePicker";
 import { closeTrafficBuilder } from "./store";
 
 const field =
@@ -64,10 +65,6 @@ export function TrafficBuilder() {
 
   const set = (i: number, over: Partial<Row>) =>
     setRows((rs) => rs.map((r, k) => (k === i ? { ...r, ...over } : r)));
-  const toggle = (i: number, name: string) => {
-    const now = rows[i]?.targets ?? [];
-    set(i, { targets: now.includes(name) ? now.filter((t) => t !== name) : [...now, name] });
-  };
   const wrong = problems(rows, doc);
   const fresh = newConnections(doc, rows);
 
@@ -210,49 +207,14 @@ export function TrafficBuilder() {
                           Replace it with a choice of services
                         </button>
                       </p>
-                    ) : services.length === 0 ? (
-                      <p className="m-0 text-xs text-muted">
-                        There are no services yet. Add one on the canvas first.
-                      </p>
                     ) : (
-                      <div className="flex flex-col gap-1.5">
-                        <label className="flex items-center gap-2 font-medium">
-                          <input
-                            type="checkbox"
-                            className="size-5"
-                            checked={services.every((s) => r.targets?.includes(s))}
-                            onChange={(e) =>
-                              set(i, { targets: e.currentTarget.checked ? [...services] : [] })
-                            }
-                          />
-                          All services
-                        </label>
-                        <div className="flex flex-wrap gap-x-5 gap-y-1.5">
-                          {services.map((s) => {
-                            const linked = (doc?.edges ?? []).some(
-                              (e) => String(e.from) === gateway && String(e.to) === s,
-                            );
-                            return (
-                              <label key={s} className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  className="size-5"
-                                  checked={r.targets?.includes(s) ?? false}
-                                  onChange={() => toggle(i, s)}
-                                />
-                                {s}
-                                {linked ? null : (
-                                  <span className="text-xs text-muted">(not connected yet)</span>
-                                )}
-                              </label>
-                            );
-                          })}
-                        </div>
-                        <p className="m-0 text-xs text-muted">
-                          More than one is called at the same time; the request waits for the
-                          slowest.
-                        </p>
-                      </div>
+                      <ServicePicker
+                        services={services}
+                        gateway={gateway}
+                        edges={doc?.edges ?? []}
+                        value={r.targets}
+                        onChange={(targets) => set(i, { targets })}
+                      />
                     )}
                   </fieldset>
                 ) : null}

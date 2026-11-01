@@ -142,3 +142,10 @@ To-do for a crates.io release (none exists yet; also listed in `RELEASE.md`): `c
 - **Command palette** (Ctrl+K) also jumps to a component by name ("Go to shop").
 - **Notices** stay while the pointer or focus is on them; Undo and Redo clear the notice a bad edit raised and say "Undone" or "Redone". A blank draft says nothing about running until something is drawn.
 - **Charts:** p99 is drawn as a moving average (it steps between histogram buckets); each chart has a time axis.
+- **Traffic routes:** on a gateway's Controls tab each endpoint has the same service picker as the traffic builder: an **All services** box and one box per service. Several are called at the same time; a service the gateway has no wire to is wired when you pick it. A chain written by hand is left as it is.
+- **System summary:** beside the charts button, a pill reads the draft's parts by sort (traffic, compute, data, external), the connection count and the simulated time of the last run. It stays whether the charts are open or closed.
+- **Deleting a wire** also takes the calls that used it out of the endpoints' chains in the same edit (so the draft never says "gateway has no edge to service"), and the notice names the endpoints that stopped forwarding. Undo puts both back. Deleting a whole component is not cascaded yet.
+
+## Credits
+
+The canvas is drawn with [React Flow](https://reactflow.dev) (`@xyflow/react`, MIT). Its corner credit is hidden in the Studio; the credit is here instead.

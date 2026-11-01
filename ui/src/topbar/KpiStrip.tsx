@@ -32,12 +32,18 @@ function Cell({
   label,
   help,
   divider = false,
+  grow = false,
+  title,
   className = "",
   children,
 }: {
   label: string;
   /** A rule down its left edge: the start of a new group of figures. */
   divider?: boolean;
+  /** Takes the room left over between the figures. */
+  grow?: boolean;
+  /** The whole figure as a tooltip, for one that has been made smaller or cut to fit. */
+  title?: string;
   help?: HelpId;
   className?: string;
   children: React.ReactNode;
@@ -45,13 +51,15 @@ function Cell({
   return (
     <div
       data-help-host
-      className={`flex flex-col gap-0.5 ${divider ? "border-l border-border pl-4" : ""}`}
+      className={`flex flex-col gap-0.5 whitespace-nowrap ${grow ? "min-w-0 flex-1" : "shrink-0"} ${divider ? "border-l border-border pl-3" : ""}`}
     >
       <dt className="flex items-center gap-0.5 text-xs text-muted">
         {label}
         {help ? <HelpPopover id={help} label={label} /> : null}
       </dt>
-      <dd className={`m-0 tabular-nums ${className}`}>{children}</dd>
+      <dd title={title} className={`m-0 tabular-nums ${className}`}>
+        {children}
+      </dd>
     </div>
   );
 }
@@ -99,6 +107,14 @@ export function KpiStrip() {
     if (clamped !== rate) write(clamped);
   };
 
+  // the lead figure; a long name or a big rate makes it smaller (and the whole of it is the tooltip)
+  const lead =
+    breaks === null
+      ? s === undefined
+        ? "Run to find out"
+        : "nothing saturates"
+      : `${breaks.node} at ${twoSignificant(breaks.atReqS)} req/s`;
+
   const marker =
     breaks !== null && breaks.atReqS >= 10 && breaks.atReqS <= 15000
       ? (sliderFromRps(breaks.atReqS) / SLIDER_MAX) * 100
@@ -108,24 +124,25 @@ export function KpiStrip() {
     <section
       aria-label="Key figures"
       data-tour="load"
-      className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t border-border px-4 py-3"
+      className="flex w-full items-end px-3 py-2.5"
     >
-      <dl className={`m-0 flex flex-wrap items-end gap-x-4 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
+      <dl
+        className={`m-0 flex w-full flex-nowrap items-end justify-between gap-x-3 ${dimmed ? "opacity-60" : ""}`}
+      >
         <Cell
           label="Breaks first"
           help="saturation"
-          className={`min-w-60 text-2xl font-semibold ${
+          title={lead}
+          className={`min-w-40 max-w-72 truncate font-semibold ${
+            lead.length > 26 ? "text-sm" : lead.length > 22 ? "text-base" : "text-xl"
+          } ${
             breaks === null ? "text-muted" : breaks.saturatedNow ? "text-negative" : "text-text"
           }`}
         >
-          {breaks === null
-            ? s === undefined
-              ? "Run to find out"
-              : "nothing saturates"
-            : `${breaks.node} at ${twoSignificant(breaks.atReqS)} req/s`}
+          {lead}
         </Cell>
-        <Cell label="Offered load" divider className="text-xl font-semibold">
-          <span className="flex items-center gap-3">
+        <Cell label="Offered load" divider grow className="text-lg font-semibold">
+          <span className="flex w-full items-center gap-2">
             <input
               key={`${shown}`}
               type="number"
@@ -136,10 +153,10 @@ export function KpiStrip() {
               defaultValue={shown ?? ""}
               onBlur={(e) => commitTyped(e.currentTarget)}
               onKeyDown={(e) => e.key === "Enter" && commitTyped(e.currentTarget)}
-              className="h-8 w-28 rounded-md border border-control bg-sheet px-2 text-right text-xl"
+              className="h-8 w-20 rounded-md border border-control bg-sheet px-2 text-right text-lg"
             />
             <span className="text-base text-muted">/s</span>
-            <span className="relative flex items-center">
+            <span className="relative flex min-w-16 max-w-96 flex-1 items-center">
               <input
                 type="range"
                 aria-label="Offered load"
@@ -156,7 +173,7 @@ export function KpiStrip() {
                 onKeyUp={(e) => {
                   if (SLIDER_KEYS.has(e.key)) commitSlider(Number(e.currentTarget.value));
                 }}
-                className="w-48 accent-accent"
+                className="w-full accent-accent"
               />
               {marker !== null && breaks !== null ? (
                 <span
@@ -172,10 +189,10 @@ export function KpiStrip() {
               disabled={view?.doc == null}
               onClick={openTrafficBuilder}
               title="Build the traffic: endpoints, payload sizes and which services they reach"
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-2.5 text-sm font-medium text-text hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-2 text-xs font-medium text-text hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
             >
               <Workflow size={14} aria-hidden />
-              Build traffic
+              <span className="max-[1699px]:sr-only">Build traffic</span>
             </button>
           </span>
         </Cell>
@@ -183,21 +200,21 @@ export function KpiStrip() {
           label="System p99"
           divider
           help="p99"
-          className={`text-base ${hasRequests ? "" : "text-muted"}`}
+          className={`text-sm ${hasRequests ? "" : "text-muted"}`}
         >
           {hasRequests && s ? fmtMs(s.latency.p99_ms, 1) : "–"}
         </Cell>
         <Cell
           label="Goodput"
           help="goodput"
-          className={`text-base ${goodput === undefined ? "text-muted" : ""}`}
+          className={`text-sm ${goodput === undefined ? "text-muted" : ""}`}
         >
           {goodput === undefined ? "–" : `${nf(goodput)}/s`}
         </Cell>
-        <Cell label="Errors" className={`text-base ${s ? "" : "text-muted"}`}>
+        <Cell label="Errors" className={`text-sm ${s ? "" : "text-muted"}`}>
           {s ? nf(s.failed) : "–"}
         </Cell>
-        <Cell label="Dropped" className={`text-base ${dropped === undefined ? "text-muted" : ""}`}>
+        <Cell label="Dropped" className={`text-sm ${dropped === undefined ? "text-muted" : ""}`}>
           {dropped === undefined ? "–" : nf(dropped)}
         </Cell>
       </dl>

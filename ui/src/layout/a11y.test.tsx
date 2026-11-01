@@ -47,7 +47,8 @@ afterEach(() => {
 
 const shell = () => (
   <Shell
-    top={<TopBar onRun={() => {}} />}
+    topLeft={<TopBar onRun={() => {}} />}
+    top={<p>figures</p>}
     palette={<Palette onAdd={() => {}} />}
     canvas={<p>canvas</p>}
     rail={<aside aria-label="Details">rail</aside>}

@@ -13,6 +13,7 @@ function width(px: number) {
 }
 
 const slots = {
+  topLeft: <p>title</p>,
   top: <header>top</header>,
   palette: <aside>palette</aside>,
   canvas: <div>canvas</div>,

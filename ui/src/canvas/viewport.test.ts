@@ -6,17 +6,17 @@ const canvas = { left: 0, top: 0, right: 1440, bottom: 900 };
 test("the_palette_takes_less_room_in_the_middle_layout", () => {
   expect(padsFor("full").left).toBeGreaterThan(padsFor("rail").left);
   expect(fitPadding("full")).toEqual({
-    top: "176px",
+    top: "168px",
     right: "392px",
     bottom: "96px",
-    left: "272px",
+    left: "328px",
   });
 });
 
 test("the_visible_centre_is_between_the_panels_not_the_middle_of_the_window", () => {
   const c = visibleCentre(canvas, padsFor("full"));
-  expect(c.x).toBe((272 + 1440 - 392) / 2);
-  expect(c.y).toBe((176 + 900 - 96) / 2);
+  expect(c.x).toBe((328 + 1440 - 392) / 2);
+  expect(c.y).toBe((168 + 900 - 96) / 2);
 });
 
 test("a_box_behind_a_panel_is_not_visible", () => {

@@ -92,3 +92,14 @@ test("the_dock_has_no_axe_violations", async () => {
   show("api #1");
   await expectNoViolations(document.body);
 });
+
+test("closing_the_dock_gives_focus_back_to_the_card", async () => {
+  const card = document.createElement("button");
+  card.dataset.nodeName = "api #1";
+  document.body.append(card);
+  show("api #1");
+  fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+  expect(sel.set).toHaveBeenCalledWith(null);
+  await vi.waitFor(() => expect(document.activeElement).toBe(card));
+  card.remove();
+});
