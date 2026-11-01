@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NuqsAdapter } from "nuqs/adapters/react";
-import { afterEach, expect, test, vi } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
+import { useRail } from "../layout/rail";
 import { Rail } from "./Rail";
 
 function show(tab: string, sentence = "", width = 1440) {
@@ -13,6 +14,7 @@ function show(tab: string, sentence = "", width = 1440) {
   );
 }
 
+beforeEach(() => useRail.setState({ open: true }));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -29,23 +31,26 @@ test("tabs_are_radix_with_aria_controls_and_arrow_keys", async () => {
   await waitFor(() => expect(document.activeElement).toBe(log));
 });
 
-test("rail_is_300_on_controls_and_440_on_log_and_results", () => {
-  const { unmount } = show("controls");
-  expect(screen.getByRole("complementary").style.width).toBe("300px");
-  unmount();
-  show("log");
-  expect(screen.getByRole("complementary").style.width).toBe("440px");
-  cleanup();
-  show("results");
-  expect(screen.getByRole("complementary").style.width).toBe("440px");
+test("the_rail_keeps_one_width_on_every_tab_and_stays_in_the_row", () => {
+  for (const tab of ["controls", "log", "results"]) {
+    show(tab);
+    expect(screen.getByRole("complementary").parentElement?.style.width).toBe("360px");
+    expect(screen.getByRole("complementary").className).not.toMatch(/absolute/);
+    cleanup();
+  }
 });
 
-test("rail_overlays_the_canvas_below_1280", () => {
-  show("log", "", 1279);
-  expect(screen.getByRole("complementary").className).toMatch(/\babsolute\b/);
-  cleanup();
-  show("log", "", 1280);
-  expect(screen.getByRole("complementary").className).not.toMatch(/\babsolute\b/);
+test("the_rail_folds_to_a_handle_with_the_button_or_the_bracket_key_and_remembers_it", () => {
+  show("controls");
+  fireEvent.click(screen.getByRole("button", { name: "Fold the details panel" }));
+  expect(screen.queryByRole("complementary")).toBeNull();
+  expect(useRail.getState().open).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Open the details panel" }));
+  expect(screen.getByRole("complementary")).toBeTruthy();
+  fireEvent.keyDown(window, { key: "]" });
+  expect(screen.queryByRole("complementary")).toBeNull();
+  fireEvent.keyDown(window, { key: "]" });
+  expect(screen.getByRole("complementary")).toBeTruthy();
 });
 
 test("sentence_is_aria_live_polite_and_present_before_it_has_words", () => {
@@ -63,13 +68,6 @@ test("sentence_is_aria_live_polite_and_present_before_it_has_words", () => {
   );
   expect(screen.getByTestId("rail-sentence")).toBe(live);
   expect(live.textContent).toBe("app: 78% busy");
-});
-
-test("rail_resize_is_instant_under_reduced_motion", () => {
-  show("controls");
-  const cls = screen.getByRole("complementary").className;
-  expect(cls).toMatch(/transition-\[width\]/);
-  expect(cls).toMatch(/motion-reduce:transition-none/);
 });
 
 test("controls_tab_has_no_slots_per_instance_jargon_label", async () => {

@@ -13,6 +13,9 @@ export interface CommandContext {
   tour: () => void;
   fit: () => void;
   traffic: () => void;
+  /** The components on the canvas, to jump to by name. */
+  nodes?: string[];
+  select?: (name: string) => void;
 }
 
 export function commands(ctx: CommandContext): Command[] {
@@ -29,6 +32,11 @@ export function commands(ctx: CommandContext): Command[] {
     { id: "tour", label: "Replay the tour", run: ctx.tour },
     { id: "fit", label: "Fit the view", run: ctx.fit },
     { id: "traffic", label: "Build traffic", run: ctx.traffic },
+    ...(ctx.nodes ?? []).map((n) => ({
+      id: `go-${n}`,
+      label: `Go to ${n}`,
+      run: () => ctx.select?.(n),
+    })),
   ];
 }
 

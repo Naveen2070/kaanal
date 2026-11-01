@@ -21,6 +21,7 @@ import { useDraft } from "../store/draft";
 import { useSelected } from "../store/view";
 import { usePrefersReducedMotion } from "../first-run/motion";
 import { useLayout } from "../layout/useLayout";
+import { useRail } from "../layout/rail";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { canvasBridge } from "./bridge";
@@ -61,8 +62,9 @@ function Flow() {
   const { screenToFlowPosition, fitView, getViewport, setCenter, zoomIn, zoomOut } = useReactFlow();
   const still = usePrefersReducedMotion();
   const mode = useLayout();
-  const pads = padsFor(mode);
-  const fitOptions = { padding: fitPadding(mode), maxZoom: MAX_FIT_ZOOM };
+  const railOpen = useRail((s) => s.open);
+  const pads = padsFor(mode, railOpen);
+  const fitOptions = { padding: fitPadding(mode, railOpen), maxZoom: MAX_FIT_ZOOM };
   /** Names given a first layout already, so a refused save cannot loop. */
   const placed = useRef(new Set<string>());
 
@@ -113,6 +115,18 @@ function Flow() {
     void setLayout(Object.fromEntries(missing.map((n) => [n, all[n] ?? [0, 0]])));
   }, [doc, layout, setLayout]);
 
+  // folding or opening the rail changes how much canvas is free: refit to it (not on first paint)
+  const firstRail = useRef(true);
+  useEffect(() => {
+    if (firstRail.current) {
+      firstRail.current = false;
+      return;
+    }
+    void fitView({ ...fitOptions, duration: still ? 0 : 200 });
+    // only the rail's state should trigger this
+    // eslint-disable-next-line react/exhaustive-deps
+  }, [railOpen]);
+
   // what the page outside the canvas may ask of it: the visible middle (a clicked palette item lands
   // there, not at the far right) and fit-to-view (the command palette)
   useEffect(() => {
@@ -136,7 +150,7 @@ function Flow() {
     };
     // `pads` and `fitOptions` follow the layout mode, which is what `mode` carries
     // eslint-disable-next-line react/exhaustive-deps
-  }, [screenToFlowPosition, fitView, zoomIn, zoomOut, still, mode]);
+  }, [screenToFlowPosition, fitView, zoomIn, zoomOut, still, mode, railOpen]);
 
   // arrow keys move the selected node (8 px, Shift 40 px); the node moves on screen at once and the
   // position is saved once the keys pause, not per press. Captured so React Flow's own key move,

@@ -2,7 +2,7 @@
 // other part floats over it as a sheet: the top bar with the key figures at the top centre, the theme
 // and help at the top right, the palette down the left, the details rail down the right, and in the
 // middle the notices at the top, the dock and the charts at the bottom, with the zoom pill beside
-// the rail. The empty middle lets pointer events through to the canvas. Under 900 px there is no
+// the rail. The empty middle lets pointer events through to the canvas. Under 768 px there is no
 // canvas to edit: the top bar and a read-only list.
 
 import type { CSSProperties, ReactNode } from "react";
@@ -35,7 +35,7 @@ export function Shell({
   zoom?: ReactNode;
   /** The notices, at the top of the free space. */
   toasts?: ReactNode;
-  /** Shown instead of the palette, canvas and rail below 900 px. */
+  /** Shown instead of the palette, canvas and rail below 768 px. */
   readonly: ReactNode;
 }) {
   const mode = useLayout();
@@ -69,11 +69,11 @@ export function Shell({
           tabIndex={-1}
           className="relative flex shrink-0 justify-center outline-none"
         >
-          <div className="pointer-events-auto w-fit max-w-full rounded-2xl border border-border bg-sheet shadow-float">
+          <div className="pointer-events-auto w-fit max-w-full min-w-0 rounded-2xl border border-border bg-sheet shadow-float">
             {top}
           </div>
           {topRight ? (
-            <div className="pointer-events-auto absolute top-0 right-0 rounded-2xl border border-border bg-sheet shadow-float">
+            <div className="pointer-events-auto self-start justify-self-end rounded-2xl border border-border bg-sheet shadow-float">
               {topRight}
             </div>
           ) : null}

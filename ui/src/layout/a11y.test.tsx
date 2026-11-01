@@ -66,7 +66,7 @@ for (const width of [1440, 1000]) {
 test("the_read_only_list_has_no_axe_violations", async () => {
   vi.stubGlobal("innerWidth", 700);
   const { container } = render(shell());
-  expect(container.textContent).toContain("read-only");
+  expect(container.textContent).toContain("edit");
   await expectNoViolations(container, { page: true });
 });
 

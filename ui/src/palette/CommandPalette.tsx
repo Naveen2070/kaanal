@@ -73,7 +73,8 @@ export function CommandPalette({ all, onClose }: { all: Command[]; onClose: () =
       {/* a native listbox: the input keeps focus and points at the active option */}
       <select
         id={listId}
-        size={Math.max(shown.length, 2)}
+        size={Math.max(shown.length, 1)}
+        hidden={shown.length === 0}
         aria-label="Commands"
         value={shown[at]?.id ?? ""}
         onChange={() => {}}

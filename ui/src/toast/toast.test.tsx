@@ -73,6 +73,7 @@ test("information_and_success_close_themselves_errors_and_warnings_do_not", () =
 
 test("a_run_that_cannot_give_numbers_is_a_notice_and_its_recovery_closes_it", () => {
   const off = startNotifications();
+  useDraft.setState({ view: { doc: { nodes: { a: {} } } } } as never);
   useRun.setState({ status: "blocked", lastError: "The draft has no traffic profile to run." });
   expect(texts()).toEqual(["The draft has no traffic profile to run."]);
   useRun.setState({ status: "done", lastError: null });
@@ -132,4 +133,16 @@ test("a_toast_under_the_pointer_does_not_close_itself", () => {
   fireEvent.mouseLeave(screen.getByRole("status"));
   act(() => void vi.advanceTimersByTime(AUTO_DISMISS_MS + 10));
   expect(useToasts.getState().toasts).toHaveLength(0);
+});
+
+test("a_run_error_on_a_blank_draft_is_not_shown_until_something_is_drawn", () => {
+  const off = startNotifications();
+  const doc = (nodes: Record<string, unknown>) =>
+    ({ view: { doc: { nodes } } }) as unknown as Parameters<typeof useDraft.setState>[0];
+  useDraft.setState(doc({}));
+  useRun.setState({ lastError: "a topology needs a gateway" });
+  expect(useToasts.getState().toasts).toHaveLength(0);
+  useDraft.setState(doc({ gw: { type: "gateway" } }));
+  expect(useToasts.getState().toasts.map((t) => t.text)).toEqual(["a topology needs a gateway"]);
+  off();
 });

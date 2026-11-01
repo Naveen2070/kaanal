@@ -7,13 +7,19 @@ import { useHistory } from "../store/history";
 import { useRun } from "../store/run";
 import { notify } from "./toasts";
 
+/** A blank draft cannot run, and saying so before anyone has drawn anything is noise, not news. */
+const blank = () => Object.keys(useDraft.getState().view?.doc?.nodes ?? {}).length === 0;
+
 export function startNotifications(): () => void {
   const offRun = useRun.subscribe((s, prev) => {
     if (s.lastError === prev.lastError) return;
-    if (s.lastError) notify.error(s.lastError, "run");
+    if (s.lastError && !blank()) notify.error(s.lastError, "run");
     else notify.clear("run");
   });
   const offDraft = useDraft.subscribe((s, prev) => {
+    // the first component arrives while a run error is still standing: now it is news
+    const err = useRun.getState().lastError;
+    if (err && s.view?.doc?.nodes !== prev.view?.doc?.nodes && !blank()) notify.error(err, "run");
     if (s.error === prev.error) return;
     if (s.error) notify.error(s.error, "draft");
     else notify.clear("draft");

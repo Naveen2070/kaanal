@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useRun } from "../store/run";
-import { linePoints, niceTicks } from "./line";
+import { linePoints, niceTicks, smooth } from "./line";
 
 const KEY = "kaanal.studio.charts.open";
 const open0 = () => {
@@ -23,20 +23,31 @@ function Chart({
   unit,
   values,
   stroke,
+  windowS,
+  trend = false,
 }: {
   title: string;
   unit: string;
   values: number[];
   stroke: string;
+  /** Seconds one point stands for, for the time axis. */
+  windowS?: number;
+  /** Draw a moving average (p99 steps between histogram buckets). */
+  trend?: boolean;
 }) {
-  const max = Math.max(0, ...values.filter(Number.isFinite));
+  const drawn = trend ? smooth(values) : values;
+  const max = Math.max(0, ...drawn.filter(Number.isFinite));
   const ticks = niceTicks(max, 3);
   const top = ticks[ticks.length - 1] as number;
   const last = values.length > 0 ? (values[values.length - 1] as number) : 0;
-  const alt = `${title}: peak ${nf(max)} ${unit}, last window ${nf(last)} ${unit}, over ${values.length} windows`;
+  const rawMax = Math.max(0, ...values.filter(Number.isFinite));
+  const alt = `${title}: peak ${nf(rawMax)} ${unit}, last window ${nf(last)} ${unit}, over ${values.length} windows`;
   return (
     <figure className="min-w-0 flex-1">
-      <figcaption className="mb-1 text-xs font-medium">{title}</figcaption>
+      <figcaption className="mb-1 text-xs font-medium">
+        {title}
+        {trend ? <span className="font-normal text-muted"> (ms, smoothed)</span> : null}
+      </figcaption>
       <div className="flex gap-1">
         <div aria-hidden className="relative h-[120px] w-9 text-[11px] tabular-nums text-muted">
           {ticks.map((t) => (
@@ -68,7 +79,7 @@ function Chart({
             />
           ))}
           <polyline
-            points={linePoints(values, top, 300, 120)}
+            points={linePoints(drawn, top, 300, 120)}
             fill="none"
             className={stroke}
             strokeWidth="2"
@@ -77,6 +88,12 @@ function Chart({
           />
         </svg>
       </div>
+      {windowS ? (
+        <div aria-hidden className="ml-10 mt-1 flex justify-between text-[11px] text-muted">
+          <span>0 s</span>
+          <span>{nf(Number((windowS * values.length).toPrecision(3)))} s</span>
+        </div>
+      ) : null}
     </figure>
   );
 }
@@ -109,18 +126,27 @@ export function ChartsBand() {
       {open ? (
         series ? (
           <div className="flex gap-4 px-3 pb-3">
-            <Chart title="p99 latency" unit="ms" values={series.p99_ms} stroke="stroke-accent" />
+            <Chart
+              title="p99 latency"
+              unit="ms"
+              values={series.p99_ms}
+              stroke="stroke-accent"
+              windowS={series.window_s}
+              trend
+            />
             <Chart
               title={`Goodput, done per ${win} window`}
               unit="requests"
               values={series.done}
               stroke="stroke-positive"
+              windowS={series.window_s}
             />
             <Chart
               title={`Failures, failed per ${win} window`}
               unit="requests"
               values={series.failed}
               stroke="stroke-negative"
+              windowS={series.window_s}
             />
           </div>
         ) : (

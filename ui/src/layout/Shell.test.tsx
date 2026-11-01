@@ -1,4 +1,4 @@
-// The shell (spec 3, 6): breakpoints, the slots, and the read-only list below 900 px.
+// The shell (spec 3, 6): breakpoints, the slots, and the read-only list below 768 px.
 
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
@@ -29,8 +29,8 @@ afterEach(() => {
 test("layout_breakpoints", () => {
   expect(layoutFor(1280)).toBe("full");
   expect(layoutFor(1279)).toBe("rail");
-  expect(layoutFor(900)).toBe("rail");
-  expect(layoutFor(899)).toBe("readonly");
+  expect(layoutFor(768)).toBe("rail");
+  expect(layoutFor(767)).toBe("readonly");
 });
 
 test("a_wide_window_shows_every_slot_and_not_the_read_only_list", () => {
@@ -39,8 +39,8 @@ test("a_wide_window_shows_every_slot_and_not_the_read_only_list", () => {
   expect(screen.queryByText("readonly list")).toBeNull();
 });
 
-test("below_900_the_canvas_palette_and_rail_give_way_to_the_list", () => {
-  width(899);
+test("below_768_the_canvas_palette_and_rail_give_way_to_the_list", () => {
+  width(767);
   render(<Shell {...slots} />);
   expect(screen.getByText("top")).toBeTruthy();
   expect(screen.getByText("readonly list")).toBeTruthy();
@@ -82,7 +82,7 @@ const view: DraftView = {
   saved: true,
 };
 
-test("readonly_below_900_lists_nodes_and_says_why", () => {
+test("readonly_below_768_lists_nodes_and_says_why", () => {
   useDraft.setState({ view });
   render(<ReadonlyNodes />);
   const items = screen.getAllByRole("listitem").map((li) => li.textContent);
@@ -91,8 +91,8 @@ test("readonly_below_900_lists_nodes_and_says_why", () => {
     expect.stringContaining("db #1/ü"),
   ]);
   expect(items[0]).toMatch(/gateway/i);
-  expect(screen.getByRole("status").textContent).toMatch(/900/);
-  expect(screen.getByRole("status").textContent).toMatch(/read-only|editing/i);
+  expect(screen.getByRole("status").textContent).toMatch(/768/);
+  expect(screen.getByRole("status").textContent).toMatch(/edit/i);
 });
 
 test("an_empty_draft_says_there_are_no_nodes_yet", () => {

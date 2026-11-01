@@ -109,6 +109,9 @@ function spotFor(target: string, side: Side, resizes: number) {
   return placeNote(r, side, { width: window.innerWidth, height: window.innerHeight });
 }
 
+/** How long a step's action must hold before the tour moves on. */
+const SETTLE_MS = 400;
+
 export function Tour() {
   const endTour = useFirstRun((s) => s.endTour);
   const progress: Progress = {
@@ -128,13 +131,17 @@ export function Tour() {
 
   // the real action moves the tour on; after the last step it ends
   const finished = step.done(progress, start.current);
+  // after a beat, so an edit the draft takes straight back out (a refused wire) does not count
   useEffect(() => {
     if (!finished) return;
-    if (i === STEPS.length - 1) endTour();
-    else {
-      start.current = progress;
-      setI(i + 1);
-    }
+    const t = setTimeout(() => {
+      if (i === STEPS.length - 1) endTour();
+      else {
+        start.current = progress;
+        setI(i + 1);
+      }
+    }, SETTLE_MS);
+    return () => clearTimeout(t);
     // `progress` is rebuilt every render; `finished` is what it decided
     // eslint-disable-next-line react/exhaustive-deps
   }, [finished]);
@@ -153,8 +160,10 @@ export function Tour() {
     };
   }, [endTour]);
 
-  // focus moves into the note at each step; when the tour ends it goes back to the Run button
-  useEffect(() => skip.current?.focus(), [i]);
+  // focus moves into the note when the tour starts, and then stays with the person's own action (a
+  // step that took focus again would pull it away from what they are doing); when the tour ends it
+  // goes back to the Run button
+  useEffect(() => skip.current?.focus(), []);
   useEffect(() => () => document.querySelector<HTMLElement>('[data-tour="run"]')?.focus(), []);
 
   return (

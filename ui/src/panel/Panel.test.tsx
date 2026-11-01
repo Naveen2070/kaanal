@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NuqsAdapter } from "nuqs/adapters/react";
+import { useRail } from "../layout/rail";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView } from "../api/types";
 import { useDraft } from "../store/draft";
@@ -35,7 +36,10 @@ async function show(url: string) {
   );
 }
 
-beforeEach(() => useDraft.setState({ view: null, error: null, restarted: false }));
+beforeEach(() => {
+  useRail.setState({ open: true });
+  useDraft.setState({ view: null, error: null, restarted: false });
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

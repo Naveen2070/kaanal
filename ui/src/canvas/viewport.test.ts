@@ -7,7 +7,7 @@ test("the_palette_takes_less_room_in_the_middle_layout", () => {
   expect(padsFor("full").left).toBeGreaterThan(padsFor("rail").left);
   expect(fitPadding("full")).toEqual({
     top: "176px",
-    right: "340px",
+    right: "392px",
     bottom: "96px",
     left: "272px",
   });
@@ -15,7 +15,7 @@ test("the_palette_takes_less_room_in_the_middle_layout", () => {
 
 test("the_visible_centre_is_between_the_panels_not_the_middle_of_the_window", () => {
   const c = visibleCentre(canvas, padsFor("full"));
-  expect(c.x).toBe((272 + 1440 - 340) / 2);
+  expect(c.x).toBe((272 + 1440 - 392) / 2);
   expect(c.y).toBe((176 + 900 - 96) / 2);
 });
 
@@ -33,4 +33,8 @@ test("a_new_card_goes_to_free_space_and_an_empty_spot_stays_put", async () => {
   const p = freeSpot([100, 100], [[100, 100]]);
   expect(p).not.toEqual([100, 100]);
   expect(Math.abs(p[0] - 100) >= 260 || Math.abs(p[1] - 100) >= 210).toBe(true);
+});
+
+test("a_folded_rail_gives_its_room_back", () => {
+  expect(padsFor("full", false).right).toBeLessThan(padsFor("full", true).right);
 });

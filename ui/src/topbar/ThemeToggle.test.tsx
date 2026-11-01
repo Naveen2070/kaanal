@@ -9,24 +9,25 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test("the_button_says_the_current_theme_and_what_a_click_does", () => {
+const pressed = (name: string) =>
+  screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true";
+
+test("three_buttons_show_the_current_choice_as_pressed", () => {
   render(<ThemeToggle />);
-  const b = screen.getByRole("button");
-  expect(b.getAttribute("aria-label")).toBe("Theme: system. Switch to light");
-  expect(b.textContent).toBe(""); // an icon alone, named by its label
+  expect(screen.getAllByRole("button")).toHaveLength(3);
+  expect(pressed("Follow the system theme")).toBe(true);
+  expect(pressed("Dark theme")).toBe(false);
 });
 
-test("clicking_cycles_system_light_dark_system_and_applies_each", () => {
+test("a_click_applies_and_remembers_the_choice", () => {
   render(<ThemeToggle />);
-  const b = () => screen.getByRole("button");
-  fireEvent.click(b());
+  fireEvent.click(screen.getByRole("button", { name: "Light theme" }));
   expect(getTheme()).toBe("light");
-  expect(b().getAttribute("aria-label")).toBe("Theme: light. Switch to dark");
-  fireEvent.click(b());
-  expect(getTheme()).toBe("dark");
+  fireEvent.click(screen.getByRole("button", { name: "Dark theme" }));
   expect(document.documentElement.dataset.theme).toBe("dark");
   expect(localStorage.getItem("kaanal-theme")).toBe("dark");
-  fireEvent.click(b());
+  expect(pressed("Dark theme")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Follow the system theme" }));
   expect(getTheme()).toBe("system");
   expect(localStorage.getItem("kaanal-theme")).toBeNull();
 });
@@ -34,12 +35,18 @@ test("clicking_cycles_system_light_dark_system_and_applies_each", () => {
 test("it_starts_from_the_theme_already_applied", () => {
   document.documentElement.dataset.theme = "dark";
   render(<ThemeToggle />);
-  expect(screen.getByRole("button").getAttribute("aria-label")).toBe(
-    "Theme: dark. Switch to system",
-  );
+  expect(pressed("Dark theme")).toBe(true);
 });
 
-test("the_target_is_at_least_24_px", () => {
+test("the_command_palette_presses_the_next_theme_in_turn", () => {
   render(<ThemeToggle />);
-  expect(screen.getByRole("button").className).toMatch(/\bh-8\b/);
+  const next = document.querySelector<HTMLElement>('[data-command="theme"]');
+  expect(next?.getAttribute("aria-label")).toBe("Light theme");
+  next?.click();
+  expect(getTheme()).toBe("light");
+});
+
+test("each_target_is_at_least_24_px", () => {
+  render(<ThemeToggle />);
+  for (const b of screen.getAllByRole("button")) expect(b.className).toMatch(/\bh-7\b/);
 });

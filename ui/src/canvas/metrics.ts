@@ -188,7 +188,8 @@ export function rankedByPeak(
     .map(({ name, peak, saturatesAtReqS }) => ({ name, peak, saturatesAtReqS }));
 }
 
-const rate = (n: number) => (n < 10 ? twoSignificant(n) : nf(n));
+/** A rate in three significant figures, so "229,327" reads "229,000": more digits than that are noise. */
+const rate = (n: number) => (n < 10 ? twoSignificant(n) : nf(Number(n.toPrecision(3))));
 
 /**
  * The details panel's sentence (spec 5.1), in plain words:

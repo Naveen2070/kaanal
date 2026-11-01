@@ -43,7 +43,10 @@ function Cell({
   children: React.ReactNode;
 }) {
   return (
-    <div className={`flex flex-col gap-0.5 ${divider ? "border-l border-border pl-6" : ""}`}>
+    <div
+      data-help-host
+      className={`flex flex-col gap-0.5 ${divider ? "border-l border-border pl-4" : ""}`}
+    >
       <dt className="flex items-center gap-0.5 text-xs text-muted">
         {label}
         {help ? <HelpPopover id={help} label={label} /> : null}
@@ -105,9 +108,9 @@ export function KpiStrip() {
     <section
       aria-label="Key figures"
       data-tour="load"
-      className="flex flex-wrap items-end gap-x-6 gap-y-2 border-t border-border px-4 py-3"
+      className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t border-border px-4 py-3"
     >
-      <dl className={`m-0 flex flex-wrap items-end gap-x-6 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
+      <dl className={`m-0 flex flex-wrap items-end gap-x-4 gap-y-2 ${dimmed ? "opacity-60" : ""}`}>
         <Cell
           label="Breaks first"
           help="saturation"

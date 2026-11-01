@@ -53,8 +53,10 @@ export function HelpPopover({ id, label = HELP_LABEL[id] }: { id: HelpId; label?
           if (open) return close(false);
           const r = button.current?.getBoundingClientRect();
           if (!r) return;
+          // below the whole figure it explains when it sits in one (data-help-host), so the value stays readable
+          const host = button.current?.closest("[data-help-host]")?.getBoundingClientRect();
           setAt({
-            top: r.bottom + 6,
+            top: (host?.bottom ?? r.bottom) + 6,
             left: Math.max(8, Math.min(r.left, window.innerWidth - WIDTH - 8)),
           });
         }}

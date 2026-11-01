@@ -68,3 +68,17 @@ test("ctrl_k_opens_a_modal_dialog_and_escape_closes_with_focus_back", async () =
   expect(document.activeElement).toBe(opener);
   opener.remove();
 });
+
+test("a_component_can_be_found_by_name_and_selected", () => {
+  const c = { ...ctx(), nodes: ["shop", "db"], select: vi.fn() };
+  render(<CommandPalette all={commands(c)} onClose={() => {}} />);
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "shop" } });
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+  expect(c.select).toHaveBeenCalledWith("shop");
+});
+
+test("an_article_is_right_before_a_vowel", () => {
+  const labels = commands(ctx()).map((c) => c.label);
+  expect(labels).toContain("Add an external api");
+  expect(labels).toContain("Add an auth");
+});

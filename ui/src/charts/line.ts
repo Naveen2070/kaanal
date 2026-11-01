@@ -19,3 +19,16 @@ export function linePoints(values: number[], top: number, w: number, h: number):
   if (v.length === 1) return `0,${y(v[0] as number)} ${w},${y(v[0] as number)}`;
   return v.map((x, i) => `${(i / (v.length - 1)) * w},${y(x)}`).join(" ");
 }
+
+/**
+ * A centred moving average over `span` points (odd). A latency read from histogram buckets steps
+ * between a few values; the average shows the trend instead of a square wave. Edges use what is there.
+ */
+export function smooth(values: number[], span = 5): number[] {
+  const half = Math.floor(span / 2);
+  return values.map((v, i) => {
+    if (!Number.isFinite(v)) return v;
+    const near = values.slice(Math.max(0, i - half), i + half + 1).filter(Number.isFinite);
+    return near.reduce((a, b) => a + b, 0) / near.length;
+  });
+}

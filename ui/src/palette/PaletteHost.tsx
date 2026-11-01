@@ -5,6 +5,8 @@ import { lazy, useEffect, useState } from "react";
 import { canvasBridge } from "../canvas/bridge";
 import { useAddNode } from "../canvas/useAddNode";
 import { useFirstRun } from "../first-run/store";
+import { useDraft } from "../store/draft";
+import { useSelected } from "../store/view";
 import { LazyBoundary } from "../states/LazyBoundary";
 import { runNow } from "../store/loopRuntime";
 import { openTrafficBuilder } from "../traffic/store";
@@ -17,6 +19,8 @@ const CommandPalette = lazy(() =>
 export function PaletteHost() {
   const [open, setOpen] = useState(false);
   const addNode = useAddNode();
+  const nodes = Object.keys(useDraft((s) => s.view?.doc?.nodes) ?? {});
+  const [, setSelected] = useSelected();
   const replayTour = useFirstRun((s) => s.replayTour);
 
   useEffect(() => {
@@ -38,6 +42,8 @@ export function PaletteHost() {
     tour: replayTour,
     fit: () => canvasBridge.fit(),
     traffic: openTrafficBuilder,
+    nodes,
+    select: (name) => void setSelected(name),
   });
   return (
     <LazyBoundary fallback={null}>

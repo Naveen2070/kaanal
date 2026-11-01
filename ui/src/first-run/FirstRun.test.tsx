@@ -259,6 +259,8 @@ const withDoc = (nodes: object, edges: object[] = [], saved = true) =>
   useDraft.setState({ view: { ...view("p"), doc: { nodes, edges }, saved } as DraftView });
 
 test("four_steps_add_connect_break_save_each_waits_for_its_real_action", () => {
+  vi.useFakeTimers();
+  const settle = () => act(() => void vi.advanceTimersByTime(500));
   withDoc({}, [], false);
   useFirstRun.setState({ phase: "tour", projectKey: "p" });
   render(<Tour />);
@@ -267,19 +269,41 @@ test("four_steps_add_connect_break_save_each_waits_for_its_real_action", () => {
   // nothing happens by itself, and an unrelated edit does not count
   expect(step()).toBe("Tour, step 1 of 4");
   act(() => withDoc({ a: { type: "service" } }, [], false));
+  settle();
   expect(step()).toBe("Tour, step 2 of 4");
   act(() =>
     withDoc({ a: { type: "service" }, b: { type: "service" } }, [{ from: "a", to: "b" }], false),
   );
+  settle();
   expect(step()).toBe("Tour, step 3 of 4");
   act(() =>
     useRun.setState({
       latest: { summary: { nodes: [{ saturated: true }] } } as unknown as RunRecord,
     }),
   );
+  settle();
   expect(step()).toBe("Tour, step 4 of 4");
   act(() => withDoc({ a: { type: "service" } }, [{ from: "a", to: "b" }], true));
+  settle();
   expect(useFirstRun.getState().phase).toBe("off");
+  vi.useRealTimers();
+});
+
+test("a_wire_the_draft_takes_straight_back_does_not_move_the_tour_on", () => {
+  vi.useFakeTimers();
+  withDoc({ a: { type: "service" }, b: { type: "service" } }, [], false);
+  useFirstRun.setState({ phase: "tour", projectKey: "p" });
+  render(<Tour />);
+  act(() => withDoc({ a: { type: "service" } }, [], false));
+  act(() => void vi.advanceTimersByTime(500)); // step 2 now
+  const here = tour()?.getAttribute("aria-label");
+  act(() =>
+    withDoc({ a: { type: "service" }, b: { type: "service" } }, [{ from: "a", to: "b" }], false),
+  );
+  act(() => withDoc({ a: { type: "service" }, b: { type: "service" } }, [], false)); // refused, taken out
+  act(() => void vi.advanceTimersByTime(500));
+  expect(tour()?.getAttribute("aria-label")).toBe(here);
+  vi.useRealTimers();
 });
 
 test("a_step_already_true_when_it_starts_does_not_finish_itself", () => {

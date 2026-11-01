@@ -20,15 +20,15 @@ export interface Box {
 
 /**
  * Space the floating panels take: the top bar and key figures above, the palette on the left (an
- * icon rail in the middle layout), the details rail on the right, and room for the dock below.
+ * icon rail in the middle layout), the details rail on the right (a slim handle when folded), and room for the dock below.
  */
-export function padsFor(mode: LayoutMode): Pads {
-  return { top: 176, right: 340, bottom: 96, left: mode === "full" ? 272 : 84 };
+export function padsFor(mode: LayoutMode, railOpen = true): Pads {
+  return { top: 176, right: railOpen ? 392 : 72, bottom: 96, left: mode === "full" ? 272 : 84 };
 }
 
 /** The padding option of React Flow's `fitView`, in pixels. */
-export function fitPadding(mode: LayoutMode): Record<keyof Pads, `${number}px`> {
-  const p = padsFor(mode);
+export function fitPadding(mode: LayoutMode, railOpen = true): Record<keyof Pads, `${number}px`> {
+  const p = padsFor(mode, railOpen);
   return {
     top: `${p.top}px`,
     right: `${p.right}px`,
