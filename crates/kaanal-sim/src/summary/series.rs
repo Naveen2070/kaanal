@@ -151,35 +151,49 @@ pub struct SystemSeries {
     pub done: Vec<u32>,
     /// Requests that finished failed, by the window they finished in.
     pub failed: Vec<u32>,
-    /// End-to-end p99 in ms of the requests finished in the window, as the upper bound of its
+    /// End-to-end p99 in ms of the requests finished in the window, estimated inside its latency
     /// bucket; 0 for a window with none.
     pub p99_ms: Vec<f64>,
 }
 
-/// Upper bound in ms of the bucket holding the nearest-rank percentile `p` of `counts` (the
-/// summary's buckets, overflow last); `None` when `counts` is empty of samples. The overflow
-/// bucket has no bound, so it reports the next doubling, which keeps the figure finite.
+/// Estimate in ms of the nearest-rank percentile `p` of `counts` (the summary's buckets, overflow
+/// last); `None` when `counts` has no samples. The samples are taken as spread evenly in log
+/// scale across the bucket `(lo, hi]` that holds the rank, so the estimate sits between the
+/// bucket's edges instead of on its upper edge (which can be twice the truth). The first bucket
+/// starts at 0, so it is spread evenly in linear scale. The overflow bucket has no upper edge, so
+/// it reports its lower edge: a floor, which keeps the figure finite.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     reason = "the rank is clamped to the total; counts are far below 2^52"
 )]
-pub(super) fn percentile_bound(counts: &[u32], p: f64) -> Option<f64> {
+pub(super) fn percentile_est(counts: &[u32], p: f64) -> Option<f64> {
     let total: u64 = counts.iter().map(|&c| u64::from(c)).sum();
     if total == 0 {
         return None;
     }
     let rank = ((p * total as f64).ceil() as u64).clamp(1, total);
-    let mut seen = 0u64;
-    let i = counts
-        .iter()
-        .position(|&c| {
-            seen += u64::from(c);
-            seen >= rank
-        })
-        .unwrap_or(COLS - 1);
-    Some(0.25 * (1u64 << i) as f64)
+    let mut before = 0u64;
+    for (i, &c) in counts.iter().enumerate() {
+        let c = u64::from(c);
+        if before + c < rank {
+            before += c;
+            continue;
+        }
+        let hi = 0.25 * (1u64 << i) as f64;
+        if i == COLS - 1 {
+            return Some(hi / 2.0); // overflow: the lower edge, a floor
+        }
+        let frac = (rank - before) as f64 / c as f64;
+        return Some(if i == 0 {
+            hi * frac
+        } else {
+            let lo = hi / 2.0;
+            lo * (hi / lo).powf(frac) // log-linear between the edges
+        });
+    }
+    None
 }
 
 /// **Private.** The system series: requests finished per window, split by outcome, and each
@@ -215,7 +229,35 @@ pub(super) fn system_series(cfg: &SimConfig, report: &SimReport) -> SystemSeries
         failed,
         p99_ms: lat
             .chunks(COLS)
-            .map(|c| percentile_bound(c, 0.99).unwrap_or(0.0))
+            .map(|c| percentile_est(c, 0.99).unwrap_or(0.0))
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{COLS, percentile_est};
+
+    fn counts(at: usize, n: u32) -> Vec<u32> {
+        let mut c = vec![0; COLS];
+        c[at] = n;
+        c
+    }
+
+    #[test]
+    fn estimate_sits_inside_the_bucket_not_on_its_upper_edge() {
+        // 100 samples in (1, 2] ms: the p99 is near the top of the bucket, but below it
+        let p99 = percentile_est(&counts(3, 100), 0.99).unwrap();
+        assert!(p99 > 1.9 && p99 < 2.0, "{p99}");
+        // and the median is nearer the lower edge: log-linear, 1 * 2^0.5
+        let p50 = percentile_est(&counts(3, 100), 0.50).unwrap();
+        assert!((p50 - 2f64.sqrt()).abs() < 0.02, "{p50}");
+    }
+
+    #[test]
+    fn first_bucket_is_linear_and_overflow_is_a_floor_and_empty_is_none() {
+        assert!((percentile_est(&counts(0, 10), 0.5).unwrap() - 0.125).abs() < 1e-9);
+        assert_eq!(percentile_est(&counts(COLS - 1, 5), 0.99), Some(65536.0));
+        assert_eq!(percentile_est(&[0; COLS], 0.99), None);
     }
 }

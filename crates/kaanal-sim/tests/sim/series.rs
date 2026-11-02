@@ -173,14 +173,15 @@ fn system_series_has_sixty_windows() {
 }
 
 #[test]
-fn node_percentiles_are_bucket_bounds_and_none_without_visits() {
+fn node_percentiles_are_exact_and_none_without_visits() {
     let (t, _, s) = go(QUEUED, &one_stream(50.0, 30));
     let app = &s.nodes[t.id("app").unwrap()];
     let (p50, p99) = (app.p50_ms.unwrap(), app.p99_ms.unwrap());
     assert!(p50 <= p99);
+    // exact over every hop: a sorted-sample percentile is almost never a power-of-two bucket bound
     let bounds: Vec<f64> = (0..19).map(|i| 0.25 * f64::from(1u32 << i)).collect();
     assert!(
-        bounds.contains(&p50) && bounds.contains(&p99),
+        !bounds.contains(&p50) && !bounds.contains(&p99),
         "{p50} {p99}"
     );
     // a service that no endpoint reaches is never visited

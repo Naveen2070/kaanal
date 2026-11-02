@@ -133,14 +133,10 @@ pub struct NodeSummary {
     pub saturates_at_req_s: Option<f64>,
     /// `1 - offered_load`, at least 0; `None` without slots.
     pub headroom: Option<f64>,
-    /// Median hop duration in ms, as the upper bound of its latency bucket; `None` without
-    /// visits. A percentile in the overflow bucket reads 131072 ms (the next doubling): a floor,
-    /// not an exact bound.
+    /// Median hop work time in ms (wait excluded), exact over every hop; `None` without visits.
     pub p50_ms: Option<f64>,
-    /// 99th percentile of the hop duration in ms, as the upper bound of its latency bucket;
-    /// `None` without visits.
-    /// A percentile in the overflow bucket reads 131072 ms (the next doubling): a floor, not an
-    /// exact bound.
+    /// 99th percentile of the hop work time in ms (wait excluded), exact over every hop; `None`
+    /// without visits. (Before 2026-11-02 this was the upper edge of a power-of-two bucket.)
     pub p99_ms: Option<f64>,
     /// Busy fraction, longest queue and hop latencies over time, 60 windows.
     pub series: Series,
@@ -268,6 +264,11 @@ fn bucket_of(v: f64) -> usize {
     i
 }
 
+/// The exact percentile of sorted values, or `None` when there are none.
+fn exact(sorted: &[f64], p: f64) -> Option<f64> {
+    (!sorted.is_empty()).then(|| pct(sorted, p))
+}
+
 fn latency(sorted: &[f64]) -> Latency {
     let mut counts = vec![0u64; BUCKETS + 1];
     for &v in sorted {
@@ -303,6 +304,8 @@ struct Tally {
     lat_all: Vec<f64>,
     /// Sorted latencies per stream.
     lat_by: Vec<Vec<f64>>,
+    /// Sorted work time in ms of every hop at each node (wait excluded), for exact percentiles.
+    work_by: Vec<Vec<f64>>,
     failed_by: Vec<u64>,
     errors: BTreeMap<String, u64>,
 }
@@ -317,6 +320,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
     let mut link_acc = vec![Acc::default(); topo.edges.len()];
     let mut lat_all = Vec::with_capacity(report.requests.len());
     let mut lat_by: Vec<Vec<f64>> = vec![Vec::new(); cfg.streams.len()];
+    let mut work_by: Vec<Vec<f64>> = vec![Vec::new(); topo.nodes.len()];
     let mut failed_by = vec![0u64; cfg.streams.len()];
     let mut errors: BTreeMap<String, u64> = BTreeMap::new();
     for r in &report.requests {
@@ -335,6 +339,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
                     let visit = !(matches!(hop.kind, HopKind::Op(_))
                         && topo.nodes[hop.node].kind == NodeKind::Monolith);
                     node_acc[hop.node][usize::from(hop.replica)].add(w, d, visit);
+                    work_by[hop.node].push(d * 1000.0);
                 }
                 HopKind::Link { edge, .. } => link_acc[usize::from(edge)].add(w, d, true),
                 HopKind::Net | HopKind::Delay => {}
@@ -342,7 +347,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
         }
     }
     lat_all.sort_by(f64::total_cmp);
-    for v in &mut lat_by {
+    for v in lat_by.iter_mut().chain(&mut work_by) {
         v.sort_by(f64::total_cmp);
     }
     Tally {
@@ -350,6 +355,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
         link_acc,
         lat_all,
         lat_by,
+        work_by,
         failed_by,
         errors,
     }
@@ -477,6 +483,7 @@ pub fn summarize(
         link_acc,
         lat_all,
         lat_by,
+        work_by,
         failed_by,
         errors,
     } = tally(topo, cfg, report);
@@ -517,10 +524,6 @@ pub fn summarize(
             let capacity = slots.and_then(|s| total.capacity(s * node_acc[i].len() as f64));
             let util = slots.map(|_| st.utilization);
             let ns = series.next().expect("one series per node");
-            let merged = ns.latency.iter().fold(vec![0u32; BUCKETS + 1], |mut m, w| {
-                m.iter_mut().zip(w).for_each(|(a, b)| *a += b);
-                m
-            });
             NodeSummary {
                 name: n.name.clone(),
                 replicas,
@@ -542,8 +545,9 @@ pub fn summarize(
                     .filter(|_| expected[i] > 0.0)
                     .map(|c| c * mix_rate / expected[i]),
                 headroom: load.map(|l| (1.0 - l).max(0.0)),
-                p50_ms: series::percentile_bound(&merged, 0.50),
-                p99_ms: series::percentile_bound(&merged, 0.99),
+                // exact, from every hop's work time; the buckets only bound it within a factor of two
+                p50_ms: exact(&work_by[i], 0.50),
+                p99_ms: exact(&work_by[i], 0.99),
                 series: ns,
                 limited: st.limited,
                 overflowed: st.overflowed,

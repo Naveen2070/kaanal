@@ -23,7 +23,7 @@ use kaanal_core::exec::{ChainRequest, execute, sample_plan};
 use kaanal_core::{ChaosState, Config, Topology};
 use kaanal_data::{DEFAULT_LOCALE, DataSet, Dictionary, Options, Pack, builtin_tags, generate};
 use kaanal_server::ServeOpts;
-use kaanal_sim::{SimConfig, Stream, run};
+use kaanal_sim::{SimConfig, Stream, run, summarize};
 use serde_json::{Value, json};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
@@ -143,20 +143,24 @@ fn sim(rows: &mut Vec<Row>) {
         warmup: Duration::ZERO,
         seed: 1,
     };
-    let runs = (0..REPS)
-        .map(|_| {
-            let start = Instant::now();
-            let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
-            let took = start.elapsed();
-            let n = rep.requests.len();
-            println!("NFR-05: {n} simulated requests in {took:.2?}");
-            // The suite's only hard checks.
-            assert!(n > 990_000, "NFR-05: only {n} requests");
-            assert!(took < Duration::from_secs(10), "NFR-05: {took:?} >= 10 s");
-            took.as_secs_f64() * 1e3
-        })
-        .collect();
+    let (mut runs, mut sums) = (Vec::new(), Vec::new());
+    for _ in 0..REPS {
+        let start = Instant::now();
+        let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+        let took = start.elapsed();
+        let n = rep.requests.len();
+        println!("NFR-05: {n} simulated requests in {took:.2?}");
+        // The suite's only hard checks.
+        assert!(n > 990_000, "NFR-05: only {n} requests");
+        assert!(took < Duration::from_secs(10), "NFR-05: {took:?} >= 10 s");
+        runs.push(took.as_secs_f64() * 1e3);
+        // the summary of the same run: percentiles, series, bottlenecks (what the Studio asks for)
+        let start = Instant::now();
+        black_box(summarize(&t, &e, &cfg, &rep));
+        sums.push(start.elapsed().as_secs_f64() * 1e3);
+    }
     rows.push(row("sim/one_million_requests", "ms", runs));
+    rows.push(row("sim/summarize_one_million", "ms", sums));
 }
 
 fn data(rows: &mut Vec<Row>) {
