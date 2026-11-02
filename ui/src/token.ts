@@ -40,3 +40,14 @@ export function captureToken(env: TokenEnv): string | null {
     return null;
   }
 }
+
+/** The token this tab uses: this page load's, else the one kept in sessionStorage; "" when there is none. */
+export function readToken(): string {
+  const live = currentToken();
+  if (live) return live;
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}

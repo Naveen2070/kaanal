@@ -4,9 +4,11 @@
 // give numbers is a notice (a toast), not a line in the bar. The key figures and the offered load
 // are the strip under it (KpiStrip.tsx).
 
-import { CircleHelp, Play } from "lucide-react";
+import { BookOpen, CircleHelp, Play } from "lucide-react";
 import { Mark } from "../brand/Mark";
 import { useFirstRun } from "../first-run/store";
+import { useGuide } from "../guide/store";
+import { MenuButton } from "../menu/MenuButton";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
 import { SaveFlow } from "./SaveFlow";
@@ -71,6 +73,16 @@ export function TopTools() {
   return (
     <div className="flex items-center gap-1 p-1.5">
       <ThemeToggle />
+      <button
+        type="button"
+        aria-label="Glossary"
+        title="Glossary: what every part and figure means"
+        onClick={() => useGuide.getState().show()}
+        className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <BookOpen size={16} aria-hidden />
+      </button>
+      <MenuButton />
       <button
         type="button"
         aria-label="Show the tour"

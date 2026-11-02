@@ -1,0 +1,264 @@
+// The glossary's words (a lazy chunk with its dialog). Plain data, so a test can check it and the
+// dialog only renders it. Every statement here is what the simulator and the loader really do
+// (rules R1.24, the chain engine's default chain, the card and key-figure definitions); a new
+// figure on the screen needs its entry here. Examples of real products say what a component
+// stands for, never what Kaanal measures.
+
+export interface Entry {
+  id: string;
+  term: string;
+  /** What it means in Kaanal, in plain words. */
+  text: string;
+  /** What it stands for in a real system, when it stands for something. */
+  real?: string;
+}
+
+export interface Chapter {
+  id: string;
+  title: string;
+  intro: string;
+  entries: Entry[];
+}
+
+export const CHAPTERS: Chapter[] = [
+  {
+    id: "components",
+    title: "Components",
+    intro:
+      "Each box on the canvas stands for one part of a real system. Kaanal does not run your code: it asks how many requests the part can work on at once, how long one takes, and how many may wait.",
+    entries: [
+      {
+        id: "gateway",
+        term: "Gateway",
+        text: "The front door: where requests enter. It does its own work first, then asks each auth component it is wired to, then passes the request on to the service that owns the route.",
+        real: "nginx, Envoy, Kong, an API gateway or a load balancer in front of your apps.",
+      },
+      {
+        id: "service",
+        term: "Service",
+        text: "An app that does work and calls others. It does its own work, then the services it calls, then its cache for reads, then its databases.",
+        real: "A Node, Spring, Go or Rails server. Slots stand for the requests it handles at once (threads or workers); copies stand for instances of it (replicas or pods).",
+      },
+      {
+        id: "monolith",
+        term: "Monolith",
+        text: "One big app that does the work of several services. It can carry its own read, write and scan costs, as well as calling a database or cache.",
+        real: "A Rails, Django, Laravel or Spring Boot application that serves everything.",
+      },
+      {
+        id: "database",
+        term: "Database",
+        text: "Stores data. Its slots are the connection pool: only that many reads or writes run at once. Reads, writes and scans each have their own time.",
+        real: "Postgres, MySQL or MongoDB, reached through a pool of connections.",
+      },
+      {
+        id: "cache",
+        term: "Cache",
+        text: "Answers repeat reads fast. A hit ends the work and skips the database; a miss carries on to the database. Writes skip it. A cache that is down counts as a miss, so the database serves the read, slower.",
+        real: "Redis or Memcached in front of a database.",
+      },
+      {
+        id: "external-api",
+        term: "External API",
+        text: "Someone else's service that you call. It has its own time and you cannot change how it is built.",
+        real: "A payment, email, SMS or maps provider.",
+      },
+      {
+        id: "auth",
+        term: "Auth",
+        text: "Checks who is calling. The gateway's token check charges the auth component's own time only. The login route (POST /login) also follows the wires that leave auth, for example to a user database or a mail service.",
+        real: "Keycloak, Auth0 or Cognito, or an nginx auth_request pointed at an auth service.",
+      },
+    ],
+  },
+  {
+    id: "screen",
+    title: "Reading the screen",
+    intro:
+      "Every number comes from the newest simulated run of your draft. The run is a relative what-if, not a prediction: use it to see which part gives out first and by how much, not to promise a real latency.",
+    entries: [
+      {
+        id: "card-line",
+        term: "Service · 1 copy × 32 slots · 25 ms",
+        text: "The card's own settings, in words: what kind it is, how many copies, how many slots each, and how long one request takes once it has a slot. 'Time varies' means the time is a spread of values set in the file.",
+      },
+      {
+        id: "busy",
+        term: "83% busy",
+        text: "The share of the component's slots in use over the run. The bar is green below 70%, amber from 70% and red from 90%; the words say the same, so colour is never the only signal.",
+      },
+      {
+        id: "waiting",
+        term: "up to 21 waiting",
+        text: "The longest queue seen during the run. It is a peak, not a live count. Some waiting is normal well below 100% busy, because requests arrive in bursts.",
+      },
+      {
+        id: "saturated",
+        term: "Saturated",
+        text: "No spare capacity left: every slot is full, so new requests queue up and then get turned away.",
+      },
+      {
+        id: "turning-away",
+        term: "Turning requests away",
+        text: "The component refused requests because its queue was full or a rate limit applied. It can be only partly busy and still turn requests away, for example with a queue limit of 0, where a request is refused the moment every slot is taken.",
+      },
+      {
+        id: "arriving",
+        term: "Arriving",
+        text: "Requests per second that got in and were worked on here. Requests turned away are not counted, which is why a component can show less than the one calling it.",
+      },
+      {
+        id: "turned-away",
+        term: "Turned away",
+        text: "Shown only when it is not zero: how many requests per second were refused here, scaled from the rate that got in.",
+      },
+      {
+        id: "slowest",
+        term: "Slowest work under",
+        text: "The time within which 99 in every 100 requests finished their work here. It counts work only, not the time spent waiting in line, and it is exact over every request in the run.",
+      },
+      {
+        id: "wire",
+        term: "A wire",
+        text: "Points from the caller to what it calls. The pulse moves toward the arrow, faster and heavier as the load grows. One lane per copy of the component it feeds. An amber or red glow under it means that component is running hot. A dashed wire carried nothing in the last run.",
+      },
+      {
+        id: "breaks-first",
+        term: "Breaks first",
+        text: "The component that gives out at the lowest load, with the load: 'shop at 2,100 req/s'. It turns red only when that component is already saturated at the current load; otherwise it reads 'nothing saturates'.",
+      },
+      {
+        id: "offered-load",
+        term: "Offered load",
+        text: "How many requests per second you send in altogether. Drag the slider or type a number; every change re-runs the simulation.",
+      },
+      {
+        id: "p99",
+        term: "System p99",
+        text: "End to end, 99 in every 100 requests finish faster than this. It includes time spent waiting, so it shows the slow tail that an average hides.",
+      },
+      {
+        id: "goodput",
+        term: "Goodput",
+        text: "Requests that finished successfully each second, not counting failed or turned-away ones.",
+      },
+      {
+        id: "errors",
+        term: "Errors",
+        text: "Requests that failed in the run: a component that was down, a failure you injected, or a caller that gave up at its timeout.",
+      },
+      {
+        id: "dropped",
+        term: "Dropped",
+        text: "Requests turned away anywhere in the system, by a full queue or a rate limit, added together.",
+      },
+      {
+        id: "draft",
+        term: "Draft, Apply, Save",
+        text: "What you edit is a draft. Run only tries it. Apply makes the draft the running system, so the mocks switch to it. Save writes kaanal.yaml. 'Draft: applied · saved' means all three agree.",
+      },
+    ],
+  },
+  {
+    id: "terms",
+    title: "Terms",
+    intro: "The words behind the settings. Each has a help button beside it on the screen.",
+    entries: [
+      {
+        id: "time",
+        term: "Time",
+        text: "How long one request holds a slot while it is being worked on. Longer means fewer requests finished each second.",
+      },
+      {
+        id: "slots",
+        term: "Slots",
+        text: "How many requests one copy works on at the same moment. More slots, more throughput, until the time per request limits it. Capacity is slots divided by time: 32 slots at 25 ms can finish about 1,280 a second.",
+      },
+      {
+        id: "copies",
+        term: "Copies",
+        text: "Identical copies of a component, each with its own slots and its own queue. Load is shared between them.",
+      },
+      {
+        id: "queue",
+        term: "Queue limit",
+        text: "How many requests may wait for a free slot. Past it they are turned away. Empty means no limit; 0 means nobody waits, and a request is refused as soon as every slot is taken.",
+      },
+      {
+        id: "timeout",
+        term: "Timeout",
+        text: "A caller gives up on a component after this long, waiting and working included, and the request fails.",
+      },
+      {
+        id: "saturation",
+        term: "Saturation",
+        text: "The point where a component has no spare capacity. Past it, requests queue up and then get turned away.",
+      },
+      {
+        id: "wait-work",
+        term: "Waiting and work",
+        text: "A request's time at a component is the time in the queue (waiting) plus the time in a slot (work). Slowest work under counts the second part only; System p99 counts both.",
+      },
+      {
+        id: "chaos",
+        term: "Chaos",
+        text: "Break something on purpose: take a component down, slow it, or drop a share of requests. It acts on the running system, so Apply the draft first.",
+      },
+    ],
+  },
+  {
+    id: "wiring",
+    title: "Wires and routes",
+    intro:
+      "A wire is allowed by the kinds it joins (the loader checks the same table). Whether it carries traffic depends on the route a request takes.",
+    entries: [
+      {
+        id: "who-calls-whom",
+        term: "Who may call whom",
+        text: "Gateway: service, monolith, auth. Service and monolith: service, monolith, database, cache, external API, auth. Auth: service, monolith, database, cache, external API. Database, cache and external API call nothing. There are no loops, and nothing calls the gateway.",
+      },
+      {
+        id: "gateway-chain",
+        term: "What the gateway does with a request",
+        text: "Its own time, then each auth it is wired to, then a call into the service that owns the route. It must have a wire to that service, or requests stop at the gateway.",
+      },
+      {
+        id: "auth-check",
+        term: "Auth is a check, not a forwarder",
+        text: "For ordinary routes the gateway only asks auth and moves on itself; the request does not travel through auth. Wires leaving auth are used by the login route.",
+      },
+      {
+        id: "failure-stops",
+        term: "A failed step stops the request",
+        text: "If auth fails or is down, the service is never called. The same holds for any step in a chain: the first failure ends it.",
+      },
+      {
+        id: "service-chain",
+        term: "What a service does with a request",
+        text: "Its own time, then the services it calls, then its cache for a read, then its databases. A cache hit ends the work early and skips the database.",
+      },
+      {
+        id: "idle-wire",
+        term: "No traffic in the last run",
+        text: "A wire shown dashed, or marked so in the Controls tab: its source had requests and its target got none. Nothing is wrong with the wire; the route that traffic took did not use it.",
+      },
+    ],
+  },
+];
+
+/** Entries whose term, text or real-world note holds every word typed, with their chapter. */
+export function searchEntries(
+  text: string,
+  chapters: Chapter[] = CHAPTERS,
+): { chapter: Chapter; entry: Entry }[] {
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  return chapters.flatMap((chapter) =>
+    chapter.entries
+      .filter((entry) => {
+        const hay = `${entry.term} ${entry.text} ${entry.real ?? ""}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      })
+      .map((entry) => ({ chapter, entry })),
+  );
+}

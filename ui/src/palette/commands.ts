@@ -14,6 +14,7 @@ export interface CommandContext {
   fit: () => void;
   traffic: () => void;
   keys?: () => void;
+  guide?: () => void;
   /** The components on the canvas, to jump to by name. */
   nodes?: string[];
   select?: (name: string) => void;
@@ -34,6 +35,7 @@ export function commands(ctx: CommandContext): Command[] {
     { id: "fit", label: "Fit the view", run: ctx.fit },
     { id: "traffic", label: "Build traffic", run: ctx.traffic },
     { id: "keys", label: "Keyboard shortcuts", shortcut: "?", run: () => ctx.keys?.() },
+    { id: "guide", label: "Open the glossary", run: () => ctx.guide?.() },
     ...(ctx.nodes ?? []).map((n) => ({
       id: `go-${n}`,
       label: `Go to ${n}`,

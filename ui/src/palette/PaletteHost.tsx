@@ -5,6 +5,7 @@ import { lazy, useEffect, useState } from "react";
 import { canvasBridge } from "../canvas/bridge";
 import { useAddNode } from "../canvas/useAddNode";
 import { useFirstRun } from "../first-run/store";
+import { useGuide } from "../guide/store";
 import { useDraft } from "../store/draft";
 import { useSelected } from "../store/view";
 import { LazyBoundary } from "../states/LazyBoundary";
@@ -61,6 +62,7 @@ export function PaletteHost() {
     tour: replayTour,
     fit: () => canvasBridge.fit(),
     traffic: openTrafficBuilder,
+    guide: () => useGuide.getState().show(),
     keys: () => {
       setOpen(false);
       setKeys(true);

@@ -1,7 +1,7 @@
 // A thin fetch wrapper for the control API. Every call sends the bearer token, can be aborted, and
 // fails as an `ApiError`; a busy simulator is a result, not a failure (`startRun`).
 
-import { TOKEN_KEY, currentToken } from "../token";
+import { readToken } from "../token";
 import type {
   ApplyResult,
   Diagnostic,
@@ -39,15 +39,7 @@ interface Opts {
   signal?: AbortSignal;
 }
 
-function token(): string {
-  const live = currentToken();
-  if (live) return live;
-  try {
-    return sessionStorage.getItem(TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
+const token = readToken;
 
 /** Sends one request and returns the status and the parsed JSON body (null when there is none). */
 async function send(

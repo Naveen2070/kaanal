@@ -13,6 +13,7 @@ import { FeedContext, type StatsFeed } from "./canvas/feed";
 import { Palette } from "./canvas/Palette";
 import { ReadonlyNodes } from "./layout/ReadonlyNodes";
 import { Shell } from "./layout/Shell";
+import { GuideHost } from "./guide/GuideHost";
 import { PaletteHost } from "./palette/PaletteHost";
 import { Panel } from "./panel/Panel";
 import { LazyBoundary } from "./states/LazyBoundary";
@@ -57,6 +58,7 @@ export function App() {
               <KpiStrip />
               <FirstRun />
               <PaletteHost />
+              <GuideHost />
               <TrafficHost />
             </>
           }
