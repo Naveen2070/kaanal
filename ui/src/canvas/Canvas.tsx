@@ -16,12 +16,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Layout } from "../api/types";
-import { useDraft } from "../store/draft";
-import { useSelected } from "../store/view";
-import { usePrefersReducedMotion } from "../first-run/motion";
-import { useLayout } from "../layout/useLayout";
-import { useRail } from "../layout/rail";
+import type { Layout } from "../data/api/types";
+import { useDraft } from "../data/store/draft";
+import { useSelected } from "../data/store/view";
+import { usePrefersReducedMotion } from "../overlays/first-run/motion";
+import { useLayout } from "../shell/layout/useLayout";
+import { useRail } from "../shell/layout/rail";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { canvasBridge } from "./bridge";
@@ -30,7 +30,7 @@ import { KIND_MIME } from "./Palette";
 import { mayCall } from "./rules";
 import { removeWires } from "./wires";
 import { autoLayout, decodeId, encodeId } from "./edges";
-import { notify } from "../toast/toasts";
+import { notify } from "../shell/toast/toasts";
 import { useZoom } from "./zoom";
 import { fitPadding, freeSlotIn, isVisible, padsFor, visibleCentre } from "./viewport";
 

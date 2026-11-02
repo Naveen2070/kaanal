@@ -2,7 +2,7 @@
 // lane's colour names the copy, its pulse and width follow that copy's own load. Pure, so it is
 // tested without drawing.
 
-import type { NodeSummary } from "../api/types";
+import type { NodeSummary } from "../data/api/types";
 
 /** More than this many lanes would be a smear; the rest share the last colour. */
 export const MAX_LANES = 8;

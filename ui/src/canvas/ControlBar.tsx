@@ -5,9 +5,9 @@
 // refused or out-of-range number puts the real value back and sends nothing. 0 ms is allowed.
 
 import { useRef, useState } from "react";
-import type { NodeDoc, Op } from "../api/types";
-import { Slider } from "../components/ui/slider";
-import { HelpPopover } from "../help/HelpPopover";
+import type { NodeDoc, Op } from "../data/api/types";
+import { Slider } from "../kit/slider";
+import { HelpPopover } from "../overlays/help/HelpPopover";
 import {
   controlRows,
   durationMs,
@@ -17,8 +17,8 @@ import {
   setSlots,
   slotsOf,
   type Row,
-} from "../panel/fields";
-import { useDraft } from "../store/draft";
+} from "../panels/details/fields";
+import { useDraft } from "../data/store/draft";
 import {
   LOG_STEPS,
   msFromSlider,

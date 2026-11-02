@@ -24,7 +24,7 @@ function themeBoot(): Plugin {
       const chunk = ctx.bundle
         ? Object.values(ctx.bundle).find((c) => c.type === "chunk" && c.name === "boot")
         : undefined;
-      const src = chunk ? `/__kaanal/studio/${chunk.fileName}` : "/src/theme/boot.js";
+      const src = chunk ? `/__kaanal/studio/${chunk.fileName}` : "/src/look/theme/boot.js";
       return [{ tag: "script", attrs: { src }, injectTo: "head-prepend" }];
     },
   };
@@ -94,7 +94,7 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => ({
     sourcemap: false,
     cssCodeSplit: false,
     rolldownOptions: {
-      input: { main: "index.html", boot: "src/theme/boot.js" },
+      input: { main: "index.html", boot: "src/look/theme/boot.js" },
       output: {
         entryFileNames: "assets/[name]-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",

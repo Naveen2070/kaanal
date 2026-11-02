@@ -5,7 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./main.css";
-import { initTheme } from "./theme/theme";
+import { initTheme } from "./look/theme/theme";
 import { captureToken } from "./token";
 
 captureToken(window);

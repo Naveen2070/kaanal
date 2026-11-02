@@ -3,7 +3,7 @@
 // window each kind is its badge and its word; between 900 and 1279 px the panel is a 48px icon rail,
 // and the button keeps its name (the kind) for assistive technology and the tooltip.
 
-import { useLayout } from "../layout/useLayout";
+import { useLayout } from "../shell/layout/useLayout";
 import { catColour, NODE_KINDS } from "./nodeKinds";
 
 /** The drag payload's type: what a drop on the canvas reads the kind from. */

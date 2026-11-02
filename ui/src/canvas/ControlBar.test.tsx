@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { NodeProps } from "@xyflow/react";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView, NodeDoc } from "../api/types";
-import { useDraft } from "../store/draft";
+import type { DraftView, NodeDoc } from "../data/api/types";
+import { useDraft } from "../data/store/draft";
 import { expectNoViolations } from "../test/axe";
 import { mockFetch } from "../test/fetch";
 import { nodeSummary } from "../test/summary";

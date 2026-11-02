@@ -7,7 +7,7 @@
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect } from "react";
-import type { NodeDoc } from "../api/types";
+import type { NodeDoc } from "../data/api/types";
 import { useFeed } from "./feed";
 import { configLine, fmtMs, nodeFigures, stateWords } from "./metrics";
 import { Meter } from "./Meter";

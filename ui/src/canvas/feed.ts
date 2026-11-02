@@ -2,7 +2,7 @@
 // later a live stream. A card knows only this interface, never the run store.
 
 import { createContext, useContext } from "react";
-import type { NodeSummary } from "../api/types";
+import type { NodeSummary } from "../data/api/types";
 
 export interface StatsFeed {
   /** The run figures of the node called `name`, or undefined when there is no run or no such node. */

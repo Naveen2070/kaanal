@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "./theme/tokens.css";
+@import "./look/theme/tokens.css";
 
 /* Fonts (ui/FONTS.md). `swap` shows text at once; the metric-matched fallback keeps the swap from
    moving anything. Only Inter is preloaded; the others load when a rule uses them. */
@@ -8,7 +8,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("./fonts/inter-latin.woff2") format("woff2");
+  src: url("./look/fonts/inter-latin.woff2") format("woff2");
 }
 
 @font-face {
@@ -16,7 +16,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("./fonts/jetbrains-mono-latin.woff2") format("woff2");
+  src: url("./look/fonts/jetbrains-mono-latin.woff2") format("woff2");
 }
 
 @font-face {
@@ -24,7 +24,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("./fonts/noto-sans-tamil-lockup.woff2") format("woff2");
+  src: url("./look/fonts/noto-sans-tamil-lockup.woff2") format("woff2");
 }
 
 /* Arial scaled to Inter's metrics, used until Inter arrives */

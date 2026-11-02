@@ -2,7 +2,7 @@
 // the canvas minus the space the panels take. These helpers say how much that is and what lands
 // inside it. Pure, so they are tested without a browser.
 
-import type { LayoutMode } from "../layout/useLayout";
+import type { LayoutMode } from "../shell/layout/useLayout";
 
 export interface Pads {
   top: number;

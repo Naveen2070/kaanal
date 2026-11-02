@@ -2,7 +2,7 @@
 // connect patch, and the first layout. Node names have no character rule (`#`, `/`, spaces,
 // unicode), so every id that leaves this file is encoded and decoded before an API call.
 
-import type { Doc, Layout, Op } from "../api/types";
+import type { Doc, Layout, Op } from "../data/api/types";
 
 export const encodeId = (name: string): string => encodeURIComponent(name);
 export const decodeId = (id: string): string => decodeURIComponent(id);

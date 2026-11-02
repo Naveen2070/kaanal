@@ -3,10 +3,10 @@
 // service" otherwise), so the calls that rode on a deleted wire are taken out of the chains in the
 // same edit: the draft stays valid, and the notice says which endpoints stopped forwarding.
 
-import type { Doc, Op } from "../api/types";
-import { useDraft } from "../store/draft";
-import { gatewayOf } from "../traffic/model";
-import { notify } from "../toast/toasts";
+import type { Doc, Op } from "../data/api/types";
+import { useDraft } from "../data/store/draft";
+import { gatewayOf } from "../panels/traffic/model";
+import { notify } from "../shell/toast/toasts";
 
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => x !== null && typeof x === "object" && !Array.isArray(x);

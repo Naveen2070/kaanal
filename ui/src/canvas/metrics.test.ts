@@ -49,7 +49,7 @@ test("replicas_default_to_one_and_ignore_nonsense", () => {
 
 // ---- T2.1: one source for the figures a card, the sentence and the KPI strip all show ----
 
-import type { Summary } from "../api/types";
+import type { Summary } from "../data/api/types";
 import { breaksFirst } from "./metrics";
 
 const sentence = (over = {}, config = { type: "service" }) =>

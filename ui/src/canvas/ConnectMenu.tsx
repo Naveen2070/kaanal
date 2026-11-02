@@ -5,9 +5,9 @@
 // wire and its own button are the others).
 
 import { Unplug } from "lucide-react";
-import type { EdgeDoc } from "../api/types";
-import { useDraft } from "../store/draft";
-import { notify } from "../toast/toasts";
+import type { EdgeDoc } from "../data/api/types";
+import { useDraft } from "../data/store/draft";
+import { notify } from "../shell/toast/toasts";
 import { carriedNothing } from "./edges";
 import { useFeed } from "./feed";
 import { mayCall } from "./rules";

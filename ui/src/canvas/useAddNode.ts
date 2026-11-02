@@ -3,8 +3,8 @@
 // type over. If another component was selected and may call the new one, a toast offers the wire.
 // A drop keeps the exact spot the person chose, so it does not come through here.
 
-import { useDraft } from "../store/draft";
-import { useSelected } from "../store/view";
+import { useDraft } from "../data/store/draft";
+import { useSelected } from "../data/store/view";
 import { canvasBridge } from "./bridge";
 import { focusName } from "./focusName";
 import { mayCall } from "./rules";

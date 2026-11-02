@@ -29,10 +29,10 @@ function bundle(js: number, fontBytes: number, lazyJs = 5000): string {
         file: "assets/index-a1.js",
         isEntry: true,
         assets: ["assets/inter-latin-b2.woff2"],
-        dynamicImports: ["src/panel/LogTab.tsx"],
+        dynamicImports: ["src/panels/details/LogTab.tsx"],
       },
       "style.css": { file: "assets/index-a1.css", src: "style.css" },
-      "src/panel/LogTab.tsx": { file: "assets/log-tab-c3.js", isDynamicEntry: true },
+      "src/panels/details/LogTab.tsx": { file: "assets/log-tab-c3.js", isDynamicEntry: true },
     }),
   );
   return dir;

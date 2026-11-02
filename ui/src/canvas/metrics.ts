@@ -3,8 +3,8 @@
 // utilization, the peak is the highest of the ~60 windows, the sparkline is queue depth (exact),
 // and headroom is capacity, not a prediction.
 
-import type { NodeDoc, NodeSummary, Summary } from "../api/types";
-import { durationMs, hasProc, slotsOf, worksOutTo } from "../panel/fields";
+import type { NodeDoc, NodeSummary, Summary } from "../data/api/types";
+import { durationMs, hasProc, slotsOf, worksOutTo } from "../panels/details/fields";
 
 export interface Figures {
   /** Measured utilization 0..1; null without a run or without slots. */

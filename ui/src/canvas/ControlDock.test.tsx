@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView } from "../api/types";
-import { useDraft } from "../store/draft";
+import type { DraftView } from "../data/api/types";
+import { useDraft } from "../data/store/draft";
 import { expectNoViolations } from "../test/axe";
 import { ControlDock } from "./ControlDock";
 
 // the selection normally lives in the address bar (nuqs); here it is a plain variable
 const sel = vi.hoisted(() => ({ name: null as string | null, set: vi.fn() }));
-vi.mock("../store/view", () => ({ useSelected: () => [sel.name, sel.set] }));
+vi.mock("../data/store/view", () => ({ useSelected: () => [sel.name, sel.set] }));
 
 const view: DraftView = {
   text: "",

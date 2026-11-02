@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView } from "../api/types";
-import { useDraft } from "../store/draft";
+import type { DraftView } from "../data/api/types";
+import { useDraft } from "../data/store/draft";
 import { mockFetch } from "../test/fetch";
-import { useToasts } from "../toast/toasts";
+import { useToasts } from "../shell/toast/toasts";
 import { ConnectMenu, targetsFor } from "./ConnectMenu";
 
 const odd = "db #1/ü x";

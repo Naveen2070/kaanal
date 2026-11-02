@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import type { Doc } from "../api/types";
+import type { Doc } from "../data/api/types";
 import { cascade, prune } from "./wires";
 
 const doc = (): Doc => ({

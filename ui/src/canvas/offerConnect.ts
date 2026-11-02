@@ -1,8 +1,8 @@
 // After a palette add with another component selected: a toast offering the wire from it (review
 // C3). A lazy chunk (`useAddNode` imports it on first use) to keep the first load inside its budget.
 
-import { useDraft } from "../store/draft";
-import { notify } from "../toast/toasts";
+import { useDraft } from "../data/store/draft";
+import { notify } from "../shell/toast/toasts";
 
 export function offerConnect(from: string, name: string): void {
   notify.info(`Added ${name}`, "added", {

@@ -13,8 +13,8 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import { X } from "lucide-react";
-import { usePrefersReducedMotion } from "../first-run/motion";
-import { useDraft } from "../store/draft";
+import { usePrefersReducedMotion } from "../overlays/first-run/motion";
+import { useDraft } from "../data/store/draft";
 import { carriedNothing, edgeSpeedS, edgeTone } from "./edges";
 import { useFeed } from "./feed";
 import { laneColour, laneCount, laneLoads, laneOffsets } from "./lanes";

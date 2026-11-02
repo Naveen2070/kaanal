@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vite-plus/test";
-import { useDraft } from "../store/draft";
-import { useToasts } from "../toast/toasts";
+import { useDraft } from "../data/store/draft";
+import { useToasts } from "../shell/toast/toasts";
 import { offerConnect } from "./offerConnect";
 
 test("the_toast_offers_the_wire_and_its_button_connects_them", () => {

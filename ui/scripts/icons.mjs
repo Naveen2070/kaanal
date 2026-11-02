@@ -1,14 +1,14 @@
 /* eslint-disable no-console -- a command-line script prints its result */
 // Renders the 180 px apple-touch-icon.png: the white mark on the brand-blue tile (#1f6fe0 in both
-// themes). Run by hand after changing src/brand/geometry.mjs: `node scripts/icons.mjs`. No image
+// themes). Run by hand after changing src/look/brand/geometry.mjs: `node scripts/icons.mjs`. No image
 // library: the mark is a few shapes, so each pixel is sampled 4x4 times and the PNG is written with
-// node:zlib. The output is committed (src/brand/apple-touch-icon.png).
+// node:zlib. The output is committed (src/look/brand/apple-touch-icon.png).
 
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
-import { DISC, GRID, HORIZON, SLICES, SUN_BARS, TILE } from "../src/brand/geometry.mjs";
+import { DISC, GRID, HORIZON, SLICES, SUN_BARS, TILE } from "../src/look/brand/geometry.mjs";
 
 const SIZE = 180;
 const MARK = 0.62; // the mark fills this share of the tile, centred
@@ -88,7 +88,7 @@ function png(raw) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const out = resolve(fileURLToPath(import.meta.url), "../../src/brand/apple-touch-icon.png");
+  const out = resolve(fileURLToPath(import.meta.url), "../../src/look/brand/apple-touch-icon.png");
   writeFileSync(out, render());
   console.log(`wrote ${out} (tile ${TILE})`);
 }

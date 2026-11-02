@@ -3,8 +3,8 @@
 // keeps one size at every zoom and is never clipped by the canvas edge. Escape closes it.
 
 import { X } from "lucide-react";
-import { useDraft } from "../store/draft";
-import { useSelected } from "../store/view";
+import { useDraft } from "../data/store/draft";
+import { useSelected } from "../data/store/view";
 import { ControlBar } from "./ControlBar";
 import { catColour, kindInfo } from "./nodeKinds";
 import { setUpdating } from "./updating";

@@ -1,6 +1,6 @@
 // Run figures for tests.
 
-import type { NodeSummary } from "../api/types";
+import type { NodeSummary } from "../data/api/types";
 
 export function nodeSummary(over: Partial<NodeSummary> = {}): NodeSummary {
   return {

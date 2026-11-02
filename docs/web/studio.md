@@ -131,11 +131,28 @@ A wire dashed on the canvas, or marked "no traffic in the last run" in the Contr
 
 ## Look and feel
 
-- **Theme:** the sun, moon and monitor button at the right of the top bar cycles system, light and dark, from the system setting by default. Neither theme uses pure white or pure black: light is warm paper (ground `#ece7de`, sheets `#f8f5ef`, cards `#fffdf9`), dark is a soft charcoal with a trace of violet (ground `#17161c`, sheets `#201f27`, cards `#282731`), so a long session is easy on the eyes. Blue stays the only action and data colour, and each kind of component and each copy lane has its own hue (`--cat-*`, `--lane-*`) (`<meta name="color-scheme">` and CSS `light-dark()` in `ui/src/theme/tokens.css`). A saved choice wins: a tiny same-origin script (`boot-<hash>.js`, one of the bundle's entries) applies it to `<html data-theme>` before the first paint, so there is no flash; blocked storage just means the system setting. The colour tokens are checked for WCAG contrast (text 4.5:1, non-text 3:1) in both themes by a test that reads the CSS.
+- **Theme:** the sun, moon and monitor button at the right of the top bar cycles system, light and dark, from the system setting by default. Neither theme uses pure white or pure black: light is warm paper (ground `#ece7de`, sheets `#f8f5ef`, cards `#fffdf9`), dark is a soft charcoal with a trace of violet (ground `#17161c`, sheets `#201f27`, cards `#282731`), so a long session is easy on the eyes. Blue stays the only action and data colour, and each kind of component and each copy lane has its own hue (`--cat-*`, `--lane-*`) (`<meta name="color-scheme">` and CSS `light-dark()` in `ui/src/look/theme/tokens.css`). A saved choice wins: a tiny same-origin script (`boot-<hash>.js`, one of the bundle's entries) applies it to `<html data-theme>` before the first paint, so there is no flash; blocked storage just means the system setting. The colour tokens are checked for WCAG contrast (text 4.5:1, non-text 3:1) in both themes by a test that reads the CSS.
 - **Fonts:** Inter (text), JetBrains Mono (ids and traces) and a Noto Sans Tamil subset (the lockup), all OFL and served from the binary; nothing comes from a CDN. `ui/FONTS.md` lists files, licences and how the Tamil subset was cut.
-- **Icons:** the mark (`ui/src/brand/Mark.tsx`, numbers in `geometry.mjs`), a 16 px favicon master and a 180 px touch icon (`node scripts/icons.mjs`, no image library).
+- **Icons:** the mark (`ui/src/look/brand/Mark.tsx`, numbers in `geometry.mjs`), a 16 px favicon master and a 180 px touch icon (`node scripts/icons.mjs`, no image library).
 - **Layout:** the canvas is the page: it fills the window with grid lines, and the top bar and key figures, the palette, the details rail, the dock and the charts float over it as sheets. At 1280 px and wider the palette is a list; from 768 to 1279 px it is an icon rail (each icon keeps its name); under 768 px the canvas is read-only: a list of the components, each with its state in words, and the reason. The top bar's three parts never overlap: the key figures wrap, the theme choice (system, light, dark as three buttons) stays at the right. Scrollbars are thin and compact everywhere.
 - **Bundle checks:** `pnpm size` also fails on any source map or `sourceMappingURL` in `ui-dist`; fonts and icons are always files (never `data:` URIs, which the CSP refuses).
+
+## Where the UI code lives
+
+`ui/src` is grouped by role. A file's folder says what it is for; a test sits beside the file it tests.
+
+| Folder      | What is in it                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------- |
+| `canvas/`   | The system drawn: component cards, wires, the control dock, the view and its keys                 |
+| `data/`     | Talking to the server (`api/`) and the state the page keeps (`store/`: draft, run loop, history)  |
+| `panels/`   | The floating work areas: the details rail (`details/`), the traffic builder, the charts band      |
+| `shell/`    | The frame around the canvas: layout and responsive modes, the top cards, notices (toasts)         |
+| `overlays/` | Things that open over the page: first-run welcome and tour, command palette, glossary, menu, help |
+| `look/`     | How it looks: the brand mark and loader, theme tokens, fonts                                      |
+| `kit/`      | Small shared parts: the slider and tabs, and the boundary for lazy chunks                         |
+| `test/`     | Helpers the tests share (fake fetch, sample summaries)                                            |
+
+A new feature goes in the folder of its role; a new menu entry is one line in `overlays/menu/MenuPanel.tsx`.
 
 ## Size budget
 

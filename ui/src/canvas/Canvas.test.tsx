@@ -1,9 +1,9 @@
 import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView } from "../api/types";
+import type { DraftView } from "../data/api/types";
 import { mockFetch } from "../test/fetch";
-import { useDraft } from "../store/draft";
+import { useDraft } from "../data/store/draft";
 import { Canvas } from "./Canvas";
 import { KIND_MIME, Palette } from "./Palette";
 
