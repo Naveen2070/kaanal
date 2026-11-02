@@ -61,6 +61,30 @@ export function freeSpot(at: [number, number], taken: [number, number][]): [numb
   return p;
 }
 
+/**
+ * The first free card slot in the visible area, reading left to right and then down, so a new card
+ * lands where it can be seen and clicked and an old one is never pushed under a panel. Null when
+ * every slot in view is taken (the caller falls back to `freeSpot`).
+ */
+export function freeSlotIn(
+  region: { left: number; top: number; width: number; height: number },
+  taken: [number, number][],
+): [number, number] | null {
+  const cols = Math.max(1, Math.floor(region.width / SLOT_W));
+  const rows = Math.max(1, Math.floor(region.height / SLOT_H));
+  const near = (p: [number, number]) =>
+    taken.some((t) => Math.abs(t[0] - p[0]) < SLOT_W && Math.abs(t[1] - p[1]) < SLOT_H);
+  const padX = (region.width - cols * SLOT_W) / 2;
+  const padY = (region.height - rows * SLOT_H) / 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const p: [number, number] = [region.left + padX + c * SLOT_W, region.top + padY + r * SLOT_H];
+      if (!near(p)) return p;
+    }
+  }
+  return null;
+}
+
 /** True when `box` (screen coordinates) lies wholly in the visible area. */
 export function isVisible(box: Box, canvas: Box, pads: Pads): boolean {
   return (

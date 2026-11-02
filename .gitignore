@@ -8,6 +8,8 @@ CLAUDE.md
 .remember
 .kaanal/
 graft/
+.taste-skill/
+.ignore
 
 # Build output
 /target

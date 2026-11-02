@@ -5,6 +5,7 @@ import {
   controlRows,
   deleteOps,
   durationMs,
+  clearQueueLimit,
   queueOf,
   setQueue,
   setSlots,
@@ -68,7 +69,8 @@ test("slots_and_queue_are_read_from_either_form", () => {
   expect(slotsOf({ type: "d", pool: { size: 20 } })).toEqual({ value: 20, from: "pool" });
   expect(slotsOf({ type: "s" }).value).toBeNull();
   expect(queueOf({ type: "s", concurrency: { limit: 3, queue: 7 } })).toBe(7);
-  expect(queueOf({ type: "s", concurrency: 3 })).toBe(0);
+  expect(queueOf({ type: "s", concurrency: 3 })).toBe("unbounded"); // a bare slot count never turns anyone away for a full queue
+  expect(queueOf({ type: "s", concurrency: { limit: 3, queue: 0 } })).toBe(0); // 0 is nobody waits
   expect(queueOf({ type: "s" })).toBeNull();
 });
 
@@ -177,4 +179,13 @@ test("slots_maps_to_concurrency_limit_or_pool_size", () => {
 
 test("an_unknown_kind_gets_no_time_row_rather_than_a_guess", () => {
   expect(ids("mystery")).toEqual(["slots", "copies"]);
+});
+
+test("clear_queue_limit_turns_the_long_form_back_into_a_bare_slot_count", () => {
+  const ops = clearQueueLimit("s", { type: "service", concurrency: { limit: 3, queue: 7 } });
+  expect(ops).toHaveLength(1);
+  expect(ops[0]).toMatchObject({ op: "set", value: 3 });
+  // a bare count is already unbounded; a pool always has a queue
+  expect(clearQueueLimit("s", { type: "service", concurrency: 3 })).toEqual([]);
+  expect(clearQueueLimit("d", { type: "database", pool: { size: 5, queue: 2 } })).toEqual([]);
 });

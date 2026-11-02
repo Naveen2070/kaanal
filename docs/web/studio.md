@@ -109,6 +109,26 @@ This page is not the embedded bundle: it has no CSP, and it is served by Vite ra
 - **Auto re-run:** every edit of the system, after a 600 ms pause, runs the simulator on the draft (never Apply). One run at a time; a busy server is waited out; a result from an older draft is thrown away; a draft that does not build keeps the last numbers dimmed with the reason. Values are checked before they are sent (whole numbers, ranges the loader accepts), and an edit that still leaves the draft unparseable is undone with the reason shown, so the canvas never goes blank. The **Apply** and **Save** buttons are the only things that leave the draft: Apply makes the draft the running system (the run loop never does), and shows what it kept and dropped; Save writes `kaanal.yaml` (and the positions file), asks first when comments would be lost, and on a conflict with the file on disk writes nothing and offers to copy your draft. The top bar is in groups with a divider between them (the title, Run with its status line, undo and redo, then the draft state with Apply and Save), one sheet at the top left as wide as its content with the key figures under it; theme and help are a small sheet at the top right. The draft state reads `Draft: applied · saved` or `Draft: not applied · not saved`, separate from the run state beside it ("Running...", "Up to date"). The **key figures** row under the top bar reads, left to right: **Breaks first** (the largest figure: the component that gives out at the lowest load, "db at 1,300 req/s", red only when it is saturated at the current load, "nothing saturates" in grey otherwise), **Offered load**, **System p99**, **Goodput**, **Errors** and **Dropped**. Offered load is a typed box and a logarithmic slider (10 to 15,000 requests per second; a number typed beyond the slider is accepted up to 1,000,000 and pins the thumb); it edits the first traffic profile's rate, commits when you let go of the slider or press Enter, puts the real value back when a typed one is refused, and goes through the same loop. A marker on the slider shows where the first component breaks. A figure with nothing behind it prints a grey dash, never zero.
 - **Wires:** a wire is an orthogonal line with rounded elbows and an arrowhead at the component it feeds. It carries one **lane per copy** of that component, each lane in that copy's colour, drawn as a pulse of dashes that moves toward the arrow, faster and heavier as that copy takes more of the load (the copy's own figure when the run has one, otherwise the node's load shared evenly). A halo in amber or red shows under the wire when the component it feeds runs hot. The lanes stand still with reduced motion. Select a wire (click it) to see a delete button on it, or press Delete or Backspace; the Controls tab also lists each wire leaving the selected component with its own delete button. Deleting a wire is an edit like any other and can be undone. The view fits once on load and never zooms in past 90%; a component added later only moves the view, and only when it would land behind a panel.
 
+### What can connect to what, and what a wire carries
+
+A wire points from the caller to what it calls. The Studio offers, and the loader accepts, only these (rule R1.24):
+
+| From                          | May call                                               |
+| ----------------------------- | ------------------------------------------------------ |
+| gateway                       | service, monolith, auth                                |
+| service, monolith             | service, monolith, database, cache, external API, auth |
+| auth                          | service, monolith, database, cache, external API       |
+| database, cache, external API | nothing (they are leaves)                              |
+
+The graph has no cycles, nothing calls the gateway, and a component calls another at most once per wire. Whether a wire is _allowed_ and whether it _carries traffic_ are different questions:
+
+- The gateway runs its own time, then each auth component it is wired to, then calls the service that owns the route. It must have a wire to that service.
+- **Auth is a check, not a forwarder.** The gateway's token check charges the auth component's own time only. Wires leaving auth are used by the login route alone (`POST /login` reads the user store, then any cache, service or external API behind it). Traffic to other routes never follows them.
+- A service runs its own time, then the services it calls, then its cache for reads, then its databases.
+- A request that fails at a step stops there: if auth rejects or fails it, the service is never called.
+
+A wire dashed on the canvas, or marked "no traffic in the last run" in the Controls tab, carried nothing in the last run: its source had requests and its target got none. That says nothing is wrong with the wire, only that the route the traffic took did not use it.
+
 ## Look and feel
 
 - **Theme:** the sun, moon and monitor button at the right of the top bar cycles system, light and dark, from the system setting by default. Neither theme uses pure white or pure black: light is warm paper (ground `#ece7de`, sheets `#f8f5ef`, cards `#fffdf9`), dark is a soft charcoal with a trace of violet (ground `#17161c`, sheets `#201f27`, cards `#282731`), so a long session is easy on the eyes. Blue stays the only action and data colour, and each kind of component and each copy lane has its own hue (`--cat-*`, `--lane-*`) (`<meta name="color-scheme">` and CSS `light-dark()` in `ui/src/theme/tokens.css`). A saved choice wins: a tiny same-origin script (`boot-<hash>.js`, one of the bundle's entries) applies it to `<html data-theme>` before the first paint, so there is no flash; blocked storage just means the system setting. The colour tokens are checked for WCAG contrast (text 4.5:1, non-text 3:1) in both themes by a test that reads the CSS.
@@ -121,10 +141,10 @@ This page is not the embedded bundle: it has no CSP, and it is served by Vite ra
 
 The bundle is part of every binary, and the first load is what a person waits for, so it has a budget that `pnpm size` (and CI) checks from the manifest. Lazy chunks (the Log and Results tabs, the charts band, the tour and the command palette) are not counted: they load when first used.
 
-| Part                                          | Budget | Measured |
-| --------------------------------------------- | ------ | -------- |
-| First-load JS + CSS (gzip, 1 kB = 1024 bytes) | 200 kB | 189 kB   |
-| First-load fonts (Latin text face, WOFF2)     | 60 kB  | 47 kB    |
+| Part                                               | Budget | Measured |
+| -------------------------------------------------- | ------ | -------- |
+| First-load JS + CSS (gzip, 1 kB = 1024 bytes)      | 350 kB | 202 kB   |
+| First-load fonts (Inter and JetBrains Mono, WOFF2) | 100 kB | 87 kB    |
 
 The numbers are guesses to revisit once measured on the redesigned UI.
 

@@ -56,11 +56,11 @@ test("a_blocked_run_says_so_in_the_status_line_and_the_reason_is_a_notice", asyn
   expect(screen.queryByText("no entry node")).toBeNull(); // the reason is a toast (toast/bind.ts)
 });
 
-test("topbar_has_one_h1_with_the_project_name", async () => {
+test("topbar_has_one_h1_with_the_product_name_and_the_project_as_its_scope", async () => {
   await show(300);
   const h1 = screen.getAllByRole("heading", { level: 1 });
   expect(h1).toHaveLength(1);
-  expect(h1[0]?.textContent).toBe("Kaanal Studio");
+  expect(h1[0]?.textContent?.trim()).toBe("Kaanal");
 });
 
 test("freshness_stamp_and_draft_state_are_separate_texts", async () => {
@@ -77,5 +77,5 @@ test("the_h1_names_the_project_folder_when_there_is_one", async () => {
   mockFetch([{ json: { ...view(300), project_name: "petstore" } }]);
   await useDraft.getState().load();
   render(<TopBar onRun={vi.fn()} />);
-  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("petstore");
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Kaanal / petstore");
 });

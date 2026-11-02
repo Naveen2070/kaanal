@@ -421,6 +421,7 @@ test("dragging_marks_the_meter_updating_until_the_run_starts", async () => {
   const ran = nodeSummary({ name: "app" });
   const feed = (dimmed: boolean, n = ran): StatsFeed => ({
     node: (name) => (name === "app" ? n : undefined),
+    nodes: [n],
     dimmed,
     peakVisits: 0,
   });
@@ -461,7 +462,12 @@ test("escape_in_a_typed_box_cancels_it_writes_nothing_and_asks_to_close", async 
 test("escape_does_not_clear_updating_while_an_edit_is_on_its_way", async () => {
   await loaded();
   const ran = nodeSummary({ name: "app" });
-  cardAndBar({ node: (n) => (n === "app" ? ran : undefined), dimmed: false, peakVisits: 0 });
+  cardAndBar({
+    node: (n) => (n === "app" ? ran : undefined),
+    nodes: [ran],
+    dimmed: false,
+    peakVisits: 0,
+  });
   fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
   fireEvent.keyUp(slider("Slots"), { key: "ArrowRight" }); // committed: the run is pending
   expect(screen.getByText("updating")).toBeTruthy();

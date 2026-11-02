@@ -158,7 +158,7 @@ export interface NodeSummary {
   /** Requests per second the whole mix can reach before this node saturates. */
   saturates_at_req_s: number | null;
   headroom: number | null;
-  /** Hop-duration percentiles as bucket upper bounds; null without visits. One in the overflow bucket reads 131072 ms (the next doubling): a floor, not an exact bound. */
+  /** Hop work-time percentiles (wait excluded), exact over every hop; null without visits. */
   p50_ms: number | null;
   p99_ms: number | null;
   series: Series;

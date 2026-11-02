@@ -43,6 +43,7 @@ export function App() {
   const nodes = latest?.summary?.nodes ?? [];
   const feed: StatsFeed = {
     node: (name) => nodes.find((n) => n.name === name),
+    nodes,
     dimmed,
     peakVisits: Math.max(0, ...nodes.map((n) => n.visits_per_s).filter(Number.isFinite)),
   };

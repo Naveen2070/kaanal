@@ -24,6 +24,7 @@ function card(feed: StatsFeed, cfg: Record<string, unknown> = config) {
 
 const feedOf = (n: ReturnType<typeof nodeSummary> | undefined, dimmed = false): StatsFeed => ({
   node: (name) => (name === "app" ? n : undefined),
+  nodes: n ? [n] : [],
   dimmed,
   peakVisits: n?.visits_per_s ?? 0,
 });

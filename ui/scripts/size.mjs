@@ -9,8 +9,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
-/** Guesses to revisit once measured (today 139 kB gzip with React Flow). */
-export const BUDGET = { jsCssGzipKb: 200, fontsKb: 60, firstLoadFonts: ["inter"] };
+/** Guesses to revisit once measured. JS+CSS raised from 200 to 350 kB on 2026-11-02 (RULES.md item 28); fonts 60 to 100 kB the same day for JetBrains Mono on figures (item 31). */
+export const BUDGET = { jsCssGzipKb: 350, fontsKb: 100, firstLoadFonts: ["inter", "jetbrains"] };
 
 const kb = (n) => n / 1024;
 

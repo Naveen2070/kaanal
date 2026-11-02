@@ -38,3 +38,27 @@ test("a_new_card_goes_to_free_space_and_an_empty_spot_stays_put", async () => {
 test("a_folded_rail_gives_its_room_back", () => {
   expect(padsFor("full", false).right).toBeLessThan(padsFor("full", true).right);
 });
+
+test("free_slot_in_fills_the_visible_area_left_to_right_then_down_and_says_when_full", async () => {
+  const { freeSlotIn } = await import("./viewport");
+  // room for 3 columns x 2 rows of cards
+  const region = { left: 0, top: 0, width: 800, height: 440 };
+  const first = freeSlotIn(region, [])!;
+  expect(first[0]).toBeGreaterThanOrEqual(0);
+  const second = freeSlotIn(region, [first])!;
+  expect(second[1]).toBe(first[1]); // same row, next column
+  expect(second[0]).toBeGreaterThan(first[0]);
+  // a full first row: the next card goes to the second row, still inside the area
+  const row = [first, second, freeSlotIn(region, [first, second])!];
+  const next = freeSlotIn(region, row)!;
+  expect(next[1]).toBeGreaterThan(first[1]);
+  expect(next[1] + 210).toBeLessThanOrEqual(region.top + region.height + 1);
+  // every slot taken: null, so the caller falls back
+  const all = [
+    ...row,
+    next,
+    freeSlotIn(region, [...row, next])!,
+    freeSlotIn(region, [...row, next, freeSlotIn(region, [...row, next])!])!,
+  ];
+  expect(freeSlotIn(region, all)).toBeNull();
+});

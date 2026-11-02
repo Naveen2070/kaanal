@@ -112,20 +112,22 @@ function StatsPill() {
     c.data > 0 && `${c.data} data`,
     c.external > 0 && `${c.external} external`,
   ].filter(Boolean);
+  // one short plain line, sentence case, never wrapped; the sorts of parts are in the tooltip
+  const line = [
+    `${c.components} ${c.components === 1 ? "component" : "components"}`,
+    `${c.connections} ${c.connections === 1 ? "connection" : "connections"}`,
+    windowS ? `${Number(windowS.toPrecision(3))} s simulated` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const sorts = parts.length > 0 ? ` Of the components: ${parts.join(", ")}.` : "";
   return (
     <p
       data-testid="system-stats"
-      title="What the draft holds. The time is how much simulated time the last run covered."
-      className="m-0 flex items-center gap-3 text-[11px] font-medium tracking-wide text-muted uppercase tabular-nums"
+      title={`What the draft holds.${sorts} The time is how much simulated time the last run covered.`}
+      className="m-0 text-xs whitespace-nowrap text-muted tabular-nums"
     >
-      <span>
-        {c.components} {c.components === 1 ? "component" : "components"}
-      </span>
-      {parts.length > 0 ? <span>{parts.join(", ")}</span> : null}
-      <span>
-        {c.connections} {c.connections === 1 ? "connection" : "connections"}
-      </span>
-      {windowS ? <span>{Number(windowS.toPrecision(3))}s</span> : null}
+      {line}
     </p>
   );
 }

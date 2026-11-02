@@ -64,7 +64,12 @@ async function show(
   const calls = { onDeleted: vi.fn(), onRenamed: vi.fn(), onChaos: vi.fn() };
   render(
     <FeedContext.Provider
-      value={{ node: (n) => (n === name ? summary : undefined), dimmed: false, peakVisits: 0 }}
+      value={{
+        node: (n) => (n === name ? summary : undefined),
+        nodes: [],
+        dimmed: false,
+        peakVisits: 0,
+      }}
     >
       <Controls name={name} config={cfg} edges={edges} {...calls} />
     </FeedContext.Provider>,
@@ -220,7 +225,7 @@ test("a_value_the_loader_would_reject_is_never_sent_and_the_box_shows_the_real_v
     ["Copies", "1.5", "2"],
     ["Timeout (ms)", "400000", ""],
     ["Service time (ms)", "-1", "98"],
-    ["Queue limit", "-3", "0"],
+    ["Queue limit", "-3", ""], // the node has a bare slot count: no limit, an empty box
   ];
   for (const [label, typed, real] of cases) {
     const input = screen.getByLabelText(label) as HTMLInputElement;
@@ -317,7 +322,9 @@ test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
   await useDraft.getState().load();
   const calls = { onDeleted: vi.fn(), onRenamed: vi.fn(), onChaos: vi.fn() };
   render(
-    <FeedContext.Provider value={{ node: () => undefined, dimmed: false, peakVisits: 0 }}>
+    <FeedContext.Provider
+      value={{ node: () => undefined, nodes: [], dimmed: false, peakVisits: 0 }}
+    >
       <Controls name="gw" config={gwCfg} edges={edges} {...calls} />
     </FeedContext.Provider>,
   );

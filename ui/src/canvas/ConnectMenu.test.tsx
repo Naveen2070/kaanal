@@ -88,3 +88,21 @@ test("a_component_with_no_outgoing_wires_lists_none", () => {
   render(<ConnectMenu from="api" />);
   expect(screen.queryByRole("list", { name: "Wires from api" })).toBeNull();
 });
+
+test("wiring_note_explains_auth_wires_and_a_gateway_that_forwards_nowhere", async () => {
+  const { wiringNote } = await import("./ConnectMenu");
+  const nodes = { gw: { type: "gateway" }, auth: { type: "auth" }, api: { type: "service" } };
+  // auth: always the note about the login route
+  expect(wiringNote("auth", nodes, [])).toContain("login route");
+  // a gateway wired only to auth stops there; to a service it does not
+  expect(wiringNote("gw", nodes, [{ from: "gw", to: "auth" }])).toContain("stop at the gateway");
+  expect(
+    wiringNote("gw", nodes, [
+      { from: "gw", to: "auth" },
+      { from: "gw", to: "api" },
+    ]),
+  ).toBeNull();
+  // nothing wired yet, or any other kind: no note
+  expect(wiringNote("gw", nodes, [])).toBeNull();
+  expect(wiringNote("api", nodes, [])).toBeNull();
+});

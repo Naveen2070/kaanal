@@ -31,7 +31,15 @@ export function TopBar({ onRun }: { onRun: () => void }) {
       <div className="flex items-center justify-between gap-2">
         <h1 className="m-0 flex min-w-0 items-center gap-2 text-base font-semibold">
           <Mark size={24} className="shrink-0 text-accent" />
-          <span className="truncate">{view?.project_name ?? "Kaanal Studio"}</span>
+          <span className="shrink-0">Kaanal </span>
+          {view?.project_name ? (
+            <span
+              className="truncate font-normal text-muted"
+              title="The project this Studio is editing"
+            >
+              / {view.project_name}
+            </span>
+          ) : null}
         </h1>
         <UndoRedo />
       </div>

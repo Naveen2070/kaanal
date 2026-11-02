@@ -41,13 +41,25 @@ export function setSlots(name: string, config: NodeDoc, n: number): Op[] {
   return [put(["nodes", name, "concurrency"], false, n)];
 }
 
-/** The longest queue allowed before a request is turned away; null when the config has no slots. */
-export function queueOf(config: NodeDoc): number | null {
+/**
+ * The longest queue allowed before a request is turned away; "unbounded" for a bare slot count
+ * (no limit, the engine's `queue: None`); null when the config has no slots. 0 is a real value:
+ * nobody waits, a request is turned away as soon as every slot is busy.
+ */
+export function queueOf(config: NodeDoc): number | "unbounded" | null {
   if (slotsOf(config).value === null) return null;
   const c = config.concurrency;
   if (isObject(c)) return typeof c.queue === "number" ? c.queue : 0;
   if (isObject(config.pool)) return typeof config.pool.queue === "number" ? config.pool.queue : 0;
-  return 0;
+  return "unbounded";
+}
+
+/** A queue set back to "no limit": the bare slot count. Only for `concurrency`; a pool always has a queue. */
+export function clearQueueLimit(name: string, config: NodeDoc): Op[] {
+  const c = config.concurrency;
+  return isObject(c) && typeof c.limit === "number"
+    ? [put(["nodes", name, "concurrency"], true, c.limit)]
+    : [];
 }
 
 export function setQueue(name: string, config: NodeDoc, n: number): Op[] {

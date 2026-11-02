@@ -66,6 +66,7 @@ const feed = (busyTo: number, replicas = [rep(0, 100)], visits = 100): StatsFeed
       : name === "app"
         ? nodeSummary({ name: "app", utilization: busyTo, visits_per_s: visits, replicas })
         : undefined,
+  nodes: [],
   dimmed: false,
   peakVisits: 100,
 });

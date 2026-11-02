@@ -8,28 +8,28 @@
   color-scheme: light dark;
 
   /*
-   * Surfaces. Neither theme uses pure white or pure black: light is warm paper, dark is a soft
-   * charcoal with a trace of violet, so long sessions are easy on the eyes. The canvas is the
+   * Surfaces. Neither theme uses pure white or pure black: light is warm paper, dark is a true
+   * neutral charcoal (no tint), so long sessions are easy on the eyes. The canvas is the
    * ground; panels float on it as sheets; a card is a step lighter than a sheet so it reads as an
    * object on the canvas and not as another panel.
    */
-  --ground: light-dark(#ece7de, #17161c);
-  --sheet: light-dark(#f8f5ef, #201f27);
-  --card: light-dark(#fffdf9, #282731);
-  --well: light-dark(#f0ebe3, #1a1920);
-  --raised: light-dark(#f3efe8, #2a2933);
-  --active: light-dark(#e6dfd3, #33313d);
-  --grid: light-dark(#d9d2c6, #2a2933);
+  --ground: light-dark(#ece7de, #161616);
+  --sheet: light-dark(#f8f5ef, #1f1f1f);
+  --card: light-dark(#fffdf9, #282828);
+  --well: light-dark(#f0ebe3, #1a1a1a);
+  --raised: light-dark(#f3efe8, #2a2a2a);
+  --active: light-dark(#e6dfd3, #343434);
+  --grid: light-dark(#d9d2c6, #2a2a2a);
 
   /* lines: panel border and row rule are decoration; --control is an input edge and needs 3:1 */
-  --border: light-dark(#cbc2b2, #34323f);
-  --rule: light-dark(#e3ddd1, #2b2a34);
-  --control: light-dark(#80786b, #7e7b8c);
+  --border: light-dark(#cbc2b2, #363636);
+  --rule: light-dark(#e3ddd1, #2c2c2c);
+  --control: light-dark(#80786b, #858585);
 
   /* text; --faint is placeholder text and still reaches 4.5:1 */
-  --text: light-dark(#211e19, #ece9f3);
-  --muted: light-dark(#554f46, #aca8b9);
-  --faint: light-dark(#5c564c, #a29eae);
+  --text: light-dark(#211e19, #ececec);
+  --muted: light-dark(#554f46, #adadad);
+  --faint: light-dark(#5c564c, #a3a3a3);
 
   /* blue is the one action colour; status colours are for data only */
   --accent: light-dark(#2d5cc4, #7ba3ff);
@@ -41,9 +41,9 @@
   --bad-fill: light-dark(#cf3342, #e85b74);
 
   /* the primary button and the tooltip invert in dark */
-  --primary: light-dark(#211e19, #ece9f3);
-  --on-primary: light-dark(#f8f5ef, #17161c);
-  --tip: light-dark(#211e19, #34323f);
+  --primary: light-dark(#211e19, #ececec);
+  --on-primary: light-dark(#f8f5ef, #161616);
+  --tip: light-dark(#211e19, #363636);
   --on-tip: #ffffff;
 
   /* one hue per kind of component: its icon, its card edge, its palette entry */

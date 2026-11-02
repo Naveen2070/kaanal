@@ -127,8 +127,9 @@ describe("design tokens", () => {
     }
   });
 
-  it("uses the soft palettes: warm paper in light, violet-tinted charcoal in dark", () => {
-    // developer, 2026-11-01: both themes were too stark (pure white sheets, pure black ground)
+  it("uses the soft palettes: warm paper in light, neutral charcoal in dark", () => {
+    // developer, 2026-11-01: both themes were too stark (pure white sheets, pure black ground);
+    // 2026-11-02: the dark ground lost its violet tint (the taste skill asks for a true neutral dark)
     expect([get("ground", 0), get("sheet", 0), get("card", 0), get("well", 0)]).toEqual([
       "#ece7de",
       "#f8f5ef",
@@ -136,10 +137,10 @@ describe("design tokens", () => {
       "#f0ebe3",
     ]);
     expect([get("ground", 1), get("sheet", 1), get("card", 1), get("well", 1)]).toEqual([
-      "#17161c",
-      "#201f27",
-      "#282731",
-      "#1a1920",
+      "#161616",
+      "#1f1f1f",
+      "#282828",
+      "#1a1a1a",
     ]);
     // neither theme uses pure white or pure black anywhere on a surface
     for (const name of ["ground", "sheet", "card", "well", "raised", "active"]) {

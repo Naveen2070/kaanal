@@ -32,7 +32,7 @@ import { removeWires } from "./wires";
 import { autoLayout, decodeId, encodeId } from "./edges";
 import { notify } from "../toast/toasts";
 import { useZoom } from "./zoom";
-import { fitPadding, isVisible, padsFor, visibleCentre } from "./viewport";
+import { fitPadding, freeSlotIn, isVisible, padsFor, visibleCentre } from "./viewport";
 
 /** Arrow-key moves are saved this long after the last press. */
 const NUDGE_SAVE_MS = 300;
@@ -139,11 +139,23 @@ function Flow() {
       // the card's top-left, so its middle is the middle of the visible area
       return [p.x - CARD_W / 2, p.y - CARD_H / 2];
     };
+    canvasBridge.region = () => {
+      const r = document.querySelector(".react-flow")?.getBoundingClientRect();
+      if (!r) return undefined;
+      // screen to flow by the viewport itself, so an empty canvas gives the same answer as a full one
+      const vp = getViewport();
+      const left = (r.left + pads.left - r.left - vp.x) / vp.zoom;
+      const top = (r.top + pads.top - r.top - vp.y) / vp.zoom;
+      const width = (r.width - pads.left - pads.right) / vp.zoom;
+      const height = (r.height - pads.top - pads.bottom) / vp.zoom;
+      return { left, top, width, height };
+    };
     canvasBridge.fit = () => void fitView({ ...fitOptions, duration: still ? 0 : 200 });
     canvasBridge.zoomIn = () => void zoomIn({ duration: still ? 0 : 150 });
     canvasBridge.zoomOut = () => void zoomOut({ duration: still ? 0 : 150 });
     return () => {
       canvasBridge.centre = () => undefined;
+      canvasBridge.region = () => undefined;
       canvasBridge.fit = () => {};
       canvasBridge.zoomIn = () => {};
       canvasBridge.zoomOut = () => {};
@@ -340,7 +352,10 @@ function Flow() {
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
             <button
               type="button"
-              onClick={() => void addNode("gateway", [0, 0])}
+              onClick={() => {
+                const r = canvasBridge.region();
+                void addNode("gateway", (r && freeSlotIn(r, [])) || [0, 0]);
+              }}
               className="pointer-events-auto rounded-2xl border border-dashed border-control px-6 py-4 text-sm text-muted hover:bg-raised"
             >
               Start with a gateway

@@ -19,6 +19,7 @@ import {
   durationMs,
   hasProc,
   LIMITS,
+  clearQueueLimit,
   queueOf,
   setDuration,
   setQueue,
@@ -179,13 +180,23 @@ export function Controls({
           <NumberField
             label="Queue limit"
             help="queue"
-            hint="Requests that may wait for a slot. Past it they are turned away. 0 means no limit."
-            value={queue}
+            hint="Requests that may wait for a slot. Past it they are turned away. Empty means no limit; 0 means nobody waits."
+            value={queue === "unbounded" ? null : queue}
+            placeholder="No limit"
             min={LIMITS.queue.min}
             max={LIMITS.queue.max}
             integer
             onCommit={(n) => patch(setQueue(name, config, n))}
           />
+        ) : null}
+        {typeof queue === "number" && clearQueueLimit(name, config).length > 0 ? (
+          <button
+            type="button"
+            onClick={() => void patch(clearQueueLimit(name, config))}
+            className="mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            Remove the queue limit
+          </button>
         ) : null}
       </Section>
 

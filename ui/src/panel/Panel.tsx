@@ -10,6 +10,7 @@ import { Controls } from "./Controls";
 import { LogTab } from "./LogTab.lazy";
 import { Rail } from "./Rail";
 import { Results } from "./Results.lazy";
+import { SystemSummary } from "./SystemSummary";
 import { LogSkeleton, ResultsSkeleton } from "./Skeletons";
 
 export function Panel() {
@@ -35,7 +36,7 @@ export function Panel() {
               onChaos={runNow}
             />
           ) : (
-            <p className="p-3 text-sm text-muted">Select a component to see and change it.</p>
+            <SystemSummary />
           ),
         log: (
           <LazyBoundary fallback={<LogSkeleton />}>

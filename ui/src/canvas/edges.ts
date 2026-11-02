@@ -118,3 +118,16 @@ export function edgeSpeedS(load: number): number | null {
   const l = clamp01(load);
   return l > 0 ? Math.round((2 - 1.4 * l) * 100) / 100 : null;
 }
+
+/**
+ * True when a wire carried nothing in the run: its source had traffic and its target got none. A
+ * statement about the run, not the rules: a wire can be allowed (R1.24) and still unused by the
+ * route the traffic hit (the gateway's token check runs the auth node's own time only, so wires
+ * leaving auth carry load for the login route alone). Needs a run: false without one.
+ */
+export function carriedNothing(
+  from: { visits_per_s: number } | undefined,
+  to: { visits_per_s: number } | undefined,
+): boolean {
+  return from !== undefined && to !== undefined && from.visits_per_s > 0 && to.visits_per_s === 0;
+}

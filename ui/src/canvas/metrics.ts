@@ -26,8 +26,12 @@ export interface Figures {
   peakWaiting: number;
   /** Requests per second reaching the node; null without a run. */
   arrivingPerS: number | null;
-  /** The node's p99 hop time, as a bucket upper bound: "slowest requests under N ms". */
+  /** The node's p99 hop work time, exact over the run: "slowest work under N ms". */
   slowestUnderMs: number | null;
+  /** Requests turned away here (rate limit or full queue) in the whole run. */
+  turnedAway: number;
+  /** Turned away per second, scaled from the arrival rate; null when nothing got in to scale by. */
+  turnedAwayPerS: number | null;
   /** One line for the card, the details panel and anything else that says it in words. */
   sentence: string;
 }
@@ -63,6 +67,8 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
       peakWaiting: 0,
       arrivingPerS: null,
       slowestUnderMs: null,
+      turnedAway: 0,
+      turnedAwayPerS: null,
       sentence: "No run yet",
     };
   }
@@ -70,6 +76,8 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
   const req = node.saturates_at_req_s;
   const peakWaiting = finiteOrNull(node.max_queue) ?? 0;
   const arrivingPerS = finiteOrNull(node.visits_per_s);
+  const turnedAway = node.limited + node.overflowed;
+  const visits = node.replicas.reduce((n, r) => n + r.visits, 0);
   return {
     busy: node.utilization,
     peak: busy.length > 0 ? Math.max(...busy) : null,
@@ -82,6 +90,11 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
     peakWaiting,
     arrivingPerS,
     slowestUnderMs: finiteOrNull(node.p99_ms),
+    turnedAway,
+    turnedAwayPerS:
+      turnedAway > 0 && visits > 0 && arrivingPerS !== null
+        ? (arrivingPerS * turnedAway) / visits
+        : null,
     sentence: sentenceOf(node, peakWaiting, arrivingPerS),
   };
 }
@@ -113,7 +126,12 @@ function sentenceOf(node: NodeSummary, peakWaiting: number, arriving: number | n
   if (node.utilization === null) return "No slot limit · never saturates";
   const waiting =
     peakWaiting > 0 ? `up to ${peakWaiting.toLocaleString("en-US")} waiting` : "nothing waiting";
-  if (node.saturated) return `Saturated · ${waiting}`;
+  const turning = node.limited + node.overflowed > 0;
+  // turned away while the slots are not all taken: the queue is what is full, so say that
+  if (turning && node.utilization < 0.9) {
+    return `${percent(node.utilization)} busy · turning requests away`;
+  }
+  if (node.saturated) return `Saturated · ${waiting}${turning ? " · turning requests away" : ""}`;
   if (arriving === 0 && node.utilization === 0) return "Idle";
   return `${percent(node.utilization)} busy · ${waiting}`;
 }
@@ -206,4 +224,25 @@ export function plainSentence(node: NodeSummary | undefined): string {
   const handles = cap !== null && cap > 0 ? `Handles up to ${rate(cap)} requests a second. ` : "";
   const getsText = gets !== null ? `It gets ${rate(gets)}, so it is ` : "It is ";
   return `${handles}${getsText}${state}${tail}.`;
+}
+
+/**
+ * The components nearest to giving out, for the empty details panel: by their peak busy share over
+ * the run, highest first, at most `n`. A component with no slot limit has no peak and is left out;
+ * ties keep the run's order.
+ */
+export function closestToBreaking(
+  nodes: NodeSummary[],
+  n = 3,
+): { name: string; peak: number; saturatesAtReqS: number | null }[] {
+  return nodes
+    .map((node, i) => {
+      const busy = node.series.busy.filter(Number.isFinite);
+      const peak = busy.length > 0 ? Math.max(...busy) : node.utilization;
+      return { i, name: node.name, peak, saturatesAtReqS: finiteOrNull(node.saturates_at_req_s) };
+    })
+    .filter((r): r is typeof r & { peak: number } => r.peak !== null)
+    .sort((a, b) => b.peak - a.peak || a.i - b.i)
+    .slice(0, n)
+    .map(({ name, peak, saturatesAtReqS }) => ({ name, peak, saturatesAtReqS }));
 }

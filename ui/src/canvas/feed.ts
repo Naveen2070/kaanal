@@ -7,13 +7,20 @@ import type { NodeSummary } from "../api/types";
 export interface StatsFeed {
   /** The run figures of the node called `name`, or undefined when there is no run or no such node. */
   node(name: string): NodeSummary | undefined;
+  /** Every node of the run, in the run's order; empty with no run. */
+  nodes: NodeSummary[];
   /** True while the figures are older than the draft (a run is in flight or was blocked). */
   dimmed: boolean;
   /** The highest requests per second reaching any node: what an edge's load is measured against. */
   peakVisits: number;
 }
 
-export const EMPTY_FEED: StatsFeed = { node: () => undefined, dimmed: false, peakVisits: 0 };
+export const EMPTY_FEED: StatsFeed = {
+  node: () => undefined,
+  nodes: [],
+  dimmed: false,
+  peakVisits: 0,
+};
 
 export const FeedContext = createContext<StatsFeed>(EMPTY_FEED);
 

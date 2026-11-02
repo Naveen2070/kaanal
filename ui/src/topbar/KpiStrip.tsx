@@ -57,7 +57,7 @@ function Cell({
         {label}
         {help ? <HelpPopover id={help} label={label} /> : null}
       </dt>
-      <dd title={title} className={`m-0 tabular-nums ${className}`}>
+      <dd title={title} className={`m-0 font-mono tabular-nums ${className}`}>
         {children}
       </dd>
     </div>

@@ -15,6 +15,7 @@ export function NumberField({
   max,
   step,
   integer = false,
+  placeholder,
 }: {
   label: string;
   /** The jargon behind the label, as a help popover. */
@@ -27,6 +28,8 @@ export function NumberField({
   max?: number;
   step?: number | "any";
   integer?: boolean;
+  /** Shown in an empty box (a setting with no value, such as "No limit"). */
+  placeholder?: string;
 }) {
   const id = useId();
   const commit = (input: HTMLInputElement) => {
@@ -62,6 +65,7 @@ export function NumberField({
         max={max}
         step={integer ? 1 : step}
         defaultValue={value ?? ""}
+        placeholder={placeholder}
         aria-describedby={`${id}-hint`}
         onBlur={(e) => commit(e.currentTarget)}
         onKeyDown={(e) => {

@@ -76,11 +76,26 @@ export function NodeCard({ data, selected }: NodeProps) {
           <Meter ratio={f.busy} label={f.sentence} stale={feed.dimmed || (pending && f.hasRun)} />
           <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-2 gap-y-0.5 text-xs">
             <dt className="text-muted">Arriving</dt>
-            <dd className="m-0 text-right tabular-nums">{perSecond(f.arrivingPerS)}</dd>
+            <dd className="m-0 text-right font-mono tabular-nums">{perSecond(f.arrivingPerS)}</dd>
+            {f.turnedAway > 0 ? (
+              <>
+                <dt
+                  className="text-muted"
+                  title="Requests refused because every slot and queue place was taken"
+                >
+                  Turned away
+                </dt>
+                <dd className="m-0 text-right font-mono tabular-nums">
+                  {f.turnedAwayPerS === null
+                    ? f.turnedAway.toLocaleString("en-US")
+                    : perSecond(f.turnedAwayPerS)}
+                </dd>
+              </>
+            ) : null}
             <dt className="text-muted" title="Time spent working here, not waiting in line">
               Slowest work under
             </dt>
-            <dd className="m-0 text-right tabular-nums">
+            <dd className="m-0 text-right font-mono tabular-nums">
               {f.slowestUnderMs === null ? "–" : fmtMs(f.slowestUnderMs)}
             </dd>
           </dl>

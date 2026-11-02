@@ -15,7 +15,7 @@ import {
 import { X } from "lucide-react";
 import { usePrefersReducedMotion } from "../first-run/motion";
 import { useDraft } from "../store/draft";
-import { edgeSpeedS, edgeTone } from "./edges";
+import { carriedNothing, edgeSpeedS, edgeTone } from "./edges";
 import { useFeed } from "./feed";
 import { laneColour, laneCount, laneLoads, laneOffsets } from "./lanes";
 import { replicasOf } from "./metrics";
@@ -41,6 +41,7 @@ export function LoadEdge({
   const copies = useDraft((s) => (to === undefined ? 1 : replicasOf(s.view?.doc?.nodes?.[to])));
   const a = from === undefined ? undefined : feed.node(from);
   const b = to === undefined ? undefined : feed.node(to);
+  const idle = carriedNothing(a, b);
   const n = laneCount(copies);
   const loads = laneLoads(n, b, feed.peakVisits);
   const offsets = laneOffsets(n);
@@ -116,8 +117,10 @@ export function LoadEdge({
               d={d}
               fill="none"
               stroke={laneColour(k)}
-              strokeOpacity={0.35}
+              strokeOpacity={idle ? 0.25 : 0.35}
               strokeWidth={width}
+              // a wire that carried nothing in the run is dashed, so it reads as "not used here"
+              strokeDasharray={idle ? "3 6" : undefined}
             />
             <path
               d={d}

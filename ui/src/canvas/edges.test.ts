@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import type { Doc } from "../api/types";
 import {
+  carriedNothing,
   autoLayout,
   connectOps,
   decodeId,
@@ -127,4 +128,14 @@ test("the_flow_speeds_up_with_load_and_is_off_without_traffic", () => {
   expect(edgeSpeedS(0)).toBeNull();
   expect(edgeSpeedS(1)!).toBeLessThan(edgeSpeedS(0.1)!);
   expect(edgeSpeedS(Number.NaN)).toBeNull();
+});
+
+test("a_wire_carried_nothing_when_the_source_had_traffic_and_the_target_none", () => {
+  const live = { visits_per_s: 99 };
+  const dead = { visits_per_s: 0 };
+  expect(carriedNothing(live, dead)).toBe(true);
+  expect(carriedNothing(live, live)).toBe(false);
+  expect(carriedNothing(dead, dead)).toBe(false); // nothing flowed in, so nothing is learned
+  expect(carriedNothing(undefined, dead)).toBe(false); // no run
+  expect(carriedNothing(live, undefined)).toBe(false);
 });

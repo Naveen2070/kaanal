@@ -8,8 +8,33 @@ import { Unplug } from "lucide-react";
 import type { EdgeDoc } from "../api/types";
 import { useDraft } from "../store/draft";
 import { notify } from "../toast/toasts";
+import { carriedNothing } from "./edges";
+import { useFeed } from "./feed";
 import { mayCall } from "./rules";
 import { removeWires } from "./wires";
+
+/**
+ * A line of plain words for a component whose wires are easy to misread: the gateway that stops
+ * at itself, and auth, whose own wires only the login route uses. Null when there is nothing to add.
+ */
+export function wiringNote(
+  from: string,
+  nodes: Record<string, { type?: string }>,
+  edges: EdgeDoc[],
+): string | null {
+  const kind = nodes[from]?.type;
+  if (kind === "auth") {
+    return "Wires from auth run only for the login route (POST /login). For other requests auth is just the gateway's check, and the request goes on from the gateway.";
+  }
+  if (kind === "gateway") {
+    const out = edges.filter((e) => String(e.from) === from).map((e) => nodes[String(e.to)]?.type);
+    const forwards = out.some((k) => k === "service" || k === "monolith");
+    if (out.length > 0 && !forwards) {
+      return "Requests stop at the gateway: wire it to a service or monolith to pass them on.";
+    }
+  }
+  return null;
+}
 
 /** The names `from` could still call: not itself, not one it calls, and only kinds it may call. */
 export function targetsFor(
@@ -26,7 +51,9 @@ export function targetsFor(
 export function ConnectMenu({ from }: { from: string }) {
   const doc = useDraft((s) => s.view?.doc);
   const connect = useDraft((s) => s.connect);
+  const feed = useFeed();
   const targets = targetsFor(from, doc?.nodes ?? {}, doc?.edges ?? []);
+  const note = wiringNote(from, doc?.nodes ?? {}, doc?.edges ?? []);
   /** The wires leaving this component, with their place in `edges` (which is what a delete needs). */
   const wires = (doc?.edges ?? [])
     .map((e, i) => ({ to: String(e.to), from: String(e.from), i }))
@@ -59,12 +86,16 @@ export function ConnectMenu({ from }: { from: string }) {
           ))}
         </ul>
       )}
+      {note ? <p className="mt-2 text-xs text-muted">{note}</p> : null}
       {wires.length > 0 ? (
         <ul aria-label={`Wires from ${from}`} className="mt-2 flex flex-col gap-1">
           {wires.map((w) => (
             <li key={w.i} className="flex items-center gap-2 text-xs">
               <span className="min-w-0 flex-1 truncate">
                 {from} to {w.to}
+                {carriedNothing(feed.node(from), feed.node(w.to)) ? (
+                  <span className="text-muted"> · no traffic in the last run</span>
+                ) : null}
               </span>
               <button
                 type="button"
