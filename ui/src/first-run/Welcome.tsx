@@ -7,9 +7,9 @@ import { useDraft } from "../store/draft";
 import { useFirstRun } from "./store";
 
 const STEPS = [
-  ["Draw", "Drag components onto the canvas and connect them."],
+  ["Add", "Drag components onto the canvas, or click them in the list."],
+  ["Connect", "Wire them together so requests flow. Every change re-runs the simulation."],
   ["Break", "Slow something down, take it out, and see what gives first."],
-  ["Run", "Every change re-runs the simulation on your draft."],
   ["Save", "Keep the system as kaanal.yaml when you are happy with it."],
 ] as const;
 

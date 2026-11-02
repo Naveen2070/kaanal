@@ -202,6 +202,8 @@ function Flow() {
         return { x: p[0], y: p[1] };
       })(),
       selected: name === selected,
+      // one tab stop per card: its name button (the wrapper would be a second one)
+      focusable: false,
       measured: measured[name],
       data: { name, kind: n.type, config: n } satisfies CardData,
     }));
@@ -333,6 +335,18 @@ function Flow() {
             style={{ opacity: 0.9 }}
           />
         </ReactFlow>
+        {doc && Object.keys(doc.nodes ?? {}).length === 0 ? (
+          // an empty draft: a ghost card pointing at the first step (review C12)
+          <div className="pointer-events-none absolute inset-0 grid place-items-center">
+            <button
+              type="button"
+              onClick={() => void addNode("gateway", [0, 0])}
+              className="pointer-events-auto rounded-2xl border border-dashed border-control px-6 py-4 text-sm text-muted hover:bg-raised"
+            >
+              Start with a gateway
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

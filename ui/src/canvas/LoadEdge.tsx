@@ -75,8 +75,8 @@ export function LoadEdge({
             viewBox="0 0 10 10"
             refX="9"
             refY="5"
-            markerWidth="9"
-            markerHeight="9"
+            markerWidth="12"
+            markerHeight="12"
             markerUnits="userSpaceOnUse"
             orient="auto"
           >

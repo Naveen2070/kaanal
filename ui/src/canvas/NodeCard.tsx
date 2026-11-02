@@ -48,7 +48,9 @@ export function NodeCard({ data, selected }: NodeProps) {
     <fieldset
       aria-label={`${name}, ${label}, ${stateWords(f)}`}
       className={`m-0 w-[236px] min-w-0 overflow-hidden rounded-xl border bg-card p-0 text-text shadow-[0_1px_2px_rgb(0_0_0/0.12)] ${border} ${
-        selected ? "outline-2 outline-offset-1 outline-accent" : ""
+        selected
+          ? "outline-2 outline-offset-2 outline-accent"
+          : "has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent"
       }`}
     >
       <div aria-hidden className="h-[3px]" style={{ background: hue }} />
@@ -57,7 +59,7 @@ export function NodeCard({ data, selected }: NodeProps) {
         <button
           type="button"
           data-node-name={name}
-          className="flex items-center gap-2 rounded-md text-left focus-visible:outline-2 focus-visible:outline-accent"
+          className="flex items-center gap-2 rounded-md text-left focus-visible:outline-none"
         >
           {Icon ? (
             <span

@@ -7,7 +7,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Loader, type LoaderStep } from "../brand/Loader";
-import { getMinLoadMs } from "../settings";
+import { getMinLoadMs, markVisited } from "../settings";
 import { useDraft } from "../store/draft";
 import { useRun } from "../store/run";
 import { usePrefersReducedMotion } from "./motion";
@@ -89,7 +89,10 @@ export function Loading({
     <Loader
       step={step}
       reason={stalled ? STALL_REASON : (error ?? undefined)}
-      onDone={() => setRevealed(true)}
+      onDone={() => {
+        markVisited();
+        setRevealed(true);
+      }}
       onRetry={retry}
       quotes={quotes}
       random={random}

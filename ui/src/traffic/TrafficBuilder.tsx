@@ -29,7 +29,7 @@ const field =
 
 function summary(r: Row, all: string[]): string {
   if (r.targets === null) return "Custom chain, kept as written";
-  if (r.targets.length === 0) return "The gateway answers";
+  if (r.targets.length === 0) return "Gateway replies itself (no backend)";
   if (all.length > 0 && r.targets.length === all.length) return `All services (${all.length})`;
   return r.targets.join(", ");
 }
@@ -76,7 +76,7 @@ export function TrafficBuilder() {
     if (!ok) return; // the refusal is already a notice, and the rows stay for another try
     notify.success(
       `Traffic updated: ${rows.length} ${rows.length === 1 ? "endpoint" : "endpoints"}${
-        fresh.length > 0 ? `, ${fresh.length} newly connected to ${gateway}` : ""
+        fresh.length > 0 ? `, connected ${gateway} to ${fresh.join(", ")}` : ""
       }.`,
       "traffic",
     );
@@ -94,7 +94,7 @@ export function TrafficBuilder() {
       }}
       className="max-h-[88vh] w-[min(64rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-border bg-sheet p-0 text-sm text-text shadow-float backdrop:bg-black/40"
     >
-      <header className="border-b border-border px-5 py-4">
+      <div className="border-b border-border px-5 py-4">
         <h2 id={titleId} className="m-0 text-base font-semibold">
           Traffic builder
         </h2>
@@ -105,7 +105,7 @@ export function TrafficBuilder() {
             : ""}
           . The rate is the Offered load slider; this table is what each request is.
         </p>
-      </header>
+      </div>
 
       <div className="px-5 py-4">
         <div
@@ -232,7 +232,7 @@ export function TrafficBuilder() {
         </button>
       </div>
 
-      <footer className="flex flex-wrap items-center gap-3 border-t border-border px-5 py-3">
+      <div className="flex flex-wrap items-center gap-3 border-t border-border px-5 py-3">
         <div aria-live="polite" className="min-w-0 flex-1 text-xs">
           {wrong.length > 0 ? (
             <ul className="m-0 list-none p-0 text-negative">
@@ -261,7 +261,7 @@ export function TrafficBuilder() {
         >
           Apply to the draft
         </button>
-      </footer>
+      </div>
     </dialog>
   );
 }

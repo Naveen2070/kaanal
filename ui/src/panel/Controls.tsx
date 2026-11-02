@@ -3,6 +3,7 @@
 // right-now figures, delete. Every edit is a patch of the draft; the auto re-run follows.
 
 import { useId } from "react";
+import { focusName } from "../canvas/focusName";
 import type { EdgeDoc, NodeDoc } from "../api/types";
 import { ConnectMenu } from "../canvas/ConnectMenu";
 import { useFeed } from "../canvas/feed";
@@ -77,6 +78,14 @@ export function Controls({
         <input
           id={nameId}
           key={name}
+          ref={(el) => {
+            // a node just added from the palette: name ready to type over, once
+            if (el && focusName.pending === name) {
+              focusName.pending = null;
+              el.focus();
+              el.select();
+            }
+          }}
           defaultValue={name}
           onBlur={(e) => {
             const input = e.currentTarget;
@@ -170,7 +179,7 @@ export function Controls({
           <NumberField
             label="Queue limit"
             help="queue"
-            hint="Requests that may wait for a slot. Past it they are turned away."
+            hint="Requests that may wait for a slot. Past it they are turned away. 0 means no limit."
             value={queue}
             min={LIMITS.queue.min}
             max={LIMITS.queue.max}

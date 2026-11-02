@@ -22,7 +22,7 @@
   --grid: light-dark(#d9d2c6, #2a2933);
 
   /* lines: panel border and row rule are decoration; --control is an input edge and needs 3:1 */
-  --border: light-dark(#d9d2c6, #34323f);
+  --border: light-dark(#cbc2b2, #34323f);
   --rule: light-dark(#e3ddd1, #2b2a34);
   --control: light-dark(#80786b, #7e7b8c);
 

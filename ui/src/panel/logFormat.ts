@@ -38,7 +38,7 @@ export function clock(t_ms: number): string {
 /** What happened at the hop, in words: "Waited 210 ms, then served in 98 ms". */
 export function eventWords(l: LogLine): string {
   const t = (n: number | null) => `${Number((n ?? 0).toFixed((n ?? 0) < 10 ? 2 : 1))} ms`;
-  if (l.event === "served") return `Served in ${t(l.service_ms)}`;
+  if (l.event === "served") return "Served, no wait";
   if (l.event === "queued") return `Waited ${t(l.wait_ms)}, then served in ${t(l.service_ms)}`;
   return ["Failed", l.status, l.note].filter((x) => x !== null && x !== "").join(" ");
 }

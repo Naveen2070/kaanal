@@ -425,7 +425,7 @@ test("dragging_marks_the_meter_updating_until_the_run_starts", async () => {
     peakVisits: 0,
   });
   const c = cardAndBar(feed(false));
-  expect(screen.queryByText("updating")).toBeNull();
+  expect(screen.queryByText("updating")?.getAttribute("aria-hidden")).toBe("true");
   fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
   expect(screen.getByText("updating")).toBeTruthy();
   fireEvent.keyUp(slider("Slots"), { key: "ArrowRight" });
@@ -434,14 +434,14 @@ test("dragging_marks_the_meter_updating_until_the_run_starts", async () => {
   c.feed(feed(true)); // it starts: the feed marks the figures
   expect(screen.getByText("updating")).toBeTruthy();
   c.feed(feed(false, nodeSummary({ name: "app" }))); // it landed
-  expect(screen.queryByText("updating")).toBeNull();
+  expect(screen.queryByText("updating")?.getAttribute("aria-hidden")).toBe("true");
 });
 
 test("without_figures_there_is_no_updating_marker_to_get_stuck", async () => {
   await loaded();
   cardAndBar(EMPTY_FEED); // no run at all (a draft with no traffic never runs)
   fireEvent.keyDown(slider("Slots"), { key: "ArrowRight" });
-  expect(screen.queryByText("updating")).toBeNull();
+  expect(screen.queryByText("updating")?.getAttribute("aria-hidden")).toBe("true");
 });
 
 test("escape_in_a_typed_box_cancels_it_writes_nothing_and_asks_to_close", async () => {

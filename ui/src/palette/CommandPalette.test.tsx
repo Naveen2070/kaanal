@@ -82,3 +82,13 @@ test("an_article_is_right_before_a_vowel", () => {
   expect(labels).toContain("Add an external api");
   expect(labels).toContain("Add an auth");
 });
+
+test("question_mark_opens_the_shortcuts_sheet_and_escape_closes_it", async () => {
+  render(<PaletteHost />);
+  await act(async () => {
+    fireEvent.keyDown(window, { key: "?" });
+  });
+  expect(await screen.findByText("Keyboard shortcuts", { selector: "h2" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByText("Keyboard shortcuts", { selector: "h2" })).toBeNull();
+});

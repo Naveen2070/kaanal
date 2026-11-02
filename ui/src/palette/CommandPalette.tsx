@@ -89,7 +89,7 @@ export function CommandPalette({ all, onClose }: { all: Command[]; onClose: () =
             onClick={() => runAt(i)}
             className={`h-8 rounded-lg px-2 ${i === at ? "bg-active" : ""}`}
           >
-            {c.label}
+            {c.shortcut ? `${c.label}  (${c.shortcut})` : c.label}
           </option>
         ))}
       </select>

@@ -146,6 +146,12 @@ export function Tour() {
     // eslint-disable-next-line react/exhaustive-deps
   }, [finished]);
 
+  // Back and Next: the same move the real action makes, so a step can be skipped or revisited
+  const go = (n: number) => {
+    start.current = progress;
+    setI(n);
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // a card that used this Escape to close has already claimed it
@@ -176,11 +182,36 @@ export function Tour() {
       <p className="mb-1">{step.text}</p>
       <p className="mb-2 text-xs opacity-80">{step.waiting}</p>
       <div className="flex items-center gap-2">
+        <span aria-hidden className="flex gap-1">
+          {STEPS.map((s, n) => (
+            <span
+              key={s.text}
+              className={`size-1.5 rounded-full bg-current ${n === i ? "" : "opacity-30"}`}
+            />
+          ))}
+        </span>
         <span className="text-xs opacity-80">
           {i + 1} / {STEPS.length}
         </span>
         <button ref={skip} type="button" className="ml-auto underline" onClick={endTour}>
           Skip tour
+        </button>
+      </div>
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          disabled={i === 0}
+          className="underline disabled:opacity-40"
+          onClick={() => go(i - 1)}
+        >
+          Back
+        </button>
+        <button
+          type="button"
+          className="underline"
+          onClick={() => (i === STEPS.length - 1 ? endTour() : go(i + 1))}
+        >
+          {i === STEPS.length - 1 ? "Done" : "Next"}
         </button>
       </div>
     </dialog>

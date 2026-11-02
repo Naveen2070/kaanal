@@ -35,6 +35,9 @@ async function open(projectId: string) {
   await useDraft.getState().load();
   useFirstRun.setState({ phase: "idle", projectKey: "" });
   render(<FirstRun />);
+  // the card is a lazy chunk: wait for it when the phase says it should show
+  if (useFirstRun.getState().phase === "welcome")
+    await screen.findByText("Welcome to Kaanal Studio");
 }
 
 const card = () => screen.queryByText("Welcome to Kaanal Studio");
@@ -180,6 +183,9 @@ test("a_project_that_already_has_components_gets_no_card_and_the_demo_cannot_rep
   await useDraft.getState().load();
   useFirstRun.setState({ phase: "idle", projectKey: "" });
   render(<FirstRun />);
+  // the card is a lazy chunk: wait for it when the phase says it should show
+  if (useFirstRun.getState().phase === "welcome")
+    await screen.findByText("Welcome to Kaanal Studio");
   expect(card()).toBeNull();
   expect(tour()).toBeNull();
   // the question mark still offers the tour
@@ -335,4 +341,19 @@ test("step_never_covers_its_target", () => {
       expect(covers, `${side} ${JSON.stringify(target)}`).toBe(false);
     }
   }
+});
+
+test("next_and_back_move_between_steps_and_done_ends_the_tour", () => {
+  useFirstRun.setState({ phase: "tour", projectKey: "p" });
+  render(<Tour />);
+  const back = screen.getByRole("button", { name: "Back" }) as HTMLButtonElement;
+  expect(back.disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("dialog", { name: /step 2 of/ })).toBeTruthy();
+  expect(back.disabled).toBe(false);
+  fireEvent.click(back);
+  expect(screen.getByRole("dialog", { name: /step 1 of/ })).toBeTruthy();
+  for (let n = 0; n < 3; n++) fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(useFirstRun.getState().phase).toBe("off");
 });

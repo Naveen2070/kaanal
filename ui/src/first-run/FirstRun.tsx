@@ -5,9 +5,9 @@ import { LazyBoundary } from "../states/LazyBoundary";
 import { useDraft } from "../store/draft";
 import { projectKeyOf } from "./flags";
 import { useFirstRun } from "./store";
-import { Welcome } from "./Welcome";
 
 // the tour is fetched when it first shows, not with the first load
+const Welcome = lazy(() => import("./Welcome").then((m) => ({ default: m.Welcome })));
 const Tour = lazy(() => import("./Tour").then((m) => ({ default: m.Tour })));
 
 export function FirstRun() {
@@ -19,10 +19,16 @@ export function FirstRun() {
     const nodes = useDraft.getState().view?.doc?.nodes ?? {};
     begin(projectKeyOf(projectId), Object.keys(nodes).length === 0);
   }, [begin, projectId]);
-  if (phase === "welcome") return <Welcome />;
+  if (phase === "welcome") {
+    return (
+      <LazyBoundary key="welcome" fallback={null}>
+        <Welcome />
+      </LazyBoundary>
+    );
+  }
   if (phase === "tour") {
     return (
-      <LazyBoundary fallback={null}>
+      <LazyBoundary key="tour" fallback={null}>
         <Tour />
       </LazyBoundary>
     );

@@ -40,7 +40,10 @@ export function Meter({
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="text-text">{label}</span>
-        {stale ? <span className="text-muted">updating</span> : null}
+        {/* always laid out, so "updating" never shifts the row */}
+        <span aria-hidden={!stale} className={stale ? "text-muted" : "invisible"}>
+          updating
+        </span>
       </div>
       {bar}
       {ratio === null ? null : (

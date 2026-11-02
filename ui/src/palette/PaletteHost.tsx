@@ -16,8 +16,11 @@ const CommandPalette = lazy(() =>
   import("./CommandPalette").then((m) => ({ default: m.CommandPalette })),
 );
 
+const Shortcuts = lazy(() => import("./Shortcuts").then((m) => ({ default: m.Shortcuts })));
+
 export function PaletteHost() {
   const [open, setOpen] = useState(false);
+  const [keys, setKeys] = useState(false);
   const addNode = useAddNode();
   const nodes = Object.keys(useDraft((s) => s.view?.doc?.nodes) ?? {});
   const [, setSelected] = useSelected();
@@ -28,12 +31,28 @@ export function PaletteHost() {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen((o) => !o);
+      } else if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // not while typing in a field or with a dialog already up
+        if (
+          (e.target as HTMLElement | null)?.closest?.(
+            "input,textarea,select,[contenteditable=true],dialog",
+          )
+        )
+          return;
+        e.preventDefault();
+        setKeys(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  if (keys)
+    return (
+      <LazyBoundary fallback={null}>
+        <Shortcuts onClose={() => setKeys(false)} />
+      </LazyBoundary>
+    );
   if (!open) return null;
   const all = commands({
     add: addNode,
@@ -42,6 +61,10 @@ export function PaletteHost() {
     tour: replayTour,
     fit: () => canvasBridge.fit(),
     traffic: openTrafficBuilder,
+    keys: () => {
+      setOpen(false);
+      setKeys(true);
+    },
     nodes,
     select: (name) => void setSelected(name),
   });

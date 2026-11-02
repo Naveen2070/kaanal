@@ -123,7 +123,7 @@ test("a_chain_written_by_hand_is_kept_unless_replaced", async () => {
   fireEvent.click(screen.getByRole("button", { name: /Services behind endpoint 1/ }));
   fireEvent.click(screen.getByRole("button", { name: "Replace it with a choice of services" }));
   expect(
-    screen.getByRole("button", { name: /Services behind endpoint 1: The gateway answers/ }),
+    screen.getByRole("button", { name: /Services behind endpoint 1: Gateway replies itself/ }),
   ).toBeTruthy();
 });
 
@@ -166,7 +166,7 @@ test("apply_sends_one_patch_with_endpoints_mix_and_edges_then_closes_with_a_noti
   ]);
   await vi.waitFor(() => expect(useTrafficBuilder.getState().open).toBe(false));
   expect(useToasts.getState().toasts[0]?.text).toMatch(
-    /Traffic updated: 1 endpoint, 1 newly connected to gw/,
+    /Traffic updated: 1 endpoint, connected gw to /,
   );
 });
 

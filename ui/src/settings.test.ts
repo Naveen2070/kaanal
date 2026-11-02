@@ -2,7 +2,13 @@
 // call the setters. Storage can be blocked: reads fall back to the default, writes never throw.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { DEFAULT_MIN_LOAD_MS, getMinLoadMs, setMinLoadMs } from "./settings";
+import {
+  DEFAULT_MIN_LOAD_MS,
+  getMinLoadMs,
+  markVisited,
+  REPEAT_MIN_LOAD_MS,
+  setMinLoadMs,
+} from "./settings";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
@@ -39,4 +45,13 @@ describe("minimum load time", () => {
     expect(getMinLoadMs()).toBe(DEFAULT_MIN_LOAD_MS);
     expect(() => setMinLoadMs(5000)).not.toThrow();
   });
+});
+
+it("after_the_loader_has_been_seen_the_hold_drops_unless_a_setting_says_otherwise", () => {
+  localStorage.clear();
+  expect(getMinLoadMs()).toBe(10_000);
+  markVisited();
+  expect(getMinLoadMs()).toBe(REPEAT_MIN_LOAD_MS);
+  setMinLoadMs(4000);
+  expect(getMinLoadMs()).toBe(4000);
 });

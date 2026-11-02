@@ -57,7 +57,7 @@ test("a_stale_meter_says_so_in_words", () => {
   expect(screen.getByText("updating")).toBeTruthy();
   cleanup();
   render(<Meter ratio={0.5} label="50% busy" />);
-  expect(screen.queryByText("updating")).toBeNull();
+  expect(screen.queryByText("updating")?.getAttribute("aria-hidden")).toBe("true");
 });
 
 test("the_fill_animation_stops_under_reduced_motion", () => {

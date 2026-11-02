@@ -4,6 +4,9 @@
 const MIN_LOAD_KEY = "kaanal-min-load-ms";
 /** The loader stays at least this long, so it is seen rather than flashed (0 turns it off). */
 export const DEFAULT_MIN_LOAD_MS = 10_000;
+/** From the second visit on, the full hold is only a wait: it drops to this unless a setting says otherwise. */
+export const REPEAT_MIN_LOAD_MS = 2_500;
+const VISITED_KEY = "kaanal-visited";
 const MAX_MIN_LOAD_MS = 60_000;
 
 export function getMinLoadMs(): number {
@@ -16,7 +19,21 @@ export function getMinLoadMs(): number {
   } catch {
     // blocked storage: the default
   }
+  try {
+    if (localStorage.getItem(VISITED_KEY) !== null) return REPEAT_MIN_LOAD_MS;
+  } catch {
+    // blocked storage: the full hold
+  }
   return DEFAULT_MIN_LOAD_MS;
+}
+
+/** The loader has been seen once: later loads hold for `REPEAT_MIN_LOAD_MS`. */
+export function markVisited(): void {
+  try {
+    localStorage.setItem(VISITED_KEY, "1");
+  } catch {
+    // blocked storage: the full hold stays
+  }
 }
 
 export function setMinLoadMs(ms: number): void {
