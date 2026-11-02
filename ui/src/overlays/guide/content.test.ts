@@ -37,3 +37,25 @@ test("search_needs_every_word_and_looks_in_the_real_world_note", () => {
   expect(searchEntries("redis").map((r) => r.entry.id)).toEqual(["cache"]);
   expect(searchEntries("zzzz nothing")).toEqual([]);
 });
+
+test("every_sample_names_only_components_the_canvas_has", () => {
+  const kinds = new Set(NODE_KINDS.map((k) => k.kind));
+  const used: string[] = [];
+  for (const e of all) {
+    const s = e.sample;
+    if (!s) continue;
+    if (s.kind === "tile" || s.kind === "card") used.push(s.of);
+    if (s.kind === "wire") used.push(s.from, s.to);
+    if (s.kind === "chain") used.push(...s.steps.map((x) => x.of));
+    if (s.kind === "calls") used.push(...s.rows.flatMap((r) => [r.from, ...r.to]));
+  }
+  expect(used.length).toBeGreaterThan(20);
+  for (const k of used) expect(kinds.has(k), `kind ${k}`).toBe(true);
+});
+
+test("every_component_and_the_wiring_table_have_a_picture", () => {
+  const components = CHAPTERS.find((c) => c.id === "components");
+  for (const e of components?.entries ?? []) expect(e.sample?.kind, e.id).toBe("tile");
+  expect(all.find((e) => e.id === "who-calls-whom")?.sample?.kind).toBe("calls");
+  expect(all.filter((e) => e.sample).length).toBeGreaterThanOrEqual(25);
+});

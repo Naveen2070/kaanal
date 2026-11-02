@@ -104,6 +104,15 @@ export function startLoop(deps: LoopDeps): Loop {
       });
       return;
     }
+    // a draft with no components cannot run (the server would answer 400): say so without asking
+    if (Object.keys(view.doc.nodes ?? {}).length === 0) {
+      deps.run.set({
+        status: "blocked",
+        dimmed: dim(),
+        lastError: "The draft has no components to run yet.",
+      });
+      return;
+    }
     const mine = view.rev;
     covered = keyOf(view);
     deps.run.set({ status: "running", dimmed: dim() });

@@ -196,6 +196,9 @@ pub struct SaveBody {
     confirm_loss: bool,
     #[serde(default)]
     fix_scenarios: Fix,
+    /// Write even though the file on disk is not what Studio read (the answer to a conflict).
+    #[serde(default)]
+    overwrite: bool,
 }
 
 /// **Private.** The flagged scenario files Save may delete: regular files (not links) directly in
@@ -240,11 +243,11 @@ pub async fn save_draft(
     let body = payload
         .map_err(|e| reject(e.status(), &e.body_text()))?
         .map_or_else(SaveBody::default, |Json(b)| b);
-    let (confirm, fix) = (body.confirm_loss, body.fix_scenarios);
+    let (confirm, fix, overwrite) = (body.confirm_loss, body.fix_scenarios, body.overwrite);
     let (dir, seed, key, port) = (st.dir.clone(), st.drawn_seed, st.auth_key.clone(), st.port);
     let st2 = st.clone();
     let done = tokio::task::spawn_blocking(move || {
-        draft_save::save(&st2.draft, &st2.save_lock, confirm, |text, renames| {
+        draft_save::save(&st2.draft, &st2.save_lock, confirm, overwrite, |text, renames| {
             // Save never writes a draft that names files outside the project
             crate::paths::confine(text, &dir).map_err(|e| e.msg)?;
             if fix == Fix::None {
@@ -315,6 +318,62 @@ pub async fn save_draft(
         Err(SaveError::Plan(m)) => Err(reject(StatusCode::BAD_REQUEST, &m)),
         Err(SaveError::Io(m)) => Err(reject(StatusCode::INTERNAL_SERVER_ERROR, &m)),
     }
+}
+
+/// `POST /__kaanal/draft/reload` — throws the draft away and reads the config file again (and the
+/// layout sidecar beside it): the answer to a Save conflict when the file on disk is the one to
+/// keep. The draft is then clean against the disk (`saved`), whatever was applied stays applied
+/// (`dirty` says whether it differs), and `rev` moves if the text did. Returns the new view.
+///
+/// # Errors
+/// 409 when the server has no config file or the file cannot be read (it is missing, say); 400 for
+/// a file over 1 MiB. The draft is unchanged.
+pub async fn reload_draft(State(st): State<Arc<AppState>>) -> Result<Json<Value>, Reject> {
+    let file = st
+        .draft
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .file
+        .clone()
+        .ok_or_else(|| {
+            reject(
+                StatusCode::CONFLICT,
+                "this server was not started from a config file; there is nothing to reload",
+            )
+        })?;
+    // a config that is a link is read through, as Save writes through it
+    let target = file.canonicalize().unwrap_or_else(|_| file.clone());
+    let (text, layout) = tokio::task::spawn_blocking(move || {
+        let text = std::fs::read_to_string(&target).map_err(|e| e.to_string())?;
+        Ok::<_, String>((text, file.parent().map(crate::draft::layout::load)))
+    })
+    .await
+    .map_err(|e| reject(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+    .map_err(|m| {
+        reject(
+            StatusCode::CONFLICT,
+            &format!("cannot read the config file: {m}"),
+        )
+    })?;
+    if text.len() > MAX_DRAFT_BYTES {
+        return Err(too_large(text.len()));
+    }
+    {
+        let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
+        if d.text != text {
+            d.rev += 1;
+        }
+        d.text.clone_from(&text);
+        d.base = Some(text);
+        d.lost.clear();
+        d.renames.clear();
+        if let Some((l, note)) = layout {
+            d.layout = l.clone();
+            d.saved_layout = l;
+            d.layout_note = note;
+        }
+    }
+    Ok(view(&st))
 }
 
 /// `POST /__kaanal/draft/validate` — builds the draft (or the `text` of the body, without storing

@@ -14,7 +14,7 @@ type Dialog =
   | { kind: "saved"; result: SaveResult }
   | { kind: "lost"; lost: string[] }
   | { kind: "broken"; problems: string[] }
-  | { kind: "conflict"; message: string }
+  | { kind: "conflict"; message: string; confirmLoss: boolean }
   | { kind: "error"; title: string; message: string };
 
 interface ErrBody {
@@ -140,8 +140,19 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
     }
   };
 
-  /** `check`: first ask whether the file would start; `confirmLoss`: the comment-loss confirmation. */
-  const save = async ({ check, confirmLoss }: { check: boolean; confirmLoss: boolean }) => {
+  /**
+   * `check`: first ask whether the file would start; `confirmLoss`: the comment-loss confirmation;
+   * `overwrite`: write over a file that changed on disk (the answer to a conflict).
+   */
+  const save = async ({
+    check,
+    confirmLoss,
+    overwrite = false,
+  }: {
+    check: boolean;
+    confirmLoss: boolean;
+    overwrite?: boolean;
+  }) => {
     setBusy("save");
     try {
       await settled();
@@ -153,7 +164,10 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
           return;
         }
       }
-      const result = await api.save(confirmLoss ? { confirm_loss: true } : {});
+      const result = await api.save({
+        ...(confirmLoss && { confirm_loss: true }),
+        ...(overwrite && { overwrite: true }),
+      });
       setDialog({ kind: "saved", result });
       await load();
     } catch (e) {
@@ -161,7 +175,7 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
       if (e instanceof ApiError && e.status === 409 && body?.lost) {
         setDialog({ kind: "lost", lost: body.lost });
       } else if (e instanceof ApiError && e.status === 409 && body?.conflict) {
-        setDialog({ kind: "conflict", message: e.message });
+        setDialog({ kind: "conflict", message: e.message, confirmLoss });
       } else {
         // the draft is untouched: a failed save loses nothing
         setDialog({
@@ -170,6 +184,25 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
           message: e instanceof Error ? e.message : String(e),
         });
       }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Throws the draft away and reads the file again (the other answer to a conflict). */
+  const reload = async () => {
+    setBusy("save");
+    try {
+      await settled();
+      await api.reload();
+      await load();
+      setDialog(null);
+    } catch (e) {
+      setDialog({
+        kind: "error",
+        title: "Reload did not happen",
+        message: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy(null);
     }
@@ -329,12 +362,29 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
         <Modal title="The file changed on disk" onClose={close}>
           <p>{dialog.message}</p>
           <p className="my-2 text-xs text-muted">
-            Nothing was written and your draft is still here. Studio cannot read the file again
-            while it runs: copy your draft first, then stop and restart <code>kaanal studio</code>{" "}
-            (the draft in memory is lost on restart) and paste your changes into the file as it is
-            now.
+            Nothing was written and your draft is still here. Overwrite replaces the file with your
+            draft and loses what changed on disk. Reload reads the file again and drops your draft.
+            Copy your draft first if you want to keep both.
           </p>
           <div className="flex flex-wrap items-start gap-2">
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() =>
+                void save({ check: false, confirmLoss: dialog.confirmLoss, overwrite: true })
+              }
+              className="rounded bg-primary px-2 font-medium text-on-primary disabled:opacity-50"
+            >
+              Overwrite the file
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void reload()}
+              className="rounded border border-control bg-sheet text-text px-2 disabled:opacity-50"
+            >
+              Reload the file
+            </button>
             <CopyDraft text={view?.text ?? ""} />
             <button
               type="button"

@@ -216,6 +216,44 @@ test("a_row_with_no_services_leaves_the_gateway_to_answer", () => {
   expect(e["GET /health"]?.chain).toBeUndefined();
 });
 
+test("a_stale_login_entry_is_dropped_so_auth_keeps_its_built_in_route", () => {
+  const d = doc({
+    nodes: { gw: { type: "gateway" }, auth: { type: "auth" }, shop: { type: "service" } },
+    endpoints: {
+      "GET /products": { chain: [{ call: "shop" }] },
+      "POST /login": { chain: [{ call: "shop" }] }, // would fail: auth has no edge to shop
+    },
+  });
+  const rows = [row({ path: "/products", targets: ["shop"] })]; // the login row was removed
+  const e = after(d, buildOps(d, "peak", rows)).endpoints as Record<string, unknown>;
+  expect(Object.keys(e)).toEqual(["GET /products"]);
+  // a row that still sends it, or another profile that uses it, keeps it
+  const keep = after(d, buildOps(d, "peak", [row({ method: "POST", path: "/login" })]));
+  expect(Object.keys(keep.endpoints as object)).toContain("POST /login");
+  const other = doc({
+    ...d,
+    traffic: { peak: { journeys: [] }, night: { journeys: [{ endpoint: "POST /login" }] } },
+  });
+  expect(Object.keys(after(other, buildOps(other, "peak", rows)).endpoints as object)).toContain(
+    "POST /login",
+  );
+  // and without an auth component nothing special happens
+  const plain = doc({ endpoints: { "POST /login": { chain: [{ call: "shop" }] } } });
+  expect(Object.keys(after(plain, buildOps(plain, "peak", rows)).endpoints as object)).toContain(
+    "POST /login",
+  );
+});
+
+test("the_login_route_cannot_be_sent_through_a_service", () => {
+  const d = doc({
+    nodes: { gw: { type: "gateway" }, auth: { type: "auth" }, shop: { type: "service" } },
+  });
+  const login = row({ method: "POST", path: "/login", targets: ["shop"] });
+  expect(problems([login], d)[0]).toMatch(/answered by the auth component/);
+  expect(problems([{ ...login, targets: [] }], d)).toEqual([]);
+  expect(problems([login], doc())).toEqual([]); // no auth component: an ordinary route
+});
+
 test("what_cannot_be_applied_is_said_in_words", () => {
   const d = doc();
   expect(problems([], d)).toEqual(["Add at least one endpoint."]);

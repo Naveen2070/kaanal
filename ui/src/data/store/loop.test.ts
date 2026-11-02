@@ -5,7 +5,10 @@ import { draftBody, startLoop, type LoopDeps } from "./loop";
 
 const RUN_MS = 300;
 
-function viewOf(rev: number, doc: DraftView["doc"] = { nodes: {}, traffic: { peak: {} } }) {
+function viewOf(
+  rev: number,
+  doc: DraftView["doc"] = { nodes: { a: { type: "service" } }, traffic: { peak: {} } },
+) {
   return {
     text: "",
     dirty: false,
@@ -232,6 +235,11 @@ test("no_run_starts_while_doc_is_null_and_one_without_a_profile_says_why", async
   await tick(5000);
   expect(w.log.starts).toEqual([]);
   expect(w.state.lastError).toMatch(/no traffic profile/);
+  // a profile but no components (the blank draft): nothing is asked of the server
+  w.setView(viewOf(3, { nodes: {}, traffic: { default: { rps: 100 } } }));
+  await tick(5000);
+  expect(w.log.starts).toEqual([]);
+  expect(w.state.lastError).toMatch(/no components/);
   loop.stop();
 });
 

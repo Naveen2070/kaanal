@@ -100,6 +100,8 @@ export const api = {
       o,
     ),
   save: (body: SaveBody = {}, o: Opts = {}) => call<SaveResult>("POST", "/draft/save", body, o),
+  /** Throws the draft away and reads the config file again. */
+  reload: (o: Opts = {}) => call<DraftView>("POST", "/draft/reload", undefined, o),
   demo: (o: Opts = {}) => call<{ text: string }>("GET", "/demo", undefined, o),
   /** Sets live chaos (merged into what is there); the body names a structured target. */
   setChaos: (body: Record<string, unknown>, o: Opts = {}) =>

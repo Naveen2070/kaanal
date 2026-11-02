@@ -64,12 +64,16 @@ pub struct Saved {
 /// lands during a Save is not lost: the saved text is what was checked, and the draft keeps the
 /// newer one (still different from the file, so the next Save writes it).
 ///
+/// `overwrite` skips the check that the file is still what we read (the answer to a
+/// [`SaveError::Conflict`]); `confirm_loss` does the same for [`SaveError::Lost`].
+///
 /// # Errors
 /// See [`SaveError`]. Nothing is changed for any of them; `Io` puts every file back first.
 pub fn save(
     draft: &std::sync::Mutex<Draft>,
     once: &std::sync::Mutex<()>,
     confirm_loss: bool,
+    overwrite: bool,
     plan: impl FnOnce(&str, &[(String, String)]) -> Result<Plan, String>,
 ) -> Result<Saved, SaveError> {
     let _one = once.lock().unwrap_or_else(PoisonError::into_inner);
@@ -95,7 +99,8 @@ pub fn save(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(SaveError::Io(e.to_string())),
     };
-    if on_disk != base {
+    // `overwrite`: the caller has seen the conflict and chose the draft over what is on disk
+    if on_disk != base && !overwrite {
         return Err(SaveError::Conflict);
     }
     let Plan { remove, rewrite } = plan(&text, &renames).map_err(SaveError::Plan)?;
@@ -402,7 +407,7 @@ mod tests {
         draft.lock().unwrap().lost = vec!["a comment".into()];
         let once = std::sync::Mutex::new(());
         // the plan runs after the snapshot: a PUT lands right then
-        let r = save(&draft, &once, true, |text, _| {
+        let r = save(&draft, &once, true, false, |text, _| {
             assert_eq!(text, "v2\n");
             draft.lock().unwrap().text = "v3\n".into();
             Ok(Plan::default())
@@ -419,7 +424,7 @@ mod tests {
             assert_eq!(g.lost, ["a comment"], "the newer text still owes its loss");
         }
         // the next Save writes the newer text without a conflict
-        assert!(save(&draft, &once, true, |_, _| Ok(Plan::default())).is_ok());
+        assert!(save(&draft, &once, true, false, |_, _| Ok(Plan::default())).is_ok());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "v3\n");
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -432,7 +437,7 @@ mod tests {
         let draft = draft_for(f.clone(), "v1\n");
         draft.lock().unwrap().text = "v2\n".into();
         let once = std::sync::Mutex::new(());
-        let r = save(&draft, &once, false, |_, _| Err("no build".into()));
+        let r = save(&draft, &once, false, false, |_, _| Err("no build".into()));
         assert!(matches!(r, Err(SaveError::Plan(m)) if m == "no build"));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "v1\n");
         let _ = std::fs::remove_dir_all(&d);
@@ -449,7 +454,7 @@ mod tests {
         let draft = draft_for(link.clone(), "v1\n");
         draft.lock().unwrap().text = "v2\n".into();
         let once = std::sync::Mutex::new(());
-        assert!(save(&draft, &once, false, |_, _| Ok(Plan::default())).is_ok());
+        assert!(save(&draft, &once, false, false, |_, _| Ok(Plan::default())).is_ok());
         assert!(
             std::fs::symlink_metadata(&link)
                 .unwrap()

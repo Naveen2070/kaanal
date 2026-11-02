@@ -112,6 +112,11 @@ export const blankRow = (): Row => ({
   targets: [],
 });
 
+/** The routes an auth component answers itself (the engine's `LOGIN_KEY` and `JWKS_KEY`). */
+const AUTH_ROUTES = ["POST /login", "GET /.well-known/jwks.json"];
+const hasAuth = (doc: Doc | null | undefined) =>
+  Object.values(doc?.nodes ?? {}).some((n) => n.type === "auth");
+
 /** What is wrong with the rows, in words, one line per problem; empty when they can be applied. */
 export function problems(rows: Row[], doc: Doc | null | undefined): string[] {
   const out: string[] = [];
@@ -142,6 +147,15 @@ export function problems(rows: Row[], doc: Doc | null | undefined): string[] {
   if (isObj(doc) && typeof doc.endpoints === "string") {
     out.push("The endpoints are in a separate file: edit them there.");
   }
+  if (hasAuth(doc)) {
+    rows.forEach((r, i) => {
+      if (AUTH_ROUTES.includes(keyOf(r.method, r.path)) && (r.targets ?? []).length > 0) {
+        out.push(
+          `Endpoint ${i + 1}: ${keyOf(r.method, r.path)} is answered by the auth component; leave its services empty.`,
+        );
+      }
+    });
+  }
   if (gatewayOf(doc) === null && rows.some((r) => (r.targets ?? []).length > 0)) {
     out.push("Add a gateway first: it is what routes a request to a service.");
   }
@@ -169,7 +183,9 @@ function endpointOf(r: Row, old: unknown): Obj {
 /**
  * The patch that makes `doc` say what `rows` say: the profile's journeys, one endpoint entry per
  * row, and an edge from the gateway to every service a row sends to that has none yet. One patch,
- * so one undo. A row that was removed leaves its endpoint in the file (it is still a route).
+ * so one undo. A row that was removed leaves its endpoint in the file (it is still a route), except
+ * the auth component's own routes (`POST /login`, the JWKS route): an entry there is only a
+ * customisation of the built-in, so one no row uses is dropped.
  */
 export function buildOps(doc: Doc, profile: string, rows: Row[]): Op[] {
   const ops: Op[] = [];
@@ -191,6 +207,20 @@ export function buildOps(doc: Doc, profile: string, rows: Row[]): Op[] {
   } else {
     for (const [key, value] of entries) {
       ops.push({ op: key in existing ? "set" : "insert", path: ["endpoints", key], value });
+    }
+  }
+
+  // An entry for an auth route that no row (and no other profile) uses is dropped: it only
+  // customises auth's built-in route, and a stale chain on it fails the compile.
+  if (existing !== null && hasAuth(doc)) {
+    const used = new Set(entries.map(([k]) => k));
+    for (const [name, p] of Object.entries(isObj(doc.traffic) ? doc.traffic : {})) {
+      if (name === profile || !isObj(p) || !Array.isArray(p.journeys)) continue;
+      for (const j of p.journeys)
+        if (isObj(j) && typeof j.endpoint === "string") used.add(j.endpoint);
+    }
+    for (const key of AUTH_ROUTES) {
+      if (key in existing && !used.has(key)) ops.push({ op: "remove", path: ["endpoints", key] });
     }
   }
 

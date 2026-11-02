@@ -346,6 +346,47 @@ test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
   });
 });
 
+test("an_unapplied_draft_offers_apply_in_the_chaos_panel_and_says_what_chaos_hits", async () => {
+  mockFetch([{ json: view({ dirty: true, doc: { nodes: { app }, edges } }) }, { json: topology }]);
+  await useDraft.getState().load();
+  render(
+    <FeedContext.Provider
+      value={{ node: () => nodeSummary(), nodes: [], dimmed: false, peakVisits: 0 }}
+    >
+      <Controls
+        name="app"
+        config={app}
+        edges={edges}
+        onDeleted={vi.fn()}
+        onRenamed={vi.fn()}
+        onChaos={vi.fn()}
+      />
+    </FeedContext.Provider>,
+  );
+  // known to the running system: chaos stays available, with the caveat
+  expect(await screen.findByText(/does not have the draft's unapplied changes/)).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Take down" }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  const sent = mockFetch([
+    { json: { ok: true, generation: 2, kept: {}, dropped: {}, flagged: [] } },
+    { json: view({ dirty: false }) },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Apply the draft" }));
+  await vi.waitFor(() =>
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toContain("POST /__kaanal/draft/apply"),
+  );
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Apply the draft" })).toBeNull(),
+  );
+});
+
+test("a_clean_draft_shows_no_apply_button_in_the_chaos_panel", async () => {
+  await show();
+  await chaosReady();
+  expect(screen.queryByRole("button", { name: "Apply the draft" })).toBeNull();
+});
+
 test("chaos_chips_disabled_until_apply_with_the_reason", async () => {
   await show(nodeSummary(), app, { applied: false });
   const take = await screen.findByRole("button", { name: "Take down" });

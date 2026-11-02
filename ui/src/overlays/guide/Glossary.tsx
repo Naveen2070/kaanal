@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { SHORTCUTS } from "../palette/Shortcuts";
 import { CHAPTERS, searchEntries, type Chapter, type Entry } from "./content";
+import { SampleView } from "./Samples";
 import { useGuide } from "./store";
 
 /** The keyboard chapter is built from the same list as the shortcuts sheet, so they never differ. */
@@ -20,14 +21,25 @@ const ALL = [...CHAPTERS, KEYS];
 
 function EntryRow({ entry, chapter }: { entry: Entry; chapter?: string }) {
   return (
-    <div className="border-b border-rule py-3 last:border-b-0">
-      <dt className="text-sm font-semibold text-text">
-        {entry.term}
-        {chapter ? <span className="ml-2 text-xs font-normal text-muted">{chapter}</span> : null}
-      </dt>
-      <dd className="m-0 mt-1 text-sm text-text">{entry.text}</dd>
-      {entry.real ? (
-        <dd className="m-0 mt-1 text-xs text-muted">In a real system: {entry.real}</dd>
+    <div
+      className={`border-b border-rule py-3 last:border-b-0 ${
+        entry.sample ? "sm:grid sm:grid-cols-[minmax(0,1fr)_15rem] sm:gap-5" : ""
+      }`}
+    >
+      <div className="min-w-0">
+        <dt className="text-sm font-semibold text-text">
+          {entry.term}
+          {chapter ? <span className="ml-2 text-xs font-normal text-muted">{chapter}</span> : null}
+        </dt>
+        <dd className="m-0 mt-1 text-sm text-text">{entry.text}</dd>
+        {entry.real ? (
+          <dd className="m-0 mt-1 text-xs text-muted">In a real system: {entry.real}</dd>
+        ) : null}
+      </div>
+      {entry.sample ? (
+        <dd className="m-0 mt-3 sm:mt-0">
+          <SampleView sample={entry.sample} />
+        </dd>
       ) : null}
     </div>
   );

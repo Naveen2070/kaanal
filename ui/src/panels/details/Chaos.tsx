@@ -50,6 +50,30 @@ export function Chaos({
     if (target.startsWith("link:")) return { edge: { from: name, to: target.slice(5) } };
     return { node: name };
   };
+  // the draft differs from the running system: what chaos hits is not what the canvas shows
+  const dirty = useDraft((s) => s.view?.dirty ?? false);
+  const load = useDraft((s) => s.load);
+  const settled = useDraft((s) => s.settled);
+  const [applying, setApplying] = useState(false);
+  /** The same Apply as the top bar's, offered here so chaos is not a dead end. */
+  const applyDraft = async () => {
+    setApplying(true);
+    try {
+      await settled();
+      await api.apply();
+      notify.clear("chaos");
+      await load();
+    } catch (e) {
+      const body =
+        e instanceof ApiError ? (e.body as { diagnostics?: { message?: string }[] } | null) : null;
+      notify.error(
+        body?.diagnostics?.[0]?.message ?? (e instanceof Error ? e.message : String(e)),
+        "chaos",
+      );
+    } finally {
+      setApplying(false);
+    }
+  };
   const run = async (action: ChaosAction) => {
     // an empty or non-numeric box is not a value: nothing is sent
     if (action.kind === "slow" && !(Number.isFinite(action.ms) && action.ms >= 0)) return;
@@ -167,11 +191,23 @@ export function Chaos({
       </div>
       <p id={`${id}-why`} className="mt-1 text-xs text-muted">
         {nodeKnown
-          ? "Live chaos, not part of the file. A run follows."
+          ? dirty
+            ? "Live chaos, not part of the file. It acts on the running system, which does not have the draft's unapplied changes."
+            : "Live chaos, not part of the file. A run follows."
           : applied === undefined
             ? "Checking the running system..."
             : "Chaos acts on the running system, and this component is not in it yet (it is only in the draft). Apply the draft first."}
       </p>
+      {dirty && applied !== undefined ? (
+        <button
+          type="button"
+          disabled={applying}
+          onClick={() => void applyDraft()}
+          className="mt-1 min-h-7 rounded border border-control bg-sheet text-text px-2 text-sm disabled:opacity-50"
+        >
+          Apply the draft
+        </button>
+      ) : null}
     </div>
   );
 }

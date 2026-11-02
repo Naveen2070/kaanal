@@ -136,12 +136,33 @@ async function conflict() {
   await screen.findByText(/the file changed on disk since Studio read it/);
 }
 
-test("a_conflict_says_the_truth_about_how_to_recover_and_copies_the_draft", async () => {
+test("a_conflict_can_overwrite_the_file_with_the_draft", async () => {
+  await conflict();
+  const sent = mockFetch([{ json: saved }, { json: view() }]);
+  fireEvent.click(screen.getByRole("button", { name: "Overwrite the file" }));
+  expect(await screen.findByRole("dialog", { name: "Saved" })).toBeTruthy();
+  expect(sent[0]?.url).toBe("/__kaanal/draft/save"); // no second check
+  expect(sent[0]?.body).toEqual({ overwrite: true });
+});
+
+test("a_conflict_can_reload_the_file_and_drop_the_draft", async () => {
+  await conflict();
+  const theirs = view({ text: "version: 1\n# edited elsewhere\n", rev: 3 });
+  const sent = mockFetch([{ json: theirs }, { json: theirs }]);
+  fireEvent.click(screen.getByRole("button", { name: "Reload the file" }));
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual([
+    "POST /__kaanal/draft/reload",
+    "GET /__kaanal/draft",
+  ]);
+  expect(useDraft.getState().view?.text).toBe("version: 1\n# edited elsewhere\n");
+});
+
+test("a_conflict_says_what_each_answer_costs_and_copies_the_draft", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   await conflict();
-  // it must not promise that reopening the page re-reads the file: only a restart does
-  expect(screen.getByText(/restart/).textContent).toMatch(/lost on restart/);
+  expect(screen.getByText(/Overwrite replaces the file/).textContent).toMatch(/Reload reads/);
   fireEvent.click(screen.getByRole("button", { name: "Copy my draft" }));
   expect(writeText).toHaveBeenCalledWith("version: 1\nnodes: {}\n");
   expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();

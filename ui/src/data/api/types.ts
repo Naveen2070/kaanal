@@ -85,6 +85,8 @@ export interface ApplyResult {
 export interface SaveBody {
   confirm_loss?: boolean;
   fix_scenarios?: "none" | "remove" | "rewrite";
+  /** Write even though the file changed on disk since Studio read it. */
+  overwrite?: boolean;
 }
 
 export interface SaveResult {

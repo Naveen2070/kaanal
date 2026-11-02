@@ -196,6 +196,96 @@ async fn save_refuses_when_the_file_changed_or_vanished_on_disk() {
 }
 
 #[tokio::test]
+async fn overwrite_saves_the_draft_over_a_changed_file() {
+    let s = start(BASE).await;
+    patch(&s, json!([{ "op": "set", "path": ["seed"], "value": 7 }])).await;
+    let theirs = "version: 1\n# edited elsewhere\n";
+    std::fs::write(s.dir.join("kaanal.yaml"), theirs).unwrap();
+    let r = s.send(reqwest::Method::POST, SAVE, None).await;
+    assert_eq!(r.status(), 409);
+    // the same Save, now told to win
+    let r = s
+        .send(
+            reqwest::Method::POST,
+            SAVE,
+            Some(json!({ "overwrite": true })),
+        )
+        .await;
+    assert_eq!(r.status(), 200);
+    assert_eq!(on_disk(&s), BASE.replace("seed: 42", "seed: 7"));
+    // and the file is ours again, so the next plain Save is not a conflict
+    let r = s.send(reqwest::Method::POST, SAVE, None).await;
+    assert_eq!(r.status(), 200);
+    // a file that was deleted is written again too
+    std::fs::remove_file(s.dir.join("kaanal.yaml")).unwrap();
+    let r = s
+        .send(
+            reqwest::Method::POST,
+            SAVE,
+            Some(json!({ "overwrite": true })),
+        )
+        .await;
+    assert_eq!(r.status(), 200);
+    assert!(s.dir.join("kaanal.yaml").exists());
+}
+
+#[tokio::test]
+async fn reload_throws_the_draft_away_and_reads_the_file_again() {
+    let s = start(BASE).await;
+    let before: Value = s.get(URL).await.json().await.unwrap();
+    patch(&s, json!([{ "op": "set", "path": ["seed"], "value": 7 }])).await;
+    let theirs = BASE.replace("seed: 42", "seed: 99");
+    std::fs::write(s.dir.join("kaanal.yaml"), &theirs).unwrap();
+    assert_eq!(
+        s.send(reqwest::Method::POST, SAVE, None).await.status(),
+        409
+    );
+
+    let r = s
+        .send(reqwest::Method::POST, "/__kaanal/draft/reload", None)
+        .await;
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    assert_eq!(v["text"], json!(theirs), "{v}");
+    assert_eq!(v["saved"], true, "{v}");
+    assert_eq!(v["lost"], json!([]));
+    assert!(
+        v["rev"].as_u64() > before["rev"].as_u64(),
+        "the text moved, so rev did: {v}"
+    );
+    // what is applied is untouched, so the draft is now "not applied"
+    assert_eq!(v["dirty"], true, "{v}");
+    // the next Save is no conflict (nothing to write, and nothing refused)
+    assert_eq!(
+        s.send(reqwest::Method::POST, SAVE, None).await.status(),
+        200
+    );
+    assert_eq!(on_disk(&s), theirs);
+}
+
+#[tokio::test]
+async fn reload_with_no_file_or_a_missing_file_is_409_and_changes_nothing() {
+    let s = start_with(BASE, None).await;
+    let r = s
+        .send(reqwest::Method::POST, "/__kaanal/draft/reload", None)
+        .await;
+    assert_eq!(r.status(), 409);
+
+    let s = start(BASE).await;
+    patch(&s, json!([{ "op": "set", "path": ["seed"], "value": 7 }])).await;
+    std::fs::remove_file(s.dir.join("kaanal.yaml")).unwrap();
+    let r = s
+        .send(reqwest::Method::POST, "/__kaanal/draft/reload", None)
+        .await;
+    assert_eq!(r.status(), 409);
+    let v: Value = s.get(URL).await.json().await.unwrap();
+    assert!(
+        v["text"].as_str().unwrap().contains("seed: 7"),
+        "the draft is kept: {v}"
+    );
+}
+
+#[tokio::test]
 async fn save_with_no_config_file_is_409() {
     let s = start_with(BASE, None).await;
     let r = s.send(reqwest::Method::POST, SAVE, None).await;
