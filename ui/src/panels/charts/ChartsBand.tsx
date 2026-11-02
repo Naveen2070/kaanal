@@ -7,7 +7,7 @@ import { useState } from "react";
 import { PanelBottomClose, PanelBottomOpen } from "lucide-react";
 import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
-import { systemCounts } from "./counts";
+import { runLine, systemCounts } from "./counts";
 import { linePoints, niceTicks, smooth } from "./line";
 
 const KEY = "kaanal.studio.charts.open";
@@ -105,6 +105,8 @@ function Chart({
 function StatsPill() {
   const doc = useDraft((s) => s.view?.doc);
   const windowS = useRun((s) => s.latest?.summary?.window_s);
+  const status = useRun((s) => s.status);
+  const latest = useRun((s) => s.latest);
   const c = systemCounts(doc);
   const parts = [
     c.traffic > 0 && `${c.traffic} traffic`,
@@ -116,15 +118,20 @@ function StatsPill() {
   const line = [
     `${c.components} ${c.components === 1 ? "component" : "components"}`,
     `${c.connections} ${c.connections === 1 ? "connection" : "connections"}`,
-    windowS ? `${Number(windowS.toPrecision(3))} s simulated` : null,
+    // the re-run time (the spec's status line) stands in for the simulated time, which is in the
+    // tooltip: both together are wider than the room beside the zoom pill
+    runLine(status, latest) ?? (windowS ? `${Number(windowS.toPrecision(3))} s simulated` : null),
   ]
     .filter(Boolean)
     .join(" · ");
   const sorts = parts.length > 0 ? ` Of the components: ${parts.join(", ")}.` : "";
+  const covered = windowS
+    ? ` The last run covered ${Number(windowS.toPrecision(3))} s of simulated time.`
+    : "";
   return (
     <p
       data-testid="system-stats"
-      title={`What the draft holds.${sorts} The time is how much simulated time the last run covered.`}
+      title={`What the draft holds.${sorts}${covered} The re-run time is how long the last run took to compute.`}
       className="m-0 text-xs whitespace-nowrap text-muted tabular-nums"
     >
       {line}

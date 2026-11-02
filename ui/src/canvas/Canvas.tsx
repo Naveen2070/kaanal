@@ -22,8 +22,11 @@ import { useSelected } from "../data/store/view";
 import { usePrefersReducedMotion } from "../overlays/first-run/motion";
 import { useLayout } from "../shell/layout/useLayout";
 import { useRail } from "../shell/layout/rail";
+import { usePickedWire } from "./picked";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
+import { NoteCard } from "./NoteCard";
+import { isNoteId, useNotes } from "./notes";
 import { canvasBridge } from "./bridge";
 import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
@@ -43,7 +46,7 @@ const MAX_FIT_ZOOM = 0.9;
 const CARD_W = 236;
 const CARD_H = 190;
 
-const nodeTypes = { card: NodeCard };
+const nodeTypes = { card: NodeCard, note: NoteCard };
 const edgeTypes = { load: LoadEdge };
 
 function Flow() {
@@ -70,6 +73,12 @@ function Flow() {
 
   const doc = view?.doc ?? null;
   const layout = view?.layout;
+  // captions are kept per project in this browser; they load once the project is known
+  const notes = useNotes((s) => s.notes);
+  const projectId = view?.project_id;
+  useEffect(() => {
+    if (projectId) useNotes.getState().load(projectId);
+  }, [projectId]);
 
   // the view is fitted once, on load (the `fitView` prop). A node added later never changes the zoom:
   // the view only moves, and only when the new card would land behind a panel or off screen
@@ -204,6 +213,16 @@ function Flow() {
 
   /** Wires picked on the canvas (click, or focus and Enter): React Flow needs them to delete one. */
   const [pickedEdges, setPickedEdges] = useState<ReadonlySet<string>>(new Set());
+  // exactly one wire picked: the rail shows its settings, and no component is selected beside it
+  const setPickedWire = usePickedWire((s) => s.set);
+  useEffect(() => {
+    const only = pickedEdges.size === 1 ? Number([...pickedEdges][0]?.slice(1)) : NaN;
+    setPickedWire(Number.isInteger(only) ? only : null);
+    if (Number.isInteger(only)) void setSelected(null);
+    return () => setPickedWire(null);
+    // `setSelected` is stable enough: only the picked set should run this
+    // eslint-disable-next-line react/exhaustive-deps
+  }, [pickedEdges, setPickedWire]);
 
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = Object.entries(doc?.nodes ?? {}).map(([name, n]) => ({
@@ -219,6 +238,18 @@ function Flow() {
       measured: measured[name],
       data: { name, kind: n.type, config: n } satisfies CardData,
     }));
+    for (const n of notes) {
+      const p = live[n.id] ?? n.at;
+      nodes.push({
+        id: n.id,
+        type: "note",
+        position: { x: p[0], y: p[1] },
+        selectable: false,
+        focusable: false,
+        measured: measured[n.id],
+        data: { text: n.text },
+      });
+    }
     const edges: Edge[] = (doc?.edges ?? []).map((e, i) => ({
       id: `e${i}`,
       type: "load",
@@ -228,7 +259,7 @@ function Flow() {
       data: { from: String(e.from), to: String(e.to), index: i },
     }));
     return { nodes, edges };
-  }, [doc, layout, live, measured, selected, pickedEdges]);
+  }, [doc, layout, live, measured, selected, pickedEdges, notes]);
 
   const onEdgesChange = (changes: EdgeChange[]) => {
     for (const c of changes) {
@@ -246,6 +277,17 @@ function Flow() {
     for (const c of changes) {
       // `add` and `replace` carry a whole node, not an id: the canvas makes neither
       if (!("id" in c)) continue;
+      if (isNoteId(c.id)) {
+        // a caption: it moves and is measured like a card, but is never the selected component
+        if (c.type === "position" && c.position) {
+          const at: [number, number] = [c.position.x, c.position.y];
+          setLive((l) => ({ ...l, [c.id]: at }));
+        } else if (c.type === "dimensions" && c.dimensions) {
+          const dims = c.dimensions;
+          setMeasured((m) => ({ ...m, [c.id]: dims }));
+        }
+        continue;
+      }
       const name = decodeId(c.id);
       if (c.type === "position" && c.position) {
         const at: [number, number] = [c.position.x, c.position.y];
@@ -263,6 +305,9 @@ function Flow() {
   /** The drag is over: save where React Flow says the dragged nodes ended, in one request. */
   const onDragStop = (dragged: Node[]) => {
     setLive({});
+    for (const n of dragged)
+      if (isNoteId(n.id)) useNotes.getState().move(n.id, [n.position.x, n.position.y]);
+    dragged = dragged.filter((n) => !isNoteId(n.id));
     if (dragged.length === 0) return;
     void setLayout(
       Object.fromEntries(
@@ -317,7 +362,9 @@ function Flow() {
           }}
           onNodeDragStop={(_, __, dragged) => onDragStop(dragged)}
           onConnect={(c) => void onConnect(c)}
-          onNodeClick={(_, n) => void setSelected(decodeId(n.id))}
+          onNodeClick={(_, n) => {
+            if (!isNoteId(n.id)) void setSelected(decodeId(n.id));
+          }}
           onPaneClick={() => void setSelected(null)}
           // only wires can be deleted from the keyboard; a component goes through its panel (with its wires)
           deleteKeyCode={["Backspace", "Delete"]}

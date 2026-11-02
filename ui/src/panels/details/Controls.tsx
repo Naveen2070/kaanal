@@ -12,11 +12,13 @@ import { kindInfo } from "../../canvas/nodeKinds";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
 import { Chaos } from "./Chaos";
-import { NumberField, Section } from "./Field";
+import { BalanceField, NumberField, Section } from "./Field";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import {
+  balanceOf,
   deleteOps,
   durationMs,
+  setBalance,
   hasProc,
   LIMITS,
   clearQueueLimit,
@@ -150,6 +152,16 @@ export function Controls({
           integer
           onCommit={(n) => patch([setReplicas(name, config, n)])}
         />
+        {replicas > 1 ? (
+          <BalanceField
+            hint="How calls into this component pick a copy. A wire into it can say its own."
+            value={balanceOf(config.balance)}
+            defaultLabel="Round robin (default)"
+            onChange={(c) =>
+              void patch(setBalance(["nodes", name, "balance"], "balance" in config, c))
+            }
+          />
+        ) : null}
         {!hasProc(config.type) ? (
           <p className="mb-2 text-xs text-muted">
             This kind prices its work per operation (reads, writes, hits), not with one service

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { NODE_KINDS } from "./nodeKinds";
 import { Palette } from "./Palette";
+import { useNotes } from "./notes";
 
 afterEach(() => {
   cleanup();
@@ -38,4 +39,29 @@ test("clicking_a_kind_adds_it_in_both_layouts", () => {
     expect(onAdd).toHaveBeenCalledWith(NODE_KINDS[1]!.kind);
     unmount();
   }
+});
+
+test("the_wide_palette_says_how_to_move_around_and_the_icon_rail_has_no_room_for_it", () => {
+  vi.stubGlobal("innerWidth", 1440);
+  const { unmount } = render(<Palette onAdd={() => {}} />);
+  const hint = screen.getByTestId("canvas-hint").textContent ?? "";
+  expect(hint).toMatch(/pan/);
+  expect(hint).toMatch(/scroll to zoom/);
+  expect(hint).toMatch(/right edge/);
+  unmount();
+  vi.stubGlobal("innerWidth", 1000);
+  render(<Palette onAdd={() => {}} />);
+  expect(screen.queryByTestId("canvas-hint")).toBeNull();
+});
+
+test("add_a_note_pins_a_caption_on_the_wide_palette_only", () => {
+  vi.stubGlobal("innerWidth", 1440);
+  useNotes.setState({ project: null, notes: [] });
+  const { unmount } = render(<Palette onAdd={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /Add a note/ }));
+  expect(useNotes.getState().notes).toHaveLength(1);
+  unmount();
+  vi.stubGlobal("innerWidth", 1000);
+  render(<Palette onAdd={() => {}} />);
+  expect(screen.queryByRole("button", { name: /Add a note/ })).toBeNull();
 });

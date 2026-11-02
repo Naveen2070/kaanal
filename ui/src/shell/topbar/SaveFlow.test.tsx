@@ -94,6 +94,50 @@ test("a_draft_that_would_not_start_asks_before_it_is_written", async () => {
   expect(await screen.findByRole("dialog", { name: "Saved" })).toBeTruthy();
 });
 
+const stale = {
+  ok: false,
+  diagnostics: [],
+  warnings: [],
+  flagged: [{ file: "scenarios/a.yaml", scenario: "a", message: "names node 'old'" }],
+};
+
+test("stale_scenario_files_after_a_rename_can_be_updated_or_deleted_in_the_same_save", async () => {
+  await show(view({ renames: [["old", "new"]] }));
+  mockFetch([{ json: stale }]);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByRole("button", { name: "Save and update the scenario files" });
+  let sent = mockFetch([{ json: saved }, { json: view() }]);
+  fireEvent.click(screen.getByRole("button", { name: "Save and update the scenario files" }));
+  expect(await screen.findByRole("dialog", { name: "Saved" })).toBeTruthy();
+  expect(sent[0]?.url).toBe("/__kaanal/draft/save"); // no second check
+  expect(sent[0]?.body).toEqual({ fix_scenarios: "rewrite" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  mockFetch([{ json: stale }]);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByRole("button", { name: "Save and delete the stale scenario files" });
+  sent = mockFetch([{ json: saved }, { json: view() }]);
+  fireEvent.click(screen.getByRole("button", { name: "Save and delete the stale scenario files" }));
+  await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+  expect(sent[0]?.body).toEqual({ fix_scenarios: "remove" });
+});
+
+test("without_a_recorded_rename_only_delete_is_offered_and_a_clean_file_offers_neither", async () => {
+  await show(view({ renames: [] }));
+  mockFetch([{ json: stale }]);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByRole("button", { name: "Save and delete the stale scenario files" });
+  expect(screen.queryByRole("button", { name: "Save and update the scenario files" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+  mockFetch([
+    { json: { ok: false, diagnostics: [{ message: "bad" }], warnings: [], flagged: [] } },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByText("bad");
+  expect(screen.queryByRole("button", { name: /scenario files/ })).toBeNull();
+});
+
 test("save_asks_before_losing_comments_and_sends_the_confirmation", async () => {
   await show();
   mockFetch([

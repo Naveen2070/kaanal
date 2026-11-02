@@ -7,11 +7,13 @@ import {
   buildOps,
   gatewayOf,
   keyOf,
+  mixOf,
   newConnections,
   problems,
   routeOps,
   rowsFrom,
   serviceNames,
+  setWeight,
   targetsOfChain,
   type Row,
 } from "./model";
@@ -291,4 +293,36 @@ test("an_endpoints_route_is_set_to_one_service_several_in_parallel_or_none", () 
   ]);
   // a chain written by hand is not touched
   expect(routeOps(d, "POST /orders", ["shop"])).toEqual([]);
+});
+
+test("the_mix_is_each_journeys_share_of_the_whole_and_what_that_is_per_second", () => {
+  const d = doc();
+  const mix = mixOf(d, "peak");
+  expect(mix.map((r) => [r.key, r.index, r.weight])).toEqual([
+    ["GET /products", 0, 4],
+    ["POST /orders", 1, 1],
+  ]);
+  expect(mix.map((r) => r.share)).toEqual([0.8, 0.2]);
+  expect(mix.map((r) => r.perS)).toEqual([240, 60]); // 300 req/s in all
+  // a journey with no weight counts as 1; a profile with no rate has no per-second figure
+  const bare = doc({
+    traffic: { peak: { journeys: [{ endpoint: "GET /a" }, { endpoint: "GET /b" }] } },
+  });
+  expect(mixOf(bare, "peak").map((r) => [r.share, r.perS])).toEqual([
+    [0.5, null],
+    [0.5, null],
+  ]);
+  expect(mixOf(d, "nope")).toEqual([]);
+  expect(mixOf(null, "peak")).toEqual([]);
+});
+
+test("a_new_weight_is_one_patch_at_the_journeys_place", () => {
+  const d = doc();
+  const next = after(d, [setWeight("peak", 1, 3)]);
+  expect(mixOf(next, "peak").map((r) => r.share)).toEqual([4 / 7, 3 / 7]);
+  expect(setWeight("peak", 1, 3)).toEqual({
+    op: "set",
+    path: ["traffic", "peak", "journeys", 1, "weight"],
+    value: 3,
+  });
 });

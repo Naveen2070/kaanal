@@ -113,6 +113,22 @@ export function setRate(profile: string, rps: number): Op {
   return { op: "set", path: ["traffic", profile, "rps"], value: rps };
 }
 
+/** How traffic entering a node (or over a wire) picks a copy: the config's `balance`; null when unset. */
+export function balanceOf(v: unknown): "round-robin" | "random" | "weighted" | null {
+  if (v === "round-robin" || v === "random") return v;
+  return isObject(v) && "weighted" in v ? "weighted" : null;
+}
+
+/** The patch for a chosen balance: "" removes it (the default applies), else the name is set. */
+export function setBalance(
+  path: Path,
+  present: boolean,
+  choice: "" | "round-robin" | "random",
+): Op[] {
+  if (choice === "") return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, choice)];
+}
+
 export function setReplicas(name: string, config: NodeDoc, n: number): Op {
   return put(["nodes", name, "replicas"], "replicas" in config, n);
 }

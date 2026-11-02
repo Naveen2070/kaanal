@@ -11,6 +11,7 @@ import { useSelected } from "../../data/store/view";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { runNow } from "../../data/store/loopRuntime";
 import { openTrafficBuilder } from "../../panels/traffic/store";
+import { addNote } from "../../canvas/addNote";
 import { commands } from "./commands";
 
 const CommandPalette = lazy(() =>
@@ -62,6 +63,7 @@ export function PaletteHost() {
     tour: replayTour,
     fit: () => canvasBridge.fit(),
     traffic: openTrafficBuilder,
+    note: () => void addNote(),
     guide: () => useGuide.getState().show(),
     keys: () => {
       setOpen(false);

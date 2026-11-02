@@ -175,6 +175,37 @@ async fn renames_chain_and_a_whole_text_put_forgets_them() {
 }
 
 #[tokio::test]
+async fn the_draft_view_lists_the_renames_made_since_the_text_was_set() {
+    async fn renames(s: &Srv) -> Value {
+        s.get("/__kaanal/draft")
+            .await
+            .json::<Value>()
+            .await
+            .unwrap()["renames"]
+            .clone()
+    }
+    let s = renamed_project().await;
+    // renamed_project already renamed db to store
+    assert_eq!(renames(&s).await, json!([["db", "store"]]));
+    let op = json!({ "op": "rename_node", "from": "store", "to": "vault" });
+    s.put("/__kaanal/draft", json!({ "patch": [op] })).await;
+    assert_eq!(
+        renames(&s).await,
+        json!([["db", "store"], ["store", "vault"]])
+    );
+    // the UI offers "rewrite" only when this is not empty
+    let text = s
+        .get("/__kaanal/draft")
+        .await
+        .json::<Value>()
+        .await
+        .unwrap()["text"]
+        .clone();
+    s.put("/__kaanal/draft", json!({ "text": text })).await;
+    assert_eq!(renames(&s).await, json!([]));
+}
+
+#[tokio::test]
 async fn rewrite_without_a_rename_is_400_and_a_file_that_cannot_be_rewritten_stops_the_save() {
     let s = flagged_project().await;
     let r = save_with(&s, "rewrite").await;

@@ -13,7 +13,7 @@ type Dialog =
   | { kind: "applied"; result: ApplyResult }
   | { kind: "saved"; result: SaveResult }
   | { kind: "lost"; lost: string[] }
-  | { kind: "broken"; problems: string[] }
+  | { kind: "broken"; problems: string[]; stale: number }
   | { kind: "conflict"; message: string; confirmLoss: boolean }
   | { kind: "error"; title: string; message: string };
 
@@ -148,25 +148,30 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
     check,
     confirmLoss,
     overwrite = false,
+    fix,
   }: {
     check: boolean;
     confirmLoss: boolean;
     overwrite?: boolean;
+    /** What to do with scenario files the draft no longer resolves against. */
+    fix?: "remove" | "rewrite";
   }) => {
     setBusy("save");
     try {
       await settled();
       if (check) {
         // a draft that parses can still be a project that does not start: say so before writing it
-        const problems = problemsOf(await api.validate());
+        const checked = await api.validate();
+        const problems = problemsOf(checked);
         if (problems.length > 0) {
-          setDialog({ kind: "broken", problems });
+          setDialog({ kind: "broken", problems, stale: checked.flagged.length });
           return;
         }
       }
       const result = await api.save({
         ...(confirmLoss && { confirm_loss: true }),
         ...(overwrite && { overwrite: true }),
+        ...(fix && { fix_scenarios: fix }),
       });
       setDialog({ kind: "saved", result });
       await load();
@@ -306,6 +311,39 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
               <li key={i}>{p}</li>
             ))}
           </ul>
+          {dialog.stale > 0 ? (
+            <>
+              <p className="mb-1 text-xs text-muted">
+                {(view?.renames?.length ?? 0) > 0
+                  ? "Scenario files still use names you changed: update them to the new names, or delete them."
+                  : "Scenario files still use names that are gone: delete them, or fix them by hand."}
+              </p>
+              <div className="mb-2 flex flex-wrap gap-2">
+                {(view?.renames?.length ?? 0) > 0 ? (
+                  <button
+                    type="button"
+                    className="rounded bg-primary px-2 font-medium text-on-primary"
+                    onClick={() => {
+                      close();
+                      void save({ check: false, confirmLoss: false, fix: "rewrite" });
+                    }}
+                  >
+                    Save and update the scenario files
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="rounded border border-control bg-sheet text-text px-2"
+                  onClick={() => {
+                    close();
+                    void save({ check: false, confirmLoss: false, fix: "remove" });
+                  }}
+                >
+                  Save and delete the stale scenario files
+                </button>
+              </div>
+            </>
+          ) : null}
           <div className="flex gap-2">
             <button
               type="button"

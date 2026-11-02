@@ -34,3 +34,14 @@ export function LogSkeleton() {
     </output>
   );
 }
+
+/** The Live tab's frame while its code loads. */
+export function LiveSkeleton() {
+  return (
+    <output aria-label="Loading the live controls" className="block p-3">
+      <Bar className="mb-2 h-4 w-2/3" />
+      <Bar className="mb-3 h-16 w-full" />
+      <Bar className="h-24 w-full" />
+    </output>
+  );
+}

@@ -80,6 +80,48 @@ export function NumberField({
   );
 }
 
+/** The balance choice: the default, round robin or random; a weighted one is shown but edited in the file. */
+export function BalanceField({
+  hint,
+  value,
+  defaultLabel,
+  onChange,
+}: {
+  hint: string;
+  value: "round-robin" | "random" | "weighted" | null;
+  /** What no value means here (the callee's own, or round robin). */
+  defaultLabel: string;
+  onChange: (choice: "" | "round-robin" | "random") => void;
+}) {
+  const id = useId();
+  return (
+    <div className="mb-2">
+      <label htmlFor={id} className="block text-sm font-medium">
+        Balance
+      </label>
+      <select
+        id={id}
+        value={value ?? ""}
+        aria-describedby={`${id}-hint`}
+        onChange={(e) => onChange(e.currentTarget.value as "" | "round-robin" | "random")}
+        className="h-7 rounded border border-control bg-sheet text-text px-1"
+      >
+        <option value="">{defaultLabel}</option>
+        <option value="round-robin">Round robin</option>
+        <option value="random">Random</option>
+        {value === "weighted" ? (
+          <option value="weighted" disabled>
+            Weighted (edit in kaanal.yaml)
+          </option>
+        ) : null}
+      </select>
+      <p id={`${id}-hint`} className="text-xs text-muted">
+        {hint}
+      </p>
+    </div>
+  );
+}
+
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-4 border-b pb-3">

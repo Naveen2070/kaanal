@@ -75,7 +75,7 @@ test("the_rail_with_its_tabs_and_sentence_has_no_axe_violations", async () => {
     <NuqsAdapter>
       <Rail
         sentence="It gets 1,000, so it is 78% busy."
-        panels={{ controls: <p>c</p>, log: <p>l</p>, results: <p>r</p> }}
+        panels={{ controls: <p>c</p>, log: <p>l</p>, results: <p>r</p>, live: <p>v</p> }}
       />
     </NuqsAdapter>,
   );

@@ -320,3 +320,39 @@ export function routeOps(doc: Doc, key: string, targets: string[]): Op[] {
   }
   return ops;
 }
+
+export interface MixRow {
+  /** Where the journey sits in the profile's `journeys`, for the patch. */
+  index: number;
+  key: string;
+  weight: number;
+  /** Its part of the mix, 0 to 1. */
+  share: number;
+  /** Requests per second at the profile's rate (null when the profile has none). */
+  perS: number | null;
+}
+
+/** The profile's journeys as shares of the whole, in file order; empty without a profile or journeys. */
+export function mixOf(doc: Doc | null | undefined, profile: string): MixRow[] {
+  const t = doc?.traffic;
+  const p = isObj(t) && isObj(t[profile]) ? (t[profile] as Obj) : null;
+  const journeys = p && Array.isArray(p.journeys) ? (p.journeys as unknown[]) : [];
+  const rps = p && typeof p.rps === "number" ? p.rps : null;
+  const picked = journeys.flatMap((j, index) =>
+    isObj(j) && typeof j.endpoint === "string"
+      ? [{ index, key: j.endpoint, weight: typeof j.weight === "number" ? j.weight : 1 }]
+      : [],
+  );
+  const total = picked.reduce((sum, r) => sum + r.weight, 0);
+  return picked.map((r) => {
+    const share = total > 0 ? r.weight / total : 0;
+    return { ...r, share, perS: rps === null ? null : rps * share };
+  });
+}
+
+/** The patch that gives journey `index` of `profile` a new weight (above 0). */
+export const setWeight = (profile: string, index: number, weight: number): Op => ({
+  op: "set",
+  path: ["traffic", profile, "journeys", index, "weight"],
+  value: weight,
+});

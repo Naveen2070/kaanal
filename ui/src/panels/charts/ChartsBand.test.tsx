@@ -69,3 +69,15 @@ test("the_stats_pill_sits_beside_the_toggle_open_or_closed", () => {
   expect(pill?.textContent).toMatch(/components?/i);
   expect(pill?.textContent).toMatch(/connections?/i);
 });
+
+test("the_pill_says_how_long_the_last_re_run_took", () => {
+  setRun();
+  useRun.setState({
+    status: "done",
+    latest: { ...(useRun.getState().latest as RunRecord), started_ms: 10, finished_ms: 410 },
+  });
+  render(<ChartsBand />);
+  expect(document.querySelector('[data-testid="system-stats"]')?.textContent).toMatch(
+    /re-run in 0.4 s/,
+  );
+});

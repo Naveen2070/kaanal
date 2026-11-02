@@ -8,7 +8,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../kit/tabs";
 import { RAIL_FOLDED_W, RAIL_W, useRail } from "../../shell/layout/rail";
 import { TABS, useTab, type Tab } from "../../data/store/view";
 
-const LABEL: Record<Tab, string> = { controls: "Controls", log: "Log", results: "Results" };
+const LABEL: Record<Tab, string> = {
+  controls: "Controls",
+  log: "Log",
+  results: "Results",
+  live: "Live",
+};
 
 export function Rail({
   sentence,

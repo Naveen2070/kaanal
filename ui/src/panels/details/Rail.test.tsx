@@ -9,7 +9,10 @@ function show(tab: string, sentence = "", width = 1440) {
   history.replaceState(null, "", `/__kaanal/studio?tab=${tab}`);
   return render(
     <NuqsAdapter>
-      <Rail sentence={sentence} panels={{ controls: <p>c</p>, log: <p>l</p>, results: <p>r</p> }} />
+      <Rail
+        sentence={sentence}
+        panels={{ controls: <p>c</p>, log: <p>l</p>, results: <p>r</p>, live: <p>v</p> }}
+      />
     </NuqsAdapter>,
   );
 }
@@ -32,7 +35,7 @@ test("tabs_are_radix_with_aria_controls_and_arrow_keys", async () => {
 });
 
 test("the_rail_keeps_one_width_on_every_tab_and_stays_in_the_row", () => {
-  for (const tab of ["controls", "log", "results"]) {
+  for (const tab of ["controls", "log", "results", "live"]) {
     show(tab);
     expect(screen.getByRole("complementary").parentElement?.style.width).toBe("360px");
     expect(screen.getByRole("complementary").className).not.toMatch(/absolute/);
@@ -62,7 +65,7 @@ test("sentence_is_aria_live_polite_and_present_before_it_has_words", () => {
     <NuqsAdapter>
       <Rail
         sentence="app: 78% busy"
-        panels={{ controls: <p>c</p>, log: <p>l</p>, results: <p>r</p> }}
+        panels={{ controls: <p>c</p>, log: <p>l</p>, results: <p>r</p>, live: <p>v</p> }}
       />
     </NuqsAdapter>,
   );

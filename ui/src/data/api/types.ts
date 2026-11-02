@@ -53,6 +53,8 @@ export interface DraftView {
   layout_dirty: boolean;
   /** The text equals what Save last read or wrote and the layout is as saved. */
   saved: boolean;
+  /** `rename_node` edits made since the text was set, in order: what `fix_scenarios: rewrite` follows. */
+  renames?: [string, string][];
 }
 
 /** One edit of the draft text (`PUT /draft` with `patch`). */
@@ -239,4 +241,53 @@ export interface LogPage {
   total: number;
   sampled: true;
   note: string;
+}
+
+/** One row of `GET /scenarios`: a named list of chaos entries and pins. */
+export interface ScenarioRow {
+  name: string;
+  /** `inline` (kaanal.yaml), `file` (scenarios/NAME.yaml) or `runtime` (defined through the API). */
+  source: "inline" | "file" | "runtime";
+  description?: string | null;
+  /** Chaos entries and pins together. */
+  entries: number;
+  pins?: { endpoint: string; state: string; status?: number; delay?: string }[];
+  active: boolean;
+  expires_in_ms?: number;
+}
+
+export const PIN_STATES = ["loading", "empty", "error", "slow", "success"] as const;
+export type PinState = (typeof PIN_STATES)[number];
+
+/** A live pin: an endpoint forced to answer in one state. */
+export interface LivePin {
+  endpoint: string;
+  state: PinState;
+  status?: number;
+  delay_ms?: number;
+}
+
+/** `GET /pins`: the live pins and the winning pin per endpoint. */
+export interface PinsView {
+  live: LivePin[];
+  effective: Record<string, LivePin & { source: "live" | { scenario: string } }>;
+}
+
+/** The body of `PUT /pins` and `POST /cycle`. */
+export interface PinBody {
+  endpoint: string;
+  state?: PinState;
+  status?: number;
+  /** Text such as `"500ms"`. */
+  delay?: string;
+}
+
+/** `POST /sample`: one response body the mock would generate for an endpoint. */
+export interface SampleResult {
+  endpoint: string;
+  status: number;
+  /** Null for a route with no response schema. */
+  body: unknown;
+  bytes: number;
+  label: string;
 }

@@ -1,9 +1,12 @@
 // The node kinds, to drag onto the canvas or (for keyboards and touch) to click. A floating panel
 // on the left. Each kind has its own hue on a tinted badge, the same one its card wears. On a wide
 // window each kind is its badge and its word; between 900 and 1279 px the panel is a 48px icon rail,
-// and the button keeps its name (the kind) for assistive technology and the tooltip.
+// and the button keeps its name (the kind) for assistive technology and the tooltip. On the wide
+// panel the foot says how to move around, in words that match what the canvas does.
 
+import { StickyNote } from "lucide-react";
 import { useLayout } from "../shell/layout/useLayout";
+import { addNote } from "./addNote";
 import { catColour, NODE_KINDS } from "./nodeKinds";
 
 /** The drag payload's type: what a drop on the canvas reads the kind from. */
@@ -46,6 +49,25 @@ export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
           </button>
         );
       })}
+      {rail ? null : (
+        <button
+          type="button"
+          title="Pin a caption to the canvas. Notes are kept in this browser, not in the file."
+          onClick={() => void addNote()}
+          className="mt-1 flex min-h-9 w-full items-center gap-2.5 rounded-lg px-1.5 text-left text-sm hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-well">
+            <StickyNote size={16} aria-hidden className="text-muted" />
+          </span>
+          Add a note
+        </button>
+      )}
+      {rail ? null : (
+        <p data-testid="canvas-hint" className="m-0 mt-auto px-2 pt-3 pb-1 text-xs text-muted">
+          Drag the canvas to pan and scroll to zoom. To connect, drag from a card&apos;s right edge
+          to another card. Delete removes a picked wire. Press ? for all the shortcuts.
+        </p>
+      )}
     </aside>
   );
 }

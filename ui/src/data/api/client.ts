@@ -7,12 +7,17 @@ import type {
   Diagnostic,
   DraftView,
   LogPage,
+  LivePin,
   LogQuery,
+  PinBody,
+  PinsView,
   PutBody,
   RunBody,
   RunRecord,
   SaveBody,
+  SampleResult,
   SaveResult,
+  ScenarioRow,
   Topology,
   ValidateResult,
 } from "./types";
@@ -106,6 +111,33 @@ export const api = {
   /** Sets live chaos (merged into what is there); the body names a structured target. */
   setChaos: (body: Record<string, unknown>, o: Opts = {}) =>
     call<Record<string, unknown>>("PUT", "/chaos", body, o),
+  listScenarios: (o: Opts = {}) => call<ScenarioRow[]>("GET", "/scenarios", undefined, o),
+  /** Pushes a scenario on the stack; `ttl` (text such as `30s`) deactivates it when the time is up. */
+  activateScenario: (name: string, ttl?: string, o: Opts = {}) =>
+    call<unknown>(
+      "POST",
+      `/scenarios/${encodeURIComponent(name)}/activate`,
+      ttl === undefined ? undefined : { ttl },
+      o,
+    ),
+  deactivateScenario: (name: string, o: Opts = {}) =>
+    call<unknown>("POST", `/scenarios/${encodeURIComponent(name)}/deactivate`, undefined, o),
+  clearScenarios: (o: Opts = {}) => call<unknown>("DELETE", "/scenarios", undefined, o),
+  getPins: (o: Opts = {}) => call<PinsView>("GET", "/pins", undefined, o),
+  putPin: (body: PinBody, o: Opts = {}) => call<LivePin>("PUT", "/pins", body, o),
+  /** Steps the endpoint's live pin to the next state (or pins `state`). */
+  cyclePin: (body: PinBody, o: Opts = {}) => call<LivePin>("POST", "/cycle", body, o),
+  /** Removes one endpoint's live pin, or every live pin with no endpoint. */
+  deletePins: (endpoint?: string, o: Opts = {}) =>
+    call<unknown>("DELETE", `/pins${query({ endpoint })}`, undefined, o),
+  /** One response body the mock would generate for `endpoint` (a seed picks the data). */
+  sample: (endpoint: string, seed?: number, o: Opts = {}) =>
+    call<SampleResult>(
+      "POST",
+      "/sample",
+      seed === undefined ? { endpoint } : { endpoint, seed },
+      o,
+    ),
   getTopology: (o: Opts = {}) => call<Topology>("GET", "/topology", undefined, o),
   /** A busy simulator (409, or 429 while draft builds are in progress) is a result, not an error. */
   async startRun(body: RunBody, o: Opts = {}): Promise<StartRun> {

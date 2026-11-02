@@ -5,6 +5,7 @@
 import { useFeed } from "../../canvas/feed";
 import { closestToBreaking, percent, twoSignificant } from "../../canvas/metrics";
 import { useSelected } from "../../data/store/view";
+import { TrafficMix } from "./TrafficMix";
 
 export function SystemSummary() {
   const feed = useFeed();
@@ -40,6 +41,7 @@ export function SystemSummary() {
         </ol>
       )}
       <p className="m-0 mt-3 text-muted">Select a component to see and change it.</p>
+      <TrafficMix />
     </div>
   );
 }

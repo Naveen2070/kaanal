@@ -13,6 +13,8 @@ export interface CommandContext {
   tour: () => void;
   fit: () => void;
   traffic: () => void;
+  /** Pin a new caption in the middle of the canvas. */
+  note?: () => void;
   keys?: () => void;
   guide?: () => void;
   /** The components on the canvas, to jump to by name. */
@@ -34,6 +36,7 @@ export function commands(ctx: CommandContext): Command[] {
     { id: "tour", label: "Replay the tour", run: ctx.tour },
     { id: "fit", label: "Fit the view", run: ctx.fit },
     { id: "traffic", label: "Build traffic", run: ctx.traffic },
+    { id: "note", label: "Add a note to the canvas", run: () => ctx.note?.() },
     { id: "keys", label: "Keyboard shortcuts", shortcut: "?", run: () => ctx.keys?.() },
     { id: "guide", label: "Open the glossary", run: () => ctx.guide?.() },
     ...(ctx.nodes ?? []).map((n) => ({

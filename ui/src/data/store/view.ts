@@ -3,7 +3,7 @@
 
 import { parseAsString, parseAsStringLiteral, useQueryState } from "nuqs";
 
-export const TABS = ["controls", "log", "results"] as const;
+export const TABS = ["controls", "log", "results", "live"] as const;
 export type Tab = (typeof TABS)[number];
 
 /** The selected node name (any text: `#`, `/`, spaces and unicode survive the URL), or null. */
