@@ -6,6 +6,7 @@ import { useRun } from "../../data/store/run";
 import { mockFetch } from "../../test/fetch";
 import { nodeSummary } from "../../test/summary";
 import { LogTab } from "./LogTab";
+import { useLogDrawer } from "./logDrawer";
 import { formatLine } from "./logFormat";
 
 function line(over: Partial<LogLine> = {}): LogLine {
@@ -414,4 +415,13 @@ test("a_request_with_no_wait_ms_at_all_has_no_finding", async () => {
   ]);
   await screen.findByText("Failed 504 deadline passed");
   expect(screen.queryByText(/waiting in line/)).toBeNull();
+});
+
+test("the_log_pops_out_to_a_drawer_and_the_rail_says_where_it_went", async () => {
+  useLogDrawer.getState().set(false);
+  await show(page([line({ request: 1 })]));
+  fireEvent.click(screen.getByRole("button", { name: "Pop out" }));
+  expect(screen.getByText("The log is open along the bottom of the window.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Bring it back here" }));
+  expect(useLogDrawer.getState().out).toBe(false);
 });

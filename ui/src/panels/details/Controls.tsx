@@ -1,11 +1,11 @@
-// The Controls tab for one node, top to bottom as the spec lists it (7.1): name and what it is,
-// how busy, what it can handle, when things go wrong, what that works out to, a suggested fix,
-// right-now figures, delete. Every edit is a patch of the draft; the auto re-run follows.
+// The Controls tab for one node: what it can handle first (the job done most), when things go
+// wrong, how busy it is, what that works out to, a suggested fix, right-now figures, then wiring,
+// the name and delete. Slots and copies are set in the dock (ControlDock.tsx), one place each. Every edit is a patch of the draft; the auto re-run follows.
 
 import { useId } from "react";
 import { focusName } from "../../canvas/focusName";
 import type { EdgeDoc, NodeDoc } from "../../data/api/types";
-import { ConnectMenu } from "../../canvas/ConnectMenu";
+import { ConnectMenu, targetsFor, wiringNote } from "../../canvas/ConnectMenu";
 import { useFeed } from "../../canvas/feed";
 import { nodeFigures, percent, replicasOf, twoSignificant } from "../../canvas/metrics";
 import { kindInfo } from "../../canvas/nodeKinds";
@@ -26,8 +26,6 @@ import {
   queueOf,
   setDuration,
   setQueue,
-  setReplicas,
-  setSlots,
   slotsOf,
   suggestedFix,
   worksOutTo,
@@ -72,87 +70,15 @@ export function Controls({
   const fix = suggestedFix(node);
   const calls = edges.filter((e) => String(e.from) === name).map((e) => String(e.to));
   const doc = useDraft((s) => s.view?.doc);
+  // nothing to connect, no wire out and nothing to say about wiring: the section is left out
+  const hasWiring =
+    targetsFor(name, doc?.nodes ?? {}, edges).length > 0 ||
+    calls.length > 0 ||
+    wiringNote(name, doc?.nodes ?? {}, edges) !== null;
 
   return (
     <div className="p-3 text-sm">
-      <Section title="This component">
-        <label htmlFor={nameId} className="block text-sm font-medium">
-          Name
-        </label>
-        <input
-          id={nameId}
-          key={name}
-          ref={(el) => {
-            // a node just added from the palette: name ready to type over, once
-            if (el && focusName.pending === name) {
-              focusName.pending = null;
-              el.focus();
-              el.select();
-            }
-          }}
-          defaultValue={name}
-          onBlur={(e) => {
-            const input = e.currentTarget;
-            const to = input.value.trim();
-            if (!to || to === name) return;
-            void patch([{ op: "rename_node", from: name, to }]).then((ok) => {
-              if (ok) onRenamed(to);
-              else input.value = name;
-            });
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-          }}
-          className="h-7 w-full rounded border border-control bg-sheet text-text px-1"
-        />
-        <p className="mt-1 text-xs text-muted">
-          {info ? `${info.label}: ${info.description}.` : config.type}
-        </p>
-      </Section>
-
-      <Section title="Connect to…">
-        <ConnectMenu from={name} />
-      </Section>
-
-      {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
-        <LazyBoundary fallback={<p className="mb-3 text-xs text-muted">Loading the routes...</p>}>
-          <TrafficRoutes gateway={name} doc={doc} edges={edges} />
-        </LazyBoundary>
-      ) : null}
-
-      <Section title="How busy it is">
-        <p>
-          {percent(f.busy)} busy
-          {f.peak !== null ? `, peaking at ${percent(f.peak)}` : ""}
-        </p>
-        <p className="text-xs text-muted">
-          {f.hasRun
-            ? "Measured over the run: the share of its slots in use."
-            : "Nothing to show until a run has finished."}
-        </p>
-      </Section>
-
-      <Section title="How much it can handle">
-        <NumberField
-          label="Slots"
-          help="slots"
-          hint="How many requests it works on at once. More slots, more throughput."
-          value={slots.value}
-          min={LIMITS.slots.min}
-          max={LIMITS.slots.max}
-          integer
-          onCommit={(n) => patch(setSlots(name, config, n))}
-        />
-        <NumberField
-          label="Copies"
-          help="copies"
-          hint="Copies of this component, each with its own slots and queue."
-          value={replicas}
-          min={LIMITS.instances.min}
-          max={LIMITS.instances.max}
-          integer
-          onCommit={(n) => patch([setReplicas(name, config, n)])}
-        />
+      <Section title="Capacity">
         {replicas > 1 ? (
           <BalanceField
             hint="How calls into this component pick a copy. A wire into it can say its own."
@@ -228,6 +154,18 @@ export function Controls({
         <Chaos name={name} replicas={replicas} links={calls} onApplied={onChaos} />
       </Section>
 
+      <Section title="How busy it is">
+        <p>
+          {percent(f.busy)} busy
+          {f.peak !== null ? `, peaking at ${percent(f.peak)}` : ""}
+        </p>
+        <p className="text-xs text-muted">
+          {f.hasRun
+            ? "Measured over the run: the share of its slots in use."
+            : "Nothing to show until a run has finished."}
+        </p>
+      </Section>
+
       {out ? (
         <Section title="What that works out to">
           <p>
@@ -269,6 +207,53 @@ export function Controls({
           </dl>
         </Section>
       ) : null}
+
+      {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
+        <LazyBoundary fallback={<p className="mb-3 text-xs text-muted">Loading the routes...</p>}>
+          <TrafficRoutes gateway={name} doc={doc} edges={edges} />
+        </LazyBoundary>
+      ) : null}
+
+      {hasWiring ? (
+        <Section title="Connect to…">
+          <ConnectMenu from={name} />
+        </Section>
+      ) : null}
+
+      <Section title="This component">
+        <label htmlFor={nameId} className="block text-sm font-medium">
+          Name
+        </label>
+        <input
+          id={nameId}
+          key={name}
+          ref={(el) => {
+            // a node just added from the palette: name ready to type over, once
+            if (el && focusName.pending === name) {
+              focusName.pending = null;
+              el.focus();
+              el.select();
+            }
+          }}
+          defaultValue={name}
+          onBlur={(e) => {
+            const input = e.currentTarget;
+            const to = input.value.trim();
+            if (!to || to === name) return;
+            void patch([{ op: "rename_node", from: name, to }]).then((ok) => {
+              if (ok) onRenamed(to);
+              else input.value = name;
+            });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+          className="h-7 w-full rounded border border-control bg-sheet text-text px-1"
+        />
+        <p className="mt-1 text-xs text-muted">
+          {info ? `${info.label}: ${info.description}.` : config.type}
+        </p>
+      </Section>
 
       <button
         type="button"

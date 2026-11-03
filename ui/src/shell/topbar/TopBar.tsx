@@ -37,7 +37,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
           {view?.project_name ? (
             <span
               className="truncate font-normal text-muted"
-              title="The project this Studio is editing"
+              title={`${view.project_name}: the project this Studio is editing`}
             >
               / {view.project_name}
             </span>

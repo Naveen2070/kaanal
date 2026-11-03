@@ -3,6 +3,8 @@
 // and a click on a line opens that one request as a waterfall. Everything here is virtual time and
 // simulated trace events, and the tab says so.
 
+import { PanelBottomOpen } from "lucide-react";
+import { useLogDrawer } from "./logDrawer";
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { ApiError, api } from "../../data/api/client";
 import type { LogLine, LogQuery } from "../../data/api/types";
@@ -28,7 +30,9 @@ const PAGE = 200;
 const SEP = "\u001f";
 const wireKey = (l: { from: string; to: string }) => `${l.from}${SEP}${l.to}`;
 
-export function LogTab() {
+export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
+  const out = useLogDrawer((s) => s.out);
+  const setOut = useLogDrawer((s) => s.set);
   const run = useRun((s) => s.latest);
   const [selected] = useSelected();
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -117,6 +121,22 @@ export function LogTab() {
   };
   const count = (n: number) => n.toLocaleString("en-US");
 
+  // popped out: the table is in the drawer, so the rail says where it went
+  if (out && !drawer) {
+    return (
+      <div className="p-3 text-sm">
+        <p className="mb-2 text-muted">The log is open along the bottom of the window.</p>
+        <button
+          type="button"
+          onClick={() => setOut(false)}
+          className="min-h-7 rounded border border-control bg-sheet px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          Bring it back here
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="p-3 text-sm">
       {dimmed ? (
@@ -124,9 +144,23 @@ export function LogTab() {
           Out of date: the newest run could not finish, so this is the last one that did.
         </p>
       ) : null}
-      <p className="text-xs font-medium">
-        {runId === null ? "No run yet" : `Run ${runId.replace(/^s/, "")}`} · simulated, virtual time
-      </p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium">
+          {runId === null ? "No run yet" : `Run ${runId.replace(/^s/, "")}`} · simulated, virtual
+          time
+        </p>
+        {drawer ? null : (
+          <button
+            type="button"
+            title="Open the log along the bottom of the window, where it has room"
+            onClick={() => setOut(true)}
+            className="flex shrink-0 items-center gap-1 rounded border border-control bg-sheet px-1.5 py-0.5 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <PanelBottomOpen size={12} aria-hidden />
+            Pop out
+          </button>
+        )}
+      </div>
       <p className="mb-2 text-xs text-muted">
         {page && !loading && !page.problem
           ? `${count(page.lines.length)} of ${count(page.total)} hops sampled. `

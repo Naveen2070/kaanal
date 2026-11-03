@@ -179,53 +179,72 @@ function PinList({ pins, btn, act }: { pins: PinsView; btn: string; act: Act }) 
   const rows = Object.entries(pins.effective);
   if (rows.length === 0) return <p className="mb-2 text-xs text-muted">No endpoint is pinned.</p>;
   return (
-    <ul className="m-0 mb-2 list-none p-0">
-      {rows.map(([endpoint, p]) => {
-        const live = p.source === "live";
-        return (
-          <li key={endpoint} className="mb-1.5 flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="wrap-break-word font-medium">{endpoint}</p>
-              <p className="text-xs text-muted">
+    <table className="mb-2 w-full border-collapse text-left">
+      <thead>
+        <tr className="text-xs text-muted">
+          <th scope="col" className="pb-1 font-normal">
+            Endpoint
+          </th>
+          <th scope="col" className="pb-1 font-normal">
+            State
+          </th>
+          <th scope="col" className="pb-1">
+            <span className="sr-only">Actions</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([endpoint, p]) => {
+          const live = p.source === "live";
+          return (
+            <tr key={endpoint} className="border-t border-rule align-top">
+              <td className="wrap-break-word py-1.5 pr-2 font-medium">{endpoint}</td>
+              <td className="py-1.5 pr-2 text-xs text-muted">
                 {describePin(p)}
                 {typeof p.source === "object" ? `, from the scenario ${p.source.scenario}` : ""}
-              </p>
-            </div>
-            {live ? (
-              <>
-                <button
-                  type="button"
-                  className={btn}
-                  aria-label={`Next state for ${endpoint}`}
-                  onClick={() => void act(() => api.cyclePin({ endpoint }), false)}
-                >
-                  Next
-                </button>
-                <button
-                  type="button"
-                  className={btn}
-                  aria-label={`Remove the pin on ${endpoint}`}
-                  onClick={() => void act(() => api.deletePins(endpoint), false)}
-                >
-                  Remove
-                </button>
-              </>
-            ) : null}
-          </li>
-        );
-      })}
+              </td>
+              <td className="py-1.5 text-right whitespace-nowrap">
+                {live ? (
+                  <>
+                    <button
+                      type="button"
+                      className={btn}
+                      aria-label={`Next state for ${endpoint}`}
+                      onClick={() => void act(() => api.cyclePin({ endpoint }), false)}
+                    >
+                      Next
+                    </button>{" "}
+                    <button
+                      type="button"
+                      className={btn}
+                      aria-label={`Remove the pin on ${endpoint}`}
+                      onClick={() => void act(() => api.deletePins(endpoint), false)}
+                    >
+                      Remove
+                    </button>
+                  </>
+                ) : null}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
       {pins.live.length > 1 ? (
-        <li>
-          <button
-            type="button"
-            className={btn}
-            onClick={() => void act(() => api.deletePins(), false)}
-          >
-            Remove all live pins
-          </button>
-        </li>
+        <tfoot>
+          <tr>
+            <td colSpan={3} className="pt-2">
+              <button
+                type="button"
+                className={btn}
+                onClick={() => void act(() => api.deletePins(), false)}
+              >
+                Remove all live pins
+              </button>
+            </td>
+          </tr>
+        </tfoot>
       ) : null}
-    </ul>
+    </table>
   );
 }
 

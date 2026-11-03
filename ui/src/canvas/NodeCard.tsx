@@ -53,7 +53,6 @@ export function NodeCard({ data, selected }: NodeProps) {
           : "has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent"
       }`}
     >
-      <div aria-hidden className="h-[3px]" style={{ background: hue }} />
       <div data-part="card" className="relative flex flex-col gap-2 px-3 pt-2.5 pb-3">
         <Handle type="target" position={Position.Left} />
         <button

@@ -47,6 +47,8 @@ export function Shell({
   // room beside the title card is not left empty; narrower, the figures card needs that width
   const wide = useWide();
   const column = editing && wide;
+  // under 1280 px the key figures get a row of their own below the title card and the icons
+  const stacked = editing && !column && mode !== "full";
   return (
     <main
       className="relative h-full overflow-hidden bg-ground text-text"
@@ -80,13 +82,19 @@ export function Shell({
                 ? "flex flex-col gap-2"
                 : column
                   ? "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3"
-                  : "grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3"
+                  : stacked
+                    ? "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3"
+                    : "grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3"
             }`}
           >
             <div className="pointer-events-auto rounded-2xl border border-border bg-sheet shadow-float">
               {topLeft}
             </div>
-            <div className="pointer-events-auto w-full min-w-0 rounded-2xl border border-border bg-sheet shadow-float">
+            <div
+              className={`pointer-events-auto w-full min-w-0 rounded-2xl border border-border bg-sheet shadow-float ${
+                stacked ? "order-last col-span-2" : ""
+              }`}
+            >
               {top}
             </div>
             {topRight && !column ? (
@@ -107,7 +115,9 @@ export function Shell({
                   <div className="flex justify-end">{zoom}</div>
                 </div>
               </div>
-              {column ? null : <div className="pointer-events-auto flex">{rail}</div>}
+              {column ? null : (
+                <div className="pointer-events-auto flex max-h-full self-start">{rail}</div>
+              )}
             </div>
           ) : (
             <div className="min-w-0 flex-1 rounded-2xl border border-border bg-sheet shadow-float">
@@ -122,7 +132,7 @@ export function Shell({
                 {topRight}
               </div>
             ) : null}
-            <div className="pointer-events-auto flex min-h-0 flex-1">{rail}</div>
+            <div className="pointer-events-auto flex min-h-0 flex-1 items-start">{rail}</div>
           </div>
         ) : null}
       </div>

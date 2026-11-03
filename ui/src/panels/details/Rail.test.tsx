@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import { useRail } from "../../shell/layout/rail";
+import { RAIL_MAX_W, RAIL_MIN_W, useRail } from "../../shell/layout/rail";
 import { Rail } from "./Rail";
 
 function show(tab: string, sentence = "", width = 1440) {
@@ -86,7 +86,7 @@ test("controls_tab_has_no_slots_per_instance_jargon_label", async () => {
     />,
   );
   expect(screen.queryByText(/per instance/i)).toBeNull();
-  expect(screen.getByLabelText("Slots")).toBeTruthy();
+  expect(screen.getByLabelText("Service time")).toBeTruthy();
 });
 
 test("tab_panels_contain_their_absolutely_positioned_children", () => {
@@ -96,4 +96,20 @@ test("tab_panels_contain_their_absolutely_positioned_children", () => {
   const panel = screen.getByRole("tabpanel");
   expect(panel.className).toMatch(/\brelative\b/);
   expect(panel.className).toMatch(/overflow-y-auto/);
+});
+
+test("the_rail_width_is_kept_between_its_limits_and_moves_with_the_arrow_keys", () => {
+  useRail.getState().setWidth(100);
+  expect(useRail.getState().width).toBe(RAIL_MIN_W);
+  useRail.getState().setWidth(9999);
+  expect(useRail.getState().width).toBe(RAIL_MAX_W);
+  useRail.getState().setWidth(360);
+  useRail.getState().set(true);
+  show("controls");
+  const grip = screen.getByRole("separator", { name: "Resize the details panel" });
+  fireEvent.keyDown(grip, { key: "ArrowLeft" });
+  expect(useRail.getState().width).toBe(384);
+  expect(localStorage.getItem("kaanal-rail-w")).toBe("384");
+  fireEvent.keyDown(grip, { key: "ArrowRight" });
+  expect(useRail.getState().width).toBe(360);
 });

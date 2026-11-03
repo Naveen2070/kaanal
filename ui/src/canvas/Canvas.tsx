@@ -66,8 +66,9 @@ function Flow() {
   const still = usePrefersReducedMotion();
   const mode = useLayout();
   const railOpen = useRail((s) => s.open);
-  const pads = padsFor(mode, railOpen);
-  const fitOptions = { padding: fitPadding(mode, railOpen), maxZoom: MAX_FIT_ZOOM };
+  const railW = useRail((s) => s.width);
+  const pads = padsFor(mode, railOpen, railW);
+  const fitOptions = { padding: fitPadding(mode, railOpen, railW), maxZoom: MAX_FIT_ZOOM };
   /** Names given a first layout already, so a refused save cannot loop. */
   const placed = useRef(new Set<string>());
 

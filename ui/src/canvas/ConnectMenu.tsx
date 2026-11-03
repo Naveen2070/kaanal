@@ -60,12 +60,7 @@ export function ConnectMenu({ from }: { from: string }) {
     .filter((w) => w.from === from);
   return (
     <div>
-      {targets.length === 0 ? (
-        <p className="text-xs text-muted">
-          Nothing to connect to: a component cannot call itself or one it already calls, and some
-          kinds cannot call others (a service cannot call a gateway).
-        </p>
-      ) : (
+      {targets.length === 0 ? null : (
         <ul aria-label={`Connect ${from} to`} className="flex flex-wrap gap-1">
           {targets.map((to) => (
             <li key={to}>

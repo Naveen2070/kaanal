@@ -54,12 +54,13 @@ test("a_service_is_never_offered_a_gateway", () => {
   expect(targetsFor("d", nodes, [])).toEqual([]);
 });
 
-test("nothing_valid_says_why", () => {
+test("nothing_valid_lists_nothing_and_does_not_apologise", () => {
   useDraft.setState({
     view: { ...view(), doc: { nodes: { a: { type: "service" } }, edges: [] } },
   });
   render(<ConnectMenu from="a" />);
-  expect(screen.getByText(/cannot call itself/)).toBeTruthy();
+  expect(screen.queryByRole("list")).toBeNull();
+  expect(screen.queryByText(/Nothing to connect/)).toBeNull();
 });
 
 test("a_click_connects_and_a_refusal_is_shown", async () => {

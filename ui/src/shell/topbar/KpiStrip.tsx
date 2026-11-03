@@ -51,7 +51,7 @@ function Cell({
   return (
     <div
       data-help-host
-      className={`flex flex-col gap-0.5 whitespace-nowrap ${grow ? "min-w-0 flex-1" : "shrink-0"} ${divider ? "border-l border-border pl-3" : ""}`}
+      className={`flex flex-col gap-0.5 whitespace-nowrap ${grow ? "min-w-64 flex-1" : "shrink-0"} ${divider ? "border-l border-border pl-3" : ""}`}
     >
       <dt className="flex items-center gap-0.5 text-xs text-muted">
         {label}
@@ -127,7 +127,7 @@ export function KpiStrip() {
       className="flex w-full items-end px-3 py-2.5"
     >
       <dl
-        className={`m-0 flex w-full flex-nowrap items-end justify-between gap-x-3 ${dimmed ? "opacity-60" : ""}`}
+        className={`m-0 flex w-full flex-wrap items-end justify-between gap-x-3 gap-y-2 ${dimmed ? "opacity-60" : ""}`}
       >
         <Cell
           label="Breaks first"

@@ -5,7 +5,7 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../kit/tabs";
-import { RAIL_FOLDED_W, RAIL_W, useRail } from "../../shell/layout/rail";
+import { RAIL_FOLDED_W, RAIL_MAX_W, RAIL_MIN_W, useRail } from "../../shell/layout/rail";
 import { TABS, useTab, type Tab } from "../../data/store/view";
 
 const LABEL: Record<Tab, string> = {
@@ -26,6 +26,8 @@ export function Rail({
   const [tab, setTab] = useTab();
   const open = useRail((s) => s.open);
   const setOpen = useRail((s) => s.set);
+  const width = useRail((s) => s.width);
+  const setWidth = useRail((s) => s.setWidth);
   // `]` folds and opens it, unless a field has the keys
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,10 +58,41 @@ export function Rail({
     );
   }
   return (
-    <div data-tour="panel" className="relative shrink-0" style={{ width: RAIL_W }}>
+    <div data-tour="panel" className="relative flex max-h-full shrink-0 flex-col" style={{ width }}>
+      {/* drag the left edge to widen (the Log table likes room); arrow keys do the same */}
+      {/* a focusable splitter is valid ARIA; the rule would have it be a plain hr */}
+      <div
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the details panel"
+        aria-valuemin={RAIL_MIN_W}
+        aria-valuemax={RAIL_MAX_W}
+        aria-valuenow={width}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft") setWidth(width + 24);
+          else if (e.key === "ArrowRight") setWidth(width - 24);
+          else return;
+          e.preventDefault();
+        }}
+        onPointerDown={(e) => {
+          const start = { x: e.clientX, w: width };
+          const el = e.currentTarget;
+          el.setPointerCapture(e.pointerId);
+          const move = (ev: PointerEvent) => setWidth(start.w + (start.x - ev.clientX));
+          const up = () => {
+            el.removeEventListener("pointermove", move);
+            el.removeEventListener("pointerup", up);
+          };
+          el.addEventListener("pointermove", move);
+          el.addEventListener("pointerup", up);
+        }}
+        className="absolute inset-y-3 -left-1.5 z-10 w-3 cursor-col-resize touch-none rounded-full hover:bg-accent/30 focus-visible:bg-accent/40 focus-visible:outline-none"
+      />
       <aside
         aria-label="Details"
-        className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-sheet shadow-float"
+        className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-sheet shadow-float"
       >
         {/* a live region must exist before its words do; it changes when a run finishes, not while a slider moves */}
         <div className="flex shrink-0 items-start border-b border-border">

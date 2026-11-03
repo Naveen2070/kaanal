@@ -88,7 +88,7 @@ afterEach(() => {
 
 test("every_field_has_a_visible_label_and_hint", async () => {
   await show();
-  for (const label of ["Name", "Slots", "Copies", "Service time", "Queue limit", "Timeout"]) {
+  for (const label of ["Name", "Service time", "Queue limit", "Timeout"]) {
     const input = screen.getByLabelText(label);
     expect(input, label).toBeTruthy();
     const hint = input.getAttribute("aria-describedby");
@@ -114,12 +114,6 @@ async function change(label: string, value: string) {
 
 test("each_field_in_the_panel_patches_its_path", async () => {
   await show();
-  expect(await change("Slots", "16")).toEqual({
-    patch: [{ op: "set", path: ["nodes", "app", "concurrency"], value: 16 }],
-  });
-  expect(await change("Copies", "3")).toEqual({
-    patch: [{ op: "set", path: ["nodes", "app", "replicas"], value: 3 }],
-  });
   expect(await change("Service time", "50")).toEqual({
     patch: [{ op: "set", path: ["nodes", "app", "proc"], value: "50ms" }],
   });
@@ -211,11 +205,6 @@ test("a_value_the_loader_would_reject_is_never_sent_and_the_box_shows_the_real_v
   await show();
   const sent = mockFetch([{ json: view() }]);
   const cases: [string, string, string][] = [
-    ["Slots", "2.5", "12"],
-    ["Slots", "5000000000", "12"],
-    ["Slots", "0", "12"],
-    ["Copies", "65", "2"],
-    ["Copies", "1.5", "2"],
     ["Timeout", "400000", ""],
     ["Service time", "-1", "98"],
     ["Queue limit", "-3", ""], // the node has a bare slot count: no limit, an empty box
@@ -242,10 +231,10 @@ test("a_tiny_service_time_is_written_without_an_exponent", async () => {
 test("a_refused_edit_puts_the_old_value_back_in_the_box", async () => {
   await show();
   mockFetch([{ status: 400, json: { error: "no" } }]);
-  const input = screen.getByLabelText("Slots") as HTMLInputElement;
+  const input = screen.getByLabelText("Service time") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "20" } });
   fireEvent.blur(input);
-  await vi.waitFor(() => expect(input.value).toBe("12"));
+  await vi.waitFor(() => expect(input.value).toBe("98"));
 });
 
 test("a_rename_tells_the_panel_to_follow_and_a_refused_one_restores_the_name", async () => {
@@ -386,4 +375,13 @@ test("chaos_chips_disabled_until_apply_with_the_reason", async () => {
   await vi.waitFor(() => expect(take.hasAttribute("disabled")).toBe(true));
   const why = document.getElementById(take.getAttribute("aria-describedby") ?? "");
   expect(why?.textContent).toMatch(/Apply the draft first/);
+});
+
+test("slots_and_copies_are_set_in_the_dock_only_and_the_name_is_last", async () => {
+  await show();
+  expect(screen.queryByLabelText("Slots")).toBeNull();
+  expect(screen.queryByLabelText("Copies")).toBeNull();
+  const order = [...document.querySelectorAll("h3")].map((h) => h.textContent);
+  expect(order[0]).toBe("Capacity");
+  expect(order.at(-1)).toBe("This component");
 });

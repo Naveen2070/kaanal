@@ -98,7 +98,7 @@ export function TrafficBuilder() {
         e.preventDefault();
         closeTrafficBuilder();
       }}
-      className="max-h-[88vh] w-[min(64rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-border bg-sheet p-0 text-sm text-text shadow-float backdrop:bg-black/40"
+      className="max-h-[88vh] w-[min(46rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-border bg-sheet p-0 text-sm text-text shadow-float backdrop:bg-black/40"
     >
       <div className="border-b border-border px-5 py-4">
         <h2 id={titleId} className="m-0 text-base font-semibold">
@@ -114,24 +114,12 @@ export function TrafficBuilder() {
       </div>
 
       <div className="px-5 py-4">
-        <div
-          aria-hidden
-          className="mb-1 hidden grid-cols-[6rem_minmax(8rem,1fr)_5rem_9.5rem_9.5rem_minmax(10rem,14rem)_2rem] gap-2 px-0.5 text-xs text-muted md:grid"
-        >
-          <span>Method</span>
-          <span>Path</span>
-          <span>Weight</span>
-          <span>Request size</span>
-          <span>Response size</span>
-          <span>Sends to</span>
-          <span />
-        </div>
         <ol className="m-0 flex list-none flex-col gap-2 p-0">
           {rows.map((r, i) => {
             const n = i + 1;
             return (
               <li key={i} className="rounded-xl border border-border bg-card p-2">
-                <div className="grid grid-cols-2 items-center gap-2 md:grid-cols-[6rem_minmax(8rem,1fr)_5rem_9.5rem_9.5rem_minmax(10rem,14rem)_2rem]">
+                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2">
                   <select
                     aria-label={`Method of endpoint ${n}`}
                     value={r.method}
@@ -151,6 +139,7 @@ export function TrafficBuilder() {
                   />
                   <input
                     aria-label={`Weight of endpoint ${n}`}
+                    title="Weight: this endpoint's share of the requests"
                     type="number"
                     min={0}
                     step="any"
@@ -158,37 +147,6 @@ export function TrafficBuilder() {
                     onChange={(e) => set(i, { weight: e.currentTarget.valueAsNumber })}
                     className={`${field} text-right tabular-nums`}
                   />
-                  <div className="flex items-center gap-1">
-                    <UnitInput
-                      ariaLabel={`Request size of endpoint ${n}`}
-                      unitLabel={`Request size unit of endpoint ${n}`}
-                      units={SIZE_UNITS}
-                      min={0}
-                      value={sizeText(r.reqKb)}
-                      onChange={(t) => set(i, { reqKb: sizeNumber(t) })}
-                      className={`${field} text-right tabular-nums`}
-                    />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <UnitInput
-                      ariaLabel={`Response size of endpoint ${n}`}
-                      unitLabel={`Response size unit of endpoint ${n}`}
-                      units={SIZE_UNITS}
-                      min={0}
-                      value={sizeText(r.respKb)}
-                      onChange={(t) => set(i, { respKb: sizeNumber(t) })}
-                      className={`${field} text-right tabular-nums`}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    aria-expanded={open === i}
-                    aria-label={`Services behind endpoint ${n}: ${summary(r, services)}`}
-                    onClick={() => setOpen(open === i ? null : i)}
-                    className={`${field} truncate text-left`}
-                  >
-                    {summary(r, services)}
-                  </button>
                   <button
                     type="button"
                     aria-label={`Remove endpoint ${n}`}
@@ -199,6 +157,41 @@ export function TrafficBuilder() {
                     className="flex size-8 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-negative focus-visible:outline-2 focus-visible:outline-accent"
                   >
                     <Trash2 size={15} aria-hidden />
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
+                  <span className="flex items-center gap-1">
+                    Request
+                    <UnitInput
+                      ariaLabel={`Request size of endpoint ${n}`}
+                      unitLabel={`Request size unit of endpoint ${n}`}
+                      units={SIZE_UNITS}
+                      min={0}
+                      value={sizeText(r.reqKb)}
+                      onChange={(t) => set(i, { reqKb: sizeNumber(t) })}
+                      className={`${field} text-right tabular-nums`}
+                    />
+                  </span>
+                  <span className="flex items-center gap-1">
+                    Response
+                    <UnitInput
+                      ariaLabel={`Response size of endpoint ${n}`}
+                      unitLabel={`Response size unit of endpoint ${n}`}
+                      units={SIZE_UNITS}
+                      min={0}
+                      value={sizeText(r.respKb)}
+                      onChange={(t) => set(i, { respKb: sizeNumber(t) })}
+                      className={`${field} text-right tabular-nums`}
+                    />
+                  </span>
+                  <button
+                    type="button"
+                    aria-expanded={open === i}
+                    aria-label={`Services behind endpoint ${n}: ${summary(r, services)}`}
+                    onClick={() => setOpen(open === i ? null : i)}
+                    className={`${field} min-w-40 flex-1 truncate text-left text-text`}
+                  >
+                    {summary(r, services)}
                   </button>
                 </div>
                 {open === i ? (
