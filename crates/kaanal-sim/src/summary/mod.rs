@@ -52,6 +52,8 @@ pub struct Summary {
     pub nodes: Vec<NodeSummary>,
     /// Per edge that has a `bandwidth`.
     pub links: Vec<LinkSummary>,
+    /// Per node pipe with a `bandwidth` (a node's send and receive side each).
+    pub pipes: Vec<PipeSummary>,
     /// Node ids with visits, the most loaded first: offered load, then mean wait; nodes without
     /// slots last.
     pub bottlenecks: Vec<usize>,
@@ -190,6 +192,29 @@ pub struct LinkSummary {
     pub series: LinkSeries,
 }
 
+/// One side of a node's network card (`bandwidth:` on a node).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PipeSummary {
+    /// The node the card belongs to.
+    pub node: String,
+    /// `send` or `receive`.
+    pub direction: &'static str,
+    /// Bodies carried over this pipe (request and response each count) that it was the narrowest
+    /// pipe for.
+    pub transfers: u64,
+    /// Mean queue wait before a transfer, ms.
+    pub mean_wait_ms: f64,
+    /// Transfer time over the window and the node's replicas: the share of capacity in use.
+    pub offered_load: f64,
+    /// Measured utilization of the pipe (busy time in the window, at most 1).
+    pub utilization: f64,
+    /// Offered load of 1.0 or more, or utilization of 0.95 or more.
+    pub saturated: bool,
+    /// Requests per second the whole traffic mix can reach before this pipe saturates; `None`
+    /// when nothing crossed it.
+    pub saturates_at_req_s: Option<f64>,
+}
+
 /// A running total: count, summed wait and summed busy time (seconds).
 #[derive(Default, Clone, Copy)]
 struct Acc {
@@ -306,6 +331,8 @@ fn latency(sorted: &[f64]) -> Latency {
 struct Tally {
     node_acc: Vec<Vec<Acc>>,
     link_acc: Vec<Acc>,
+    /// Per node, `[send, receive]`, summed over its replicas.
+    nic_acc: Vec<[Acc; 2]>,
     /// Sorted latencies in ms, all requests.
     lat_all: Vec<f64>,
     /// Sorted latencies per stream.
@@ -324,6 +351,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
         .map(|n| vec![Acc::default(); usize::from(n.replicas.max(1))])
         .collect();
     let mut link_acc = vec![Acc::default(); topo.edges.len()];
+    let mut nic_acc = vec![[Acc::default(); 2]; topo.nodes.len()];
     let mut lat_all = Vec::with_capacity(report.requests.len());
     let mut lat_by: Vec<Vec<f64>> = vec![Vec::new(); cfg.streams.len()];
     let mut work_by: Vec<Vec<f64>> = vec![Vec::new(); topo.nodes.len()];
@@ -361,6 +389,9 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
                     work_by[hop.node].push(d * 1000.0);
                 }
                 HopKind::Link { edge, .. } => link_acc[usize::from(edge)].add(w, d, true),
+                HopKind::Nic { send, .. } => {
+                    nic_acc[hop.node][usize::from(!send)].add(w, d, true);
+                }
                 HopKind::Net | HopKind::Delay => {}
             }
         }
@@ -372,6 +403,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
     Tally {
         node_acc,
         link_acc,
+        nic_acc,
         lat_all,
         lat_by,
         work_by,
@@ -381,7 +413,12 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
 }
 
 /// **Private.** What a reader should know before trusting the numbers.
-fn warnings(requests: u64, nodes: &[NodeSummary], links: &[LinkSummary]) -> Vec<String> {
+fn warnings(
+    requests: u64,
+    nodes: &[NodeSummary],
+    links: &[LinkSummary],
+    pipes: &[PipeSummary],
+) -> Vec<String> {
     let mut warnings = Vec::new();
     if requests < FEW {
         warnings.push(format!(
@@ -409,6 +446,9 @@ fn warnings(requests: u64, nodes: &[NodeSummary], links: &[LinkSummary]) -> Vec<
     }
     for l in links.iter().filter(|l| l.saturated) {
         warnings.push(format!("link {} -> {} is saturated", l.from, l.to));
+    }
+    for p in pipes.iter().filter(|p| p.saturated) {
+        warnings.push(format!("{} of node {} is saturated", p.direction, p.node));
     }
     warnings
 }
@@ -490,6 +530,45 @@ fn link_summaries(
         .collect()
 }
 
+/// **Private.** Per node pipe with a rate.
+fn pipe_summaries(
+    topo: &Topology,
+    report: &SimReport,
+    nic_acc: &[[Acc; 2]],
+    window_s: f64,
+    mix_rate: f64,
+) -> Vec<PipeSummary> {
+    let mut pipes = Vec::new();
+    for (i, n) in topo.nodes.iter().enumerate() {
+        for (side, (rate, direction)) in [(n.bandwidth.0, "send"), (n.bandwidth.1, "receive")]
+            .into_iter()
+            .enumerate()
+        {
+            if rate.is_none() {
+                continue;
+            }
+            let a = nic_acc[i][side];
+            let load = if window_s > 0.0 {
+                a.busy / (window_s * f64::from(n.replicas.max(1)))
+            } else {
+                0.0
+            };
+            let util = report.nic_utilization.get(i).map_or(0.0, |u| u[side]);
+            pipes.push(PipeSummary {
+                node: n.name.clone(),
+                direction,
+                transfers: a.n,
+                mean_wait_ms: a.mean_wait_ms(),
+                offered_load: load,
+                utilization: util,
+                saturated: load >= 1.0 || util >= SATURATED,
+                saturates_at_req_s: (load > 0.0 && mix_rate > 0.0).then(|| mix_rate / load),
+            });
+        }
+    }
+    pipes
+}
+
 /// Folds `report` (a run of `cfg` on `topo`) into a [`Summary`].
 #[must_use]
 #[expect(
@@ -507,6 +586,7 @@ pub fn summarize(
     let Tally {
         node_acc,
         link_acc,
+        nic_acc,
         lat_all,
         lat_by,
         work_by,
@@ -583,7 +663,8 @@ pub fn summarize(
         .collect();
     let links = link_summaries(topo, cfg, report, &link_acc, window_s, mix_rate);
     let requests = report.requests.len() as u64;
-    let warnings = warnings(requests, &nodes, &links);
+    let pipes = pipe_summaries(topo, report, &nic_acc, window_s, mix_rate);
+    let warnings = warnings(requests, &nodes, &links, &pipes);
     let bottlenecks = bottlenecks(&nodes);
     let sys_series = series::system_series(cfg, report);
     let streams = stream_summaries(cfg, &lat_by, &failed_by);
@@ -599,6 +680,7 @@ pub fn summarize(
         streams,
         nodes,
         links,
+        pipes,
         bottlenecks,
     }
 }

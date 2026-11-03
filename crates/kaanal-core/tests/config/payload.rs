@@ -88,3 +88,29 @@ fn per_kb_on_a_cache_is_rejected() {
     assert!(err.contains("a cache has no per_kb"), "{err}");
     assert!(err.starts_with("3:"), "positioned on its line: {err}");
 }
+
+#[test]
+fn node_bandwidth_takes_one_number_or_out_and_in_and_must_be_positive() {
+    let c = load("  app: { type: service, bandwidth: 125000 }\n", "").unwrap();
+    assert_eq!(c.nodes["app"].bandwidth(), (Some(125_000), Some(125_000)));
+    let c = load(
+        "  app: { type: service, bandwidth: { out: 10, in: 20 } }\n",
+        "",
+    )
+    .unwrap();
+    assert_eq!(c.nodes["app"].bandwidth(), (Some(10), Some(20)));
+    let c = load("  app: { type: service, bandwidth: { out: 10 } }\n", "").unwrap();
+    assert_eq!(c.nodes["app"].bandwidth(), (Some(10), None));
+    let t = Topology::build(&c).unwrap();
+    assert_eq!(t.nodes[0].bandwidth, (Some(10), None));
+    assert!(
+        t.payload_costs(),
+        "a node bandwidth makes payload size matter"
+    );
+    let err = load("  app: { type: service, bandwidth: 0 }\n", "").unwrap_err();
+    assert!(err.contains("bandwidth must be at least 1"), "{err}");
+    let err = load("  app: { type: service, bandwidth: { out: 0 } }\n", "").unwrap_err();
+    assert!(err.contains("bandwidth must be at least 1"), "{err}");
+    let err = load("  c: { type: cache, bandwidth: 5 }\n", "").unwrap_err();
+    assert!(err.contains("bandwidth"), "a cache has none: {err}");
+}

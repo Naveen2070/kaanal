@@ -7,7 +7,7 @@ import { focusName } from "../../canvas/focusName";
 import type { EdgeDoc, NodeDoc } from "../../data/api/types";
 import { ConnectMenu, targetsFor, wiringNote } from "../../canvas/ConnectMenu";
 import { fixNode, whyNodeRed, whyWireRed } from "../../canvas/insights";
-import { bandwidthKbOf } from "./edgeFields";
+import { bandwidthKbOf, EDGE_LIMITS } from "./edgeFields";
 import { useFeed } from "../../canvas/feed";
 import { nodeFigures, percent, replicasOf, twoSignificant } from "../../canvas/metrics";
 import { kindInfo } from "../../canvas/nodeKinds";
@@ -17,14 +17,16 @@ import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section, StyleField } from "./Field";
 import { callsOthers } from "../../canvas/rules";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
-import { TIME_UNITS } from "./units";
+import { RATE_UNITS, TIME_UNITS } from "./units";
 import {
   balanceOf,
+  cardOf,
   deleteOps,
   holdOf,
   setStyle,
   durationMs,
   setBalance,
+  setCard,
   hasProc,
   LIMITS,
   clearQueueLimit,
@@ -204,6 +206,51 @@ export function Controls({
                 : `Overloaded: ${twoSignificant(node.visits_per_s)} visits/s arrive, more than it can take.`
               : "Spare capacity shows after a run."}
           </p>
+        </Section>
+      ) : null}
+
+      {config.type !== "cache" ? (
+        <Section title="Network card">
+          <NumberField
+            label="Sends up to"
+            units={RATE_UNITS}
+            hint="What this component can send each second, over all its wires: calls out and replies. Each copy has its own. Empty means no limit."
+            value={cardOf(config).send}
+            placeholder="No limit"
+            min={EDGE_LIMITS.bandwidthKb.min}
+            max={EDGE_LIMITS.bandwidthKb.max}
+            step="any"
+            onCommit={(n) => patch(setCard(name, config, "send", n))}
+          />
+          {cardOf(config).send !== null ? (
+            <button
+              type="button"
+              onClick={() => void patch(setCard(name, config, "send", null))}
+              className="mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              Remove the send limit
+            </button>
+          ) : null}
+          <NumberField
+            label="Receives up to"
+            units={RATE_UNITS}
+            hint="What this component can take in each second, over all its wires. Empty means no limit."
+            value={cardOf(config).receive}
+            placeholder="No limit"
+            min={EDGE_LIMITS.bandwidthKb.min}
+            max={EDGE_LIMITS.bandwidthKb.max}
+            step="any"
+            onCommit={(n) => patch(setCard(name, config, "receive", n))}
+          />
+          {cardOf(config).receive !== null ? (
+            <button
+              type="button"
+              onClick={() => void patch(setCard(name, config, "receive", null))}
+              className="mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              Remove the receive limit
+            </button>
+          ) : null}
         </Section>
       ) : null}
 

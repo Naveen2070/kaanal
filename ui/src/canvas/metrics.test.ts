@@ -57,7 +57,7 @@ test("replicas_default_to_one_and_ignore_nonsense", () => {
 // ---- T2.1: one source for the figures a card, the sentence and the KPI strip all show ----
 
 import type { Summary } from "../data/api/types";
-import { breaksFirst } from "./metrics";
+import { breaksFirst, rankedByPeak } from "./metrics";
 
 const sentence = (over = {}, config = { type: "service" }) =>
   nodeFigures(nodeSummary(over), config).sentence;
@@ -231,4 +231,32 @@ test("a_node_that_turns_requests_away_says_so_and_gives_a_rate", () => {
   const none = nodeFigures(nodeSummary({ overflowed: 0, limited: 0 }), { type: "service" });
   expect(none.turnedAway).toBe(0);
   expect(none.turnedAwayPerS).toBeNull();
+});
+
+const pipe = {
+  node: "app",
+  direction: "send" as const,
+  transfers: 10,
+  mean_wait_ms: 1,
+  offered_load: 0.5,
+  utilization: 0.4,
+  saturated: false,
+  saturates_at_req_s: 200,
+};
+
+test("a_node_pipe_can_break_first", () => {
+  const s = { nodes: [], links: [], pipes: [pipe] } as unknown as Summary;
+  expect(breaksFirst(s)?.node).toBe("app send pipe");
+  const idle = { ...s, pipes: [{ ...pipe, saturates_at_req_s: null }] } as unknown as Summary;
+  expect(breaksFirst(idle)).toBeNull();
+});
+
+test("a_node_pipe_is_ranked_by_its_larger_figure_at_most_100_percent", () => {
+  const s = {
+    nodes: [],
+    links: [],
+    bottlenecks: [],
+    pipes: [{ ...pipe, offered_load: 3 }],
+  } as unknown as Summary;
+  expect(rankedByPeak(s)).toEqual([{ name: "app send pipe", peak: 1, saturatesAtReqS: 200 }]);
 });

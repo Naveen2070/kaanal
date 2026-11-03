@@ -114,6 +114,9 @@ pub struct SimReport {
     pub replica_utilization: Vec<Vec<f64>>,
     /// Measured utilization of each edge's link, by edge index; `0.0` without a `bandwidth`.
     pub link_utilization: Vec<f64>,
+    /// Measured utilization of each node's network pipes, by node id, `[send, receive]`: busy time
+    /// in the window over the window and the node's replicas; `0.0` without a `bandwidth` that way.
+    pub nic_utilization: Vec<[f64; 2]>,
 }
 
 impl SimReport {

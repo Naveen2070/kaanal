@@ -156,3 +156,63 @@ fn a_cache_edge_has_link_hops_and_a_miss_has_no_response_transfer() {
     assert_eq!(dirs("1.0"), [(false, ms(10)), (true, ms(20))], "a hit");
     assert_eq!(dirs("0.0"), [(false, ms(10))], "a miss returns nothing");
 }
+
+#[test]
+fn a_node_bandwidth_queues_on_the_narrowest_pipe_and_a_tie_goes_to_the_wire() {
+    // app sends 500 kB/s, db receives 2 MB/s, the wire is 1 MB/s: the sender is narrowest.
+    let (topo, eps) = build(&cfg(", bandwidth: { out: 500000 }", ", bandwidth: 1000000"));
+    let (app, db) = (topo.id("app").unwrap(), topo.id("db").unwrap());
+    let h = hops(&topo, &eps, 10_000, 0);
+    let n: Vec<_> = h
+        .iter()
+        .filter(|h| {
+            matches!(
+                h.kind,
+                HopKind::Nic { send: true, .. } | HopKind::Link { .. }
+            )
+        })
+        .collect();
+    assert_eq!(n.len(), 1, "one pipelined transfer, not one hop per pipe");
+    assert_eq!(n[0].dur, ms(20), "10 KB over the narrowest, 500 kB/s");
+    assert_eq!(
+        n[0].kind,
+        HopKind::Nic {
+            send: true,
+            resp: false
+        }
+    );
+    assert_eq!(n[0].node, app, "the sender's pipe");
+    // the response: db sends (no limit), app receives (no limit), only the wire: a link hop
+    let h = hops(&topo, &eps, 0, 10_000);
+    let l = links(&h);
+    assert_eq!((l.len(), l[0].dur, l[0].node), (1, ms(10), db));
+    // equal rates: the wire wins the tie
+    let (topo, eps) = build(&cfg(", bandwidth: 1000000", ", bandwidth: 1000000"));
+    let h = hops(&topo, &eps, 10_000, 0);
+    assert_eq!(links(&h).len(), 1);
+    assert!(
+        !h.iter()
+            .any(|h| matches!(h.kind, HopKind::Nic { send: true, .. }))
+    );
+}
+
+#[test]
+fn a_receiving_pipe_binds_the_response_and_belongs_to_the_caller() {
+    // the caller (app) receives only 250 kB/s; the response comes back to it
+    let (t, e) = build(&cfg(", bandwidth: { in: 250000 }", ""));
+    let app = t.id("app").unwrap();
+    let h = hops(&t, &e, 0, 10_000);
+    let n: Vec<_> = h
+        .iter()
+        .filter(|h| matches!(h.kind, HopKind::Nic { .. }))
+        .collect();
+    assert_eq!(n.len(), 1);
+    assert_eq!((n[0].dur, n[0].node), (ms(40), app));
+    assert_eq!(
+        n[0].kind,
+        HopKind::Nic {
+            send: false,
+            resp: true
+        }
+    );
+}

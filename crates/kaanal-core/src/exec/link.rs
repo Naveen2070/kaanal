@@ -15,34 +15,54 @@ use crate::topology::{EdgeId, NodeId};
 pub(super) const MAX_HOP: Duration = Duration::from_hours(10);
 
 impl Walk<'_> {
-    /// **Private.** A payload crossing `edge` as a `Link` hop: `bytes / bandwidth`, capped at 10 h.
-    /// Nothing (zero, no hop) without a bandwidth or without bytes in this direction. A link
-    /// chaos `bandwidth_cap` (`cap`) lowers the bandwidth, so the transfer takes longer.
+    /// **Private.** A payload crossing `edge` from `from` to `to` (each a node and replica) as
+    /// one transfer, pipelined: `bytes / rate` at the narrowest of the sender's send pipe, the
+    /// wire and the receiver's receive pipe, capped at 10 h. The hop queues FIFO on that
+    /// narrowest pipe (the wire on a tie, then the sender). Nothing (zero, no hop) when no pipe
+    /// has a rate or there are no bytes this way. A link chaos `bandwidth_cap` (`cap`) lowers the
+    /// wire's rate.
     pub(super) fn link(
         &mut self,
         edge: Option<EdgeId>,
-        to: NodeId,
+        (from, to): ((NodeId, u16), (NodeId, u16)),
         resp: bool,
-        (start, replica): (Duration, u16),
+        start: Duration,
         cap: Option<u64>,
     ) -> Duration {
         let bytes = if resp { self.bytes.1 } else { self.bytes.0 };
-        let Some((edge, bw)) = edge.and_then(|e| Some((e, self.topo.edges[e].bandwidth?))) else {
-            return Duration::ZERO;
-        };
         if bytes == 0 {
             return Duration::ZERO;
         }
-        let bw = cap.map_or(bw, |c| c.min(bw)).max(1);
-        let ns = (u128::from(bytes) * 1_000_000_000 / u128::from(bw)).min(MAX_HOP.as_nanos());
+        let wire = edge.and_then(|e| self.topo.edges[e].bandwidth);
+        let wire = wire.map(|bw| cap.map_or(bw, |c| c.min(bw)).max(1));
+        let (send, recv) = (
+            self.topo.nodes[from.0].bandwidth.0,
+            self.topo.nodes[to.0].bandwidth.1,
+        );
+        // (rate, the hop's owner and kind); the first narrowest wins a tie.
+        let mut pipes = Vec::with_capacity(3);
+        if let (Some(e), Some(bw)) = (edge, wire) {
+            let edge = u16::try_from(e).expect("a topology has at most u16::MAX edges");
+            // the wire belongs to the edge's target (the callee), whichever way the body goes
+            let callee = if resp { from } else { to };
+            pipes.push((bw, callee, HopKind::Link { edge, resp }));
+        }
+        if let Some(bw) = send {
+            pipes.push((bw, from, HopKind::Nic { send: true, resp }));
+        }
+        if let Some(bw) = recv {
+            pipes.push((bw, to, HopKind::Nic { send: false, resp }));
+        }
+        let Some((bw, (node, replica), kind)) = pipes.into_iter().min_by_key(|p| p.0) else {
+            return Duration::ZERO;
+        };
+        let ns =
+            (u128::from(bytes) * 1_000_000_000 / u128::from(bw.max(1))).min(MAX_HOP.as_nanos());
         let dur = Duration::from_nanos(u64::try_from(ns).unwrap_or(u64::MAX));
         self.items.push(PlanItem::Hop(Hop {
-            node: to,
+            node,
             replica,
-            kind: HopKind::Link {
-                edge: u16::try_from(edge).expect("a topology has at most u16::MAX edges"),
-                resp,
-            },
+            kind,
             start,
             dur,
         }));

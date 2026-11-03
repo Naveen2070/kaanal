@@ -103,6 +103,9 @@ pub fn trace_parts(
                     HopKind::Link { resp, .. } => {
                         format!("{}.{}={d}", at(h.node, h.replica), link_name(resp))
                     }
+                    HopKind::Nic { send, .. } => {
+                        format!("{}.{}={d}", at(h.node, h.replica), nic_name(send))
+                    }
                 }));
             }
             PlanItem::Hop(_)
@@ -449,7 +452,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                         HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss => {
                             run.chaos.visit_replica(h.node, key, h.replica)
                         }
-                        HopKind::Net | HopKind::Link { .. } => None,
+                        HopKind::Net | HopKind::Link { .. } | HopKind::Nic { .. } => None,
                     };
                     // A cache lookup never emits a `Fail`: a hang is a hop charged the node's
                     // `timeout` (else HANG_CAP) with no latency, and a slow lookup is cut to the
@@ -547,7 +550,13 @@ fn kind_str(kind: HopKind) -> &'static str {
         HopKind::CacheMiss => "miss",
         HopKind::Delay => "delay",
         HopKind::Link { resp, .. } => link_name(resp),
+        HopKind::Nic { send, .. } => nic_name(send),
     }
+}
+
+/// **Private.** The name of a node's network pipe hop: `nic-out` (send) or `nic-in` (receive).
+fn nic_name(send: bool) -> &'static str {
+    if send { "nic-out" } else { "nic-in" }
 }
 
 #[cfg(test)]

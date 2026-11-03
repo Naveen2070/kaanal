@@ -15,7 +15,7 @@ export function SystemSummary() {
   const feed = useFeed();
   const run = useRun((s) => s.latest);
   const [, select] = useSelected();
-  const rows = closestToBreaking(feed.nodes, 3, feed.links);
+  const rows = closestToBreaking(feed.nodes, 3, feed.links, feed.pipes);
   const loaded = rows.some((r) => r.peak > 0);
   const edges = useDraft((s) => s.view?.doc?.edges);
   const fix = fixFirstLimit(run?.summary ?? undefined, (l) => {

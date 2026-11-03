@@ -71,6 +71,8 @@ fn hop_label(k: HopKind) -> &'static str {
         HopKind::Delay => "delay",
         HopKind::Link { resp: false, .. } => "link request",
         HopKind::Link { resp: true, .. } => "link response",
+        HopKind::Nic { send: true, .. } => "node uplink",
+        HopKind::Nic { send: false, .. } => "node downlink",
     }
 }
 
@@ -328,6 +330,7 @@ pub(super) mod tests {
             nodes: vec![],
             replica_utilization: vec![],
             link_utilization: vec![],
+            nic_utilization: vec![],
         }
     }
 

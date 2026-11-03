@@ -1,12 +1,15 @@
-import { expect, test } from "vite-plus/test";
+import { describe, expect, it, test } from "vite-plus/test";
+import type { NodeDoc } from "../../data/api/types";
 import { nodeSummary } from "../../test/summary";
 import {
+  cardOf,
   chaosBody,
   controlRows,
   deleteOps,
   durationMs,
   clearQueueLimit,
   queueOf,
+  setCard,
   setQueue,
   setSlots,
   slotsOf,
@@ -188,4 +191,28 @@ test("clear_queue_limit_turns_the_long_form_back_into_a_bare_slot_count", () => 
   // a bare count is already unbounded; a pool always has a queue
   expect(clearQueueLimit("s", { type: "service", concurrency: 3 })).toEqual([]);
   expect(clearQueueLimit("d", { type: "database", pool: { size: 5, queue: 2 } })).toEqual([]);
+});
+
+describe("a node's network card", () => {
+  const svc = (extra: Record<string, unknown> = {}) => ({ type: "service", ...extra }) as NodeDoc;
+  it("reads one number as both sides and a pair as each", () => {
+    expect(cardOf(svc({ bandwidth: 2048 }))).toEqual({ send: 2, receive: 2 });
+    expect(cardOf(svc({ bandwidth: { out: 1024 } }))).toEqual({ send: 1, receive: null });
+    expect(cardOf(svc())).toEqual({ send: null, receive: null });
+  });
+  it("writes one number for equal sides, a pair otherwise, and removes when none is left", () => {
+    expect(setCard("a", svc(), "send", 1)).toEqual([
+      { op: "insert", path: ["nodes", "a", "bandwidth"], value: { out: 1024 } },
+    ]);
+    expect(setCard("a", svc({ bandwidth: { out: 1024 } }), "receive", 1)).toEqual([
+      { op: "set", path: ["nodes", "a", "bandwidth"], value: 1024 },
+    ]);
+    expect(setCard("a", svc({ bandwidth: 1024 }), "send", 2)).toEqual([
+      { op: "set", path: ["nodes", "a", "bandwidth"], value: { out: 2048, in: 1024 } },
+    ]);
+    expect(setCard("a", svc({ bandwidth: { out: 1024 } }), "send", null)).toEqual([
+      { op: "remove", path: ["nodes", "a", "bandwidth"] },
+    ]);
+    expect(setCard("a", svc(), "send", null)).toEqual([]);
+  });
 });

@@ -238,6 +238,19 @@ pub(crate) fn prob_ok(p: f64) -> bool {
 /// **Private.** Edge `prob` rules serde cannot place: the range, and where an edge may carry one.
 /// A cache keeps its own hit ratio, and the gateway routes by endpoint, so neither takes a share.
 pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
+    for (name, n) in &cfg.nodes {
+        let (out, rx) = n.bandwidth();
+        if out == Some(0) || rx == Some(0) {
+            return Err(Located::at_value(
+                vec![
+                    PathSeg::Key("nodes".into()),
+                    PathSeg::Key(name.clone()),
+                    PathSeg::Key("bandwidth".into()),
+                ],
+                format!("node '{name}': bandwidth must be at least 1 byte per second (got 0)"),
+            ));
+        }
+    }
     for (i, e) in cfg.edges.iter().enumerate() {
         if e.bandwidth == Some(0) {
             return Err(Located::at_value(

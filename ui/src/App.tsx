@@ -43,10 +43,12 @@ export function App() {
   // the cards read the finished run through this feed and never import the run store
   const nodes = latest?.summary?.nodes ?? [];
   const links = latest?.summary?.links ?? [];
+  const pipes = latest?.summary?.pipes ?? [];
   const feed: StatsFeed = {
     node: (name) => nodes.find((n) => n.name === name),
     link: (from, to) => links.find((l) => l.from === from && l.to === to),
     links,
+    pipes,
     nodes,
     dimmed,
     peakVisits: Math.max(0, ...nodes.map((n) => n.visits_per_s).filter(Number.isFinite)),

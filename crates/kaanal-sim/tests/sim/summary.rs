@@ -253,3 +253,36 @@ fn a_deadline_at_a_node_without_slots_is_a_warning_not_saturation() {
         s.warnings
     );
 }
+
+#[test]
+fn a_node_card_reports_its_send_and_receive_pipes() {
+    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms, bandwidth: 1000000 }\nedges:\n  - { from: gw, to: app }\n";
+    let mut cfg = windowed(20.0, 60, 5);
+    cfg.streams[0].req_bytes = 1000;
+    cfg.streams[0].resp_bytes = 1000;
+    let (_, s) = summary_of(y, &cfg);
+    assert!(s.links.is_empty(), "the edge has no bandwidth of its own");
+    let dirs: Vec<_> = s
+        .pipes
+        .iter()
+        .map(|p| (p.node.as_str(), p.direction))
+        .collect();
+    assert_eq!(dirs, [("app", "send"), ("app", "receive")]);
+    for p in &s.pipes {
+        assert_eq!(p.transfers, s.requests, "one body each way per request");
+        // 20/s x 1 KB over 1 MB/s = 0.02, so it fills at 1000 req/s
+        assert!((p.offered_load - 0.02).abs() < 0.005, "{}", p.offered_load);
+        let at = p.saturates_at_req_s.expect("it carried transfers");
+        assert!((at - 20.0 / p.offered_load).abs() < 1e-6, "{at}");
+        assert!(!p.saturated);
+    }
+    // a thin card saturates and says so
+    let thin = y.replace("bandwidth: 1000000", "bandwidth: 10000");
+    let (_, s) = summary_of(&thin, &cfg);
+    assert!(s.pipes.iter().all(|p| p.saturated), "{:?}", s.pipes);
+    assert!(
+        s.warnings.iter().any(|w| w.contains("send of node app")),
+        "{:?}",
+        s.warnings
+    );
+}

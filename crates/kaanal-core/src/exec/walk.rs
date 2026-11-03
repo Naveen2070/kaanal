@@ -186,13 +186,13 @@ impl Walk<'_> {
                             self.close_span(span);
                             return fail;
                         }
-                        now += self.link(edge, call.node, false, (now, r), cap);
+                        now += self.link(edge, (run, (call.node, r)), false, now, cap);
                         now += self.net(call.node, &call.net, rep_path, (now, r), lc);
                         let hold = self.open_hold(call.node, r);
                         let flow = self.seq(&call.body, rep_path, op, now, (call.node, r));
                         self.close_hold(hold);
                         if let Flow::Done(end) | Flow::Hit(end) = flow {
-                            now = end + self.link(edge, call.node, true, (end, r), cap);
+                            now = end + self.link(edge, ((call.node, r), run), true, end, cap);
                         }
                         self.close_span(span);
                         match flow {
@@ -223,12 +223,12 @@ impl Walk<'_> {
                             now += self.cache_miss_on_drop(k, cache.node, (now, r));
                             continue;
                         }
-                        now += self.link(edge, cache.node, false, (now, r), cap);
+                        now += self.link(edge, (run, (cache.node, r)), false, now, cap);
                         now += self.net(cache.node, &cache.net, rep_path, (now, r), lc);
                         let (hit, dur) = self.lookup(cache.node, rep_path, now, r);
                         now += dur;
                         if hit {
-                            now += self.link(edge, cache.node, true, (now, r), cap);
+                            now += self.link(edge, ((cache.node, r), run), true, now, cap);
                             return Flow::Hit(now);
                         }
                     }

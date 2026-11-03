@@ -82,3 +82,39 @@ fn a_busy_link_is_not_a_node_and_an_unlimited_edge_has_zero_counters() {
 fn e_len(t: &kaanal_core::Topology) -> usize {
     kaanal_core::replay::Engine::new(t).link_counters().len()
 }
+
+/// A node's network pipe hop of `ms`, owned by `node` replica `replica`.
+fn nic(node: usize, replica: u16, send: bool, ms: u64) -> PlanItem {
+    PlanItem::Hop(Hop {
+        node,
+        replica,
+        kind: HopKind::Nic { send, resp: false },
+        start: Duration::ZERO,
+        dur: Duration::from_millis(ms),
+    })
+}
+
+const NIC: &str = "version: 1\nnodes:\n  gw: { type: gateway, bandwidth: 1000, replicas: 2 }\n  a: { type: service }\n  b: { type: service }\nedges:\n  - { from: gw, to: a }\n  - { from: gw, to: b }\n";
+
+#[test]
+fn a_node_pipe_is_shared_by_every_wire_out_of_it_and_each_copy_has_its_own() {
+    let t = topo(NIC);
+    let gw = t.id("gw").unwrap();
+    let mut e = kaanal_core::replay::Engine::new(&t);
+    // two transfers on the same copy's send pipe queue; one on the other copy runs at once
+    e.submit(0, plan(vec![nic(gw, 0, true, 10)]), 0).unwrap();
+    e.submit(0, plan(vec![nic(gw, 0, true, 10)]), 1).unwrap();
+    e.submit(0, plan(vec![nic(gw, 1, true, 10)]), 2).unwrap();
+    let done = run_all(&mut e);
+    assert_eq!(
+        (fin(&done, 0).done, fin(&done, 1).done, fin(&done, 2).done),
+        (ms(10), ms(20), ms(10))
+    );
+    let c = &e.nic_counters()[2 * gw];
+    assert_eq!((c.completed, c.wait), (3, u128::from(ms(10))));
+    assert_eq!(
+        e.nic_counters()[2 * gw + 1].completed,
+        0,
+        "the receive pipe is idle"
+    );
+}

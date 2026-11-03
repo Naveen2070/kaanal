@@ -20,8 +20,11 @@ pub(super) struct Units {
     pub(super) states: Vec<NodeState>,
     /// Per-replica counters: `counters[node][replica]`.
     pub(super) counters: Vec<Vec<NodeCounters>>,
-    /// Number of real nodes: the units after them are one pseudo-node per edge (the link).
+    /// Number of real nodes: the units after them are one pseudo-node per edge (the link), then
+    /// two per node (its send and receive pipe, in that order).
     pub(super) nodes: usize,
+    /// Number of edges (links).
+    pub(super) edges: usize,
 }
 
 impl Units {
@@ -60,9 +63,29 @@ impl Units {
             count.push(1);
             counters.push(vec![NodeCounters::default()]);
         }
+        // Then a send and a receive pipe per node, one per replica, gated only when the node has
+        // a bandwidth that way.
+        for n in &topo.nodes {
+            for rate in [n.bandwidth.0, n.bandwidth.1] {
+                first.push(states.len());
+                for _ in 0..n.replicas.max(1) {
+                    states.push(NodeState {
+                        gate: rate.map(|_| Gate::new(&link)),
+                        bucket: None,
+                        since: 0,
+                    });
+                }
+                count.push(n.replicas.max(1));
+                counters.push(vec![
+                    NodeCounters::default();
+                    usize::from(n.replicas.max(1))
+                ]);
+            }
+        }
         Units {
             first,
             nodes: topo.nodes.len(),
+            edges: topo.edges.len(),
             count,
             states,
             counters,
@@ -97,7 +120,14 @@ impl Engine {
     /// transfers started, `wait` their summed queueing, `area` the busy time. An edge without a
     /// `bandwidth` stays zero.
     pub fn link_counters(&self) -> &[NodeCounters] {
-        &self.counters[self.units.nodes..]
+        &self.counters[self.units.nodes..self.units.nodes + self.units.edges]
+    }
+
+    /// Counters of each node's network pipes, `[2 * node]` the send pipe and `[2 * node + 1]`
+    /// the receive pipe (summed over its replicas). A node without a bandwidth that way stays
+    /// zero.
+    pub fn nic_counters(&self) -> &[NodeCounters] {
+        &self.counters[self.units.nodes + self.units.edges..]
     }
 
     /// **Private.** Applies `f` to the node's totals and to the counters of its `replica`.
@@ -130,6 +160,10 @@ impl Units {
     pub(super) fn target(&self, h: &Hop) -> (NodeId, u16) {
         match h.kind {
             HopKind::Link { edge, .. } => (self.nodes + usize::from(edge), 0),
+            HopKind::Nic { send, .. } => (
+                self.nodes + self.edges + 2 * h.node + usize::from(!send),
+                h.replica,
+            ),
             _ => (h.node, h.replica),
         }
     }

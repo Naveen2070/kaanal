@@ -50,7 +50,7 @@ impl Engine {
     pub fn new(topo: &Topology) -> Engine {
         Engine {
             units: Units::new(topo),
-            counters: vec![NodeCounters::default(); topo.nodes.len() + topo.edges.len()],
+            counters: vec![NodeCounters::default(); topo.nodes.len() * 3 + topo.edges.len()],
             heap: BinaryHeap::new(),
             seq: 0,
             now: 0,

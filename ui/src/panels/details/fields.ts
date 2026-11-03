@@ -263,3 +263,32 @@ export function controlRows(kind: string, config: NodeDoc): Row[] {
   rows.push({ id: "slots", editable: true }, { id: "copies", editable: true });
   return rows;
 }
+
+/** A node's network card in KB/s (1024 bytes), `{ send, receive }`; null = no limit that way. */
+export function cardOf(config: NodeDoc): { send: number | null; receive: number | null } {
+  const kb = (v: unknown) => (typeof v === "number" ? Number((v / 1024).toFixed(3)) : null);
+  const b = config.bandwidth;
+  if (isObject(b)) return { send: kb(b.out), receive: kb(b.in) };
+  return { send: kb(b), receive: kb(b) };
+}
+
+/**
+ * The patch for one side of the card set to `kb` KB/s (null removes that side). The file keeps one
+ * number when both sides are equal and `{ out, in }` otherwise; no side left removes the field.
+ */
+export function setCard(
+  name: string,
+  config: NodeDoc,
+  side: "send" | "receive",
+  kb: number | null,
+): Op[] {
+  const path = ["nodes", name, "bandwidth"];
+  const now = cardOf(config);
+  const next = { ...now, [side]: kb };
+  const bytes = (v: number | null) => (v === null ? null : Math.max(1, Math.round(v * 1024)));
+  const [out, rx] = [bytes(next.send), bytes(next.receive)];
+  const present = "bandwidth" in config;
+  if (out === null && rx === null) return present ? [{ op: "remove", path }] : [];
+  const value = out === rx ? out : { ...(out !== null && { out }), ...(rx !== null && { in: rx }) };
+  return [put(path, present, value)];
+}

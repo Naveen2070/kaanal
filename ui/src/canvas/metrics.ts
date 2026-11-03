@@ -3,7 +3,7 @@
 // utilization, the peak is the highest of the ~60 windows, the sparkline is queue depth (exact),
 // and headroom is capacity, not a prediction.
 
-import type { LinkSummary, NodeDoc, NodeSummary, Summary } from "../data/api/types";
+import type { LinkSummary, NodeDoc, NodeSummary, PipeSummary, Summary } from "../data/api/types";
 import { durationMs, hasProc, slotsOf, worksOutTo } from "../panels/details/fields";
 
 export interface Figures {
@@ -171,8 +171,18 @@ export function breaksFirst(summary: Summary | undefined): BreaksFirst | null {
       consider({ node: `${l.from} → ${l.to}`, atReqS: at, saturatedNow: l.saturated, wire: true });
     }
   }
+  for (const p of summary?.pipes ?? []) {
+    const at = p.saturates_at_req_s;
+    if (usable(at)) consider({ node: pipeName(p), atReqS: at, saturatedNow: p.saturated });
+  }
   return best;
 }
+
+/** "app send pipe": a node's network card, one direction, named for a ranking. */
+export const pipeName = (p: PipeSummary): string => `${p.node} ${p.direction} pipe`;
+
+/** A pipe's peak: demand over capacity for the run, at most 100% (as a wire's). */
+const pipePeak = (p: PipeSummary): number => Math.min(1, Math.max(p.offered_load, p.utilization));
 
 /** A whole percent, or an en dash when there is nothing to show. */
 export function percent(x: number | null): string {
@@ -247,7 +257,14 @@ export function rankedByPeak(summary: Summary): Ranked[] {
       wire: true,
     };
   });
-  return [...nodes, ...wires]
+  const pipes = (summary.pipes ?? []).map((p, k) => ({
+    i: summary.nodes.length + summary.links.length + k,
+    name: pipeName(p),
+    peak: pipePeak(p),
+    saturatesAtReqS: finiteOrNull(p.saturates_at_req_s),
+    wire: false,
+  }));
+  return [...nodes, ...wires, ...pipes]
     .filter((r): r is typeof r & { peak: number } => r.peak !== null)
     .sort((a, b) => b.peak - a.peak || order(a.i) - order(b.i) || a.i - b.i)
     .map(({ name, peak, saturatesAtReqS, wire }) => ({
@@ -287,6 +304,7 @@ export function closestToBreaking(
   nodes: NodeSummary[],
   n = 3,
   links: LinkSummary[] = [],
+  pipes: PipeSummary[] = [],
 ): { name: string; peak: number; saturatesAtReqS: number | null; wire?: LinkSummary }[] {
   const comps = nodes.map((node, i) => {
     const busy = node.series.busy.filter(Number.isFinite);
@@ -307,7 +325,14 @@ export function closestToBreaking(
     saturatesAtReqS: finiteOrNull(l.saturates_at_req_s),
     wire: l as LinkSummary | undefined,
   }));
-  return [...comps, ...wires]
+  const cards = pipes.map((p, k) => ({
+    i: nodes.length + links.length + k,
+    name: pipeName(p),
+    peak: pipePeak(p) as number | null,
+    saturatesAtReqS: finiteOrNull(p.saturates_at_req_s),
+    wire: undefined as LinkSummary | undefined,
+  }));
+  return [...comps, ...wires, ...cards]
     .filter((r): r is typeof r & { peak: number } => r.peak !== null)
     .sort((a, b) => b.peak - a.peak || a.i - b.i)
     .slice(0, n)

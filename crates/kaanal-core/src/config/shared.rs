@@ -174,3 +174,38 @@ pub struct Override {
 pub(super) fn default_status() -> u16 {
     200
 }
+
+/// A node's network card (`bandwidth:`): bytes per second, one number for both directions or
+/// `{ out, in }`. Each direction is at least 1; a missing side of the pair is unlimited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum NodeBandwidth {
+    /// The same rate sending and receiving.
+    Both(#[schemars(extend("minimum" = 1))] u64),
+    /// Separate rates (full duplex).
+    Split(NodeBandwidthSplit),
+}
+
+/// The `{ out, in }` form of [`NodeBandwidth`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NodeBandwidthSplit {
+    /// Bytes per second this node can send (its calls out and its responses).
+    #[serde(default)]
+    #[schemars(extend("minimum" = 1))]
+    pub out: Option<u64>,
+    /// Bytes per second this node can receive.
+    #[serde(default, rename = "in")]
+    #[schemars(extend("minimum" = 1))]
+    pub r#in: Option<u64>,
+}
+
+impl NodeBandwidth {
+    /// `(send, receive)` in bytes per second; `None` = unlimited in that direction.
+    pub fn pair(self) -> (Option<u64>, Option<u64>) {
+        match self {
+            NodeBandwidth::Both(b) => (Some(b), Some(b)),
+            NodeBandwidth::Split(s) => (s.out, s.r#in),
+        }
+    }
+}

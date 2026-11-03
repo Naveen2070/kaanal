@@ -202,6 +202,19 @@ export interface LinkSummary {
   series: LinkSeries;
 }
 
+/** One side of a node's network card (`bandwidth:` on a node). */
+export interface PipeSummary {
+  node: string;
+  direction: "send" | "receive";
+  transfers: number;
+  mean_wait_ms: number;
+  offered_load: number;
+  utilization: number;
+  saturated: boolean;
+  /** Requests per second the whole mix can reach before this pipe saturates; null when nothing crossed it. */
+  saturates_at_req_s: number | null;
+}
+
 export interface Summary {
   label: string;
   window_s: number;
@@ -214,6 +227,8 @@ export interface Summary {
   streams: { endpoint: string; requests: number; failed: number; [k: string]: unknown }[];
   nodes: NodeSummary[];
   links: LinkSummary[];
+  /** Node network pipes with a rate; absent from an older server. */
+  pipes?: PipeSummary[];
   /** Indexes into `nodes`. */
   bottlenecks: number[];
 }

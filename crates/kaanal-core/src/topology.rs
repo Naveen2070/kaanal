@@ -55,6 +55,9 @@ pub struct Node {
     /// What a slot of this node covers: its own work only, or everything it calls too. Only a
     /// node with slots (an `admission`) can hold anything; for the others it changes nothing.
     pub hold: Hold,
+    /// Network card in bytes per second as `(send, receive)`; `None` = unlimited that way. Each
+    /// replica has its own pair of FIFO pipes.
+    pub bandwidth: (Option<u64>, Option<u64>),
     /// Extra processing time per KB of payload, request and response each, once per body
     /// (zero when unconfigured).
     pub per_kb: Dist,
@@ -459,6 +462,7 @@ impl Topology {
                 replicas: n.replicas(),
                 balance: n.balance().cloned().unwrap_or_default(),
                 hold: n.hold(),
+                bandwidth: n.bandwidth(),
                 per_kb: Dist::from_config(n.per_kb()),
                 chains: n.chains().cloned().unwrap_or_default(),
                 locale: n.locale().map(str::to_string),
@@ -568,7 +572,9 @@ impl Topology {
     /// change a plan. False by default, so existing configs plan exactly as before.
     pub fn payload_costs(&self) -> bool {
         self.edges.iter().any(|e| e.bandwidth.is_some())
-            || self.nodes.iter().any(|n| n.per_kb != Dist::ZERO)
+            || self.nodes.iter().any(|n| {
+                n.per_kb != Dist::ZERO || n.bandwidth.0.is_some() || n.bandwidth.1.is_some()
+            })
     }
 
     /// Finds the edge between two specific nodes, if any.

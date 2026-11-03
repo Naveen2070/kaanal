@@ -228,6 +228,21 @@ impl NodeConfig {
         }
     }
 
+    /// The node's network card (`bandwidth:`) as `(send, receive)` bytes per second; `None` =
+    /// unlimited that way. A cache has none (put the bandwidth on its edge).
+    pub fn bandwidth(&self) -> (Option<u64>, Option<u64>) {
+        match self {
+            NodeConfig::Gateway(n) => n.bandwidth,
+            NodeConfig::Service(n) => n.bandwidth,
+            NodeConfig::Monolith(n) => n.bandwidth,
+            NodeConfig::Database(n) => n.bandwidth,
+            NodeConfig::ExternalApi(n) => n.bandwidth,
+            NodeConfig::Auth(n) => n.bandwidth,
+            NodeConfig::Cache(_) => None,
+        }
+        .map_or((None, None), NodeBandwidth::pair)
+    }
+
     /// What a slot of this node covers (`hold:`); only a node that calls others has the field.
     pub fn hold(&self) -> Hold {
         match self {
@@ -320,6 +335,11 @@ pub struct GatewayConfig {
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
+    /// This node's network card, in bytes per second (at least 1): one number for both
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
+    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    #[serde(default)]
+    pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -370,6 +390,11 @@ pub struct ServiceConfig {
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
+    /// This node's network card, in bytes per second (at least 1): one number for both
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
+    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    #[serde(default)]
+    pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -427,6 +452,11 @@ pub struct MonolithConfig {
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
+    /// This node's network card, in bytes per second (at least 1): one number for both
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
+    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    #[serde(default)]
+    pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -473,6 +503,11 @@ pub struct DatabaseConfig {
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
+    /// This node's network card, in bytes per second (at least 1): one number for both
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
+    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    #[serde(default)]
+    pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -577,6 +612,11 @@ pub struct ExternalApiConfig {
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
+    /// This node's network card, in bytes per second (at least 1): one number for both
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
+    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    #[serde(default)]
+    pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -635,6 +675,11 @@ pub struct AuthConfig {
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
+    /// This node's network card, in bytes per second (at least 1): one number for both
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
+    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    #[serde(default)]
+    pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]

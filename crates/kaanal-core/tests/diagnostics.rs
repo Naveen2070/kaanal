@@ -24,7 +24,7 @@ fn unknown_field_in_the_second_node_is_reported_at_its_key() {
     let e = fail(&format!("{HEAD}    bogus: 1\n"));
     assert_eq!(
         e.to_string(),
-        "7:5: node 'orders-db': unknown field 'bogus' (expected: balance, concurrency, flavor, locale, ops, per_kb, pool, rate_limit, replicas, timeout)"
+        "7:5: node 'orders-db': unknown field 'bogus' (expected: balance, bandwidth, concurrency, flavor, locale, ops, per_kb, pool, rate_limit, replicas, timeout)"
     );
 }
 

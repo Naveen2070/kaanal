@@ -201,11 +201,25 @@ fn report(
         .iter()
         .map(|c| c.area as f64 / window)
         .collect();
+    // a node's pipes: the counters are summed over its replicas, so divide by their number
+    let nic_utilization = topo
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let share = |side: usize| {
+                engine.nic_counters()[2 * i + side].area as f64
+                    / (window * f64::from(n.replicas.max(1)))
+            };
+            [share(0), share(1)]
+        })
+        .collect();
     SimReport {
         requests,
         nodes,
         replica_utilization,
         link_utilization,
+        nic_utilization,
     }
 }
 

@@ -168,7 +168,9 @@ An edge `gateway -> auth` makes every request pay an auth check; logins run insi
 
 ## Payload cost
 
-Off by default. `per_kb` on any node (a duration like `proc`, e.g. `per_kb: 50us`) adds that much processing time for every KB of the request and of the response, once per body. `bandwidth` on an edge (bytes per second) makes the link a FIFO queue with one server at that speed. Payload sizes come from the traffic (a stream's `req_bytes` and `resp_bytes` in the simulator; in the live mock, the request's `Content-Length` and the size of the JSON body the route would answer). A route with a collection or a built-in login or JWKS counts its response as 0 bytes. With no sizes, neither field changes anything. In a trace a transfer shows as `db.link=50.0ms` (request) and `db.link-resp=12.0ms` (response), the node being the edge's target. A cache takes `bandwidth` on its edge but no `per_kb` (a load error). The live mock sizes the request from `Content-Length` only (a chunked upload counts 0), counts a HEAD response and a collection or built-in responder as 0 bytes, and sizes the normal success body even when a pin replaces it.
+Off by default. `per_kb` on any node (a duration like `proc`, e.g. `per_kb: 50us`) adds that much processing time for every KB of the request and of the response, once per body. `bandwidth` on an edge (bytes per second) makes the link a FIFO queue with one server at that speed. Payload sizes come from the traffic (a stream's `req_bytes` and `resp_bytes` in the simulator; in the live mock, the request's `Content-Length` and the size of the JSON body the route would answer). A route with a collection or a built-in login or JWKS counts its response as 0 bytes. With no sizes, neither field changes anything. In a trace a transfer shows as `db.link=50.0ms` (request) and `db.link-resp=12.0ms` (response), the node being the edge's target. A cache takes `bandwidth` on its edge but no `per_kb` (a load error).
+
+**Network card (`bandwidth` on a node).** Any node except a cache takes `bandwidth:` in bytes per second (at least 1): one number for both directions, or `{ out: 125000, in: 250000 }` (either side may be left out; a missing side is unlimited). It is the node's network card, so it is shared by every wire in that direction: calls to different services from one node share its `out`, and the replies it sends share it too. Each copy has its own send and receive pipe, so more copies mean more bandwidth. A transfer from A to B is pipelined: it lasts `bytes / the narrowest of A's out, the wire's bandwidth and B's in`, and queues FIFO on that narrowest pipe (the wire on a tie, then the sender). Limits of this model: only the narrowest pipe queues the transfer, concurrent transfers queue instead of sharing the rate, and there is no connection set-up time. A load balancer is just a node with a `bandwidth`. In a trace a transfer held up by a card shows as `app.nic-out=20.0ms` or `app.nic-in=20.0ms`, the node being the one whose card it is. Unset means no limit and no hop. The live mock sizes the request from `Content-Length` only (a chunked upload counts 0), counts a HEAD response and a collection or built-in responder as 0 bytes, and sizes the normal success body even when a pin replaces it.
 
 ## What a slot covers: `hold`
 
@@ -239,7 +241,7 @@ A `flavor` fills the values you do not write; anything you write wins. **All num
 ## Every error names file, line, column, node and field
 
 ```text
-kaanal.yaml:12:5: node 'orders-db': unknown field 'bogus' (expected: balance, concurrency, flavor, locale, ops, per_kb, pool, rate_limit, replicas, timeout)
+kaanal.yaml:12:5: node 'orders-db': unknown field 'bogus' (expected: balance, bandwidth, concurrency, flavor, locale, ops, per_kb, pool, rate_limit, replicas, timeout)
 ```
 
 Run `kaanal schema` to print a JSON Schema of the whole file for editor autocomplete.

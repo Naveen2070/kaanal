@@ -515,6 +515,48 @@
       ],
       "type": "object"
     },
+    "NodeBandwidth": {
+      "anyOf": [
+        {
+          "description": "The same rate sending and receiving.",
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "$ref": "#/$defs/NodeBandwidthSplit",
+          "description": "Separate rates (full duplex)."
+        }
+      ],
+      "description": "A node's network card (`bandwidth:`): bytes per second, one number for both directions or\n`{ out, in }`. Each direction is at least 1; a missing side of the pair is unlimited."
+    },
+    "NodeBandwidthSplit": {
+      "additionalProperties": false,
+      "description": "The `{ out, in }` form of [`NodeBandwidth`].",
+      "properties": {
+        "in": {
+          "default": null,
+          "description": "Bytes per second this node can receive.",
+          "format": "uint64",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "out": {
+          "default": null,
+          "description": "Bytes per second this node can send (its calls out and its responses).",
+          "format": "uint64",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "NodeConfig": {
       "description": "One node in `nodes:`. `type` selects the kind; each kind rejects fields it does not have.",
       "oneOf": [
@@ -532,6 +574,17 @@
                 }
               ],
               "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
             },
             "concurrency": {
               "anyOf": [
@@ -646,6 +699,17 @@
                 }
               ],
               "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
             },
             "chains": {
               "additionalProperties": {
@@ -770,6 +834,17 @@
                 }
               ],
               "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
             },
             "chains": {
               "additionalProperties": {
@@ -916,6 +991,17 @@
                 }
               ],
               "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
             },
             "concurrency": {
               "anyOf": [
@@ -1170,6 +1256,17 @@
               ],
               "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
             },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+            },
             "concurrency": {
               "anyOf": [
                 {
@@ -1296,6 +1393,17 @@
                 }
               ],
               "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
             },
             "claims": {
               "additionalProperties": {

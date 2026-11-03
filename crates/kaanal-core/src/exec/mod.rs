@@ -84,6 +84,15 @@ pub enum HopKind {
         /// False for the request body, true for the response body.
         resp: bool,
     },
+    /// A payload held up by a node's network card when that is the narrowest pipe on its path
+    /// (`bandwidth:` on a node). The hop belongs to the node and replica whose pipe it is, and
+    /// queues FIFO behind other transfers on that pipe.
+    Nic {
+        /// True for the node's send pipe, false for its receive pipe.
+        send: bool,
+        /// False for the request body, true for the response body.
+        resp: bool,
+    },
 }
 
 /// One timed step of a request.
