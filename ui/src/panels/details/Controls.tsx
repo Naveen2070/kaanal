@@ -107,6 +107,17 @@ export function Controls({
             }
           />
         ) : null}
+        {config.type === "load-balancer" ? (
+          <BalanceField
+            label="Spread"
+            hint="How it picks which component a call goes to. A weighted spread (one weight per wire out of it) is set in kaanal.yaml."
+            value={balanceOf(config.spread)}
+            defaultLabel="Round robin (default)"
+            onChange={(c) =>
+              void patch(setBalance(["nodes", name, "spread"], "spread" in config, c))
+            }
+          />
+        ) : null}
         {callsOthers(config.type) ? (
           <StyleField
             value={holdOf(config)}

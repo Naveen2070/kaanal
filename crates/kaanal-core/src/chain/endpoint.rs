@@ -1,8 +1,9 @@
 //! `Compiler` methods that compile a whole endpoint: node chains, state overrides, heads.
 
 use super::{
-    Arc, Call, Compiler, Endpoint, EndpointConfig, Job, Keys, Located, NodeId, PathSeg, PinState,
-    Place, Responder, Seq, StateOverride, StateOverrides, Step, check_entry, limits,
+    Arc, BTreeMap, Call, Compiler, Endpoint, EndpointConfig, Job, Keys, Located, NodeId, NodeKind,
+    PathSeg, PinState, Place, Responder, Seq, StateOverride, StateOverrides, Step, check_entry,
+    limits,
 };
 
 impl Compiler<'_> {
@@ -126,25 +127,7 @@ impl Compiler<'_> {
                 }
                 Arc::new(Seq::new(steps))
             }
-            (Some(gw), Some(o)) => {
-                let (net, balance) = {
-                    let e = self.edge(gw, o, &j.place)?;
-                    (e.net.clone(), e.balance.clone())
-                };
-                let mut steps = self.default[gw].steps.clone();
-                let key = Keys::after(&steps, n).next(o);
-                steps.push(Step::Call(Call {
-                    node: o,
-                    repeat: 1,
-                    net,
-                    body: Arc::clone(&body),
-                    op: None,
-                    prob: 1.0,
-                    balance,
-                    key,
-                }));
-                Arc::new(Seq::new(steps))
-            }
+            (Some(gw), Some(o)) => self.routed_chain(gw, o, &body, &j.place)?,
             _ => Arc::clone(&body),
         };
         limits(&chain, &j.place)?;
@@ -185,5 +168,100 @@ impl Compiler<'_> {
                 Arc::new(h)
             });
         }
+    }
+}
+
+impl Compiler<'_> {
+    /// **Private.** The load balancers a request crosses from `from` to reach `to` when `from`
+    /// has no wire to it: the shortest chain of wires `from -> lb -> ... -> to` whose middle
+    /// nodes are all load balancers. Empty when there is none (the caller then reports the missing
+    /// wire as before).
+    fn balancers_between(&self, from: NodeId, to: NodeId) -> Vec<NodeId> {
+        let lb = |n: NodeId| self.topo.nodes[n].kind == NodeKind::LoadBalancer;
+        let mut prev: BTreeMap<NodeId, NodeId> = BTreeMap::new();
+        let mut queue = std::collections::VecDeque::from([from]);
+        while let Some(at) = queue.pop_front() {
+            for e in self.topo.out_edges(at) {
+                if e.to == to {
+                    let mut path = Vec::new();
+                    let mut cur = at;
+                    while cur != from {
+                        path.push(cur);
+                        cur = prev[&cur];
+                    }
+                    path.reverse();
+                    return path;
+                }
+                if lb(e.to) && e.to != from && !prev.contains_key(&e.to) {
+                    prev.insert(e.to, at);
+                    queue.push_back(e.to);
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Compiler<'_> {
+    /// **Private.** The whole chain of a route owned by `o` behind the gateway `gw`: the gateway's
+    /// own work, then the call to the owner, straight over the wire when there is one, else through
+    /// the load balancers that reach it.
+    fn routed_chain(
+        &self,
+        gw: NodeId,
+        o: NodeId,
+        body: &Arc<Seq>,
+        place: &Place,
+    ) -> Result<Arc<Seq>, Located> {
+        let n = self.topo.nodes.len();
+        // no wire straight to the owner, but one through load balancers: the request
+        // crosses each of them (path-based routing: the route decides the target, so a
+        // balancer does not pick) and their cost, queue and bandwidth are paid on the way
+        let via = if self.topo.edge(gw, o).is_none() {
+            self.balancers_between(gw, o)
+        } else {
+            Vec::new()
+        };
+        let mut hops = via.clone();
+        hops.push(o);
+        let mut inner = Arc::clone(body);
+        for w in (1..hops.len()).rev() {
+            let (lb, to) = (hops[w - 1], hops[w]);
+            let (net, balance) = {
+                let e = self.edge(lb, to, place)?;
+                (e.net.clone(), e.balance.clone())
+            };
+            let mut steps = self.prefix(lb);
+            let key = Keys::after(&steps, n).next(to);
+            steps.push(Step::Call(Call {
+                node: to,
+                repeat: 1,
+                net,
+                body: inner,
+                op: None,
+                prob: 1.0,
+                balance,
+                key,
+            }));
+            inner = Arc::new(Seq::new(steps));
+        }
+        let first = hops[0];
+        let (net, balance) = {
+            let e = self.edge(gw, first, place)?;
+            (e.net.clone(), e.balance.clone())
+        };
+        let mut steps = self.default[gw].steps.clone();
+        let key = Keys::after(&steps, n).next(first);
+        steps.push(Step::Call(Call {
+            node: first,
+            repeat: 1,
+            net,
+            body: inner,
+            op: None,
+            prob: 1.0,
+            balance,
+            key,
+        }));
+        Ok(Arc::new(Seq::new(steps)))
     }
 }

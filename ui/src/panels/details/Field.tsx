@@ -194,9 +194,12 @@ export function BalanceField({
   hint,
   value,
   defaultLabel,
+  label = "Balance",
   onChange,
 }: {
   hint: string;
+  /** The field's name (default "Balance"). */
+  label?: string;
   value: "round-robin" | "random" | "weighted" | null;
   /** What no value means here (the callee's own, or round robin). */
   defaultLabel: string;
@@ -206,7 +209,7 @@ export function BalanceField({
   return (
     <div className="mb-2">
       <label htmlFor={id} className="block text-sm font-medium">
-        Balance
+        {label}
       </label>
       <select
         id={id}

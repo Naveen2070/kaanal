@@ -93,7 +93,14 @@ export function setDuration(name: string, config: NodeDoc, field: string, ms: nu
 }
 
 /** The fallback for the kinds that have a `proc` field (the others price their work with `ops`, `hit` and `miss`); the server's `kinds` wins. */
-const HAS_PROC = new Set(["gateway", "service", "monolith", "external-api", "auth"]);
+const HAS_PROC = new Set([
+  "gateway",
+  "service",
+  "monolith",
+  "external-api",
+  "auth",
+  "load-balancer",
+]);
 
 export function hasProc(kind: string): boolean {
   // the engine's own answer when the server has given it, else the copy above

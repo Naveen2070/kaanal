@@ -275,6 +275,11 @@ pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
                 "edge #{i}: a cache keeps its own hit ratio, so an edge to '{}' takes no prob",
                 e.to
             )
+        } else if cfg.nodes.get(&e.from).map(NodeConfig::kind) == Some(NodeKind::LoadBalancer) {
+            format!(
+                "edge #{i}: a load balancer picks one wire by its spread, so an edge out of '{}' takes no prob (use spread: {{ weighted: [..] }})",
+                e.from
+            )
         } else if cfg.nodes.get(&e.from).map(NodeConfig::kind) == Some(NodeKind::Gateway) {
             format!(
                 "edge #{i}: the gateway routes by endpoint, so an edge out of '{}' takes no prob (split a service with balance)",
@@ -291,9 +296,15 @@ pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
 /// **Private.** The weights of a `weighted` balance must name every replica and give at least one
 /// a share; `None` when `b` is not weighted or is fine, else the problem.
 fn weights_problem(b: &Balance, replicas: u16) -> Option<String> {
+    weights_for(b, usize::from(replicas), "replicas")
+}
+
+/// **Private.** [`weights_problem`] for `count` things called `what` (copies, or the wires out of a
+/// load balancer).
+fn weights_for(b: &Balance, count: usize, what: &str) -> Option<String> {
     let Balance::Weighted(w) = b else { return None };
-    if w.len() != usize::from(replicas) {
-        return Some(format!("{} weights for {replicas} replicas", w.len()));
+    if w.len() != count {
+        return Some(format!("{} weights for {count} {what}", w.len()));
     }
     if w.iter().all(|x| *x == 0) {
         return Some("weighted needs at least one weight above 0".into());
@@ -318,6 +329,15 @@ pub(super) fn check_replicas(cfg: &Config) -> Result<(), Located> {
                 format!(
                     "node '{name}': a cache has no per_kb (it returns a stored value; put bandwidth on its edge instead)"
                 ),
+            ));
+        }
+        if let Some(p) = node.spread().and_then(|b| {
+            let wires = cfg.edges.iter().filter(|e| e.from == *name).count();
+            weights_for(b, wires, "wires out of it")
+        }) {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "spread"]),
+                format!("node '{name}': {p}"),
             ));
         }
         if let Some(p) = node.balance().and_then(|b| weights_problem(b, r)) {

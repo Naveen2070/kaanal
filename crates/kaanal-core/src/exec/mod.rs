@@ -10,6 +10,7 @@
 //! IO; live mode sleeps [`ChainOutcome::total`], the simulator advances virtual time (R2.5).
 
 mod link;
+mod route;
 mod walk;
 
 pub(crate) use walk::draw_rng;
@@ -387,6 +388,7 @@ pub fn sample_plan(
         ep_key: ep.key.as_str(),
         n: req.n,
         picks: vec![0; topo.nodes.len()],
+        routes: vec![0; topo.nodes.len()],
         bytes: (req.req_bytes, req.resp_bytes),
         items: Vec::new(),
     };

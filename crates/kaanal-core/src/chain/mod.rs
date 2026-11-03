@@ -41,8 +41,8 @@ use compiler::{Compiler, limits, normalize};
 pub use compiler::{compile, skeleton};
 use place::{Entry, Job, Keys, Place, callees_first, error_key};
 pub use types::{
-    CacheStep, Call, CollectionOp, Endpoint, Endpoints, EndpointsInput, Responder, RouteSpec, Seq,
-    Step, StepKey, collection_op, default_status, resolve_error,
+    CacheStep, Call, CollectionOp, Endpoint, Endpoints, EndpointsInput, Responder, Route,
+    RouteSpec, Seq, Step, StepKey, collection_op, default_status, resolve_error,
 };
 use types::{METHODS, collection_name_ok};
 

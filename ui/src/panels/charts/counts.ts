@@ -18,7 +18,7 @@ export function systemCounts(doc: Doc | null | undefined): Counts {
   const n = (...of: string[]) => kinds.filter((k) => of.includes(String(k))).length;
   return {
     components: kinds.length,
-    traffic: n("gateway"),
+    traffic: n("gateway", "load-balancer"),
     compute: n("service", "monolith", "auth"),
     data: n("database", "cache"),
     external: n("external-api"),

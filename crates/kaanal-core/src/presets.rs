@@ -71,6 +71,7 @@ pub fn starter(kind: NodeKind) -> &'static str {
         NodeKind::Cache => "{ type: cache, flavor: redis }",
         NodeKind::ExternalApi => "{ type: external-api, pool: { size: 10 }, proc: 100ms }",
         NodeKind::Auth => "{ type: auth, concurrency: 32, proc: 10ms }",
+        NodeKind::LoadBalancer => "{ type: load-balancer, concurrency: 1000, proc: 200us }",
     }
 }
 

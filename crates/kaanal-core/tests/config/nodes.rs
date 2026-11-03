@@ -48,10 +48,11 @@ nodes:
            proxy: "https://api.example.com", pool: { size: 4 } }
   login: { type: auth, proc: 5ms, token_ttl: 2h, concurrency: 2,
            users: [ { username: alice, password: secret, roles: [admin] }, { username: bob, password: pw } ] }
+  lb:    { type: load-balancer, proc: 1ms, spread: random, concurrency: 16 }
 "#;
 
 #[test]
-fn all_seven_kinds_parse_with_every_field() {
+fn all_eight_kinds_parse_with_every_field() {
     let cfg = Config::from_yaml(ALL_KINDS).unwrap();
     let kinds: Vec<&str> = cfg.nodes.values().map(|n| n.kind().as_str()).collect();
     assert_eq!(
@@ -63,7 +64,8 @@ fn all_seven_kinds_parse_with_every_field() {
             "database",
             "cache",
             "external-api",
-            "auth"
+            "auth",
+            "load-balancer"
         ]
     );
     let NodeConfig::Monolith(mono) = &cfg.nodes["mono"] else {
@@ -258,7 +260,8 @@ fn schema_has_one_branch_per_kind() {
             "database",
             "cache",
             "external-api",
-            "auth"
+            "auth",
+            "load-balancer"
         ]
     );
     for b in branches {

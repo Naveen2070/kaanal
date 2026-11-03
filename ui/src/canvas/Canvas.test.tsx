@@ -164,7 +164,7 @@ test("the_palette_lists_every_kind_and_a_click_adds_one", async () => {
   await show(view());
   render(<Palette onAdd={(kind) => void useDraft.getState().addNode(kind)} />);
   const sent = mockFetch([{ json: view() }]);
-  expect(screen.getAllByRole("button")).toHaveLength(7);
+  expect(screen.getAllByRole("button")).toHaveLength(8);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: /cache/i })));
   expect(sent[0]?.body).toMatchObject({
     patch: [{ op: "add_node", name: "cache", kind: "cache" }],

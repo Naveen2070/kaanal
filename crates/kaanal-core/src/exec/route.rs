@@ -1,0 +1,91 @@
+//! Calls and the load balancer's pick, split out of `walk.rs`: one `call:` step run as a method,
+//! and the choice of a callee for a [`Step::Route`].
+
+use std::time::Duration;
+
+use super::Op;
+use super::walk::{Flow, Walk, step_path, takes_branch};
+use crate::balance::pick_replica;
+use crate::chain::{Call, Route};
+use crate::stable_hash;
+use crate::topology::NodeId;
+
+impl Walk<'_> {
+    /// **Private.** Runs one `call:` step from `*now`: the network hop, the callee's body, the
+    /// response, `repeat` times in sequence. Moves `*now` to the end; `Some` is the failure that
+    /// ended the request.
+    pub(super) fn call_step(
+        &mut self,
+        call: &Call,
+        path: u64,
+        op: Op,
+        now: &mut Duration,
+        run: (NodeId, u16),
+    ) -> Option<Flow> {
+        let topo = self.topo;
+        let chaos = self.chaos;
+        let target = topo.nodes[call.node].name.as_str();
+        // One draw per step: a skipped call has no hop, span or repeat.
+        if !takes_branch(call.prob, path, target, call.key.occ) {
+            return None;
+        }
+        let op = call.op.unwrap_or(op);
+        for rep in 0..call.repeat {
+            let rep_path = step_path(path, target, call.key.occ, rep);
+            let Some(r) = self.pick(call.node, call.balance.as_ref(), rep_path) else {
+                return Some(self.no_replica(call.node, *now));
+            };
+            let span = self.open_span(call.node, *now);
+            let edge = topo.edge_id(run.0, call.node);
+            let lc = edge.and_then(|e| chaos.link(e));
+            let cap = lc.and_then(|l| l.bandwidth_cap);
+            if let Some(k) = lc.and_then(|l| self.link_drop(l, call.node, rep_path)) {
+                let fail = self.link_fail(k, call.node, r, *now);
+                self.close_span(span);
+                return Some(fail);
+            }
+            *now += self.link(edge, (run, (call.node, r)), false, *now, cap);
+            *now += self.net(call.node, &call.net, rep_path, (*now, r), lc);
+            let hold = self.open_hold(call.node, r);
+            let flow = self.seq(&call.body, rep_path, op, *now, (call.node, r));
+            self.close_hold(hold);
+            if let Flow::Done(end) | Flow::Hit(end) = flow {
+                *now = end + self.link(edge, ((call.node, r), run), true, end, cap);
+            }
+            self.close_span(span);
+            match flow {
+                Flow::Done(_) | Flow::Hit(_) => {}
+                fail @ Flow::Fail { .. } => return Some(fail),
+            }
+        }
+        None
+    }
+
+    /// **Private.** The wire out of a balancer a call takes now: the pure [`pick_replica`] over
+    /// its callees by `spread`, a callee with every copy down skipped. The round-robin counter
+    /// is the balancer's own (a balancer with copies keeps its replica picks apart), and the
+    /// draw is tagged with its own name so it does not repeat the replica pick. `None` when every
+    /// callee is down.
+    pub(super) fn pick_callee<'c>(&mut self, r: &'c Route, path: u64) -> Option<&'c Call> {
+        let lb = &self.topo.nodes[r.node];
+        let k = u64::from(self.routes[r.node]);
+        self.routes[r.node] += 1;
+        let tag = format!("{}#spread", lb.name);
+        let offset = stable_hash(&[self.ep_key.as_bytes(), tag.as_bytes()]).wrapping_add(k);
+        let up: Vec<bool> = r
+            .calls
+            .iter()
+            .map(|c| {
+                self.chaos.is_empty()
+                    || (0..self.topo.nodes[c.node].replicas)
+                        .any(|rep| !self.chaos.replica_down(c.node, self.ep_key, rep))
+            })
+            .collect();
+        let count = u16::try_from(r.calls.len()).unwrap_or(u16::MAX);
+        // each copy of the balancer round-robins over only the calls it gets, one in `replicas`;
+        // counting requests in step with the copy pick would lock a callee to a copy
+        let n = self.n / u64::from(lb.replicas.max(1));
+        let i = pick_replica(&r.spread, count, &up, n, offset, path, &tag)?;
+        r.calls.get(usize::from(i))
+    }
+}

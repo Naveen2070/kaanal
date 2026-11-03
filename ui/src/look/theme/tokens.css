@@ -54,6 +54,7 @@
   --cat-cache: light-dark(#a8480d, #f39055);
   --cat-external: light-dark(#ac3569, #f283b4);
   --cat-auth: light-dark(#1b7547, #63d48f);
+  --cat-balancer: light-dark(#7a6a08, #d9c24a);
 
   /* a wire carries one lane per copy of the node it feeds; copy 0 takes the first colour, and so on */
   --lane-0: light-dark(#2d5cc4, #7ba3ff);
@@ -105,6 +106,7 @@
   --color-cat-cache: var(--cat-cache);
   --color-cat-external: var(--cat-external);
   --color-cat-auth: var(--cat-auth);
+  --color-cat-balancer: var(--cat-balancer);
   --color-tip: var(--tip);
   --color-on-tip: var(--on-tip);
 }

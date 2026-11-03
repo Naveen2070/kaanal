@@ -10,7 +10,7 @@ Durations are `5ms`, `{ p50: 4ms, p99: 20ms }` or `{ mean: 5ms }`, as described 
 
 ## `gateway`
 
-A reverse proxy, API gateway or load balancer. Optional, at most one. With a gateway, every request pays its `proc` first, then runs its auth calls, and it answers static endpoints (an `endpoints:` entry with `override` and no owning service).
+A reverse proxy or API gateway (nginx, Envoy). Optional, at most one. For a balancer that spreads calls over several components, see [`load-balancer`](#load-balancer). With a gateway, every request pays its `proc` first, then runs its auth calls, and it answers static endpoints (an `endpoints:` entry with `override` and no owning service).
 
 ```yaml
 nginx: { type: gateway, flavor: nginx, proc: 1ms }
@@ -137,30 +137,55 @@ login:
 | `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
 | `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
 
+## `load-balancer`
+
+A hop that sends each call to **one** of the components it has wires to, chosen by `spread`. It has its own time, slots, queue, rate limit, timeout, copies and `bandwidth` like any proxy, no chain of its own, and it is never an entry node (only a gateway, or the service that owns a route, is). There may be several, for example one in front of each tier.
+
+```yaml
+lb:
+  type: load-balancer
+  proc: 200us
+  concurrency: 1000
+  spread: { weighted: [3, 1] }   # the wires out of lb, in the order of edges:
+```
+
+| Field                                                                | Meaning                                                                                                                                                                 | Default     |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `proc`                                                               | Cost of passing one call through                                                                                                                                        | zero        |
+| `spread`                                                             | How it picks the component a call goes to: `round-robin`, `random` or `{ weighted: [..] }` with one weight per wire out of it. A component with no live copy is skipped | round-robin |
+| `balance`                                                            | How traffic entering the balancer picks one of its own copies (as on every node)                                                                                        | round-robin |
+| `concurrency`                                                        | A number, or `{ limit, queue, overflow_status }`                                                                                                                        | unlimited   |
+| `hold`                                                               | `own` (a slot only for its own work) or `call` (until the chosen component has answered: a connection-limited proxy)                                                    | `own`       |
+| `bandwidth`, `per_kb`, `rate_limit`, `timeout`, `replicas`, `locale` | As on the other nodes                                                                                                                                                   |             |
+
+The chosen component then picks a copy by its own `balance`, and the wire to it keeps its `net`, `calls` and `bandwidth`. An edge out of a balancer takes no `prob` (the spread decides). With every callee down the call fails with a 503 at the balancer. Round robin counts the calls each copy of the balancer gets, so copies of a balancer do not lock to the components behind them. **A route behind a balancer.** When the gateway has no wire to the service that owns a route but has one to a balancer that reaches it (through one balancer or several in a row), the request crosses each balancer on the way: path-based routing, as an nginx or an ALB rule does, so the route decides the target and the balancer does not pick; its time, slots, queue, bandwidth and `hold` are paid on every such route. A direct wire from the gateway to the owner wins when there is one. To spread one route over several identical backends, give the owner `replicas` and a `balance` (a pool); `spread` is for a balancer that really chooses between different components (a call from a service, a `call:` step, a gateway chain). **Not built yet:** `least-conn` and `p2c` (they need the live queues; the next step).
+
 ## Nodes added in Studio
 
 `add_node` (see the [control API](control-api.md#draft)) writes a node that is valid as it stands and has a capacity, so the bottleneck report can rank it. These are **estimates**: typical sizes for a small deployment, meant to be edited.
 
-| Kind           | Written as                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------ |
-| `gateway`      | `{ type: gateway, concurrency: 256 }`                                                                        |
-| `service`      | `{ type: service, concurrency: 32 }`                                                                         |
-| `monolith`     | `{ type: monolith, concurrency: 64 }`                                                                        |
-| `database`     | `{ type: database, flavor: postgres, pool: { size: 20 } }` (the flavor fills the read, write and scan costs) |
-| `cache`        | `{ type: cache, flavor: redis }` (no capacity; the flavor fills hit ratio and costs)                         |
-| `external-api` | `{ type: external-api, pool: { size: 10 } }`                                                                 |
-| `auth`         | `{ type: auth, concurrency: 32 }` (needs a signing key, which `kaanal up` and `kaanal studio` provide)       |
+| Kind            | Written as                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------ |
+| `gateway`       | `{ type: gateway, concurrency: 256 }`                                                                        |
+| `service`       | `{ type: service, concurrency: 32 }`                                                                         |
+| `monolith`      | `{ type: monolith, concurrency: 64 }`                                                                        |
+| `database`      | `{ type: database, flavor: postgres, pool: { size: 20 } }` (the flavor fills the read, write and scan costs) |
+| `cache`         | `{ type: cache, flavor: redis }` (no capacity; the flavor fills hit ratio and costs)                         |
+| `external-api`  | `{ type: external-api, pool: { size: 10 } }`                                                                 |
+| `auth`          | `{ type: auth, concurrency: 32 }` (needs a signing key, which `kaanal up` and `kaanal studio` provide)       |
+| `load-balancer` | `{ type: load-balancer, concurrency: 1000, proc: 200us }`                                                    |
 
 ## Edges: who may call whom
 
 An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). `prob` (above 0, at most 1, default 1) is the share of requests that take the edge; see [Endpoints](endpoints.md#steps). `bandwidth` (bytes per second, at least 1) limits the link: with a payload size a transfer takes `bytes / bandwidth` on a FIFO link, and without it the link costs nothing and adds no hop. No cycles, no self edges, no duplicate edges.
 
-| From                                | May call                                                           |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `gateway`                           | `service`, `monolith`, `auth`                                      |
-| `service`, `monolith`               | `service`, `monolith`, `database`, `cache`, `external-api`, `auth` |
-| `auth`                              | `service`, `monolith`, `database`, `cache`, `external-api`         |
-| `database`, `cache`, `external-api` | nothing                                                            |
+| From                                | May call                                                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------- |
+| `gateway`                           | `service`, `monolith`, `auth`, `load-balancer`                                      |
+| `service`, `monolith`               | `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer` |
+| `auth`                              | `service`, `monolith`, `database`, `cache`, `external-api`, `load-balancer`         |
+| `load-balancer`                     | `service`, `monolith`, `database`, `external-api`, `auth`, `load-balancer`          |
+| `database`, `cache`, `external-api` | nothing                                                                             |
 
 An edge that breaks the table is rejected with a message listing what that kind may call.
 

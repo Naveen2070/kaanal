@@ -1,6 +1,7 @@
 //! Integration tests for `kaanal-core`: config (R3.8: one module per topic).
 
 mod auth;
+mod balancer;
 mod basics;
 mod common;
 mod endpoints;

@@ -71,6 +71,14 @@ fn walk(topo: &Topology, seq: &Seq, runner: NodeId, op: Op, mut m: f64, v: &mut 
                 v[c.node] += m * lookups.0;
                 m *= lookups.1;
             }
+            Step::Route(r) => {
+                // one callee takes each call: its share of the traffic, by the spread
+                for (c, share) in r.calls.iter().zip(r.shares()) {
+                    let k = m * share * f64::from(c.repeat);
+                    v[c.node] += k;
+                    walk(topo, &c.body, c.node, c.op.unwrap_or(op), k, v);
+                }
+            }
             Step::Parallel(branches) => {
                 for b in branches {
                     walk(topo, b, runner, op, m, v);

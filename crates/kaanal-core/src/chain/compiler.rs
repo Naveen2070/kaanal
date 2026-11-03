@@ -2,8 +2,8 @@
 
 use super::{
     Arc, BTreeMap, BTreeSet, CacheStep, Call, Edge, Endpoint, Endpoints, EndpointsInput, Keys,
-    Located, MAX_DEPTH, MAX_HOPS, MAX_REPEAT, NodeId, NodeKind, PathSeg, Place, RouteSpec, Seq,
-    Step, Topology, callees_first,
+    Located, MAX_DEPTH, MAX_HOPS, MAX_REPEAT, NodeId, NodeKind, PathSeg, Place, Route, RouteSpec,
+    Seq, Step, Topology, callees_first,
 };
 
 /// **Private.** Compile state.
@@ -34,7 +34,12 @@ impl Compiler<'_> {
     }
 
     pub(super) fn default_call(&self, e: &Edge, keys: &mut Keys) -> Step {
-        Step::Call(Call {
+        Step::Call(self.call_of(e, keys))
+    }
+
+    /// **Private.** The call along edge `e` with the callee's default body.
+    fn call_of(&self, e: &Edge, keys: &mut Keys) -> Call {
+        Call {
             node: e.to,
             repeat: e.calls.get(),
             net: e.net.clone(),
@@ -43,7 +48,7 @@ impl Compiler<'_> {
             prob: e.prob,
             balance: e.balance.clone(),
             key: keys.next(e.to),
-        })
+        }
     }
 
     /// **Private.** Section 5.2: service/monolith/external-api/auth callees in edge order, then
@@ -54,7 +59,11 @@ impl Compiler<'_> {
         for e in self.topo.out_edges(n).filter(|e| {
             matches!(
                 kind(e),
-                NodeKind::Service | NodeKind::Monolith | NodeKind::ExternalApi | NodeKind::Auth
+                NodeKind::Service
+                    | NodeKind::Monolith
+                    | NodeKind::ExternalApi
+                    | NodeKind::Auth
+                    | NodeKind::LoadBalancer
             )
         }) {
             out.push(self.default_call(e, keys));
@@ -115,6 +124,21 @@ impl Compiler<'_> {
                     }
                 }
                 NodeKind::Service | NodeKind::Monolith => steps.extend(self.walk(n, &mut keys)),
+                NodeKind::LoadBalancer => {
+                    let calls: Vec<Call> = self
+                        .topo
+                        .out_edges(n)
+                        .map(|e| self.call_of(e, &mut keys))
+                        .collect();
+                    if !calls.is_empty() {
+                        steps.push(Step::Route(Route {
+                            node: n,
+                            calls,
+                            spread: self.topo.nodes[n].spread.clone(),
+                            key: keys.next(n),
+                        }));
+                    }
+                }
                 _ => {}
             }
             self.default[n] = Arc::new(Seq::new(steps));

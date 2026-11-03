@@ -286,3 +286,25 @@ fn a_node_card_reports_its_send_and_receive_pipes() {
         s.warnings
     );
 }
+
+#[test]
+fn a_balancer_splits_the_load_and_adds_its_own_hop() {
+    let text = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\n  lb: { type: load-balancer, proc: 2ms, concurrency: 4 }\n  a: { type: service, proc: 10ms }\n  b: { type: service, proc: 10ms }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: lb }\n  - { from: lb, to: a }\n  - { from: lb, to: b }\n";
+    let (t, s) = summary_of(text, &windowed(40.0, 120, 10));
+    let visits = |n: &str| s.nodes[t.id(n).unwrap()].visits_per_s;
+    assert!(
+        (visits("lb") - visits("app")).abs() < 2.0,
+        "every request passes the balancer once: {} vs {}",
+        visits("lb"),
+        visits("app")
+    );
+    let (va, vb) = (visits("a"), visits("b"));
+    assert!(
+        (va - vb).abs() < 0.2 * (va + vb),
+        "round-robin splits them evenly: {va} vs {vb}"
+    );
+    assert!((va + vb - visits("lb")).abs() < 2.0, "{va} + {vb} = lb");
+    // 40/s x 2 ms over 4 slots
+    let load = s.nodes[t.id("lb").unwrap()].offered_load.unwrap();
+    assert!((load - 0.02).abs() < 0.01, "{load}");
+}

@@ -17,13 +17,22 @@ export function kindRulesOf(kind: string): KindRules | undefined {
   return served?.find((k) => k.kind === kind);
 }
 
-const BACKENDS = ["service", "monolith", "database", "cache", "external-api", "auth"];
+const BACKENDS = [
+  "service",
+  "monolith",
+  "database",
+  "cache",
+  "external-api",
+  "auth",
+  "load-balancer",
+];
 
 const MAY_CALL: Record<string, string[]> = {
-  gateway: ["service", "monolith", "auth"],
+  gateway: ["service", "monolith", "auth", "load-balancer"],
   service: BACKENDS,
   monolith: BACKENDS,
-  auth: ["service", "monolith", "database", "cache", "external-api"],
+  auth: ["service", "monolith", "database", "cache", "external-api", "load-balancer"],
+  "load-balancer": ["service", "monolith", "database", "external-api", "auth", "load-balancer"],
   database: [],
   cache: [],
   "external-api": [],

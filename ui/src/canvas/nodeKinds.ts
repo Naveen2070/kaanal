@@ -9,6 +9,7 @@ import {
   Globe,
   KeyRound,
   Network,
+  Split,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -73,6 +74,13 @@ export const NODE_KINDS: KindInfo[] = [
     accent: "border-orange-500 text-orange-600",
     description: "Checks who is calling",
   },
+  {
+    kind: "load-balancer",
+    label: "Load balancer",
+    icon: Split,
+    accent: "border-yellow-500 text-yellow-600",
+    description: "Sends each call to one of several components",
+  },
 ];
 
 export function kindInfo(kind: string | undefined): KindInfo | undefined {
@@ -88,6 +96,7 @@ const HUE: Record<string, string> = {
   cache: "cache",
   "external-api": "external",
   auth: "auth",
+  "load-balancer": "balancer",
 };
 
 /** The CSS colour of a kind: its own hue, or a neutral for a kind the Studio does not know. */

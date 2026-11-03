@@ -9,7 +9,8 @@ Parsing of `kaanal.yaml` into typed config.
 | File           | What it holds                                                                                                                                      |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mod.rs`       | `Config`, `Determinism`, `SeedSource`, `ConfigError`, `Config::from_yaml`; re-exports every public name, so `kaanal_core::config::X` is unchanged. |
-| `nodes.rs`     | The node kinds and the per-kind structs (gateway, service, monolith, database, cache, external API, auth), the flavor enums.                       |
+| `balancer.rs`  | `LoadBalancerConfig`, the load-balancer node's fields (split out of `nodes.rs`, which passed 800 lines).                                           |
+| `nodes.rs`     | The node kinds and the per-kind structs (gateway, service, monolith, database, cache, external API, auth, load balancer), the flavor enums.        |
 | `limits.rs`    | Concurrency, pools and rate limits.                                                                                                                |
 | `shared.rs`    | Users, edges, latency distributions (`DistConfig`) and endpoint overrides.                                                                         |
 | `endpoints.rs` | The `endpoints:` map, error maps and the step deserializers (`call`, `cache`, `parallel`, `repeat`).                                               |

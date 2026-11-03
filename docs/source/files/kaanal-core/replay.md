@@ -23,6 +23,10 @@ A node with `replicas: N` has N independent copies of its queueing state: its ow
 
 Counters are kept twice. `node_counters()` is per node, summed over its replicas, and is what `NodeStats` reports (frozen, R1.48(5)): `max_queue` is the longest queue of any replica and `area` the busy slot-time of all of them. `replica_counters()[node][replica]` is the same fields per replica, for the Studio report. A deadline belongs to a call, not a replica, so `timed_out` is per node only. The simulator divides `area` by `slots x replicas x window`, so a replicated node's utilization is per slot of every replica.
 
+## Node pipes
+
+A node with a `bandwidth` has a send and a receive pipe per replica: two more pseudo-nodes per node after the edges (`nodes + edges + 2 * node + (0 send, 1 receive)`), each replica one single-slot FIFO gate, gated only when that side has a rate. A `Nic` hop maps to its owner's pipe (`Units::target`); `Engine::nic_counters` holds the totals, `SimReport::nic_utilization` the measured busy share (busy time over the window and the node's copies). A pipe holds no node slot.
+
 ## Links An edge with a `bandwidth` is a unit of its own: a single-slot, unbounded FIFO gate, kept after the nodes in the same table (pseudo-node `nodes + edge`, replica 0), so a `Link` hop queues, hands over and cancels like any queued hop and holds no node slot. `Engine::link_counters()` (indexed by `EdgeId`) reports transfers started, summed wait and busy time; `node_counters()` and `replica_counters()` still cover the real nodes only. An edge without a bandwidth plans no link hop and has no gate.
 
 ## Gate

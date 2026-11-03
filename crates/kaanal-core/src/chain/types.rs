@@ -54,6 +54,37 @@ pub enum Step {
     Cache(CacheStep),
     /// Branches that start together; the block ends with the slowest.
     Parallel(Vec<Seq>),
+    /// A load balancer's pick: one of its callees takes the call.
+    Route(Route),
+}
+
+/// A load balancer's body after its own work: one call per wire out of it, of which one runs.
+#[derive(Debug, Clone)]
+pub struct Route {
+    /// The balancer.
+    pub node: NodeId,
+    /// One resolved call per wire out of the balancer, in `edges:` order (weights follow it).
+    pub calls: Vec<Call>,
+    /// How the balancer picks (`spread:`).
+    pub spread: Balance,
+    /// Which pick this is, for seeding.
+    pub key: StepKey,
+}
+
+impl Route {
+    /// The share of calls each wire out of the balancer takes, in `calls` order, when every
+    /// callee is up: equal for `round-robin` and `random`, by weight for `weighted`.
+    pub fn shares(&self) -> Vec<f64> {
+        let n = self.calls.len();
+        let weights: Vec<f64> = match &self.spread {
+            Balance::Weighted(w) if w.iter().any(|x| *x > 0) => (0..n)
+                .map(|i| f64::from(w.get(i).copied().unwrap_or(0)))
+                .collect(),
+            _ => vec![1.0; n],
+        };
+        let total: f64 = weights.iter().sum();
+        weights.into_iter().map(|w| w / total).collect()
+    }
 }
 
 /// A resolved `call:`.
@@ -118,6 +149,18 @@ impl Seq {
                     u64::from(c.repeat).saturating_mul(c.body.hops.saturating_add(1)),
                     c.body.depth.saturating_add(1),
                 ),
+                Step::Route(r) => (
+                    r.calls
+                        .iter()
+                        .map(|c| u64::from(c.repeat).saturating_mul(c.body.hops.saturating_add(1)))
+                        .max()
+                        .unwrap_or(0),
+                    r.calls
+                        .iter()
+                        .map(|c| c.body.depth.saturating_add(1))
+                        .max()
+                        .unwrap_or(0),
+                ),
                 Step::Parallel(bs) => (
                     bs.iter().fold(0u64, |a, b| a.saturating_add(b.hops)),
                     bs.iter()
@@ -145,6 +188,13 @@ impl Drop for Seq {
                     Step::Call(c) => {
                         if let Ok(mut body) = Arc::try_unwrap(c.body) {
                             work.push(std::mem::take(&mut body.steps));
+                        }
+                    }
+                    Step::Route(r) => {
+                        for c in r.calls {
+                            if let Ok(mut body) = Arc::try_unwrap(c.body) {
+                                work.push(std::mem::take(&mut body.steps));
+                            }
                         }
                     }
                     Step::Parallel(branches) => {

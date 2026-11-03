@@ -1522,6 +1522,135 @@
             "type"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A load balancer: a real hop that spreads calls over several components.",
+          "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks one of its copies (default `round-robin`)."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Absent = no limit."
+            },
+            "concurrency": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most calls this node passes at once, as a number (the rest wait without limit) or a map\n`{ limit, queue, overflow_status }`. Absent = unlimited."
+            },
+            "hold": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hold"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What a slot of this node covers (default `own`); with `call` it is held until the chosen\ncomponent has answered, as a connection-limited proxy does."
+            },
+            "locale": {
+              "default": null,
+              "description": "Locale pack; a balancer generates no data, so this only passes down.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_kb": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra processing time per KB of payload (request and response each, once per body)."
+            },
+            "proc": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Distribution"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cost of passing one call through (default none)."
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast calls may reach this node: 429 beyond it."
+            },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1).",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "spread": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How this node picks the component a call goes to: `round-robin` (default), `random`, or\n`{ weighted: [3, 1] }` with one weight per wire out of it, in the order of `edges:`. A\ncomponent with no live copy is skipped; with none left the call fails with 503."
+            },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait, its own work and the chosen component's\nanswer. `0 < timeout <= 5 min`; absent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
+            "type": {
+              "const": "load-balancer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },

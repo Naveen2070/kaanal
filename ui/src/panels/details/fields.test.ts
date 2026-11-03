@@ -2,6 +2,7 @@ import { describe, expect, it, test } from "vite-plus/test";
 import type { NodeDoc } from "../../data/api/types";
 import { nodeSummary } from "../../test/summary";
 import {
+  balanceOf,
   cardOf,
   chaosBody,
   controlRows,
@@ -9,7 +10,9 @@ import {
   durationMs,
   clearQueueLimit,
   queueOf,
+  setBalance,
   setCard,
+  hasProc,
   setQueue,
   setSlots,
   slotsOf,
@@ -215,4 +218,15 @@ describe("a node's network card", () => {
     ]);
     expect(setCard("a", svc(), "send", null)).toEqual([]);
   });
+});
+
+test("a_load_balancer_has_a_service_time_and_its_spread_is_a_balance", () => {
+  expect(hasProc("load-balancer")).toBe(true);
+  expect(balanceOf("random")).toBe("random");
+  expect(setBalance(["nodes", "lb", "spread"], false, "random")).toEqual([
+    { op: "insert", path: ["nodes", "lb", "spread"], value: "random" },
+  ]);
+  expect(setBalance(["nodes", "lb", "spread"], true, "")).toEqual([
+    { op: "remove", path: ["nodes", "lb", "spread"] },
+  ]);
 });

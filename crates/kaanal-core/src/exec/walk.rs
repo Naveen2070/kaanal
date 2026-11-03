@@ -22,7 +22,7 @@ pub(crate) fn draw_rng(path: u64, node: &str, tag: &[u8]) -> HopRng {
 }
 
 /// **Private.** The path of one `call`/`cache` step repetition (D8).
-fn step_path(parent: u64, target: &str, occ: u32, rep: u32) -> u64 {
+pub(super) fn step_path(parent: u64, target: &str, occ: u32, rep: u32) -> u64 {
     stable_hash(&[
         &parent.to_le_bytes(),
         target.as_bytes(),
@@ -34,7 +34,7 @@ fn step_path(parent: u64, target: &str, occ: u32, rep: u32) -> u64 {
 /// **Private.** Whether a request takes a `call` step with branch probability `prob`: always
 /// when `prob` is 1 (no draw, so the plan is as before `prob` existed), else a Bernoulli draw
 /// from the step's own stream under the new tag `prob`, so no existing draw moves.
-fn takes_branch(prob: f64, path: u64, target: &str, occ: u32) -> bool {
+pub(super) fn takes_branch(prob: f64, path: u64, target: &str, occ: u32) -> bool {
     if prob >= 1.0 {
         return true;
     }
@@ -62,6 +62,8 @@ pub(super) struct Walk<'a> {
     pub(super) n: u64,
     /// Picks so far per node in this request (round-robin advances per pick).
     pub(super) picks: Vec<u32>,
+    /// Callee picks so far per load balancer in this request (its own round-robin counter).
+    pub(super) routes: Vec<u32>,
     /// Request and response body sizes, for link hops and `per_kb`.
     pub(super) bytes: (u64, u64),
     pub(super) items: Vec<PlanItem>,
@@ -166,39 +168,16 @@ impl Walk<'_> {
                     }
                 }
                 Step::Call(call) => {
-                    let target = topo.nodes[call.node].name.as_str();
-                    // One draw per step: a skipped call has no hop, span or repeat.
-                    if !takes_branch(call.prob, path, target, call.key.occ) {
-                        continue;
+                    if let Some(fail) = self.call_step(call, path, op, &mut now, run) {
+                        return fail;
                     }
-                    let op = call.op.unwrap_or(op);
-                    for rep in 0..call.repeat {
-                        let rep_path = step_path(path, target, call.key.occ, rep);
-                        let Some(r) = self.pick(call.node, call.balance.as_ref(), rep_path) else {
-                            return self.no_replica(call.node, now);
-                        };
-                        let span = self.open_span(call.node, now);
-                        let edge = topo.edge_id(run.0, call.node);
-                        let lc = edge.and_then(|e| chaos.link(e));
-                        let cap = lc.and_then(|l| l.bandwidth_cap);
-                        if let Some(k) = lc.and_then(|l| self.link_drop(l, call.node, rep_path)) {
-                            let fail = self.link_fail(k, call.node, r, now);
-                            self.close_span(span);
-                            return fail;
-                        }
-                        now += self.link(edge, (run, (call.node, r)), false, now, cap);
-                        now += self.net(call.node, &call.net, rep_path, (now, r), lc);
-                        let hold = self.open_hold(call.node, r);
-                        let flow = self.seq(&call.body, rep_path, op, now, (call.node, r));
-                        self.close_hold(hold);
-                        if let Flow::Done(end) | Flow::Hit(end) = flow {
-                            now = end + self.link(edge, ((call.node, r), run), true, end, cap);
-                        }
-                        self.close_span(span);
-                        match flow {
-                            Flow::Done(_) | Flow::Hit(_) => {}
-                            fail @ Flow::Fail { .. } => return fail,
-                        }
+                }
+                Step::Route(route) => {
+                    let Some(call) = self.pick_callee(route, path) else {
+                        return self.no_replica(route.node, now);
+                    };
+                    if let Some(fail) = self.call_step(call, path, op, &mut now, run) {
+                        return fail;
                     }
                 }
                 Step::Cache(cache) => {
@@ -292,7 +271,7 @@ impl Walk<'_> {
     }
 
     /// **Private.** An edge's latency as a `Net` hop, with the link's chaos (extra latency, jitter) on it.
-    fn net(
+    pub(super) fn net(
         &mut self,
         to: NodeId,
         d: &Dist,

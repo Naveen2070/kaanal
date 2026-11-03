@@ -1,6 +1,7 @@
 //! Integration tests for `kaanal-core`: exec (R3.8: one module per topic).
 
 mod balance;
+mod balancer;
 mod basic;
 mod common;
 mod deadlines;

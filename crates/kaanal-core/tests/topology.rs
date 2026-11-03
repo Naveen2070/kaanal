@@ -198,7 +198,7 @@ fn forbidden_edge_names_what_is_allowed() {
     let e = with_edge("gw", "db").unwrap_err();
     assert!(
         e.to_string()
-            .ends_with("gateway may call: service, monolith, auth"),
+            .ends_with("gateway may call: service, monolith, auth, load-balancer"),
         "{e}"
     );
 }

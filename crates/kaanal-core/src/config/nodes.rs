@@ -20,6 +20,8 @@ pub enum NodeKind {
     ExternalApi,
     /// An identity provider (login and token issue).
     Auth,
+    /// A load balancer: picks one of its callee components for each call.
+    LoadBalancer,
 }
 
 /// What a node's slot covers (`hold:`), for a node that calls others.
@@ -39,7 +41,7 @@ pub enum Hold {
 impl NodeKind {
     /// Every kind, in the order Studio lists them. A new kind goes here too: the draft view's
     /// `kinds` and `kind_defaults` are built from this list.
-    pub const ALL: [NodeKind; 7] = [
+    pub const ALL: [NodeKind; 8] = [
         NodeKind::Gateway,
         NodeKind::Service,
         NodeKind::Monolith,
@@ -47,6 +49,7 @@ impl NodeKind {
         NodeKind::Cache,
         NodeKind::ExternalApi,
         NodeKind::Auth,
+        NodeKind::LoadBalancer,
     ];
 
     /// Whether the kind has one `proc` service time (the others price their work with `ops`,
@@ -57,7 +60,8 @@ impl NodeKind {
             | NodeKind::Service
             | NodeKind::Monolith
             | NodeKind::ExternalApi
-            | NodeKind::Auth => true,
+            | NodeKind::Auth
+            | NodeKind::LoadBalancer => true,
             NodeKind::Database | NodeKind::Cache => false,
         }
     }
@@ -72,6 +76,7 @@ impl NodeKind {
             NodeKind::Cache => "cache",
             NodeKind::ExternalApi => "external-api",
             NodeKind::Auth => "auth",
+            NodeKind::LoadBalancer => "load-balancer",
         }
     }
 }
@@ -107,6 +112,8 @@ pub enum NodeConfig {
     ExternalApi(ExternalApiConfig),
     /// An identity provider: login and token issue.
     Auth(AuthConfig),
+    /// A load balancer: a real hop that spreads calls over several components.
+    LoadBalancer(LoadBalancerConfig),
 }
 
 impl NodeConfig {
@@ -120,6 +127,7 @@ impl NodeConfig {
             NodeConfig::Cache(_) => NodeKind::Cache,
             NodeConfig::ExternalApi(_) => NodeKind::ExternalApi,
             NodeConfig::Auth(_) => NodeKind::Auth,
+            NodeConfig::LoadBalancer(_) => NodeKind::LoadBalancer,
         }
     }
 
@@ -131,6 +139,7 @@ impl NodeConfig {
             NodeConfig::Monolith(n) => n.proc.as_ref(),
             NodeConfig::ExternalApi(n) => n.proc.as_ref(),
             NodeConfig::Auth(n) => n.proc.as_ref(),
+            NodeConfig::LoadBalancer(n) => n.proc.as_ref(),
             NodeConfig::Database(_) | NodeConfig::Cache(_) => None,
         }
     }
@@ -163,6 +172,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.concurrency.as_ref(),
             NodeConfig::ExternalApi(n) => n.concurrency.as_ref(),
             NodeConfig::Auth(n) => n.concurrency.as_ref(),
+            NodeConfig::LoadBalancer(n) => n.concurrency.as_ref(),
         }
     }
 
@@ -185,6 +195,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.rate_limit.as_ref(),
             NodeConfig::ExternalApi(n) => n.rate_limit.as_ref(),
             NodeConfig::Auth(n) => n.rate_limit.as_ref(),
+            NodeConfig::LoadBalancer(n) => n.rate_limit.as_ref(),
         }
     }
 
@@ -198,6 +209,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.timeout,
             NodeConfig::ExternalApi(n) => n.timeout,
             NodeConfig::Auth(n) => n.timeout,
+            NodeConfig::LoadBalancer(n) => n.timeout,
         }
     }
 
@@ -211,6 +223,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.replicas,
             NodeConfig::ExternalApi(n) => n.replicas,
             NodeConfig::Auth(n) => n.replicas,
+            NodeConfig::LoadBalancer(n) => n.replicas,
         }
         .unwrap_or(1)
     }
@@ -225,6 +238,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.balance.as_ref(),
             NodeConfig::ExternalApi(n) => n.balance.as_ref(),
             NodeConfig::Auth(n) => n.balance.as_ref(),
+            NodeConfig::LoadBalancer(n) => n.balance.as_ref(),
         }
     }
 
@@ -238,9 +252,19 @@ impl NodeConfig {
             NodeConfig::Database(n) => n.bandwidth,
             NodeConfig::ExternalApi(n) => n.bandwidth,
             NodeConfig::Auth(n) => n.bandwidth,
+            NodeConfig::LoadBalancer(n) => n.bandwidth,
             NodeConfig::Cache(_) => None,
         }
         .map_or((None, None), NodeBandwidth::pair)
+    }
+
+    /// How a load balancer picks one of its callee components (`spread:`); `None` for every other
+    /// kind and for a balancer that sets none (round-robin then).
+    pub fn spread(&self) -> Option<&Balance> {
+        match self {
+            NodeConfig::LoadBalancer(n) => n.spread.as_ref(),
+            _ => None,
+        }
     }
 
     /// What a slot of this node covers (`hold:`); only a node that calls others has the field.
@@ -250,6 +274,7 @@ impl NodeConfig {
             NodeConfig::Service(n) => n.hold,
             NodeConfig::Monolith(n) => n.hold,
             NodeConfig::Auth(n) => n.hold,
+            NodeConfig::LoadBalancer(n) => n.hold,
             NodeConfig::Database(_) | NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) => None,
         }
         .unwrap_or_default()
@@ -265,6 +290,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.per_kb.as_ref(),
             NodeConfig::ExternalApi(n) => n.per_kb.as_ref(),
             NodeConfig::Auth(n) => n.per_kb.as_ref(),
+            NodeConfig::LoadBalancer(n) => n.per_kb.as_ref(),
         }
     }
 
@@ -278,6 +304,7 @@ impl NodeConfig {
             NodeConfig::Cache(n) => n.locale.as_deref(),
             NodeConfig::ExternalApi(n) => n.locale.as_deref(),
             NodeConfig::Auth(n) => n.locale.as_deref(),
+            NodeConfig::LoadBalancer(n) => n.locale.as_deref(),
         }
     }
 

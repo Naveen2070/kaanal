@@ -127,24 +127,43 @@ async fn kinds_carry_who_may_call_whom_and_which_have_a_service_time() {
     let s = start(BASE).await;
     let v = draft(&s).await;
     let kinds = v["kinds"].as_array().expect("kinds is a list");
-    assert_eq!(kinds.len(), 7, "{v}");
+    assert_eq!(kinds.len(), 8, "{v}");
     let of = |name: &str| {
         kinds
             .iter()
             .find(|k| k["kind"] == name)
             .unwrap_or_else(|| panic!("{name}"))
     };
-    // the gateway forwards to services, monoliths and auth only
+    // the gateway forwards to services, monoliths, auth and balancers only
     assert_eq!(
         of("gateway")["callees"],
-        json!(["service", "monolith", "auth"])
+        json!(["service", "monolith", "auth", "load-balancer"])
+    );
+    // a balancer fronts any tier but a cache and the gateway
+    assert_eq!(
+        of("load-balancer")["callees"],
+        json!([
+            "service",
+            "monolith",
+            "database",
+            "external-api",
+            "auth",
+            "load-balancer"
+        ])
     );
     assert_eq!(of("database")["callees"], json!([]));
-    assert_eq!(of("service")["callees"].as_array().map(Vec::len), Some(6));
+    assert_eq!(of("service")["callees"].as_array().map(Vec::len), Some(7));
     // a database and a cache price their work per operation, the others have one service time
     assert_eq!(of("database")["service_time"], false);
     assert_eq!(of("cache")["service_time"], false);
-    for k in ["gateway", "service", "monolith", "external-api", "auth"] {
+    for k in [
+        "gateway",
+        "service",
+        "monolith",
+        "external-api",
+        "auth",
+        "load-balancer",
+    ] {
         assert_eq!(of(k)["service_time"], true, "{k}");
     }
 }

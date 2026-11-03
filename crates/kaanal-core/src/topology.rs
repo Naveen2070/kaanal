@@ -55,6 +55,8 @@ pub struct Node {
     /// What a slot of this node covers: its own work only, or everything it calls too. Only a
     /// node with slots (an `admission`) can hold anything; for the others it changes nothing.
     pub hold: Hold,
+    /// How a load balancer picks the component a call goes to; the default for every other kind.
+    pub spread: Balance,
     /// Network card in bytes per second as `(send, receive)`; `None` = unlimited that way. Each
     /// replica has its own pair of FIFO pipes.
     pub bandwidth: (Option<u64>, Option<u64>),
@@ -357,7 +359,12 @@ impl NodeKind {
 /// **Private.** R1.24: the kinds a node of kind `from` may call.
 fn callees(from: NodeKind) -> &'static [NodeKind] {
     match from {
-        NodeKind::Gateway => &[NodeKind::Service, NodeKind::Monolith, NodeKind::Auth],
+        NodeKind::Gateway => &[
+            NodeKind::Service,
+            NodeKind::Monolith,
+            NodeKind::Auth,
+            NodeKind::LoadBalancer,
+        ],
         NodeKind::Service | NodeKind::Monolith => &[
             NodeKind::Service,
             NodeKind::Monolith,
@@ -365,6 +372,7 @@ fn callees(from: NodeKind) -> &'static [NodeKind] {
             NodeKind::Cache,
             NodeKind::ExternalApi,
             NodeKind::Auth,
+            NodeKind::LoadBalancer,
         ],
         NodeKind::Auth => &[
             NodeKind::Service,
@@ -372,6 +380,17 @@ fn callees(from: NodeKind) -> &'static [NodeKind] {
             NodeKind::Database,
             NodeKind::Cache,
             NodeKind::ExternalApi,
+            NodeKind::LoadBalancer,
+        ],
+        // a balancer fronts any tier, another balancer too; not a cache (a lookup is a step of
+        // its caller) and not the gateway
+        NodeKind::LoadBalancer => &[
+            NodeKind::Service,
+            NodeKind::Monolith,
+            NodeKind::Database,
+            NodeKind::ExternalApi,
+            NodeKind::Auth,
+            NodeKind::LoadBalancer,
         ],
         NodeKind::Database | NodeKind::Cache | NodeKind::ExternalApi => &[],
     }
@@ -462,6 +481,7 @@ impl Topology {
                 replicas: n.replicas(),
                 balance: n.balance().cloned().unwrap_or_default(),
                 hold: n.hold(),
+                spread: n.spread().cloned().unwrap_or_default(),
                 bandwidth: n.bandwidth(),
                 per_kb: Dist::from_config(n.per_kb()),
                 chains: n.chains().cloned().unwrap_or_default(),

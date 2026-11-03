@@ -128,6 +128,13 @@ export const CHAPTERS: Chapter[] = [
         real: "Keycloak, Auth0 or Cognito, or an nginx auth_request pointed at an auth service.",
         sample: { kind: "tile", of: "auth" },
       },
+      {
+        id: "load-balancer",
+        term: "Load balancer",
+        text: "A hop that sends each call to one of the components it has wires to, round robin, at random or by weight. It has its own time, slots and bandwidth, and you can have several (for example one in front of each tier). Unlike the gateway it is never where requests enter. A component with no live copy is skipped; with none left the call fails with a 503.",
+        real: "nginx, HAProxy, Envoy or a cloud load balancer in front of a tier.",
+        sample: { kind: "tile", of: "load-balancer" },
+      },
     ],
   },
   {
@@ -347,16 +354,31 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "who-calls-whom",
         term: "Who may call whom",
-        text: "Gateway: service, monolith, auth. Service and monolith: service, monolith, database, cache, external API, auth. Auth: service, monolith, database, cache, external API. Database, cache and external API call nothing. There are no loops, and nothing calls the gateway.",
+        text: "Gateway: service, monolith, auth, load balancer. Service and monolith: service, monolith, database, cache, external API, auth, load balancer. Auth: service, monolith, database, cache, external API, load balancer. Load balancer: service, monolith, database, external API, auth, load balancer. Database, cache and external API call nothing. There are no loops, and nothing calls the gateway.",
         sample: {
           kind: "calls",
           rows: [
-            { from: "gateway", to: ["service", "monolith", "auth"] },
+            { from: "gateway", to: ["service", "monolith", "auth", "load-balancer"] },
             {
               from: "service",
-              to: ["service", "monolith", "database", "cache", "external-api", "auth"],
+              to: [
+                "service",
+                "monolith",
+                "database",
+                "cache",
+                "external-api",
+                "auth",
+                "load-balancer",
+              ],
             },
-            { from: "auth", to: ["service", "monolith", "database", "cache", "external-api"] },
+            {
+              from: "auth",
+              to: ["service", "monolith", "database", "cache", "external-api", "load-balancer"],
+            },
+            {
+              from: "load-balancer",
+              to: ["service", "monolith", "database", "external-api", "auth", "load-balancer"],
+            },
           ],
         },
       },

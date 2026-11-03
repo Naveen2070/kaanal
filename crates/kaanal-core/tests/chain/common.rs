@@ -60,7 +60,7 @@ pub(crate) fn err(src: &str) -> ConfigError {
 }
 
 /// `gw.proc login[login.proc] app[...]`: `name*repeat:op[body]` for calls, `cache(c)` for
-/// cache steps (`?` = default-chain cache, skipped for writes), `par(a | b)` for parallel.
+/// cache steps (`?` = default-chain cache, skipped for writes), `par(a | b)` for parallel, `route(a / b)` for a load balancer's pick.
 pub(crate) fn outline(t: &Topology, s: &Seq) -> String {
     let name = |n: usize| t.nodes[n].name.clone();
     s.steps
@@ -90,6 +90,14 @@ pub(crate) fn outline(t: &Topology, s: &Seq) -> String {
                     String::new()
                 }
             }
+            Step::Route(r) => format!(
+                "route({})",
+                r.calls
+                    .iter()
+                    .map(|c| format!("{}[{}]", name(c.node), outline(t, &c.body)))
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            ),
             Step::Parallel(bs) => format!(
                 "par({})",
                 bs.iter()
