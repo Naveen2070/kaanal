@@ -105,7 +105,7 @@ test("the_card_has_no_axe_violations_idle_busy_or_saturated", async () => {
 
 test("a_distribution_and_a_database_have_their_own_config_words", () => {
   card(feedOf(undefined), { type: "service", concurrency: 4, proc: { p50: "4ms", p99: "20ms" } });
-  expect(screen.getByText("Service · 1 copy × 4 slots · time varies")).toBeTruthy();
+  expect(screen.getByText("Service · 1 copy × 4 slots · varies")).toBeTruthy();
   cleanup();
   card(feedOf(undefined), { type: "database", pool: { size: 10 } });
   expect(screen.getByText("Database · 1 copy × 10 slots")).toBeTruthy(); // no Time row for a database

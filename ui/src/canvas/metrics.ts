@@ -3,7 +3,7 @@
 // utilization, the peak is the highest of the ~60 windows, the sparkline is queue depth (exact),
 // and headroom is capacity, not a prediction.
 
-import type { NodeDoc, NodeSummary, Summary } from "../data/api/types";
+import type { LinkSummary, NodeDoc, NodeSummary, Summary } from "../data/api/types";
 import { durationMs, hasProc, slotsOf, worksOutTo } from "../panels/details/fields";
 
 export interface Figures {
@@ -193,7 +193,7 @@ export function configLine(label: string, config: NodeDoc | undefined): string {
   ];
   if (config && hasProc(String(config.type)) && "proc" in config) {
     const ms = durationMs(config.proc);
-    parts.push(ms === null ? "time varies" : `${Number(ms.toFixed(3))} ms`);
+    parts.push(ms === null ? "varies" : `${Number(ms.toFixed(3))} ms`);
   }
   return parts.join(" · ");
 }
@@ -286,15 +286,35 @@ export function plainSentence(node: NodeSummary | undefined): string {
 export function closestToBreaking(
   nodes: NodeSummary[],
   n = 3,
-): { name: string; peak: number; saturatesAtReqS: number | null }[] {
-  return nodes
-    .map((node, i) => {
-      const busy = node.series.busy.filter(Number.isFinite);
-      const peak = busy.length > 0 ? Math.max(...busy) : node.utilization;
-      return { i, name: node.name, peak, saturatesAtReqS: finiteOrNull(node.saturates_at_req_s) };
-    })
+  links: LinkSummary[] = [],
+): { name: string; peak: number; saturatesAtReqS: number | null; wire?: LinkSummary }[] {
+  const comps = nodes.map((node, i) => {
+    const busy = node.series.busy.filter(Number.isFinite);
+    const peak = busy.length > 0 ? Math.max(...busy) : node.utilization;
+    return {
+      i,
+      name: node.name,
+      peak,
+      saturatesAtReqS: finiteOrNull(node.saturates_at_req_s),
+      wire: undefined as LinkSummary | undefined,
+    };
+  });
+  // a wire's peak is demand over capacity for the run, at most 100% (as in rankedByPeak)
+  const wires = links.map((l, k) => ({
+    i: nodes.length + k,
+    name: `${l.from} → ${l.to}`,
+    peak: Math.min(1, Math.max(l.offered_load, l.utilization)) as number | null,
+    saturatesAtReqS: finiteOrNull(l.saturates_at_req_s),
+    wire: l as LinkSummary | undefined,
+  }));
+  return [...comps, ...wires]
     .filter((r): r is typeof r & { peak: number } => r.peak !== null)
     .sort((a, b) => b.peak - a.peak || a.i - b.i)
     .slice(0, n)
-    .map(({ name, peak, saturatesAtReqS }) => ({ name, peak, saturatesAtReqS }));
+    .map(({ name, peak, saturatesAtReqS, wire }) => ({
+      name,
+      peak,
+      saturatesAtReqS,
+      ...(wire && { wire }),
+    }));
 }

@@ -7,6 +7,8 @@ import { HEAT_ASPECT } from "./Skeletons";
 import { bucketLabel, heatmapData, intensity } from "./heatmapData";
 
 const CELL = 8;
+// the scale reads "128 ms", not "<= 128 ms" (the tooltip and the table keep the full words)
+const axis = (label: string) => label.replace("<= ", "");
 const secs = (n: number) => `${Number(n.toPrecision(3))} s`;
 
 export function Heatmap({
@@ -34,31 +36,47 @@ export function Heatmap({
   }
   return (
     <figure>
-      <svg
-        viewBox={`0 0 ${d.cols * CELL} ${d.rows * CELL}`}
-        className={`w-full rounded border border-border bg-well ${HEAT_ASPECT}`}
+      <div className="flex items-stretch gap-1">
+        {/* the scale: slowest bucket at the top, the middle one, and the fastest at the bottom */}
+        <div
+          aria-hidden
+          className="flex w-14 shrink-0 flex-col justify-between text-right text-[11px] tabular-nums text-muted"
+        >
+          <span className="whitespace-nowrap">{axis(bucketLabel(buckets, d.rows - 1))}</span>
+          <span className="whitespace-nowrap">
+            {axis(bucketLabel(buckets, Math.floor((d.rows - 1) / 2)))}
+          </span>
+          <span className="whitespace-nowrap">{axis(bucketLabel(buckets, 0))}</span>
+        </div>
+        <svg
+          viewBox={`0 0 ${d.cols * CELL} ${d.rows * CELL}`}
+          className={`min-w-0 flex-1 rounded border border-border bg-well ${HEAT_ASPECT}`}
+        >
+          <title>{`${wire ? "Time on the wire" : "Latency"} of ${name} over the run: time across, slower ${thing} higher up`}</title>
+          {d.cells.map((row, r) =>
+            row.map((count, c) =>
+              count > 0 ? (
+                <rect
+                  key={`${r}-${c}`}
+                  x={c * CELL}
+                  // row 0 (fastest) at the bottom
+                  y={(d.rows - 1 - r) * CELL}
+                  width={CELL}
+                  height={CELL}
+                  className="fill-accent"
+                  fillOpacity={0.1 + 0.9 * intensity(count, d.max)}
+                >
+                  <title>{`${bucketLabel(buckets, r)}, window ${c + 1}: ${count} ${thing}`}</title>
+                </rect>
+              ) : null,
+            ),
+          )}
+        </svg>
+      </div>
+      <div
+        aria-hidden
+        className="mt-0.5 ml-[60px] flex justify-between text-[11px] tabular-nums text-muted"
       >
-        <title>{`${wire ? "Time on the wire" : "Latency"} of ${name} over the run: time across, slower ${thing} higher up`}</title>
-        {d.cells.map((row, r) =>
-          row.map((count, c) =>
-            count > 0 ? (
-              <rect
-                key={`${r}-${c}`}
-                x={c * CELL}
-                // row 0 (fastest) at the bottom
-                y={(d.rows - 1 - r) * CELL}
-                width={CELL}
-                height={CELL}
-                className="fill-accent"
-                fillOpacity={0.1 + 0.9 * intensity(count, d.max)}
-              >
-                <title>{`${bucketLabel(buckets, r)}, window ${c + 1}: ${count} ${thing}`}</title>
-              </rect>
-            ) : null,
-          ),
-        )}
-      </svg>
-      <div aria-hidden className="mt-0.5 flex justify-between text-[11px] tabular-nums text-muted">
         <span>0 s</span>
         <span>{secs((d.cols * series.window_s) / 2)}</span>
         <span>{secs(d.cols * series.window_s)}</span>

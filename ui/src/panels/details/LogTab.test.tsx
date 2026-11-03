@@ -284,7 +284,7 @@ test("a_request_missing_from_a_newer_run_closes_the_waterfall", async () => {
   expect(screen.queryByRole("region", { name: "Request r-4812" })).toBeNull();
 });
 
-test("levels_are_info_warn_error_with_text", async () => {
+test("only_warn_and_error_carry_a_level_badge", async () => {
   await show(
     page([
       line({ level: "info", event: "served", request: 1 }),
@@ -293,7 +293,9 @@ test("levels_are_info_warn_error_with_text", async () => {
     ]),
   );
   await screen.findByText(/r-1 /);
-  for (const w of ["info", "warn", "error"]) expect(screen.getByText(w)).toBeTruthy();
+  // info is the normal case and carries no badge; a warning and an error do
+  expect(screen.queryByText("info")).toBeNull();
+  for (const w of ["warn", "error"]) expect(screen.getByText(w)).toBeTruthy();
 });
 
 test("event_cell_is_a_button_inside_a_table_with_a_time_column", async () => {

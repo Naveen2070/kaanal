@@ -3,7 +3,7 @@
 
 const MIN_LOAD_KEY = "kaanal-min-load-ms";
 /** The loader stays at least this long, so it is seen rather than flashed (0 turns it off). */
-export const DEFAULT_MIN_LOAD_MS = 10_000;
+export const DEFAULT_MIN_LOAD_MS = 2_500;
 /** From the second visit on, the full hold is only a wait: it drops to this unless a setting says otherwise. */
 export const REPEAT_MIN_LOAD_MS = 2_500;
 const VISITED_KEY = "kaanal-visited";

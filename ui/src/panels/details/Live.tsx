@@ -89,8 +89,7 @@ export function Live() {
     <div className="p-3 text-sm">
       <Section title="Scenarios">
         <p className="mb-2 text-xs text-muted">
-          A scenario is a named set of failures and pins. Turn several on and they stack, the last
-          one on top. This is live: it is not written to the file.
+          Live only, not written to the file. Several can be on; the last one on top wins.
         </p>
         {data.scenarios.length === 0 ? (
           <p className="text-xs text-muted">
@@ -161,8 +160,7 @@ export function Live() {
 
       <Section title="Pins">
         <p className="mb-2 text-xs text-muted">
-          A pin makes one endpoint answer in a state you pick, so a screen can be seen loading,
-          empty or failing. Live pins sit above the pins of any scenario.
+          One endpoint answers in the state you pick. Live pins sit above a scenario's.
         </p>
         <PinList pins={data.pins} btn={btn} act={act} />
         <PinForm endpoints={data.endpoints} btn={btn} act={act} />

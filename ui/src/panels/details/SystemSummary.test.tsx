@@ -50,3 +50,22 @@ test("says_so_with_no_run_and_with_nothing_under_load", () => {
   show(withNodes([busy("a", 0, 5000)]));
   expect(screen.getByText("Nothing is under load yet.")).toBeTruthy();
 });
+
+test("a_full_wire_is_listed_with_the_components_and_is_not_a_button", () => {
+  const link = {
+    from: "gw",
+    to: "app",
+    transfers: 10,
+    mean_wait_ms: 5,
+    offered_load: 4,
+    utilization: 1,
+    saturated: true,
+    saturates_at_req_s: 120,
+    series: { window_s: 1, latency: [] },
+  };
+  show({ ...withNodes([busy("a", 0.2, 5000)]), links: [link] });
+  expect(screen.getByText("gw → app")).toBeTruthy();
+  expect(screen.getByText("100% full at its peak")).toBeTruthy();
+  expect(screen.getByText("Wire · Saturates near 120 req/s")).toBeTruthy();
+  expect(screen.getAllByRole("button")).toHaveLength(1); // only the component
+});

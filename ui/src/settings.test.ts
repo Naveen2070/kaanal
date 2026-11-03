@@ -14,9 +14,9 @@ beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
 describe("minimum load time", () => {
-  it("defaults_to_ten_seconds", () => {
-    expect(DEFAULT_MIN_LOAD_MS).toBe(10_000);
-    expect(getMinLoadMs()).toBe(10_000);
+  it("defaults_to_two_and_a_half_seconds", () => {
+    expect(DEFAULT_MIN_LOAD_MS).toBe(2_500);
+    expect(getMinLoadMs()).toBe(2_500);
   });
 
   it("a_saved_value_wins_and_zero_turns_the_hold_off", () => {
@@ -49,7 +49,7 @@ describe("minimum load time", () => {
 
 it("after_the_loader_has_been_seen_the_hold_drops_unless_a_setting_says_otherwise", () => {
   localStorage.clear();
-  expect(getMinLoadMs()).toBe(10_000);
+  expect(getMinLoadMs()).toBe(2_500);
   markVisited();
   expect(getMinLoadMs()).toBe(REPEAT_MIN_LOAD_MS);
   setMinLoadMs(4000);

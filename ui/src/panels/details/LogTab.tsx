@@ -358,6 +358,8 @@ const LEVEL: Record<LogLine["level"], string> = {
 
 /** The level as a badge; the word is always there, colour only repeats it. */
 function Level({ level }: { level: LogLine["level"] }) {
+  // "info" is the normal case: only a warning or an error earns a badge
+  if (level === "info") return null;
   return <span className={`rounded border px-1 text-[11px] ${LEVEL[level]}`}>{level}</span>;
 }
 

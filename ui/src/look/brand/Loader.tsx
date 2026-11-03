@@ -128,6 +128,7 @@ export function Loader({
       className={`kaanal-loader fixed inset-0 flex flex-col overflow-hidden ${ready && !still ? "kaanal-settle" : ""}`}
     >
       {/* the one live region: the step line, never the quote */}
+      <h1 className="sr-only">Kaanal Studio</h1>
       <output className="sr-only">{status}</output>
       <div className="relative flex-[3] bg-(--kl-sky)">
         <div aria-hidden className="absolute bottom-0 left-1/2 -translate-x-1/2" style={box}>

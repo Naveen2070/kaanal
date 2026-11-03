@@ -27,6 +27,12 @@ export const RATE_UNITS: readonly Unit[] = [
   { label: "GB/s", per: 1024 * 1024 },
 ];
 
+/** "280 KB/s", "1.5 MB/s": a rate in KB/s in the unit that reads best, three significant digits. */
+export function rateText(kb: number): string {
+  const u = [...RATE_UNITS].reverse().find((x) => kb >= x.per) ?? (RATE_UNITS[0] as Unit);
+  return `${Number((kb / u.per).toPrecision(3)).toLocaleString("en-US")} ${u.label}`;
+}
+
 /** A float with the binary noise cut off: 0.1 * 3 gives 0.3, not 0.30000000000000004. */
 const clean = (n: number): number => Number(n.toPrecision(12));
 

@@ -71,7 +71,9 @@ export function NodeCard({ data, selected }: NodeProps) {
           ) : null}
           <span className="truncate text-sm font-semibold">{name}</span>
         </button>
-        <div className="text-xs text-muted">{configLine(label, config)}</div>
+        <div className="truncate text-xs text-muted" title={configLine(label, config)}>
+          {configLine(label, config)}
+        </div>
         <div className={feed.dimmed ? "opacity-60" : ""}>
           <Meter ratio={f.busy} label={f.sentence} stale={feed.dimmed || (pending && f.hasRun)} />
           <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-2 gap-y-0.5 text-xs">

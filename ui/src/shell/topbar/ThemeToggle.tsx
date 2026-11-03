@@ -1,43 +1,33 @@
-// The theme switch: three icon buttons in a group (system, light, dark), the chosen one pressed, so
-// what a click does is plain. The command palette's "Switch theme" presses the next one in turn.
+// The theme switch: one icon button that shows the current choice (system, light, dark) and moves to
+// the next on a click, so the top right needs one icon, not three. The command palette's "Switch
+// theme" presses the same button.
 
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useState } from "react";
 import { getTheme, setTheme, type Theme } from "../../look/theme/theme";
 
 const NEXT: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
-const CHOICES: { theme: Theme; icon: typeof Sun; label: string }[] = [
-  { theme: "system", icon: Monitor, label: "Follow the system theme" },
-  { theme: "light", icon: Sun, label: "Light theme" },
-  { theme: "dark", icon: Moon, label: "Dark theme" },
-];
+const NAME: Record<Theme, string> = { system: "the system theme", light: "light", dark: "dark" };
+const ICON: Record<Theme, typeof Sun> = { system: Monitor, light: Sun, dark: Moon };
 
 export function ThemeToggle() {
   const [theme, set] = useState<Theme>(getTheme);
+  const Icon = ICON[theme];
+  const label = `Theme: ${NAME[theme]}. Switch to ${NAME[NEXT[theme]]}`;
   return (
-    <fieldset
-      aria-label="Theme"
-      className="m-0 min-w-0 border-0 flex items-center gap-0.5 rounded-lg bg-well p-0.5"
+    <button
+      type="button"
+      data-command="theme"
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        const next = NEXT[theme];
+        setTheme(next);
+        set(next);
+      }}
+      className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
     >
-      {CHOICES.map(({ theme: t, icon: Icon, label }) => (
-        <button
-          key={t}
-          type="button"
-          data-command={NEXT[theme] === t ? "theme" : undefined}
-          aria-label={label}
-          aria-pressed={theme === t}
-          title={label}
-          onClick={() => {
-            setTheme(t);
-            set(t);
-          }}
-          className={`flex h-7 w-7 items-center justify-center rounded-md focus-visible:outline-2 focus-visible:outline-accent ${
-            theme === t ? "bg-sheet text-text shadow-sm" : "text-muted hover:text-text"
-          }`}
-        >
-          <Icon size={15} aria-hidden />
-        </button>
-      ))}
-    </fieldset>
+      <Icon size={16} aria-hidden />
+    </button>
   );
 }

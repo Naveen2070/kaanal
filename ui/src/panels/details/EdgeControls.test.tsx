@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { mockFetch } from "../../test/fetch";
+import { EMPTY_FEED, FeedContext } from "../../canvas/feed";
 import { EdgeControls } from "./EdgeControls";
 
 function view(over: Partial<DraftView["doc"]> = {}): DraftView {
@@ -159,4 +160,35 @@ test("a_latency_spread_is_not_editable_here", async () => {
   );
   expect(screen.queryByLabelText("Network latency")).toBeNull();
   expect(screen.getByText(/spread of values/)).toBeTruthy();
+});
+
+test("a_full_wire_says_what_bandwidth_the_load_needs", async () => {
+  mockFetch([{ json: view() }]);
+  await useDraft.getState().load();
+  const link = (saturated: boolean, offered: number) => ({
+    from: "app",
+    to: "db",
+    transfers: 10,
+    mean_wait_ms: 5,
+    offered_load: offered,
+    utilization: 1,
+    saturated,
+    saturates_at_req_s: 40,
+    series: { window_s: 1, latency: [] },
+  });
+  const feed = (l: ReturnType<typeof link>) => ({ ...EMPTY_FEED, link: () => l });
+  render(
+    <FeedContext.Provider value={feed(link(true, 3))}>
+      <EdgeControls index={1} />
+    </FeedContext.Provider>,
+  );
+  // 2 KB/s asked for 3 times over: at least 6 KB/s
+  expect(screen.getByText("Full at this load: it needs at least 6 KB/s.")).toBeTruthy();
+  cleanup();
+  render(
+    <FeedContext.Provider value={feed(link(false, 0.5))}>
+      <EdgeControls index={1} />
+    </FeedContext.Provider>,
+  );
+  expect(screen.queryByText(/Full at this load/)).toBeNull();
 });

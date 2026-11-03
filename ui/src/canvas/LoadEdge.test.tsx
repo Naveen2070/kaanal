@@ -190,3 +190,26 @@ test("a_selected_wire_shows_a_button_that_deletes_exactly_that_entry", async () 
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0] }] });
 });
+
+test("a_full_wire_says_why_on_the_wire_its_bandwidth_and_the_demand_over_it", () => {
+  const v = view(1);
+  useDraft.setState({
+    view: { ...v, doc: { ...v.doc, edges: [{ from: "gw", to: "app", bandwidth: 286720 }] } },
+  });
+  const link = (saturated: boolean) => ({
+    from: "gw",
+    to: "app",
+    transfers: 10,
+    mean_wait_ms: 5,
+    offered_load: 3,
+    utilization: 1,
+    saturated,
+    saturates_at_req_s: 40,
+    series: { window_s: 1, latency: [] },
+  });
+  edge({ ...feed(0.0), link: () => link(true) });
+  expect(document.querySelector("[data-wire-label]")?.textContent).toBe("280 KB/s · 300%");
+  cleanup();
+  edge({ ...feed(0.0), link: () => link(false) });
+  expect(document.querySelector("[data-wire-label]")).toBeNull();
+});

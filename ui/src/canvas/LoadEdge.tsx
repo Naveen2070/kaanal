@@ -16,6 +16,8 @@ import {
 import { X } from "lucide-react";
 import { usePrefersReducedMotion } from "../overlays/first-run/motion";
 import { useDraft } from "../data/store/draft";
+import { bandwidthKbOf } from "../panels/details/edgeFields";
+import { rateText } from "../panels/details/units";
 import { carriedNothing, edgeSpeedS, edgeTone } from "./edges";
 import { useFeed } from "./feed";
 import { laneColour, laneCount, laneLoads, laneOffsets } from "./lanes";
@@ -50,6 +52,19 @@ export function LoadEdge({
   // behind it sit idle, waiting for what the wire can carry
   const full = from !== undefined && to !== undefined && feed.link?.(from, to)?.saturated === true;
   const halo = full ? HALO.bad : HALO[edgeTone(a?.utilization ?? null, b?.utilization ?? null)];
+  // why it is red, on the wire: "280 KB/s · 320%" (its bandwidth, and the demand over it)
+  const kb = useDraft((s) => {
+    const e = index === undefined ? undefined : s.view?.doc?.edges?.[index];
+    return e ? bandwidthKbOf(e) : null;
+  });
+  const asked =
+    full && from !== undefined && to !== undefined
+      ? feed.link?.(from, to)?.offered_load
+      : undefined;
+  const fullLabel =
+    full && kb !== null && asked !== undefined && Number.isFinite(asked)
+      ? `${rateText(kb)} · ${Math.round(asked * 100).toLocaleString("en-US")}%`
+      : null;
 
   const geometry = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
   // bend in a gap between the cards, not through one
@@ -141,6 +156,20 @@ export function LoadEdge({
           </g>
         );
       })}
+      {fullLabel ? (
+        <EdgeLabelRenderer>
+          <span
+            data-wire-label
+            title="The wire's bandwidth, and the share of it the traffic asks for"
+            className="pointer-events-none absolute whitespace-nowrap rounded border border-negative bg-sheet px-1.5 py-0.5 text-[11px] tabular-nums text-negative"
+            style={{
+              transform: `translate(-50%, ${selected ? "-150%" : "-50%"}) translate(${labelX}px, ${labelY}px)`,
+            }}
+          >
+            {fullLabel}
+          </span>
+        </EdgeLabelRenderer>
+      ) : null}
       {selected && index !== undefined ? (
         <EdgeLabelRenderer>
           <button

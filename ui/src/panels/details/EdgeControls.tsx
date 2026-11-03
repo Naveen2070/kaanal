@@ -4,6 +4,7 @@
 // patch of the draft; the auto re-run follows.
 
 import { ArrowRight } from "lucide-react";
+import { useFeed } from "../../canvas/feed";
 import { removeWires } from "../../canvas/wires";
 import { useDraft } from "../../data/store/draft";
 import type { Doc, EdgeDoc, NodeDoc } from "../../data/api/types";
@@ -22,7 +23,7 @@ import {
   shareApplies,
   shareOf,
 } from "./edgeFields";
-import { RATE_UNITS, TIME_UNITS } from "./units";
+import { RATE_UNITS, rateText, TIME_UNITS } from "./units";
 
 const callee = (doc: Doc | null | undefined, e: EdgeDoc): NodeDoc | undefined =>
   doc?.nodes?.[String(e.to)];
@@ -30,10 +31,17 @@ const callee = (doc: Doc | null | undefined, e: EdgeDoc): NodeDoc | undefined =>
 export function EdgeControls({ index }: { index: number }) {
   const doc = useDraft((s) => s.view?.doc);
   const patch = useDraft((s) => s.patch);
+  const feed = useFeed();
   const e = doc?.edges?.[index];
   if (!e) return null;
   const net = netMsOf(e);
   const bandwidth = bandwidthKbOf(e);
+  // a full wire: the load asks for offered_load times what it carries
+  const link = feed.link?.(String(e.from), String(e.to));
+  const needKb =
+    link?.saturated && bandwidth !== null && link.offered_load > 1
+      ? bandwidth * link.offered_load
+      : null;
   return (
     <div className="p-3 text-sm">
       <Section title="This wire">
@@ -68,7 +76,7 @@ export function EdgeControls({ index }: { index: number }) {
         )}
         <NumberField
           label="Bandwidth"
-          hint="How much the link carries each second (1 KB is 1024 bytes; 1 Gbit/s is about 125,000 KB/s). A bigger payload takes longer, and transfers queue behind each other. Empty means no limit."
+          hint="What the link carries each second; empty means no limit."
           value={bandwidth}
           units={RATE_UNITS}
           placeholder="No limit"
@@ -77,6 +85,11 @@ export function EdgeControls({ index }: { index: number }) {
           step="any"
           onCommit={(n) => patch([setBandwidth(index, e, n)])}
         />
+        {needKb !== null ? (
+          <p className="mb-2 text-xs text-negative">
+            Full at this load: it needs at least {rateText(needKb)}.
+          </p>
+        ) : null}
         {bandwidth !== null ? (
           <button
             type="button"

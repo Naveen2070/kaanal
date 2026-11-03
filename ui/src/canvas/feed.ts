@@ -9,6 +9,8 @@ export interface StatsFeed {
   node(name: string): NodeSummary | undefined;
   /** The run figures of the wire from one node to another; only a wire with a bandwidth has any. */
   link?(from: string, to: string): LinkSummary | undefined;
+  /** Every wire with a bandwidth in the run; empty or absent with no run. */
+  links?: LinkSummary[];
   /** Every node of the run, in the run's order; empty with no run. */
   nodes: NodeSummary[];
   /** True while the figures are older than the draft (a run is in flight or was blocked). */

@@ -64,8 +64,7 @@ export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
       )}
       {rail ? null : (
         <p data-testid="canvas-hint" className="m-0 mt-auto px-2 pt-3 pb-1 text-xs text-muted">
-          Drag the canvas to pan and scroll to zoom. To connect, drag from a card&apos;s right edge
-          to another card. Delete removes a picked wire. Press ? for all the shortcuts.
+          Drag to pan, scroll to zoom. Connect from a card&apos;s right edge. Press ? for shortcuts.
         </p>
       )}
     </aside>

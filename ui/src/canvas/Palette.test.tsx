@@ -48,6 +48,7 @@ test("the_wide_palette_says_how_to_move_around_and_the_icon_rail_has_no_room_for
   expect(hint).toMatch(/pan/);
   expect(hint).toMatch(/scroll to zoom/);
   expect(hint).toMatch(/right edge/);
+  expect(hint.length).toBeLessThan(100);
   unmount();
   vi.stubGlobal("innerWidth", 1000);
   render(<Palette onAdd={() => {}} />);

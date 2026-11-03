@@ -38,10 +38,15 @@ export function Meter({
   );
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-text">{label}</span>
-        {/* always laid out, so "updating" never shifts the row */}
-        <span aria-hidden={!stale} className={stale ? "text-muted" : "invisible"}>
+      {/* one line always (cards stay one height); "updating" floats over the right end */}
+      <div className="relative text-xs">
+        <span className="block truncate text-text" title={label}>
+          {label}
+        </span>
+        <span
+          aria-hidden={!stale}
+          className={stale ? "absolute inset-y-0 right-0 bg-card pl-1 text-muted" : "invisible"}
+        >
           updating
         </span>
       </div>
