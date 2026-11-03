@@ -21,7 +21,7 @@ pub use summary::{
 };
 
 use kaanal_core::{
-    ChainResult, ChaosState, Dist, EffectiveChaos, Endpoint, Endpoints, Hop, Topology,
+    ChainResult, ChaosState, Dist, EffectiveChaos, Endpoint, Endpoints, FinishedHold, Hop, Topology,
 };
 
 /// The two caps on the size of a run, checked before it starts.
@@ -180,6 +180,9 @@ pub struct RequestRecord {
     /// zero load, including when two failing branches tie at the same instant through
     /// zero-duration hops that need no slot or token (D17; the lower branch wins, as in live mode).
     pub hops: Vec<(Hop, Duration)>,
+    /// The slots it held across a call (`hold: call`): from the moment a node admitted the request
+    /// until what it called had answered. Those nodes' busy time is this, not their own hops.
+    pub holds: Vec<FinishedHold>,
 }
 
 /// Per-node statistics over the reported requests.

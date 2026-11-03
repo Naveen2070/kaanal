@@ -10,6 +10,7 @@ use super::{Hop, HopKind, Op, PlanItem, fail_of, hang_cap};
 use crate::balance::{Balance, pick_replica};
 use crate::chain::{Seq, Step};
 use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, Resolved};
+use crate::config::Hold;
 use crate::dist::Dist;
 use crate::rng::HopRng;
 use crate::stable_hash;
@@ -187,7 +188,9 @@ impl Walk<'_> {
                         }
                         now += self.link(edge, call.node, false, (now, r), cap);
                         now += self.net(call.node, &call.net, rep_path, (now, r), lc);
+                        let hold = self.open_hold(call.node, r);
                         let flow = self.seq(&call.body, rep_path, op, now, (call.node, r));
+                        self.close_hold(hold);
                         if let Flow::Done(end) | Flow::Hit(end) = flow {
                             now = end + self.link(edge, call.node, true, (end, r), cap);
                         }
@@ -237,6 +240,32 @@ impl Walk<'_> {
             }
         }
         Flow::Done(now)
+    }
+
+    /// **Private.** Opens a hold for a visit to `node` (replica `replica`) when it has `hold: call`
+    /// and slots to hold; returns its plan index. The caller walks the node's body, then closes it.
+    pub(super) fn open_hold(&mut self, node: NodeId, replica: u16) -> Option<usize> {
+        let n = &self.topo.nodes[node];
+        if n.hold != Hold::Call || n.admission.is_none() {
+            return None;
+        }
+        self.items.push(PlanItem::Hold {
+            node,
+            replica,
+            size: 0,
+        });
+        Some(self.items.len() - 1)
+    }
+
+    /// **Private.** Fixes the size of the hold opened at `hold` (after its body is walked, also
+    /// when the body failed).
+    pub(super) fn close_hold(&mut self, hold: Option<usize>) {
+        if let Some(i) = hold {
+            let end = self.items.len() - i - 1;
+            if let PlanItem::Hold { size, .. } = &mut self.items[i] {
+                *size = end;
+            }
+        }
     }
 
     /// **Private.** Opens a span for a call to `node` when it has a `timeout`; returns its plan index.

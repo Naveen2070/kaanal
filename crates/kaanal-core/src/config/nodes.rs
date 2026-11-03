@@ -22,6 +22,20 @@ pub enum NodeKind {
     Auth,
 }
 
+/// What a node's slot covers (`hold:`), for a node that calls others.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Hold {
+    /// The slot is held only while the node does its own work. A server that waits on its calls
+    /// without a thread (an event loop: Node, Go, async Python). The default.
+    #[default]
+    Own,
+    /// The slot is held from the moment the request is admitted until everything the node calls
+    /// has answered. A server with a thread or worker per request (Tomcat, sync Gunicorn, Puma,
+    /// PHP-FPM): a slow dependency fills the node's slots and its queue grows.
+    Call,
+}
+
 impl NodeKind {
     /// Every kind, in the order Studio lists them. A new kind goes here too: the draft view's
     /// `kinds` and `kind_defaults` are built from this list.
@@ -214,6 +228,18 @@ impl NodeConfig {
         }
     }
 
+    /// What a slot of this node covers (`hold:`); only a node that calls others has the field.
+    pub fn hold(&self) -> Hold {
+        match self {
+            NodeConfig::Gateway(n) => n.hold,
+            NodeConfig::Service(n) => n.hold,
+            NodeConfig::Monolith(n) => n.hold,
+            NodeConfig::Auth(n) => n.hold,
+            NodeConfig::Database(_) | NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) => None,
+        }
+        .unwrap_or_default()
+    }
+
     /// The per-KB payload cost (`per_kb:`), if the node sets one.
     pub fn per_kb(&self) -> Option<&DistConfig> {
         match self {
@@ -286,6 +312,11 @@ pub struct GatewayConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
+    /// does its own work; `call` holds it until everything the node calls has answered, as a
+    /// thread-per-request server does, so a slow dependency fills this node's slots too.
+    #[serde(default)]
+    pub hold: Option<Hold>,
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
@@ -331,6 +362,11 @@ pub struct ServiceConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
+    /// does its own work; `call` holds it until everything the node calls has answered, as a
+    /// thread-per-request server does, so a slow dependency fills this node's slots too.
+    #[serde(default)]
+    pub hold: Option<Hold>,
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
@@ -383,6 +419,11 @@ pub struct MonolithConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
+    /// does its own work; `call` holds it until everything the node calls has answered, as a
+    /// thread-per-request server does, so a slow dependency fills this node's slots too.
+    #[serde(default)]
+    pub hold: Option<Hold>,
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
@@ -586,6 +627,11 @@ pub struct AuthConfig {
     /// may override it.
     #[serde(default)]
     pub balance: Option<Balance>,
+    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
+    /// does its own work; `call` holds it until everything the node calls has answered, as a
+    /// thread-per-request server does, so a slow dependency fills this node's slots too.
+    #[serde(default)]
+    pub hold: Option<Hold>,
     /// Extra processing time per KB of payload (request and response each, once per body), a
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,

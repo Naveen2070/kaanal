@@ -303,6 +303,7 @@ pub(super) mod tests {
                 ChainResult::Ok
             },
             cause: fail.then_some(kaanal_sim::Cause::Chaos),
+            holds: Vec::new(),
             hops: vec![(hop, Duration::ZERO)],
         }
     }

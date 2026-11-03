@@ -337,6 +337,11 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
             failed_by[r.stream] += 1;
             *errors.entry(kind.as_str().to_string()).or_default() += 1;
         }
+        // a node that held its slot across a call is busy for the whole hold (own work and the wait
+        // on what it called), so that, not its own hops, is its busy time
+        for h in &r.holds {
+            node_acc[h.node][usize::from(h.replica)].busy += h.dur.as_secs_f64();
+        }
         for (hop, wait) in &r.hops {
             let (w, d) = (wait.as_secs_f64(), hop.dur.as_secs_f64());
             match hop.kind {
@@ -344,7 +349,15 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
                     // a monolith runs a Proc hop and an Op hop per visit: count the Proc one
                     let visit = !(matches!(hop.kind, HopKind::Op(_))
                         && topo.nodes[hop.node].kind == NodeKind::Monolith);
-                    node_acc[hop.node][usize::from(hop.replica)].add(w, d, visit);
+                    let held = r
+                        .holds
+                        .iter()
+                        .any(|h| h.node == hop.node && h.replica == hop.replica);
+                    node_acc[hop.node][usize::from(hop.replica)].add(
+                        w,
+                        if held { 0.0 } else { d },
+                        visit,
+                    );
                     work_by[hop.node].push(d * 1000.0);
                 }
                 HopKind::Link { edge, .. } => link_acc[usize::from(edge)].add(w, d, true),

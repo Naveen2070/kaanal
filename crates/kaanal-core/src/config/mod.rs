@@ -44,7 +44,7 @@ pub use endpoints::{
 pub use limits::{BoundedConcurrency, ConcurrencyConfig, PoolConfig, RateLimitConfig};
 pub use nodes::{
     AuthConfig, CacheConfig, CacheFlavor, DatabaseConfig, DbFlavor, ExternalApiConfig,
-    GatewayConfig, MonolithConfig, NodeConfig, NodeKind, OpsConfig, ServiceConfig,
+    GatewayConfig, Hold, MonolithConfig, NodeConfig, NodeKind, OpsConfig, ServiceConfig,
 };
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;

@@ -130,15 +130,16 @@ One test target (`cargo test -p kaanal-core --test config`), one module per topi
 
 One test target (`cargo test -p kaanal-core --test replay`), one module per topic in `tests/replay/` (R3.8):
 
-| Module           | What it covers                                                |
-| ---------------- | ------------------------------------------------------------- |
-| `common.rs`      | Topology, hops, plans, the run loop.                          |
-| `bucket_gate.rs` | The token bucket and the slot gate.                           |
-| `engine.rs`      | FIFO hand-over, answers, stamps, clock, table, submit, drain. |
-| `limits.rs`      | Rate limits and queue overflow.                               |
-| `spans.rs`       | Timeout spans, zombies, deadlines.                            |
-| `reference.rs`   | The engine against a reference queue.                         |
-| `cause.rs`       | The failure cause per failure kind.                           |
+| Module           | What it covers                                                 |
+| ---------------- | -------------------------------------------------------------- |
+| `common.rs`      | Topology, hops, plans, the run loop.                           |
+| `bucket_gate.rs` | The token bucket and the slot gate.                            |
+| `engine.rs`      | FIFO hand-over, answers, stamps, clock, table, submit, drain.  |
+| `limits.rs`      | Rate limits and queue overflow.                                |
+| `spans.rs`       | Timeout spans, zombies, deadlines.                             |
+| `reference.rs`   | The engine against a reference queue.                          |
+| `cause.rs`       | The failure cause per failure kind.                            |
+| `hold.rs`        | `hold: call`: held slots, failure, zombies, parallel, no leak. |
 
 | Test                                                             | What it proves                                                                                                               |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -2301,15 +2302,16 @@ Golden strings; no network. See [logview](files/kaanal/logview.md).
 
 One test target (`cargo test -p kaanal-sim --test sim`), one module per topic in `tests/sim/` (R3.8):
 
-| Module         | What it covers                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| `common.rs`    | Shared helpers and the compared configs (`tests/common/mod.rs` is included as `shared`). |
-| `zero_load.rs` | Zero-load equality against `execute` and live.                                           |
-| `behaviour.rs` | Lindley, FIFO, determinism, overload, utilization, warmup.                               |
-| `config.rs`    | Config validation, counters, absurd values, bounded queues.                              |
-| `streams.rs`   | Streams named by compiled endpoints, the hop budget.                                     |
-| `forks.rs`     | Fork and join: ties, cancelled siblings, slots.                                          |
-| `auth.rs`      | Login and JWKS as stream keys.                                                           |
+| Module         | What it covers                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `common.rs`    | Shared helpers and the compared configs (`tests/common/mod.rs` is included as `shared`).   |
+| `zero_load.rs` | Zero-load equality against `execute` and live.                                             |
+| `behaviour.rs` | Lindley, FIFO, determinism, overload, utilization, warmup.                                 |
+| `config.rs`    | Config validation, counters, absurd values, bounded queues.                                |
+| `streams.rs`   | Streams named by compiled endpoints, the hop budget.                                       |
+| `forks.rs`     | Fork and join: ties, cancelled siblings, slots.                                            |
+| `auth.rs`      | Login and JWKS as stream keys.                                                             |
+| `hold.rs`      | `hold: call` end to end: held app busy, report agrees with engine, no-slot node unchanged. |
 
 | Test                                                                      | What it pins                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

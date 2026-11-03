@@ -130,6 +130,19 @@ pub enum PlanItem {
         /// Items after this one that belong to the branch.
         size: usize,
     },
+    /// A node holding its slot across a call (`hold: call`, pre-order): the node takes a slot of
+    /// `replica` here, queueing like any hop when none is free, and the `size` items after this one
+    /// (its own hops and everything it calls) run inside that slot, which is freed when the walk
+    /// passes the last of them. The node's own hops in the scope take no slot of their own. Never
+    /// emitted for a node without slots.
+    Hold {
+        /// The node whose slot is held.
+        node: NodeId,
+        /// The replica whose slot it is.
+        replica: u16,
+        /// Items after this one that run inside the held slot.
+        size: usize,
+    },
     /// A deadline scope (pre-order): the `size` items after it are the call (edge hop and body)
     /// that must end within `timeout` of `at`.
     Span {
@@ -430,13 +443,16 @@ pub fn sample_plan(
         }
     }
     let flow = flow.unwrap_or_else(|| {
-        w.seq(
+        let hold = entry.and_then(|n| w.open_hold(n, er));
+        let flow = w.seq(
             &ep.chain,
             root,
             ep.op,
             start,
             (entry.unwrap_or_default(), er),
-        )
+        );
+        w.close_hold(hold);
+        flow
     });
     w.close_span(root_span);
     let fail = match flow {

@@ -117,7 +117,7 @@ fn timeline(t: &Topology, o: &ChainOutcome) -> Vec<String> {
         .collect()
 }
 
-/// `H` hop, `X` fail, `F<branches>/<size>` fork, `B<size>` branch.
+/// `H` hop, `X` fail, `F<branches>/<size>` fork, `B<size>` branch, `S<size>` span, `K<size>` hold.
 fn shape(p: &Plan) -> String {
     p.items
         .iter()
@@ -127,6 +127,7 @@ fn shape(p: &Plan) -> String {
             PlanItem::Fork { branches, size } => format!("F{branches}/{size}"),
             PlanItem::Branch { size } => format!("B{size}"),
             PlanItem::Span { size, .. } => format!("S{size}"),
+            PlanItem::Hold { size, .. } => format!("K{size}"),
         })
         .collect::<Vec<_>>()
         .join(" ")

@@ -137,6 +137,7 @@ pub(crate) fn simulate(
                         FailCause::Deadline => Cause::Deadline,
                     }),
                     hops: f.hops.into_iter().map(|h| (h.hop, h.wait)).collect(),
+                    holds: f.holds,
                 },
             ));
         }

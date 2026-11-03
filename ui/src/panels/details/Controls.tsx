@@ -14,12 +14,15 @@ import { kindInfo } from "../../canvas/nodeKinds";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
 import { Chaos } from "./Chaos";
-import { BalanceField, NumberField, Section } from "./Field";
+import { BalanceField, NumberField, Section, StyleField } from "./Field";
+import { callsOthers } from "../../canvas/rules";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { TIME_UNITS } from "./units";
 import {
   balanceOf,
   deleteOps,
+  holdOf,
+  setStyle,
   durationMs,
   setBalance,
   hasProc,
@@ -100,6 +103,12 @@ export function Controls({
             onChange={(c) =>
               void patch(setBalance(["nodes", name, "balance"], "balance" in config, c))
             }
+          />
+        ) : null}
+        {callsOthers(config.type) ? (
+          <StyleField
+            value={holdOf(config)}
+            onChange={(c) => void patch(setStyle(name, config, c))}
           />
         ) : null}
         {!hasProc(config.type) ? (

@@ -51,6 +51,7 @@ fn finished(hops: Vec<FinishedHop>, result: ChainResult, cause: Option<FailCause
         result,
         cause,
         hops,
+        holds: Vec::new(),
     }
 }
 

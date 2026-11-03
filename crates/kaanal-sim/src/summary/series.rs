@@ -42,6 +42,27 @@ struct Work {
     queue: Vec<Vec<(u64, u8)>>,
 }
 
+/// **Private.** Adds the part of `[start, end]` (seconds) inside each window to that window's busy
+/// seconds. `(warm, w)` is where the windows start and how long each is.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "window indices are clamped to WINDOWS; times are far below 2^52"
+)]
+fn add_busy(busy: &mut [f64], (warm, w): (f64, f64), start: f64, end: f64) {
+    let mut i = (((start - warm) / w).max(0.0) as usize).min(WINDOWS - 1);
+    loop {
+        let lo = warm + i as f64 * w;
+        let hi = lo + w;
+        busy[i] += (end.min(hi) - start.max(lo)).max(0.0);
+        i += 1;
+        if end <= hi || i == WINDOWS {
+            break;
+        }
+    }
+}
+
 /// **Private.** Series per node, by node id.
 #[expect(
     clippy::cast_precision_loss,
@@ -74,6 +95,13 @@ pub(super) fn series(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Ve
         .collect();
     for r in &report.requests {
         let arrival = r.arrival.as_secs_f64();
+        for h in &r.holds {
+            let wk = &mut work[h.node];
+            if !wk.busy.is_empty() {
+                let start = arrival + h.start.as_secs_f64();
+                add_busy(&mut wk.busy, (warm, w), start, start + h.dur.as_secs_f64());
+            }
+        }
         for (hop, wait) in &r.hops {
             if !matches!(
                 hop.kind,
@@ -87,16 +115,13 @@ pub(super) fn series(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Ve
             if wk.busy.is_empty() {
                 continue;
             }
-            let end = start + dur;
-            let mut i = win(start);
-            loop {
-                let lo = warm + i as f64 * w;
-                let hi = lo + w;
-                wk.busy[i] += (end.min(hi) - start.max(lo)).max(0.0);
-                i += 1;
-                if end <= hi || i == WINDOWS {
-                    break;
-                }
+            // a hop inside a held slot adds no busy time of its own: the hold, below, is the busy time
+            if !r
+                .holds
+                .iter()
+                .any(|h| h.node == hop.node && h.replica == hop.replica)
+            {
+                add_busy(&mut wk.busy, (warm, w), start, start + dur);
             }
             if !wait.is_zero() {
                 // the queue it joined: from the join instant to the instant it got its slot

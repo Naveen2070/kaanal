@@ -1,4 +1,4 @@
-# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`)
+# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`)
 
 The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together. `engine` is a folder: `engine/state.rs` holds the data types (errors, finished-request records, per-request and per-node state) and `engine/mod.rs` keeps `impl Engine` whole (about 650 lines, on purpose: one type's hot-path impl, R3.8).
 
@@ -86,3 +86,7 @@ Full model: [../../chaos.md](../../chaos.md). The walk puts `PlanItem::Span { no
 - **`HopKind::Delay`** (endpoint latency) is handled like a `Net` hop: no gate slot, no rate-limit token (Z18), so it is never a visit and never queues.
 
 **Limit L1 (Q6).** A 429 or an overflow failure that ties with another _engine_ failure at the same instant keeps the one the engine processed first. A planned `Fail` item keeps the D17 rule: a lower plan index reached at the same instant still replaces a 429 or an overflow, and then the refusal is taken back out of `limited`/`overflowed`, so the counters equal the answers. The `parallel` branches need not be zero-cost for this: any exact tie (fixed latencies, equal hop sums) can produce it.
+
+## Holding a slot across a call (`engine/hold.rs`)
+
+A node with `hold: call` keeps its slot while it waits on what it calls. The walk puts a `PlanItem::Hold { node, replica, size }` marker in front of the node's body; the token that reaches it takes a slot of that replica (queueing, or failing on a full queue or the rate limit, exactly as a hop does) and keeps it until it walks past the last of the `size` items. The node's own hops in the scope take no slot of their own (`holds_unit`). Branch tokens of a `parallel` block inherit the chain but never let go of a parent's hold (`HoldState::owner`). When a request fails, `release_idle_holds` frees every hold except those on a unit where a hop of the request is still running, and runs again as each hop of a failed request ends; `drop_holds` is the last net when the request's table slot is freed. `Finished::holds` carries each hold's start and length so the simulator's busy time, load and per-window busy share for such a node are the held time. The wait for a hold is shown on the node's first own hop in the scope.

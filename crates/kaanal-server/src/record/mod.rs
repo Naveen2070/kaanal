@@ -105,7 +105,10 @@ pub fn trace_parts(
                     }
                 }));
             }
-            PlanItem::Hop(_) | PlanItem::Fail { .. } | PlanItem::Span { .. } => {}
+            PlanItem::Hop(_)
+            | PlanItem::Fail { .. }
+            | PlanItem::Span { .. }
+            | PlanItem::Hold { .. } => {}
         }
     }
     pieces.extend(forks.iter().map(|_| Piece::Close));
@@ -502,7 +505,10 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                     why: (!why.is_empty()).then(|| why.join(", ")),
                 });
             }
-            PlanItem::Hop(_) | PlanItem::Fail { .. } | PlanItem::Span { .. } => {}
+            PlanItem::Hop(_)
+            | PlanItem::Fail { .. }
+            | PlanItem::Span { .. }
+            | PlanItem::Hold { .. } => {}
         }
     }
     (recs, truncated, delayed, faulted)

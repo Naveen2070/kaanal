@@ -137,7 +137,7 @@ rcb02-0005  GET /users/1  200  served 64ms  trace 49.5ms  flags=DI
 The header gives the id, the request, the status, the measured time (`served`), the simulated total (`trace`), and the scope, pin, client id and flags when present. Each row is one hop: its node and kind, when it started and how long it ran (simulated ms), then a 40-column bar of the total, and a note.
 
 - `#` is the hop running. A hop always gets at least one column, so a 0.1 ms hop is still visible.
-- `.` before it is time spent **queued** for a slot at that node ([capacity](capacity.md)).
+- `.` before it is time spent **queued** for a slot at that node ([capacity](capacity.md)); for a node with `hold: call` it is the wait for the slot the node holds across its calls, shown on its first own hop.
 - `x` is a hop that was **cut**: it ran for less time than planned because a failure or a deadline stopped it, or it is the hop that failed.
 - The note shows why: `chaos +40ms`, `chaos hang`, `pin delay`, `queued 98.0ms`, and `lane 1`, `lane 2` for the branches of a `parallel` block. (A nested `parallel` shows only its innermost branch number.)
 - The last line says how it ended: `failed at db: 503 (chaos)`, `failed at db: 504 timeout (deadline)`, `failed at gw: 429 (rate-limit)`, or, for a pin that hid a failure, `pinned=success hid: db.error=503`.

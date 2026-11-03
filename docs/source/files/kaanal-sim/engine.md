@@ -13,7 +13,7 @@ The thin driver behind `run`. It owns the stream arrivals on a virtual clock in 
 
 **Clock overflow.** The engine flags an event time past `u64::MAX` ns (about 584 years) and `simulate` returns `Err("simulated clock overflow…")`, never a silently wrong report. An arrival time past it is the same error. `validate` bounds hop records but not arrivals × service time, so this is reachable: 600k requests of 9 h through one slot overflows.
 
-Model: a node's slot is busy only during its own hop (a tandem queueing network); "hold until downstream returns" is planned for M1.
+Model: by default a node's slot is busy only during its own hop (a tandem queueing network). A node with `hold: call` keeps its slot until what it calls has answered (`PlanItem::Hold`, [replay.md](../kaanal-core/replay.md)); the engine's `utilization` counts that time too, and each hold is returned in `Finished::holds` and `RequestRecord::holds`.
 
 **Equal to live.** At zero load (live mode runs this same engine) every token starts each hop at its zero-load `start`, so the record equals `execute()` exactly: same hops, same cut rule, same failure, `latency == total()`.
 

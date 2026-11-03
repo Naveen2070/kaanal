@@ -14,7 +14,9 @@ use std::time::Duration;
 use indexmap::IndexMap;
 
 use crate::balance::Balance;
-use crate::config::{ConcurrencyConfig, Config, NodeConfig, NodeKind, RateLimitConfig, StepConfig};
+use crate::config::{
+    ConcurrencyConfig, Config, Hold, NodeConfig, NodeKind, RateLimitConfig, StepConfig,
+};
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::dist::Dist;
 use crate::presets;
@@ -50,6 +52,9 @@ pub struct Node {
     pub replicas: u16,
     /// How traffic entering this node picks a replica (an edge may override it).
     pub balance: Balance,
+    /// What a slot of this node covers: its own work only, or everything it calls too. Only a
+    /// node with slots (an `admission`) can hold anything; for the others it changes nothing.
+    pub hold: Hold,
     /// Extra processing time per KB of payload, request and response each, once per body
     /// (zero when unconfigured).
     pub per_kb: Dist,
@@ -453,6 +458,7 @@ impl Topology {
                 timeout: n.timeout(),
                 replicas: n.replicas(),
                 balance: n.balance().cloned().unwrap_or_default(),
+                hold: n.hold(),
                 per_kb: Dist::from_config(n.per_kb()),
                 chains: n.chains().cloned().unwrap_or_default(),
                 locale: n.locale().map(str::to_string),

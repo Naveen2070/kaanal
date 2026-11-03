@@ -170,6 +170,33 @@ An edge `gateway -> auth` makes every request pay an auth check; logins run insi
 
 Off by default. `per_kb` on any node (a duration like `proc`, e.g. `per_kb: 50us`) adds that much processing time for every KB of the request and of the response, once per body. `bandwidth` on an edge (bytes per second) makes the link a FIFO queue with one server at that speed. Payload sizes come from the traffic (a stream's `req_bytes` and `resp_bytes` in the simulator; in the live mock, the request's `Content-Length` and the size of the JSON body the route would answer). A route with a collection or a built-in login or JWKS counts its response as 0 bytes. With no sizes, neither field changes anything. In a trace a transfer shows as `db.link=50.0ms` (request) and `db.link-resp=12.0ms` (response), the node being the edge's target. A cache takes `bandwidth` on its edge but no `per_kb` (a load error). The live mock sizes the request from `Content-Length` only (a chunked upload counts 0), counts a HEAD response and a collection or built-in responder as 0 bytes, and sizes the normal success body even when a pin replaces it.
 
+## What a slot covers: `hold`
+
+A gateway, service, monolith or auth node with `concurrency` can say what one of its slots is held for:
+
+| `hold`          | A slot is held                                                                       | Fits                                                                 |
+| --------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `own` (default) | Only while the node does its own work (its `proc`)                                   | An event-loop server that waits on its calls: Node, Go, async Python |
+| `call`          | From the moment the request is admitted until everything the node calls has answered | A thread or worker per request: Tomcat, sync Gunicorn, Puma, PHP-FPM |
+
+With `call`, a slow dependency fills the slots of the node above it, its queue grows and it turns requests away, as such a server does, so a slow database shows up as a busy, saturated app instead of an app that looks idle. The node's own hops run in the slot it holds, and its response transfer (a wire's `bandwidth`) happens after the slot is let go.
+
+```yaml
+nodes:
+  app: { type: service, concurrency: 16, proc: 10ms, hold: call }
+```
+
+- A node with no `concurrency` has no slot to hold, so `hold` changes nothing for it. A database, a cache and an external API call nothing, so they do not take the field.
+- A call that fails or times out frees the caller's slot at that moment, as a worker is freed when its call errors; a node whose own hop is still running keeps the slot until that hop ends.
+- A held node's offered load, busy share per window and saturation point are measured from the time its slots were held, so they include the wait on what it called. They move with the dependency: when the database slows down, the app's "breaks first" rate falls.
+- Studio: the **Server style** choice on the Controls tab, for any component that calls others: **Event loop (default)** writes nothing (`hold: own`); **Thread per request** writes `hold: call` and, on a component with no slot limit yet, also `concurrency: { limit: 200, queue: 100 }` (Tomcat's defaults; change them under Capacity). Choosing the event loop again removes `hold` and leaves the slots as they are.
+
+**Not built yet:**
+
+- `hold` is per node. There is no hold per wire or per endpoint, so a node that holds its slot for one dependency but not another cannot say so.
+- A caller that carries on after a failed call, and retries, are not modelled yet: a failing call ends the request (continue-after-failure and retries are a later step).
+- A held node's response transfer is outside the hold, so a very large response over a slow wire frees the slot a little earlier than a real thread-per-request server would.
+
 ## Replicas and balancing
 
 Any node can have copies: `replicas: 3` (1 to 64, default 1). Each replica has its own slots, queue, pool and rate limit, so three replicas of a service with `concurrency: 4` serve twelve requests at once. `balance` says how traffic entering the node picks a replica:

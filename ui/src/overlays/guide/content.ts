@@ -156,7 +156,7 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "busy",
         term: "83% busy",
-        text: "The share of the component's slots in use over the run. The bar is green below 70%, amber from 70% and red from 90%; the words say the same, so colour is never the only signal.",
+        text: "The share of the component's slots in use over the run. For a thread per request (see Server style) a slot counts as in use while the component waits on what it calls, so a slow dependency makes it look busy. The bar is green below 70%, amber from 70% and red from 90%; the words say the same, so colour is never the only signal.",
         sample: {
           kind: "meters",
           items: [
@@ -180,6 +180,12 @@ export const CHAPTERS: Chapter[] = [
           kind: "meters",
           items: [{ ratio: 1, label: "Saturated · up to 40 waiting" }],
         },
+      },
+      {
+        id: "server-style",
+        term: "Server style",
+        text: "How a component spends its slots. An event loop (the default) holds a slot only while it works; while it waits on something it calls, the slot is free. A thread per request holds its slot until everything it calls has answered, so a slow database fills the app above it and the app shows busy, queues and turns requests away. Choosing a thread per request on a component with no slot limit gives it 200 slots and a queue of 100; change them in Capacity.",
+        real: "Event loop: Node, Go, async Python. Thread per request: Tomcat, sync Gunicorn, Puma, PHP-FPM.",
       },
       {
         id: "turning-away",
@@ -220,7 +226,7 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "slowest",
         term: "Slowest work under",
-        text: "The time within which 99 in every 100 requests finished their work here. It counts work only, not the time spent waiting in line, and it is exact over every request in the run.",
+        text: "The time within which 99 in every 100 requests finished their work here. It counts work only, not the time spent waiting in line or for a held slot, and it is exact over every request in the run.",
         sample: { kind: "time", wait: 12, work: 25 },
       },
       {
@@ -232,7 +238,7 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "breaks-first",
         term: "Breaks first",
-        text: "The component that gives out at the lowest load, with the load: 'shop at 2,100 req/s'. It turns red only when that component is already saturated at the current load; otherwise it reads 'nothing saturates'.",
+        text: "The component that gives out at the lowest load, with the load (for a thread per request it falls when something it calls gets slower): 'shop at 2,100 req/s'. It turns red only when that component is already saturated at the current load; otherwise it reads 'nothing saturates'.",
         sample: { kind: "figure", label: "Breaks first", value: "shop at 2,100 req/s" },
       },
       {

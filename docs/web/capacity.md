@@ -29,7 +29,7 @@ nodes:
 
 Set one of `pool` or `concurrency` on a node, not both (the file will not load).
 
-A slot is held for a hop's whole duration, including any extra latency you add with chaos.
+A slot is held for a hop's whole duration, including any extra latency you add with chaos. By default that is all: a node that waits on what it calls is not busy while it waits. A node that keeps a worker per request can say so with `hold: call`, which holds the slot until its calls return (see [nodes](nodes.md#what-a-slot-covers-hold)). A request that waits for a held slot shows the wait on the node's first own hop.
 
 ## Rate limits
 
@@ -44,7 +44,7 @@ The bucket starts full with `burst` tokens and refills at `rps` per second. Each
 
 ## What counts as a visit
 
-A rate limit takes one token per **visit**, not per hop. A visit is a run of consecutive hops of one node, so a monolith's own processing followed by its inline database operation is one visit. A second call to the same node is a visit of its own, each pass of a `repeat` is one (`repeat: 3` takes three tokens), and a `parallel` block takes one per branch. Slots work per hop: each hop of the node takes a slot while it runs.
+A rate limit takes one token per **visit**, not per hop. A visit is a run of consecutive hops of one node, so a monolith's own processing followed by its inline database operation is one visit. A second call to the same node is a visit of its own, each pass of a `repeat` is one (`repeat: 3` takes three tokens), and a `parallel` block takes one per branch. Slots work per hop: each hop of the node takes a slot while it runs. With `hold: call` the node takes one slot (and one rate-limit token) when the request is admitted, and its own hops in that call run inside it.
 
 ## What clients see
 

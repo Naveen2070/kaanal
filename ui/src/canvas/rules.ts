@@ -29,6 +29,11 @@ const MAY_CALL: Record<string, string[]> = {
   "external-api": [],
 };
 
+/** Whether a node of this kind can call others at all (a database, a cache and an external API cannot). */
+export function callsOthers(kind: string): boolean {
+  return (kindRulesOf(kind)?.callees ?? MAY_CALL[kind] ?? []).length > 0;
+}
+
 /** True when a node of kind `from` may call one of kind `to`. An unknown kind is allowed: the draft decides. */
 export function mayCall(from: string | undefined, to: string | undefined): boolean {
   if (from === undefined || to === undefined) return true;

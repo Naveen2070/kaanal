@@ -231,6 +231,38 @@ export function BalanceField({
   );
 }
 
+/** How the server works: an event loop (the default), or a thread per request that holds its slot across its calls. */
+export function StyleField({
+  value,
+  onChange,
+}: {
+  value: "own" | "call";
+  onChange: (choice: "own" | "call") => void;
+}) {
+  const id = useId();
+  return (
+    <div className="mb-2">
+      <label htmlFor={id} className="block text-sm font-medium">
+        Server style
+      </label>
+      <select
+        id={id}
+        value={value}
+        aria-describedby={`${id}-hint`}
+        onChange={(e) => onChange(e.currentTarget.value as "own" | "call")}
+        className="h-7 rounded border border-control bg-sheet text-text px-1"
+      >
+        <option value="own">Event loop (default)</option>
+        <option value="call">Thread per request</option>
+      </select>
+      <p id={`${id}-hint`} className="text-xs text-muted">
+        A thread per request holds its slot while it waits on what it calls (Tomcat, sync Gunicorn,
+        Puma). With no slot limit yet it gets 200 slots and a queue of 100: change them above.
+      </p>
+    </div>
+  );
+}
+
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-4 border-b pb-3">

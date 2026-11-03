@@ -131,6 +131,37 @@ export function setBalance(
   return [put(path, present, choice)];
 }
 
+/** What a node's slot covers: its own work only (the default), or until what it calls has answered. */
+export const holdOf = (config: NodeDoc): "own" | "call" =>
+  config.hold === "call" ? "call" : "own";
+
+/** The patch for a chosen hold: `own` is the default, so it removes the field. */
+export function setHold(name: string, config: NodeDoc, choice: "own" | "call"): Op[] {
+  const path = ["nodes", name, "hold"];
+  if (choice === "own") return "hold" in config ? [{ op: "remove", path }] : [];
+  return [put(path, "hold" in config, "call")];
+}
+
+/** What "Thread per request" sets on a node with no slot limit: Tomcat's defaults (200 threads, 100 waiting). */
+export const THREAD_STYLE = { slots: 200, queue: 100 };
+
+/**
+ * A server style: `own` is an event loop (the default, nothing written); `call` is a thread per
+ * request, which holds its slot across its calls and, with no limit yet, gets a typical pool.
+ */
+export function setStyle(name: string, config: NodeDoc, choice: "own" | "call"): Op[] {
+  const ops = setHold(name, config, choice);
+  if (choice === "call" && slotsOf(config).value === null) {
+    ops.push(
+      put(["nodes", name, "concurrency"], false, {
+        limit: THREAD_STYLE.slots,
+        queue: THREAD_STYLE.queue,
+      }),
+    );
+  }
+  return ops;
+}
+
 export function setReplicas(name: string, config: NodeDoc, n: number): Op {
   return put(["nodes", name, "replicas"], "replicas" in config, n);
 }

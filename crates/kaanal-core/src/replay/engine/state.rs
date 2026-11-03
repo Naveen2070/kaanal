@@ -55,6 +55,21 @@ pub struct Finished {
     /// The hops that ran, in plan order: `start` is the offset from `arrival`; a hop a failure
     /// cancelled while running is cut at the failure instant; one that had not started is absent.
     pub hops: Vec<FinishedHop>,
+    /// The slots it held across a call, in the order they were taken.
+    pub holds: Vec<FinishedHold>,
+}
+
+/// A slot a request held across a call (`hold: call`), as the client's record sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinishedHold {
+    /// The node whose slot it was.
+    pub node: NodeId,
+    /// The replica whose slot it was.
+    pub replica: u16,
+    /// When it was taken, as an offset from arrival.
+    pub start: Duration,
+    /// How long it was held (cut at the answer when it was still held then).
+    pub dur: Duration,
 }
 
 /// One hop of a [`Finished`] request.
@@ -102,6 +117,9 @@ pub(super) struct Token {
     pub(super) last_own: Option<NodeId>,
     /// Innermost span this token opened that is still open (`SpanState::parent` chains outward).
     pub(super) open_top: Option<usize>,
+    /// Innermost hold this token stands in (`HoldState::parent` chains outward). A branch token
+    /// starts with its parent's, which it may look at but never lets go of (`HoldState::owner`).
+    pub(super) hold_top: Option<usize>,
 }
 
 /// **Private.** A `parallel` block waiting for its branches.
@@ -126,6 +144,23 @@ pub(super) struct SpanState {
     pub(super) due: u64,
     /// Not yet walked past by its opening token; only an open span can time the request out.
     pub(super) open: bool,
+}
+
+/// **Private.** One slot a request holds across a call (`hold: call`, see `hold.rs`).
+pub(super) struct HoldState {
+    /// The enclosing hold on the same token when this one was taken.
+    pub(super) parent: Option<usize>,
+    /// The token that took it, and the only one that lets it go.
+    pub(super) owner: usize,
+    /// Plan index just past the held scope; the owner frees the slot on walking on past it.
+    pub(super) end: usize,
+    pub(super) node: NodeId,
+    pub(super) replica: u16,
+    /// The slot is still held.
+    pub(super) open: bool,
+    /// When it was taken and, once let go, when (ns).
+    pub(super) since: u64,
+    pub(super) until: u64,
 }
 
 /// **Private.** The failure that decided a request: instant, plan index (D17), node, status.
@@ -156,6 +191,7 @@ pub(super) struct Req {
     pub(super) tokens: Vec<Token>,
     pub(super) joins: Vec<Join>,
     pub(super) spans: Vec<SpanState>,
+    pub(super) holds: Vec<HoldState>,
     /// Tokens holding a hop or waiting in a queue.
     pub(super) busy: usize,
     pub(super) fail: Option<Failure>,
@@ -173,6 +209,7 @@ pub(super) struct Scratch {
     pub(super) tokens: Vec<Token>,
     pub(super) joins: Vec<Join>,
     pub(super) spans: Vec<SpanState>,
+    pub(super) holds: Vec<HoldState>,
 }
 
 /// **Private.** Queueing state of one node.

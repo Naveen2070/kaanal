@@ -460,6 +460,21 @@
         }
       ]
     },
+    "Hold": {
+      "description": "What a node's slot covers (`hold:`), for a node that calls others.",
+      "oneOf": [
+        {
+          "const": "own",
+          "description": "The slot is held only while the node does its own work. A server that waits on its calls\nwithout a thread (an event loop: Node, Go, async Python). The default.",
+          "type": "string"
+        },
+        {
+          "const": "call",
+          "description": "The slot is held from the moment the request is admitted until everything the node calls\nhas answered. A server with a thread or worker per request (Tomcat, sync Gunicorn, Puma,\nPHP-FPM): a slow dependency fills the node's slots and its queue grows.",
+          "type": "string"
+        }
+      ]
+    },
     "JourneyConfig": {
       "additionalProperties": false,
       "description": "One endpoint in a profile's mix.",
@@ -536,6 +551,17 @@
                 "string",
                 "null"
               ]
+            },
+            "hold": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hold"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
             "locale": {
               "default": null,
@@ -642,6 +668,17 @@
                 }
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
+            },
+            "hold": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hold"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
             "locale": {
               "default": null,
@@ -766,6 +803,17 @@
                 }
               ],
               "description": "Preset that fills inline ops the user left out (estimates)."
+            },
+            "hold": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hold"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
             "locale": {
               "default": null,
@@ -1273,6 +1321,17 @@
                 }
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
+            },
+            "hold": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hold"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
             "locale": {
               "default": null,

@@ -16,12 +16,13 @@ use super::gate::{Admit, Gate};
 use crate::chaos::FailKind;
 use crate::exec::{ChainResult, Hop, HopKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
+mod hold;
 mod replicas;
 mod state;
 
 use replicas::Units;
 use state::{DEADLINE, Failure, Join, NOT_STARTED, Req, Scratch, SpanState, Token, live, nanos};
-pub use state::{EngineError, FailCause, Finished, FinishedHop, NodeCounters};
+pub use state::{EngineError, FailCause, Finished, FinishedHold, FinishedHop, NodeCounters};
 
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].
@@ -160,9 +161,11 @@ impl Engine {
             queued_at: None,
             last_own: None,
             open_top: None,
+            hold_top: None,
         });
         sc.joins.clear();
         sc.spans.clear();
+        sc.holds.clear();
         let req = Req {
             tag,
             order: self.order,
@@ -173,6 +176,7 @@ impl Engine {
             tokens: sc.tokens,
             joins: sc.joins,
             spans: sc.spans,
+            holds: sc.holds,
             busy: 0,
             fail: None,
             done: None,
@@ -254,6 +258,8 @@ impl Engine {
     fn advance(&mut self, r: usize, mut k: usize) {
         loop {
             let now = self.now;
+            // slots held across a call are let go as the token walks past the call
+            self.close_holds(r, k);
             let req = live(&mut self.reqs, r);
             let (at, end) = (req.tokens[k].at, req.tokens[k].end);
             // A span closes when its opener walks on past it. A fork parks the opener at the block
@@ -289,7 +295,7 @@ impl Engine {
                 // zero-duration hops that need no slot or token, as `execute` does (D17); the
                 // skipped hop never starts, so it is not recorded.
                 let skip = match &item {
-                    PlanItem::Span { .. } => true,
+                    PlanItem::Span { .. } | PlanItem::Hold { .. } => true,
                     PlanItem::Hop(h) => {
                         h.dur.is_zero()
                             && (h.kind == HopKind::Net
@@ -339,6 +345,15 @@ impl Engine {
                     size,
                     ..
                 } => self.open_span(r, k, node, nanos(timeout), size),
+                PlanItem::Hold {
+                    node,
+                    replica,
+                    size,
+                } => {
+                    if !self.enter_hold(r, k, node, replica, size) {
+                        return;
+                    }
+                }
                 PlanItem::Branch { .. } => unreachable!("tokens start after their Branch marker"),
             }
         }
@@ -355,6 +370,7 @@ impl Engine {
         });
         req.tokens[k].at = at + 1 + size;
         let inherited = req.tokens[k].last_own;
+        let held = req.tokens[k].hold_top;
         let first = req.tokens.len();
         let mut b = at + 1;
         while b < at + 1 + size {
@@ -368,6 +384,7 @@ impl Engine {
                 queued_at: None,
                 last_own: inherited,
                 open_top: None,
+                hold_top: held,
             });
             b += 1 + bs;
         }
@@ -416,10 +433,13 @@ impl Engine {
             req.busy += 1;
         } else {
             let (node, rep) = self.units.target(h);
+            // inside a `hold: call` scope the visit's slot (and rate-limit token) is already taken
+            let held = self.holds_unit(r, k, node, rep);
             let tok = &mut live(&mut self.reqs, r).tokens[k];
             let new_visit = tok.last_own != Some(node);
             tok.last_own = Some(node);
             if new_visit
+                && !held
                 && let Some(b) = self.units.state(node, rep).bucket.as_mut()
                 && let Err(wait) = b.take(now)
             {
@@ -442,7 +462,7 @@ impl Engine {
                 );
                 return;
             }
-            if self.units.state(node, rep).gate.is_some() {
+            if !held && self.units.state(node, rep).gate.is_some() {
                 self.mark(node, now);
                 let gate = self.units.state(node, rep).gate.as_mut().expect("checked");
                 match gate.arrive((r, k)) {
@@ -501,8 +521,11 @@ impl Engine {
             };
             (self.units.target(h), h.kind)
         };
+        let held =
+            kind != HopKind::Net && kind != HopKind::Delay && self.holds_unit(r, k, node, rep);
         if kind != HopKind::Net
             && kind != HopKind::Delay
+            && !held
             && self.units.state(node, rep).gate.is_some()
         {
             self.mark(node, now);
@@ -521,6 +544,9 @@ impl Engine {
         let req = live(&mut self.reqs, r);
         req.busy -= 1;
         req.tokens[k].at += 1;
+        if req.fail.is_some() {
+            self.release_idle_holds(r);
+        }
         self.advance(r, k);
         self.settle(r);
     }
@@ -535,11 +561,16 @@ impl Engine {
             .take()
             .expect("a token in a node queue has queued_at set");
         let wait = now - since;
+        if matches!(waiter.plan.items[i], PlanItem::Hold { .. }) {
+            // a slot held across a call: the token goes on from the marker
+            self.grant_hold(qr, qk, (node, rep), wait);
+            return;
+        }
         waiter.waits[i] = wait;
         waiter.starts[i] = now;
         let counted = waiter.arrival >= warmup;
         let PlanItem::Hop(qh) = &waiter.plan.items[i] else {
-            unreachable!("queued at a hop")
+            unreachable!("queued at a hop or a hold")
         };
         let dur = nanos(qh.dur);
         if counted {
@@ -638,6 +669,8 @@ impl Engine {
             req.tokens[k].queued_at = None;
             req.busy -= 1;
         }
+        // callers' workers are freed as their calls fail, but not under a hop still running
+        self.release_idle_holds(r);
         if first {
             self.answering.push(r);
         }
@@ -676,6 +709,8 @@ impl Engine {
 
     /// **Private.** Frees request slot `r` and keeps its buffers for the next request (R6.13).
     fn release_slot(&mut self, r: usize) {
+        // a request that failed while holding slots lets them go now that nothing of it runs
+        self.drop_holds(r);
         let req = self.reqs[r].take().expect("released once");
         self.free.push(r);
         self.spare.push(Scratch {
@@ -684,6 +719,7 @@ impl Engine {
             tokens: req.tokens,
             joins: req.joins,
             spans: req.spans,
+            holds: req.holds,
         });
     }
 }
@@ -719,6 +755,25 @@ fn record(req: &Req) -> Finished {
             wait: Duration::from_nanos(req.waits[i]),
         });
     }
+    // a hold still open at the answer is cut there, as a hop a failure cancelled is
+    let answered = req.done.expect("answered requests are done");
+    let holds = req
+        .holds
+        .iter()
+        .map(|h| {
+            let until = if h.open {
+                answered.max(h.since)
+            } else {
+                h.until
+            };
+            FinishedHold {
+                node: h.node,
+                replica: h.replica,
+                start: Duration::from_nanos(h.since - req.arrival),
+                dur: Duration::from_nanos(until.saturating_sub(h.since)),
+            }
+        })
+        .collect();
     let result = req
         .fail
         .as_ref()
@@ -736,5 +791,6 @@ fn record(req: &Req) -> Finished {
         result,
         cause: req.fail.as_ref().map(|f| f.cause),
         hops,
+        holds,
     }
 }

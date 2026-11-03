@@ -385,3 +385,43 @@ test("slots_and_copies_are_set_in_the_dock_only_and_the_name_is_last", async () 
   expect(order[0]).toBe("Capacity");
   expect(order.at(-1)).toBe("This component");
 });
+
+test("server_style_is_chosen_per_node_and_written_only_when_not_the_default", async () => {
+  await show();
+  const select = screen.getByLabelText("Server style") as HTMLSelectElement;
+  expect(select.value).toBe("own");
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(select, { target: { value: "call" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["nodes", "app", "hold"], value: "call" }],
+  });
+  cleanup();
+  // already `call`: choosing the default again removes the field
+  await show(nodeSummary(), { ...app, hold: "call" });
+  const held = screen.getByLabelText("Server style") as HTMLSelectElement;
+  expect(held.value).toBe("call");
+  const removal = mockFetch([{ json: view() }]);
+  fireEvent.change(held, { target: { value: "own" } });
+  await vi.waitFor(() => expect(removal).toHaveLength(1));
+  expect(removal[0]?.body).toEqual({ patch: [{ op: "remove", path: ["nodes", "app", "hold"] }] });
+});
+
+test("server_style_is_offered_only_to_a_node_that_calls_others", async () => {
+  // a database calls nothing, so it has no style to choose
+  await show(nodeSummary(), { type: "database", flavor: "postgres" }, { name: "db" });
+  expect(screen.queryByLabelText("Server style")).toBeNull();
+});
+
+test("a_thread_per_request_on_a_node_with_no_limit_also_sets_a_typical_pool", async () => {
+  await show(nodeSummary(), { type: "service", proc: "10ms" });
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(screen.getByLabelText("Server style"), { target: { value: "call" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [
+      { op: "insert", path: ["nodes", "app", "hold"], value: "call" },
+      { op: "insert", path: ["nodes", "app", "concurrency"], value: { limit: 200, queue: 100 } },
+    ],
+  });
+});

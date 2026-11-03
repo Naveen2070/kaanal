@@ -43,7 +43,7 @@ pub use chaos::{
     MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers,
 };
 pub use config::{
-    ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointConfig, EndpointsConfig,
+    ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointConfig, EndpointsConfig, Hold,
     JourneyConfig, NodeKind, ScenarioConfig, SeedSource, TrafficConfig, check_profile,
     parse_scenario, preprocess, strip_bom, valid_locale_tag,
 };
@@ -56,7 +56,9 @@ pub use pin::{
     EffectivePins, EmptyOk, Outcome, PinEntry, PinEntryConfig, PinLayer, PinSource, PinState,
     ResolvedPin, StateOverride, StateOverrideConfig, StateOverrides, resolve, validate_entry,
 };
-pub use replay::{Engine, EngineError, FailCause, Finished, FinishedHop, NodeCounters};
+pub use replay::{
+    Engine, EngineError, FailCause, Finished, FinishedHold, FinishedHop, NodeCounters,
+};
 pub use rng::HopRng;
 pub use scenario::{
     ChaosStack, MAX_ENTRIES, MAX_SCENARIOS, Scenario, ScenarioError, ScenarioSet, Source,

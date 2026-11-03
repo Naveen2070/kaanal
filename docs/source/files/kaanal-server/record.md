@@ -15,7 +15,7 @@ Secrets never get here: only names, times, statuses and the path (no query strin
 - `header` is the response's `X-Kaanal-Trace`, cut at `TRACE_CAP` (4096 bytes: Node's undici rejects headers past about 16 KiB, and this keeps well under).
 - `full` is the log's copy, cut only at `MAX_TRACE` (16 KiB).
 
-The pieces are the same as before the log existed (the rules live with the header in [mock.md](mock.md#what-it-does) step 6): hops in plan order with one decimal, `[a|b]` for a `parallel`, `node.wait=T` before a queued hop, `node.hit` / `node.miss`, `node.error=STATUS` (or `reset` / `malformed`), `pinned=STATE`. A text over its cap stops before a hop, closes the open brackets and ends `,...+N hops`. The error part and the pin are reserved before the hops are cut, so both survive. `without_empty_blocks` drops a `[|]` block whose branches never started. `Piece` and `render` are the private building blocks.
+The pieces are the same as before the log existed (the rules live with the header in [mock.md](mock.md#what-it-does) step 6): hops in plan order with one decimal, `[a|b]` for a `parallel`, `node.wait=T` before a queued hop, `node.hit` / `node.miss`, `node.error=STATUS` (or `reset` / `malformed`), `pinned=STATE`. A hold (`PlanItem::Hold`, a `hold: call` marker) is not a hop: it has no part in the text, no lane and no wait of its own. A text over its cap stops before a hop, closes the open brackets and ends `,...+N hops`. The error part and the pin are reserved before the hops are cut, so both survive. `without_empty_blocks` drops a `[|]` block whose branches never started. `Piece` and `render` are the private building blocks.
 
 ## Entries
 
