@@ -5,7 +5,9 @@
         {
           "enum": [
             "round-robin",
-            "random"
+            "random",
+            "least-conn",
+            "p2c"
           ],
           "type": "string"
         },
@@ -28,7 +30,7 @@
           "type": "object"
         }
       ],
-      "description": "How traffic picks a replica: `round-robin` (default), `random`, or `{ weighted: [..] }` with one weight per replica (at least one above 0)."
+      "description": "How traffic picks a replica: `round-robin` (default), `random`, `least-conn` (the replica with the fewest requests in it), `p2c` (the less loaded of two random replicas), or `{ weighted: [..] }` with one weight per replica (at least one above 0)."
     },
     "BoundedConcurrency": {
       "additionalProperties": false,

@@ -129,3 +129,22 @@ fn replicas_parse_on_every_node_kind() {
         assert_eq!(n.balance(), Some(&Balance::Random), "{kind}");
     }
 }
+
+#[test]
+fn least_conn_and_p2c_parse_as_balances_and_a_spread_cannot_use_them() {
+    let nodes =
+        "  gw: { type: gateway }\n  app: { type: service, replicas: 2, balance: least-conn }\n";
+    let c = Config::from_yaml(&format!(
+        "version: 1\nnodes:\n{nodes}edges:\n  - {{ from: gw, to: app, balance: p2c }}\n"
+    ))
+    .unwrap();
+    assert_eq!(c.nodes["app"].balance(), Some(&Balance::LeastConn));
+    assert_eq!(c.edges[0].balance, Some(Balance::P2c));
+    assert!(Balance::P2c.is_dynamic() && !Balance::Random.is_dynamic());
+    let bad = "version: 1\nnodes:\n  gw: { type: gateway }\n  lb: { type: load-balancer, spread: least-conn }\n  a: { type: service }\nedges:\n  - { from: gw, to: lb }\n  - { from: lb, to: a }\n";
+    let err = Config::from_yaml(bad).unwrap_err().to_string();
+    assert!(
+        err.contains("spread") && err.contains("least-conn"),
+        "{err}"
+    );
+}

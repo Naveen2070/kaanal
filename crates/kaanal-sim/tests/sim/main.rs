@@ -7,6 +7,7 @@ mod auth;
 mod behaviour;
 mod common;
 mod config;
+mod dynamic;
 mod forks;
 mod hold;
 mod links;

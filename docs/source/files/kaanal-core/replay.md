@@ -1,4 +1,4 @@
-# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`, `engine/finish.rs`)
+# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`, `engine/finish.rs`, `engine/dispatch.rs`)
 
 The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together. `engine` is a folder: `engine/state.rs` holds the data types (errors, finished-request records, per-request and per-node state) and `engine/mod.rs` keeps `impl Engine` whole (about 650 lines, on purpose: one type's hot-path impl, R3.8).
 
@@ -90,6 +90,10 @@ Full model: [../../chaos.md](../../chaos.md). The walk puts `PlanItem::Span { no
 - **`HopKind::Delay`** (endpoint latency) is handled like a `Net` hop: no gate slot, no rate-limit token (Z18), so it is never a visit and never queues.
 
 **Limit L1 (Q6).** A 429 or an overflow failure that ties with another _engine_ failure at the same instant keeps the one the engine processed first. A planned `Fail` item keeps the D17 rule: a lower plan index reached at the same instant still replaces a 429 or an overflow, and then the refusal is taken back out of `limited`/`overflowed`, so the counters equal the answers. The `parallel` branches need not be zero-cost for this: any exact tie (fixed latencies, equal hop sums) can produce it.
+
+## The copy chosen at dispatch (`engine/dispatch.rs`)
+
+`least-conn` and `p2c` leave the copy open: the walk emits a `PlanItem::Pick { node, code, kind, cands, offset, skew }` and the hops (and holds) of the visit carry `replica = code` (`>= DYN_BASE`, 0x8000). When a token reaches the `Pick`, `Engine::dispatch` reads the live gates (`busy + queued`, 0 for a node without slots), chooses (least loaded of `cands`, ties rotated by `offset` for `least-conn`; the less loaded of two, the first on a tie, for `p2c`) and binds the later items with `Plan::bind_pick`, which also adds the copy's chaos latency from `skew` to its work hops. The plan is copied once for that request (`Arc::make_mut`), so every other part of the engine sees an ordinary copy. `execute` and the live mock call `Plan::resolved`, which settles each pick by its tie rule.
 
 ## How a request ends (`engine/finish.rs`)
 

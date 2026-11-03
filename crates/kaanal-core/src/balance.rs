@@ -24,11 +24,27 @@ pub enum Balance {
     Random,
     /// A random live replica, weighted: one weight per replica (a 0 weight gets none).
     Weighted(Vec<u32>),
+    /// The live replica with the fewest requests in it (busy slots and queue) when the call is
+    /// sent; ties rotate. Needs the live queues, so only the simulator can do it (the plan holds
+    /// the live set and the simulator chooses); a pure pick, as in the mocks, takes turns.
+    LeastConn,
+    /// Power of two choices: two random live replicas, the less loaded of the two when the call is
+    /// sent. As for `LeastConn`, the simulator chooses; a pure pick takes a random live replica.
+    P2c,
+}
+
+impl Balance {
+    /// Whether the replica is chosen by the simulator from the live queues, not while the plan is
+    /// built (`least-conn`, `p2c`).
+    pub fn is_dynamic(&self) -> bool {
+        matches!(self, Balance::LeastConn | Balance::P2c)
+    }
 }
 
 impl<'de> Deserialize<'de> for Balance {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        const EXPECTED: &str = "expected `round-robin`, `random` or `{ weighted: [3, 1, 1] }`";
+        const EXPECTED: &str =
+            "expected `round-robin`, `random`, `least-conn`, `p2c` or `{ weighted: [3, 1, 1] }`";
         /// **Private.** `{ weighted: [...] }`; unknown keys rejected.
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -46,6 +62,8 @@ impl<'de> Deserialize<'de> for Balance {
             Raw::Name(n) => match n.as_str() {
                 "round-robin" => Ok(Balance::RoundRobin),
                 "random" => Ok(Balance::Random),
+                "least-conn" => Ok(Balance::LeastConn),
+                "p2c" => Ok(Balance::P2c),
                 "weighted" => Err(D::Error::custom(
                     "weighted needs weights: write `{ weighted: [3, 1, 1] }` (one per replica)",
                 )),
@@ -83,8 +101,10 @@ pub fn pick_replica(
     let count = live.len() as u64;
     let uniform = |rng: &mut HopRng| live[usize::try_from(rng.random_range(0..count)).unwrap_or(0)];
     Some(match balance {
-        Balance::RoundRobin => live[usize::try_from(n.wrapping_add(offset) % count).unwrap_or(0)],
-        Balance::Random => uniform(&mut draw_rng(path, node, b"replica")),
+        Balance::RoundRobin | Balance::LeastConn => {
+            live[usize::try_from(n.wrapping_add(offset) % count).unwrap_or(0)]
+        }
+        Balance::Random | Balance::P2c => uniform(&mut draw_rng(path, node, b"replica")),
         Balance::Weighted(w) => {
             let weight = |i: u16| u64::from(w.get(usize::from(i)).copied().unwrap_or(0));
             let total: u64 = live.iter().map(|i| weight(*i)).sum();

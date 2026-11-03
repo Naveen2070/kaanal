@@ -3,6 +3,7 @@
 mod bucket_gate;
 mod cause;
 mod common;
+mod dispatch;
 mod engine;
 mod hold;
 mod limits;

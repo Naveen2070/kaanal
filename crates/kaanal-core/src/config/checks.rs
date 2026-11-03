@@ -331,6 +331,14 @@ pub(super) fn check_replicas(cfg: &Config) -> Result<(), Located> {
                 ),
             ));
         }
+        if node.spread().is_some_and(Balance::is_dynamic) {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "spread"]),
+                format!(
+                    "node '{name}': spread cannot be least-conn or p2c (they choose among the copies of one component by its queues; use round-robin, random or weighted, and put least-conn or p2c on the balance of the components behind the balancer)"
+                ),
+            ));
+        }
         if let Some(p) = node.spread().and_then(|b| {
             let wires = cfg.edges.iter().filter(|e| e.from == *name).count();
             weights_for(b, wires, "wires out of it")

@@ -4,6 +4,7 @@
 import { useId, useState } from "react";
 import type { HelpId } from "../../overlays/help/copy";
 import { HelpPopover } from "../../overlays/help/HelpPopover";
+import type { BalanceChoice } from "./fields";
 import { display, fromUnit, pickUnit, toUnit, type Unit } from "./units";
 
 export function NumberField({
@@ -189,21 +190,24 @@ export function UnitInput({
   );
 }
 
-/** The balance choice: the default, round robin or random; a weighted one is shown but edited in the file. */
+/** The balance choice: the default, round robin, random, least connections or power of two choices; a weighted one is shown but edited in the file. */
 export function BalanceField({
   hint,
   value,
   defaultLabel,
   label = "Balance",
+  dynamic = true,
   onChange,
 }: {
   hint: string;
   /** The field's name (default "Balance"). */
   label?: string;
-  value: "round-robin" | "random" | "weighted" | null;
+  value: BalanceChoice | "weighted" | null;
   /** What no value means here (the callee's own, or round robin). */
   defaultLabel: string;
-  onChange: (choice: "" | "round-robin" | "random") => void;
+  /** Offer least connections and power of two choices (default); a balancer's spread cannot use them. */
+  dynamic?: boolean;
+  onChange: (choice: "" | BalanceChoice) => void;
 }) {
   const id = useId();
   return (
@@ -215,12 +219,14 @@ export function BalanceField({
         id={id}
         value={value ?? ""}
         aria-describedby={`${id}-hint`}
-        onChange={(e) => onChange(e.currentTarget.value as "" | "round-robin" | "random")}
+        onChange={(e) => onChange(e.currentTarget.value as "" | BalanceChoice)}
         className="h-7 rounded border border-control bg-sheet text-text px-1"
       >
         <option value="">{defaultLabel}</option>
         <option value="round-robin">Round robin</option>
         <option value="random">Random</option>
+        {dynamic ? <option value="least-conn">Least connections</option> : null}
+        {dynamic ? <option value="p2c">Power of two choices</option> : null}
         {value === "weighted" ? (
           <option value="weighted" disabled>
             Weighted (edit in kaanal.yaml)
@@ -229,6 +235,9 @@ export function BalanceField({
       </select>
       <p id={`${id}-hint`} className="text-xs text-muted">
         {hint}
+        {value === "least-conn" || value === "p2c"
+          ? " Runs choose by the real queues; the live mock plays this as round robin."
+          : ""}
       </p>
     </div>
   );

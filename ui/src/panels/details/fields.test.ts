@@ -230,3 +230,11 @@ test("a_load_balancer_has_a_service_time_and_its_spread_is_a_balance", () => {
     { op: "remove", path: ["nodes", "lb", "spread"] },
   ]);
 });
+
+test("least_conn_and_p2c_are_balances_the_page_can_write", () => {
+  expect(balanceOf("least-conn")).toBe("least-conn");
+  expect(balanceOf("p2c")).toBe("p2c");
+  expect(setBalance(["nodes", "a", "balance"], true, "p2c")).toEqual([
+    { op: "set", path: ["nodes", "a", "balance"], value: "p2c" },
+  ]);
+});

@@ -1,12 +1,13 @@
 //! The walk behind [`super::sample_plan`]: one request's chain as a timeline of [`PlanItem`]s,
 //! with the per-hop draws, spans, forks and failures. Moved out of `mod.rs` unchanged (R3.8).
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use rand::{Rng, SeedableRng};
 
 use super::link::MAX_HOP;
-use super::{Hop, HopKind, Op, PlanItem, fail_of, hang_cap};
+use super::{DYN_BASE, Hop, HopKind, Op, PickKind, Plan, PlanItem, fail_of, hang_cap};
 use crate::balance::{Balance, pick_replica};
 use crate::chain::{Seq, Step};
 use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, Resolved};
@@ -64,6 +65,8 @@ pub(super) struct Walk<'a> {
     pub(super) picks: Vec<u32>,
     /// Callee picks so far per load balancer in this request (its own round-robin counter).
     pub(super) routes: Vec<u32>,
+    /// Dynamic picks emitted so far (the next code is `DYN_BASE + this`).
+    pub(super) dyn_picks: u16,
     /// Request and response body sizes, for link hops and `per_kb`.
     pub(super) bytes: (u64, u64),
     pub(super) items: Vec<PlanItem>,
@@ -91,7 +94,78 @@ impl Walk<'_> {
                 .map(|r| !self.chaos.replica_down(node, self.ep_key, r))
                 .collect()
         };
+        if balance.is_dynamic() {
+            return self.pick_dynamic(node, balance, &up, offset, path);
+        }
         pick_replica(balance, nd.replicas, &up, self.n, offset, path, &nd.name)
+    }
+
+    /// **Private.** `least-conn` or `p2c` for `node`: the live copies become candidates in a
+    /// [`PlanItem::Pick`] and the hops after it carry its code, so the simulator chooses by the
+    /// live queues when the call is sent. With one live copy there is nothing to choose; `p2c`
+    /// draws its two distinct candidates from its own stream. `None` when every copy is down.
+    fn pick_dynamic(
+        &mut self,
+        node: NodeId,
+        balance: &Balance,
+        up: &[bool],
+        offset: u64,
+        path: u64,
+    ) -> Option<u16> {
+        let nd = &self.topo.nodes[node];
+        let live: Vec<u16> = (0..nd.replicas)
+            .filter(|i| up.get(usize::from(*i)).copied().unwrap_or(true))
+            .collect();
+        match live.as_slice() {
+            [] => return None,
+            [only] => return Some(*only),
+            _ => {}
+        }
+        let (kind, cands) = if matches!(balance, Balance::P2c) {
+            let mut rng = draw_rng(path, &nd.name, b"p2c");
+            let a = rng.random_range(0..live.len());
+            let mut b = rng.random_range(0..live.len() - 1);
+            if b >= a {
+                b += 1;
+            }
+            (PickKind::P2c, (1u64 << live[a]) | (1u64 << live[b]))
+        } else {
+            (
+                PickKind::LeastConn,
+                live.iter().fold(0u64, |m, i| m | 1u64 << i),
+            )
+        };
+        if self.dyn_picks >= DYN_BASE - 1 {
+            // out of codes (a huge repeat): settle it now, as the mocks would
+            return Some(Plan::static_copy(kind, cands, 0));
+        }
+        let code = DYN_BASE + self.dyn_picks;
+        self.dyn_picks += 1;
+        // chaos aimed at one copy (its extra latency) cannot be put on a hop whose copy is not
+        // known yet: carry it per copy, and the choice adds it (errors on one copy are not
+        // supported with these balances: the hops see the node's chaos only)
+        let skew = (!self.chaos.is_empty())
+            .then(|| {
+                let lat = |c: Option<&Resolved>| c.map_or(Duration::ZERO, |c| c.latency_add);
+                let node_part = lat(self.chaos.visit_replica(node, self.ep_key, code));
+                let per_copy: Vec<u64> = (0..nd.replicas)
+                    .map(|i| {
+                        let all = lat(self.chaos.visit_replica(node, self.ep_key, i));
+                        u64::try_from(all.saturating_sub(node_part).as_nanos()).unwrap_or(u64::MAX)
+                    })
+                    .collect();
+                per_copy.iter().any(|x| *x > 0).then(|| Arc::from(per_copy))
+            })
+            .flatten();
+        self.items.push(PlanItem::Pick {
+            node,
+            code,
+            kind,
+            cands,
+            offset: u16::try_from(self.n.wrapping_add(offset) % 4096).unwrap_or(0),
+            skew,
+        });
+        Some(code)
     }
 
     /// **Private.** Every replica of `node` is down: the call fails at `at` with a 503.

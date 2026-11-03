@@ -17,6 +17,7 @@ pub(crate) use walk::draw_rng;
 use walk::{Flow, Walk};
 
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rand::Rng;
@@ -153,6 +154,26 @@ pub enum PlanItem {
         /// Items after this one that run inside the held slot.
         size: usize,
     },
+    /// The copy of `node` the next visit takes is not fixed yet: hops and holds after this item
+    /// that name `replica == code` (`>= DYN_BASE`) run on the copy the simulator chooses from
+    /// `cands` when it reaches this item, by the live queues. A plan for the mocks and for
+    /// `execute` is made static first ([`Plan::resolve_static`]). Only `least-conn` and `p2c`
+    /// emit it.
+    Pick {
+        /// The node whose copy is chosen.
+        node: NodeId,
+        /// The code the later hops carry in `replica`.
+        code: u16,
+        /// How the copy is chosen.
+        kind: PickKind,
+        /// Candidate copies, bit `i` for copy `i` (at most 64 copies).
+        cands: u64,
+        /// Rotates the tie-break of `least-conn`, like the round-robin offset.
+        offset: u16,
+        /// Extra work time per copy (ns, indexed by copy) from chaos aimed at one copy: the part
+        /// the plan could not add because the copy was not known. `None` when no copy has any.
+        skew: Option<Arc<[u64]>>,
+    },
     /// A deadline scope (pre-order): the `size` items after it are the call (edge hop and body)
     /// that must end within `timeout` of `at`.
     Span {
@@ -165,6 +186,18 @@ pub enum PlanItem {
         /// Items after this one that belong to the span.
         size: usize,
     },
+}
+
+/// First `replica` value that is a [`PlanItem::Pick`] code, not a copy (a node has at most 64).
+pub const DYN_BASE: u16 = 0x8000;
+
+/// How a [`PlanItem::Pick`] chooses among its candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickKind {
+    /// The candidate with the fewest requests in it; ties rotate with the offset.
+    LeastConn,
+    /// The less loaded of two candidates; a tie takes the first.
+    P2c,
 }
 
 /// The sampled tree of one request: what ran, with zero-load times, fixed at arrival.
@@ -241,6 +274,61 @@ pub struct ChainRequest<'a> {
 }
 
 impl Plan {
+    /// Points every hop and hold of the pick at item `pick` (and the pick itself) at copy `copy`:
+    /// the later items that carry the pick's code.
+    pub fn bind_pick(&mut self, pick: usize, copy: u16) {
+        let PlanItem::Pick { code, skew, .. } = self.items[pick].clone() else {
+            return;
+        };
+        let extra = skew
+            .and_then(|s| s.get(usize::from(copy)).copied())
+            .map_or(Duration::ZERO, Duration::from_nanos);
+        for item in &mut self.items[pick + 1..] {
+            match item {
+                PlanItem::Hop(h) if h.replica == code => {
+                    h.replica = copy;
+                    // the copy's own chaos latency lands on its work, as in a fixed-copy plan
+                    if matches!(
+                        h.kind,
+                        HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss
+                    ) {
+                        h.dur += extra;
+                    }
+                }
+                PlanItem::Hold { replica, .. } if *replica == code => *replica = copy,
+                _ => {}
+            }
+        }
+    }
+
+    /// The copy a [`PlanItem::Pick`] takes with no load to look at (zero load, the mocks): the
+    /// rotating offset for `least-conn`, the first candidate for `p2c`.
+    pub fn static_copy(kind: PickKind, cands: u64, offset: u16) -> u16 {
+        let live: Vec<u16> = (0..64u16).filter(|i| cands >> i & 1 == 1).collect();
+        match kind {
+            PickKind::LeastConn => live[usize::from(offset) % live.len().max(1)],
+            PickKind::P2c => live[0],
+        }
+    }
+
+    /// This plan with every [`PlanItem::Pick`] settled as for no load: for `execute` and the
+    /// live mocks, which have no queues to look at. The simulator uses the plan as it is.
+    #[must_use]
+    pub fn resolved(mut self) -> Plan {
+        for i in 0..self.items.len() {
+            if let PlanItem::Pick {
+                kind,
+                cands,
+                offset,
+                ..
+            } = self.items[i]
+            {
+                self.bind_pick(i, Plan::static_copy(kind, cands, offset));
+            }
+        }
+        self
+    }
+
     /// Plan ranges a failure at item `fail` cancels: at every fork enclosing it, every
     /// branch except the one holding it (live mode and the simulator share this rule).
     pub fn cancelled_by(&self, fail: usize) -> Vec<Range<usize>> {
@@ -309,6 +397,8 @@ impl Plan {
 /// chaos roll first and caches also their hit roll, always, so chaos never shifts a timing.
 pub fn execute(topo: &Topology, chaos: &EffectiveChaos, req: &ChainRequest) -> ChainOutcome {
     let (plan, planned) = sample_plan(topo, chaos, req);
+    // zero load has no queues to look at: `least-conn` and `p2c` are settled by their tie rules
+    let plan = plan.resolved();
     let decided = deadline_failure(&plan, planned).or(planned);
     let result = match decided.map(|(i, _)| &plan.items[i]) {
         Some(&PlanItem::Fail {
@@ -389,6 +479,7 @@ pub fn sample_plan(
         n: req.n,
         picks: vec![0; topo.nodes.len()],
         routes: vec![0; topo.nodes.len()],
+        dyn_picks: 0,
         bytes: (req.req_bytes, req.resp_bytes),
         items: Vec::new(),
     };

@@ -50,7 +50,8 @@ pub use config::{
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
 pub use exec::{
-    ChainOutcome, ChainRequest, ChainResult, Hop, HopKind, Op, Plan, PlanItem, execute, sample_plan,
+    ChainOutcome, ChainRequest, ChainResult, DYN_BASE, Hop, HopKind, Op, PickKind, Plan, PlanItem,
+    execute, sample_plan,
 };
 pub use pin::{
     EffectivePins, EmptyOk, Outcome, PinEntry, PinEntryConfig, PinLayer, PinSource, PinState,

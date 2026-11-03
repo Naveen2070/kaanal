@@ -5,6 +5,7 @@ mod balancer;
 mod basic;
 mod common;
 mod deadlines;
+mod dynamic;
 mod endpoint;
 mod layers;
 mod link_chaos;

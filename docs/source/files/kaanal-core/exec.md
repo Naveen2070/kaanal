@@ -1,7 +1,7 @@
 # `crates/kaanal-core/src/exec/`
 
 The chain executor — the heart of the engine. Given a request, it computes _what the request would experience_: every hop with its start and duration, and where (if anywhere) it fails.
-Two files (R3.8): `mod.rs` holds the public types (`Op`, `Hop`, `Plan`, `ChainOutcome`, `ChainRequest`), `execute`, `sample_plan` and the failure helpers; `route.rs` holds one `call:` step as a method (`call_step`, moved out of `walk.rs`) and a load balancer's pick of a callee (`pick_callee`: `pick_replica` over its wires, a callee with every copy down skipped, the round-robin counter its own and per copy); `walk.rs` holds the walk itself (`Walk`, `Flow`, the per-hop draws, spans, forks and branch probability).
+Two files (R3.8): `mod.rs` holds the public types (`Op`, `Hop`, `Plan`, `ChainOutcome`, `ChainRequest`), `execute`, `sample_plan` and the failure helpers; `route.rs` holds one `call:` step as a method (`call_step`, moved out of `walk.rs`) and a load balancer's pick of a callee (`pick_callee`: `pick_replica` over its wires, a callee with every copy down skipped, the round-robin counter its own and per copy); `walk.rs` holds the walk itself (its `pick_dynamic` emits a `PlanItem::Pick` for `least-conn` and `p2c`, carrying per-copy chaos latency as `skew`) (`Walk`, `Flow`, the per-hop draws, spans, forks and branch probability).
 
 ## What it does
 

@@ -71,6 +71,30 @@ traffic:
       - { endpoint: "GET /home", weight: 1 }
 `;
 
+const BALANCED = `version: 1
+seed: 7
+nodes:
+  gateway: { type: gateway, concurrency: 256, proc: { p50: 1ms, p99: 3ms } }
+  balancer: { type: load-balancer, concurrency: 512, proc: { p50: 200us, p99: 600us } }
+  api: { type: service, concurrency: 8, replicas: 3, balance: p2c, proc: { p50: 12ms, p99: 40ms } }
+  db: { type: database, flavor: postgres, pool: { size: 20 } }
+edges:
+  - { from: gateway, to: balancer, net: { p50: 1ms, p99: 3ms } }
+  - { from: balancer, to: api, net: { p50: 1ms, p99: 3ms } }
+  - { from: api, to: db, net: { p50: 1ms, p99: 3ms } }
+endpoints:
+  "GET /items":
+    op: read
+    override: { body: { items: [] } }
+    chain: [balancer]
+traffic:
+  peak:
+    rps: 150
+    duration: 30s
+    journeys:
+      - { endpoint: "GET /items", weight: 1 }
+`;
+
 export const STARTERS: Starter[] = [
   {
     id: "shop",
@@ -92,5 +116,13 @@ export const STARTERS: Starter[] = [
     blurb: "One request calls three services that share a database",
     tryThis: "Cut the database pool to 2: everything slows together.",
     text: async () => FAN_OUT,
+  },
+  {
+    id: "balanced",
+    title: "A balanced tier",
+    blurb: "A gateway, a load balancer, three copies of an API and a database",
+    tryThis:
+      "Change the API's Balance from power of two choices to round robin, and slow one copy on the Live tab: compare the p99.",
+    text: async () => BALANCED,
   },
 ];

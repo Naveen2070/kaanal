@@ -108,10 +108,8 @@ pub fn trace_parts(
                     }
                 }));
             }
-            PlanItem::Hop(_)
-            | PlanItem::Fail { .. }
-            | PlanItem::Span { .. }
-            | PlanItem::Hold { .. } => {}
+            // a hop is a piece through `hops`; the rest draw nothing
+            _ => {}
         }
     }
     pieces.extend(forks.iter().map(|_| Piece::Close));
@@ -511,7 +509,8 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
             PlanItem::Hop(_)
             | PlanItem::Fail { .. }
             | PlanItem::Span { .. }
-            | PlanItem::Hold { .. } => {}
+            | PlanItem::Hold { .. }
+            | PlanItem::Pick { .. } => {}
         }
     }
     (recs, truncated, delayed, faulted)

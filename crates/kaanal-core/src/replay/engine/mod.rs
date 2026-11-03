@@ -15,8 +15,9 @@ use std::time::Duration;
 use super::bucket::Bucket;
 use super::gate::{Admit, Gate};
 use crate::chaos::FailKind;
-use crate::exec::{ChainResult, Hop, HopKind, Plan, PlanItem};
+use crate::exec::{ChainResult, Hop, HopKind, PickKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
+mod dispatch;
 mod finish;
 mod hold;
 mod replicas;
@@ -297,7 +298,7 @@ impl Engine {
                 // zero-duration hops that need no slot or token, as `execute` does (D17); the
                 // skipped hop never starts, so it is not recorded.
                 let skip = match &item {
-                    PlanItem::Span { .. } | PlanItem::Hold { .. } => true,
+                    PlanItem::Span { .. } | PlanItem::Hold { .. } | PlanItem::Pick { .. } => true,
                     PlanItem::Hop(h) => {
                         h.dur.is_zero()
                             && (h.kind == HopKind::Net
@@ -356,6 +357,7 @@ impl Engine {
                         return;
                     }
                 }
+                PlanItem::Pick { .. } => self.dispatch(r, k),
                 PlanItem::Branch { .. } => unreachable!("tokens start after their Branch marker"),
             }
         }

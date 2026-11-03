@@ -110,6 +110,7 @@ export function Controls({
         {config.type === "load-balancer" ? (
           <BalanceField
             label="Spread"
+            dynamic={false}
             hint="How it picks which component a call goes to. A weighted spread (one weight per wire out of it) is set in kaanal.yaml."
             value={balanceOf(config.spread)}
             defaultLabel="Round robin (default)"

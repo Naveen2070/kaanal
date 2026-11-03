@@ -293,7 +293,11 @@ fn plan_of(
         req_bytes,
         resp_bytes,
     };
-    (Arc::new(sample_plan(&g.topo, chaos, &req).0), pin)
+    // the mock has no queues to look at, so `least-conn` and `p2c` are settled as for no load
+    (
+        Arc::new(sample_plan(&g.topo, chaos, &req).0.resolved()),
+        pin,
+    )
 }
 
 /// **Private.** The request body size from `Content-Length` (0 when absent or not a number).

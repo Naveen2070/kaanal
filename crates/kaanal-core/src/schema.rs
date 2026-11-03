@@ -199,9 +199,9 @@ impl JsonSchema for Balance {
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "How traffic picks a replica: `round-robin` (default), `random`, or `{ weighted: [..] }` with one weight per replica (at least one above 0).",
+            "description": "How traffic picks a replica: `round-robin` (default), `random`, `least-conn` (the replica with the fewest requests in it), `p2c` (the less loaded of two random replicas), or `{ weighted: [..] }` with one weight per replica (at least one above 0).",
             "anyOf": [
-                { "type": "string", "enum": ["round-robin", "random"] },
+                { "type": "string", "enum": ["round-robin", "random", "least-conn", "p2c"] },
                 {
                     "type": "object",
                     "properties": {

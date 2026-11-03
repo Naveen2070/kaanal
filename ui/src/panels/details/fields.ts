@@ -122,18 +122,17 @@ export function setRate(profile: string, rps: number): Op {
   return { op: "set", path: ["traffic", profile, "rps"], value: rps };
 }
 
+/** A balance the page can write: `least-conn` and `p2c` choose by the live queues, so only the simulator can. */
+export type BalanceChoice = "round-robin" | "random" | "least-conn" | "p2c";
+
 /** How traffic entering a node (or over a wire) picks a copy: the config's `balance`; null when unset. */
-export function balanceOf(v: unknown): "round-robin" | "random" | "weighted" | null {
-  if (v === "round-robin" || v === "random") return v;
+export function balanceOf(v: unknown): BalanceChoice | "weighted" | null {
+  if (v === "round-robin" || v === "random" || v === "least-conn" || v === "p2c") return v;
   return isObject(v) && "weighted" in v ? "weighted" : null;
 }
 
 /** The patch for a chosen balance: "" removes it (the default applies), else the name is set. */
-export function setBalance(
-  path: Path,
-  present: boolean,
-  choice: "" | "round-robin" | "random",
-): Op[] {
+export function setBalance(path: Path, present: boolean, choice: "" | BalanceChoice): Op[] {
   if (choice === "") return present ? [{ op: "remove", path }] : [];
   return [put(path, present, choice)];
 }

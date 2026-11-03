@@ -228,11 +228,15 @@ nodes:
 
 Any node can have copies: `replicas: 3` (1 to 64, default 1). Each replica has its own slots, queue, pool and rate limit, so three replicas of a service with `concurrency: 4` serve twelve requests at once. `balance` says how traffic entering the node picks a replica:
 
-| `balance`                 | Picks                                                                         |
-| ------------------------- | ----------------------------------------------------------------------------- |
-| `round-robin` (default)   | The next live replica in turn                                                 |
-| `random`                  | A uniformly random live replica                                               |
-| `{ weighted: [3, 1, 1] }` | A random live replica, weighted: one weight per replica, at least one above 0 |
+| `balance`                 | Picks                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `round-robin` (default)   | The next live replica in turn                                                                                                  |
+| `random`                  | A uniformly random live replica                                                                                                |
+| `least-conn`              | The live replica with the fewest requests in it (busy slots plus those waiting for one) when the call is sent; ties take turns |
+| `p2c`                     | Power of two choices: two random live replicas, the less loaded of the two when the call is sent; a tie takes the first        |
+| `{ weighted: [3, 1, 1] }` | A random live replica, weighted: one weight per replica, at least one above 0                                                  |
+
+`least-conn` and `p2c` read the live queues, so the **simulator** (Studio runs, `kaanal-sim`) chooses at the moment each call is sent, as a real balancer does; the **live mock** has no queues to look at and plays both as round robin (least-conn) or a random live replica (p2c) until live-load mode. Two cautions: the simulator reads exact queue lengths, so it is a little kinder than a real balancer with delayed counts; and chaos aimed at one replica works with them for `down` and for added latency, but an error rate set on one replica is not applied (the node-wide chaos is). A balancer's `spread` cannot use them (a load error says so): put `least-conn` or `p2c` on the `balance` of the components behind the balancer.
 
 A node sets `balance` for traffic entering it, and an edge may override it for calls over that edge: `{ from: app, to: db, balance: random }`. A weighted list must have exactly one weight per replica of the callee. Without `replicas`, `balance` does nothing. Database replicas all take every request: there is no read/write split yet, so a write is not sent to a primary only.
 
