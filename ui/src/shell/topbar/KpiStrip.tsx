@@ -113,7 +113,7 @@ export function KpiStrip() {
       ? s === undefined
         ? "Run to find out"
         : "nothing saturates"
-      : `${breaks.node} at ${twoSignificant(breaks.atReqS)} req/s`;
+      : `${breaks.node}${breaks.wire ? " wire" : ""} at ${twoSignificant(breaks.atReqS)} req/s`;
 
   const marker =
     breaks !== null && breaks.atReqS >= 10 && breaks.atReqS <= 15000
@@ -134,7 +134,13 @@ export function KpiStrip() {
           help="saturation"
           title={lead}
           className={`min-w-40 max-w-72 truncate font-semibold ${
-            lead.length > 26 ? "text-sm" : lead.length > 22 ? "text-base" : "text-xl"
+            lead.length > 30
+              ? "text-xs"
+              : lead.length > 26
+                ? "text-sm"
+                : lead.length > 22
+                  ? "text-base"
+                  : "text-xl"
           } ${
             breaks === null ? "text-muted" : breaks.saturatedNow ? "text-negative" : "text-text"
           }`}

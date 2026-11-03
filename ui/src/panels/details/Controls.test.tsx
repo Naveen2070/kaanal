@@ -88,14 +88,7 @@ afterEach(() => {
 
 test("every_field_has_a_visible_label_and_hint", async () => {
   await show();
-  for (const label of [
-    "Name",
-    "Slots",
-    "Copies",
-    "Service time (ms)",
-    "Queue limit",
-    "Timeout (ms)",
-  ]) {
+  for (const label of ["Name", "Slots", "Copies", "Service time", "Queue limit", "Timeout"]) {
     const input = screen.getByLabelText(label);
     expect(input, label).toBeTruthy();
     const hint = input.getAttribute("aria-describedby");
@@ -127,10 +120,10 @@ test("each_field_in_the_panel_patches_its_path", async () => {
   expect(await change("Copies", "3")).toEqual({
     patch: [{ op: "set", path: ["nodes", "app", "replicas"], value: 3 }],
   });
-  expect(await change("Service time (ms)", "50")).toEqual({
+  expect(await change("Service time", "50")).toEqual({
     patch: [{ op: "set", path: ["nodes", "app", "proc"], value: "50ms" }],
   });
-  expect(await change("Timeout (ms)", "800")).toEqual({
+  expect(await change("Timeout", "800")).toEqual({
     patch: [{ op: "insert", path: ["nodes", "app", "timeout"], value: "800ms" }],
   });
   expect(await change("Queue limit", "5")).toEqual({
@@ -170,7 +163,7 @@ test("chaos_requests_name_a_replica_and_a_link_as_objects", async () => {
     body: { node: "app", replica: 1, down: true },
   });
   fireEvent.change(screen.getByLabelText("Break"), { target: { value: "link:db" } });
-  fireEvent.change(screen.getByLabelText("Slow by (ms)"), { target: { value: "20" } });
+  fireEvent.change(screen.getByLabelText("Slow by"), { target: { value: "20" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Apply" })[0] as HTMLElement);
   await vi.waitFor(() => expect(sent).toHaveLength(2));
   expect(sent[1]?.body).toEqual({ edge: { from: "app", to: "db" }, latency_ms: 20 });
@@ -209,7 +202,7 @@ test("a_database_has_no_service_time_box_and_a_cache_none_either", async () => {
   for (const type of ["database", "cache"]) {
     cleanup();
     await show(nodeSummary(), { type, pool: { size: 20 } }, { name: "x" });
-    expect(screen.queryByLabelText("Service time (ms)"), type).toBeNull();
+    expect(screen.queryByLabelText("Service time"), type).toBeNull();
     expect(screen.getByText(/prices its work per operation/), type).toBeTruthy();
   }
 });
@@ -223,8 +216,8 @@ test("a_value_the_loader_would_reject_is_never_sent_and_the_box_shows_the_real_v
     ["Slots", "0", "12"],
     ["Copies", "65", "2"],
     ["Copies", "1.5", "2"],
-    ["Timeout (ms)", "400000", ""],
-    ["Service time (ms)", "-1", "98"],
+    ["Timeout", "400000", ""],
+    ["Service time", "-1", "98"],
     ["Queue limit", "-3", ""], // the node has a bare slot count: no limit, an empty box
   ];
   for (const [label, typed, real] of cases) {
@@ -239,7 +232,7 @@ test("a_value_the_loader_would_reject_is_never_sent_and_the_box_shows_the_real_v
 test("a_tiny_service_time_is_written_without_an_exponent", async () => {
   await show();
   const sent = mockFetch([{ json: view() }]);
-  const input = screen.getByLabelText("Service time (ms)");
+  const input = screen.getByLabelText("Service time");
   fireEvent.change(input, { target: { value: "0.0004" } });
   fireEvent.keyDown(input, { key: "Enter" });
   await vi.waitFor(() => expect(sent).toHaveLength(1));
@@ -282,7 +275,7 @@ test("chaos_starts_a_run_and_an_empty_or_bad_box_sends_nothing", async () => {
   await chaosReady();
   const sent = mockFetch([{ json: {} }]);
   const apply = screen.getAllByRole("button", { name: "Apply" });
-  fireEvent.change(screen.getByLabelText("Slow by (ms)"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Slow by"), { target: { value: "" } });
   fireEvent.click(apply[0] as HTMLElement);
   fireEvent.change(screen.getByLabelText("Drop (%)"), { target: { value: "150" } });
   fireEvent.click(apply[1] as HTMLElement);

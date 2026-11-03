@@ -22,6 +22,7 @@ import {
   shareApplies,
   shareOf,
 } from "./edgeFields";
+import { RATE_UNITS, TIME_UNITS } from "./units";
 
 const callee = (doc: Doc | null | undefined, e: EdgeDoc): NodeDoc | undefined =>
   doc?.nodes?.[String(e.to)];
@@ -53,10 +54,11 @@ export function EdgeControls({ index }: { index: number }) {
           </p>
         ) : (
           <NumberField
-            label="Network latency (ms)"
+            label="Network latency"
             help="time"
             hint="Time on the wire for each call, before the callee starts. Empty means none."
             value={net.ms}
+            units={TIME_UNITS}
             placeholder="None"
             min={EDGE_LIMITS.netMs.min}
             max={EDGE_LIMITS.netMs.max}
@@ -65,9 +67,10 @@ export function EdgeControls({ index }: { index: number }) {
           />
         )}
         <NumberField
-          label="Bandwidth (KB/s)"
-          hint="How much the link carries. A bigger payload takes longer, and transfers queue behind each other. Empty means no limit."
+          label="Bandwidth"
+          hint="How much the link carries each second (1 KB is 1024 bytes; 1 Gbit/s is about 125,000 KB/s). A bigger payload takes longer, and transfers queue behind each other. Empty means no limit."
           value={bandwidth}
+          units={RATE_UNITS}
           placeholder="No limit"
           min={EDGE_LIMITS.bandwidthKb.min}
           max={EDGE_LIMITS.bandwidthKb.max}

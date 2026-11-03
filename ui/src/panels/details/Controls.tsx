@@ -14,6 +14,7 @@ import { useDraft } from "../../data/store/draft";
 import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section } from "./Field";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
+import { TIME_UNITS } from "./units";
 import {
   balanceOf,
   deleteOps,
@@ -169,7 +170,8 @@ export function Controls({
           </p>
         ) : serviceMs !== null || !("proc" in config) ? (
           <NumberField
-            label="Service time (ms)"
+            label="Service time"
+            units={TIME_UNITS}
             help="time"
             hint={
               serviceMs === null && slots.value !== null
@@ -214,7 +216,8 @@ export function Controls({
 
       <Section title="When things go wrong">
         <NumberField
-          label="Timeout (ms)"
+          label="Timeout"
+          units={TIME_UNITS}
           hint="A caller gives up on this component after this long, wait and work included."
           value={timeoutMs}
           min={LIMITS.timeoutMs.min}

@@ -21,8 +21,14 @@ import {
   type Method,
   type Row,
 } from "./model";
+import { UnitInput } from "../details/Field";
+import { SIZE_UNITS } from "../details/units";
 import { ServicePicker } from "./ServicePicker";
 import { closeTrafficBuilder } from "./store";
+
+/** A row's size (KB, NaN while the box is empty) as the text of a box, and back. */
+const sizeText = (kb: number): string => (Number.isNaN(kb) ? "" : String(kb));
+const sizeNumber = (t: string): number => (t.trim() === "" ? NaN : Number(t));
 
 const field =
   "h-8 rounded-md border border-control bg-sheet px-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent";
@@ -110,13 +116,13 @@ export function TrafficBuilder() {
       <div className="px-5 py-4">
         <div
           aria-hidden
-          className="mb-1 hidden grid-cols-[6rem_minmax(8rem,1fr)_5rem_6rem_6rem_minmax(10rem,14rem)_2rem] gap-2 px-0.5 text-xs text-muted md:grid"
+          className="mb-1 hidden grid-cols-[6rem_minmax(8rem,1fr)_5rem_9.5rem_9.5rem_minmax(10rem,14rem)_2rem] gap-2 px-0.5 text-xs text-muted md:grid"
         >
           <span>Method</span>
           <span>Path</span>
           <span>Weight</span>
-          <span>Request KB</span>
-          <span>Response KB</span>
+          <span>Request size</span>
+          <span>Response size</span>
           <span>Sends to</span>
           <span />
         </div>
@@ -125,7 +131,7 @@ export function TrafficBuilder() {
             const n = i + 1;
             return (
               <li key={i} className="rounded-xl border border-border bg-card p-2">
-                <div className="grid grid-cols-2 items-center gap-2 md:grid-cols-[6rem_minmax(8rem,1fr)_5rem_6rem_6rem_minmax(10rem,14rem)_2rem]">
+                <div className="grid grid-cols-2 items-center gap-2 md:grid-cols-[6rem_minmax(8rem,1fr)_5rem_9.5rem_9.5rem_minmax(10rem,14rem)_2rem]">
                   <select
                     aria-label={`Method of endpoint ${n}`}
                     value={r.method}
@@ -152,24 +158,28 @@ export function TrafficBuilder() {
                     onChange={(e) => set(i, { weight: e.currentTarget.valueAsNumber })}
                     className={`${field} text-right tabular-nums`}
                   />
-                  <input
-                    aria-label={`Request size in KB of endpoint ${n}`}
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={r.reqKb}
-                    onChange={(e) => set(i, { reqKb: e.currentTarget.valueAsNumber })}
-                    className={`${field} text-right tabular-nums`}
-                  />
-                  <input
-                    aria-label={`Response size in KB of endpoint ${n}`}
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={r.respKb}
-                    onChange={(e) => set(i, { respKb: e.currentTarget.valueAsNumber })}
-                    className={`${field} text-right tabular-nums`}
-                  />
+                  <div className="flex items-center gap-1">
+                    <UnitInput
+                      ariaLabel={`Request size of endpoint ${n}`}
+                      unitLabel={`Request size unit of endpoint ${n}`}
+                      units={SIZE_UNITS}
+                      min={0}
+                      value={sizeText(r.reqKb)}
+                      onChange={(t) => set(i, { reqKb: sizeNumber(t) })}
+                      className={`${field} text-right tabular-nums`}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <UnitInput
+                      ariaLabel={`Response size of endpoint ${n}`}
+                      unitLabel={`Response size unit of endpoint ${n}`}
+                      units={SIZE_UNITS}
+                      min={0}
+                      value={sizeText(r.respKb)}
+                      onChange={(t) => set(i, { respKb: sizeNumber(t) })}
+                      className={`${field} text-right tabular-nums`}
+                    />
+                  </div>
                   <button
                     type="button"
                     aria-expanded={open === i}

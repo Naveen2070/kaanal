@@ -41,9 +41,13 @@ export function twoSignificant(n: number): string {
   return Number(n.toPrecision(2)).toLocaleString("en-US");
 }
 
-/** Milliseconds for a person: "32 ms" up to a second, then "15.3 s". */
+/** Milliseconds for a person: "32 ms" up to a second, then "15.3 s", "4.2 min" and "15 h". */
 export function fmtMs(ms: number, digits = 0): string {
-  if (ms >= 1000) return `${(ms / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })} s`;
+  const one = (n: number, unit: string) =>
+    `${n.toLocaleString("en-US", { maximumFractionDigits: 1 })} ${unit}`;
+  if (ms >= 3_600_000) return one(ms / 3_600_000, "h");
+  if (ms >= 60_000) return one(ms / 60_000, "min");
+  if (ms >= 1000) return one(ms / 1000, "s");
   return `${ms.toLocaleString("en-US", { maximumFractionDigits: digits })} ms`;
 }
 
@@ -136,16 +140,35 @@ function sentenceOf(node: NodeSummary, peakWaiting: number, arriving: number | n
   return `${percent(node.utilization)} busy · ${waiting}`;
 }
 
-/** The node that gives out first as load grows: the lowest saturation point (null without one). */
-export function breaksFirst(
-  summary: Summary | undefined,
-): { node: string; atReqS: number; saturatedNow: boolean } | null {
-  let best: { node: string; atReqS: number; saturatedNow: boolean } | null = null;
+export interface BreaksFirst {
+  /** The component's name, or for a wire "from → to". */
+  node: string;
+  atReqS: number;
+  saturatedNow: boolean;
+  /** Set when the limit is a wire's bandwidth, not a component's slots. */
+  wire?: true;
+}
+
+/**
+ * What gives out first as load grows: the lowest saturation point of any component or any wire
+ * with a bandwidth (null without one). A wire counts because a thin link starves the components
+ * behind it long before their own slots fill.
+ */
+export function breaksFirst(summary: Summary | undefined): BreaksFirst | null {
+  let best: BreaksFirst | null = null;
+  const consider = (candidate: BreaksFirst) => {
+    if (best === null || candidate.atReqS < best.atReqS) best = candidate;
+  };
+  const usable = (at: number | null | undefined): at is number =>
+    typeof at === "number" && Number.isFinite(at) && at > 0;
   for (const n of summary?.nodes ?? []) {
     const at = n.saturates_at_req_s;
-    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0) continue;
-    if (best === null || at < best.atReqS) {
-      best = { node: n.name, atReqS: at, saturatedNow: n.saturated };
+    if (usable(at)) consider({ node: n.name, atReqS: at, saturatedNow: n.saturated });
+  }
+  for (const l of summary?.links ?? []) {
+    const at = l.saturates_at_req_s;
+    if (usable(at)) {
+      consider({ node: `${l.from} → ${l.to}`, atReqS: at, saturatedNow: l.saturated, wire: true });
     }
   }
   return best;

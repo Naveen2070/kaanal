@@ -171,6 +171,19 @@ export interface NodeSummary {
   timed_out: number;
 }
 
+/** One wire that has a bandwidth. */
+export interface LinkSummary {
+  from: string;
+  to: string;
+  transfers: number;
+  mean_wait_ms: number;
+  offered_load: number;
+  utilization: number;
+  saturated: boolean;
+  /** Requests per second the whole mix can reach before this wire saturates; null when nothing crossed it. */
+  saturates_at_req_s: number | null;
+}
+
 export interface Summary {
   label: string;
   window_s: number;
@@ -182,15 +195,7 @@ export interface Summary {
   series: SystemSeries;
   streams: { endpoint: string; requests: number; failed: number; [k: string]: unknown }[];
   nodes: NodeSummary[];
-  links: {
-    from: string;
-    to: string;
-    transfers: number;
-    mean_wait_ms: number;
-    offered_load: number;
-    utilization: number;
-    saturated: boolean;
-  }[];
+  links: LinkSummary[];
   /** Indexes into `nodes`. */
   bottlenecks: number[];
 }

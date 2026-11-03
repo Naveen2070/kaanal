@@ -7,7 +7,9 @@ import { ApiError, api } from "../../data/api/client";
 import type { Topology } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { notify } from "../../shell/toast/toasts";
+import { UnitInput } from "./Field";
 import { chaosBody, type ChaosAction, type ChaosTarget } from "./fields";
+import { TIME_UNITS } from "./units";
 
 export function Chaos({
   name,
@@ -144,15 +146,16 @@ export function Chaos({
         </button>
       </div>
       <div className="mt-1 flex items-center gap-1 text-sm">
-        <label htmlFor={`${id}-ms`}>Slow by (ms)</label>
-        <input
+        <label htmlFor={`${id}-ms`}>Slow by</label>
+        <UnitInput
           id={`${id}-ms`}
-          type="number"
+          unitLabel="Slow by unit"
+          units={TIME_UNITS}
           min={0}
           max={300000}
           value={ms}
-          onChange={(e) => setMs(e.currentTarget.value)}
-          className="h-7 w-20 rounded border border-control bg-sheet text-text px-1"
+          onChange={setMs}
+          className="h-7 rounded border border-control bg-sheet text-text px-1"
         />
         <button
           type="button"

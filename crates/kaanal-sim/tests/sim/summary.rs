@@ -83,6 +83,20 @@ fn a_bandwidth_link_reports_its_transfers() {
     let load = s.links[0].offered_load;
     // 20/s x 2 KB over 1 MB/s = 0.04
     assert!((load - 0.04).abs() < 0.01, "{load}");
+    // the link fills at 20 / 0.04 = 500 req/s
+    let at = s.links[0].saturates_at_req_s.expect("it carried transfers");
+    assert!(
+        (at - 20.0 / load).abs() < 1e-6 && (at - 500.0).abs() < 125.0,
+        "{at}"
+    );
+}
+
+#[test]
+fn a_link_nothing_crossed_has_no_saturation_point() {
+    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
+    // no payload, so the link never carries a byte
+    let (_, s) = summary_of(y, &windowed(20.0, 60, 5));
+    assert_eq!(s.links[0].saturates_at_req_s, None);
 }
 
 #[test]

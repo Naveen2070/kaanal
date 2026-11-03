@@ -8,8 +8,9 @@ import { ApiError, api } from "../../data/api/client";
 import { PIN_STATES, type PinState, type PinsView, type ScenarioRow } from "../../data/api/types";
 import { runNow } from "../../data/store/loopRuntime";
 import { notify } from "../../shell/toast/toasts";
-import { Section } from "./Field";
+import { Section, UnitInput } from "./Field";
 import { Sample } from "./Sample";
+import { TIME_UNITS } from "./units";
 import {
   describePin,
   leaseLeft,
@@ -298,16 +299,16 @@ function PinForm({ endpoints, btn, act }: { endpoints: string[]; btn: string; ac
         ) : null}
         {takesDelay(state) ? (
           <>
-            <label htmlFor={`${id}-dl`}>delay (ms)</label>
-            <input
+            <label htmlFor={`${id}-dl`}>delay</label>
+            <UnitInput
               id={`${id}-dl`}
-              type="number"
+              unitLabel="delay unit"
+              units={TIME_UNITS}
               min={0}
-              step="any"
               placeholder="none"
               value={delay}
-              onChange={(e) => setDelay(e.currentTarget.value)}
-              className={`${field} w-20`}
+              onChange={setDelay}
+              className={field}
             />
           </>
         ) : null}

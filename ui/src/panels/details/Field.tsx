@@ -1,9 +1,10 @@
 // One labelled setting with a plain-words hint under it. A number is committed on blur or Enter,
 // not on every keystroke, so half-typed values never reach the draft.
 
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { HelpId } from "../../overlays/help/copy";
 import { HelpPopover } from "../../overlays/help/HelpPopover";
+import { display, fromUnit, pickUnit, toUnit, type Unit } from "./units";
 
 export function NumberField({
   label,
@@ -16,25 +17,40 @@ export function NumberField({
   step,
   integer = false,
   placeholder,
+  units,
 }: {
   label: string;
   /** The jargon behind the label, as a help popover. */
   help?: HelpId;
   hint: string;
+  /** In the base unit (the first of `units`, when there are any): what the file holds. */
   value: number | null;
   /** May return whether the edit was accepted; a refusal puts the real value back in the box. */
   onCommit: (n: number) => Promise<boolean> | void;
+  /** Limits in the base unit too. */
   min?: number;
   max?: number;
   step?: number | "any";
   integer?: boolean;
   /** Shown in an empty box (a setting with no value, such as "No limit"). */
   placeholder?: string;
+  /**
+   * Units to pick from, smallest first (see `units.ts`). The box then shows and takes the chosen
+   * unit; `value`, `min`, `max` and what `onCommit` gets stay in the base unit.
+   */
+  units?: readonly Unit[];
 }) {
   const id = useId();
+  // until a unit is picked, the one that reads best for the value; after, the person's choice
+  const [chosen, setChosen] = useState<Unit | null>(null);
+  const unit: Unit | null = units ? (chosen ?? pickUnit(units, value)) : null;
+  const shown = (base: number) => (unit ? display(base, unit) : base);
   const commit = (input: HTMLInputElement) => {
     const raw = input.value;
-    const n = Number(raw);
+    // untouched: the box shows a rounded figure, which must never be written back over the real one
+    if (raw === (value === null ? "" : String(shown(value)))) return;
+    const typed = Number(raw);
+    const n = unit ? fromUnit(typed, unit) : typed;
     const ok =
       raw.trim() !== "" &&
       Number.isFinite(n) &&
@@ -42,7 +58,7 @@ export function NumberField({
       (max === undefined || n <= max) &&
       (!integer || Number.isInteger(n));
     const back = () => {
-      input.value = value === null ? "" : String(value);
+      input.value = value === null ? "" : String(shown(value));
     };
     // out of range or not whole: the draft is never asked, and the box shows what is really set
     if (!ok) return back();
@@ -57,26 +73,119 @@ export function NumberField({
         </label>
         {help ? <HelpPopover id={help} label={label} /> : null}
       </div>
-      <input
-        id={id}
-        key={value ?? "none"}
-        type="number"
-        min={min}
-        max={max}
-        step={integer ? 1 : step}
-        defaultValue={value ?? ""}
-        placeholder={placeholder}
-        aria-describedby={`${id}-hint`}
-        onBlur={(e) => commit(e.currentTarget)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit(e.currentTarget);
-        }}
-        className="h-7 w-28 rounded border border-control bg-sheet text-text px-1"
-      />
+      <div className="flex items-center gap-1">
+        <input
+          id={id}
+          key={`${value ?? "none"}-${unit?.label ?? ""}`}
+          type="number"
+          min={unit ? toUnit(min, unit) : min}
+          max={max === undefined ? undefined : unit ? toUnit(max, unit) : max}
+          step={integer ? 1 : step}
+          defaultValue={value === null ? "" : shown(value)}
+          placeholder={placeholder}
+          aria-describedby={`${id}-hint`}
+          onBlur={(e) => commit(e.currentTarget)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit(e.currentTarget);
+          }}
+          className="h-7 w-28 rounded border border-control bg-sheet text-text px-1"
+        />
+        {units && unit ? (
+          <select
+            aria-label={`${label} unit`}
+            value={unit.label}
+            onChange={(e) =>
+              setChosen(units.find((u) => u.label === e.currentTarget.value) ?? null)
+            }
+            className="h-7 rounded border border-control bg-sheet px-1 text-text"
+          >
+            {units.map((u) => (
+              <option key={u.label} value={u.label}>
+                {u.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
       <p id={`${id}-hint`} className="text-xs text-muted">
         {hint}
       </p>
     </div>
+  );
+}
+
+/**
+ * A number box with a unit option box beside it, for a value its owner keeps as text in the base
+ * unit (the first of `units`). Typing is in the chosen unit and `onChange` gets the base unit;
+ * picking another unit shows the same amount in it. An empty or half-typed box passes as typed.
+ */
+export function UnitInput({
+  id,
+  ariaLabel,
+  unitLabel,
+  value,
+  onChange,
+  units,
+  min,
+  max,
+  placeholder,
+  className = "",
+}: {
+  id?: string;
+  /** Names the number box when there is no visible label for it. */
+  ariaLabel?: string;
+  /** Names the option box for a screen reader. */
+  unitLabel: string;
+  value: string;
+  onChange: (baseValue: string) => void;
+  units: readonly Unit[];
+  /** Limits in the base unit. */
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  /** Classes for both boxes (their look); the number box adds its own width. */
+  className?: string;
+}) {
+  const [unit, setUnit] = useState<Unit>(units[0] as Unit);
+  const [typed, setTyped] = useState<string | null>(null);
+  const base = Number(value);
+  const expected =
+    value.trim() === "" || !Number.isFinite(base) ? value : String(display(base, unit));
+  // keep what was typed ("1." on the way to "1.5") while it still means the value
+  const shown =
+    typed !== null && typed.trim() !== "" && Number(typed) === Number(expected) ? typed : expected;
+  return (
+    <>
+      <input
+        id={id}
+        aria-label={ariaLabel}
+        type="number"
+        min={min === undefined ? undefined : toUnit(min, unit)}
+        max={max === undefined ? undefined : toUnit(max, unit)}
+        step="any"
+        placeholder={placeholder}
+        value={shown}
+        onChange={(e) => {
+          const t = e.currentTarget.value;
+          setTyped(t);
+          const n = Number(t);
+          onChange(t.trim() === "" || !Number.isFinite(n) ? t : String(fromUnit(n, unit)));
+        }}
+        className={`${className} w-20`}
+      />
+      <select
+        aria-label={unitLabel}
+        value={unit.label}
+        onChange={(e) => setUnit(units.find((u) => u.label === e.currentTarget.value) ?? unit)}
+        className={className}
+      >
+        {units.map((u) => (
+          <option key={u.label} value={u.label}>
+            {u.label}
+          </option>
+        ))}
+      </select>
+    </>
   );
 }
 

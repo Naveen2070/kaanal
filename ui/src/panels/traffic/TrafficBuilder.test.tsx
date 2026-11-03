@@ -76,13 +76,28 @@ test("method_path_weight_and_payload_sizes_are_edited_per_endpoint", async () =>
   render(<TrafficBuilder />);
   fireEvent.change(screen.getByLabelText("Method of endpoint 1"), { target: { value: "POST" } });
   fireEvent.change(screen.getByLabelText("Path of endpoint 1"), { target: { value: "/orders" } });
-  fireEvent.change(screen.getByLabelText("Request size in KB of endpoint 1"), {
+  fireEvent.change(screen.getByLabelText("Request size of endpoint 1"), {
     target: { value: "4" },
   });
   expect((screen.getByLabelText("Method of endpoint 1") as HTMLSelectElement).value).toBe("POST");
-  expect(
-    (screen.getByLabelText("Request size in KB of endpoint 1") as HTMLInputElement).value,
-  ).toBe("4");
+  expect((screen.getByLabelText("Request size of endpoint 1") as HTMLInputElement).value).toBe("4");
+});
+
+test("a_size_typed_in_megabytes_is_held_in_kilobytes_and_sent_in_bytes", async () => {
+  await load();
+  openTrafficBuilder();
+  render(<TrafficHost />);
+  await screen.findByRole("dialog", { name: "Traffic builder" });
+  fireEvent.change(screen.getByLabelText("Response size unit of endpoint 1"), {
+    target: { value: "MB" },
+  });
+  fireEvent.change(screen.getByLabelText("Response size of endpoint 1"), {
+    target: { value: "2" },
+  });
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.click(screen.getByRole("button", { name: "Apply to the draft" }));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(JSON.stringify(sent[0]?.body)).toContain('"resp_bytes":2097152');
 });
 
 test("all_services_picks_every_service_and_not_the_database", async () => {

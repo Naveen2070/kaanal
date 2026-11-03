@@ -42,8 +42,10 @@ export function App() {
   // a draft that cannot be loaded is shown by <Loading> (the reason and a Retry), not here
   // the cards read the finished run through this feed and never import the run store
   const nodes = latest?.summary?.nodes ?? [];
+  const links = latest?.summary?.links ?? [];
   const feed: StatsFeed = {
     node: (name) => nodes.find((n) => n.name === name),
+    link: (from, to) => links.find((l) => l.from === from && l.to === to),
     nodes,
     dimmed,
     peakVisits: Math.max(0, ...nodes.map((n) => n.visits_per_s).filter(Number.isFinite)),

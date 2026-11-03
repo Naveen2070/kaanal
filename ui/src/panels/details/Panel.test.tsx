@@ -77,12 +77,12 @@ test("the_tabs_switch_between_controls_log_and_results", async () => {
 test("a_picked_wire_shows_its_settings_and_a_selected_component_wins", async () => {
   usePickedWire.setState({ index: 0 });
   await show("/__kaanal/studio");
-  expect(screen.getByLabelText("Network latency (ms)")).toBeTruthy();
+  expect(screen.getByLabelText("Network latency")).toBeTruthy();
   expect(screen.getByTestId("rail-sentence").textContent).toBe("Wire from app to db");
   cleanup();
   await show("/__kaanal/studio?node=app");
   expect(screen.getByLabelText("Slots")).toBeTruthy();
-  expect(screen.queryByLabelText("Network latency (ms)")).toBeNull();
+  expect(screen.queryByLabelText("Network latency")).toBeNull();
   cleanup();
   usePickedWire.setState({ index: 7 }); // a place that is not there any more
   await show("/__kaanal/studio");

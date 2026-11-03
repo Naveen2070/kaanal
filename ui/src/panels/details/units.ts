@@ -1,0 +1,57 @@
+// Units for the numbers a person types: the file keeps one base unit (milliseconds, kilobytes,
+// kilobytes a second) and the box shows whichever unit reads best. A unit is a name and how many
+// base units it holds. KB is 1024 bytes, as everywhere else in Studio.
+
+export interface Unit {
+  /** Shown in the option box. */
+  label: string;
+  /** Base units in one of this unit. */
+  per: number;
+}
+
+export const TIME_UNITS: readonly Unit[] = [
+  { label: "ms", per: 1 },
+  { label: "s", per: 1000 },
+  { label: "min", per: 60_000 },
+];
+
+export const SIZE_UNITS: readonly Unit[] = [
+  { label: "KB", per: 1 },
+  { label: "MB", per: 1024 },
+  { label: "GB", per: 1024 * 1024 },
+];
+
+export const RATE_UNITS: readonly Unit[] = [
+  { label: "KB/s", per: 1 },
+  { label: "MB/s", per: 1024 },
+  { label: "GB/s", per: 1024 * 1024 },
+];
+
+/** A float with the binary noise cut off: 0.1 * 3 gives 0.3, not 0.30000000000000004. */
+const clean = (n: number): number => Number(n.toPrecision(12));
+
+/** `base` base units, in `unit`. */
+export const toUnit = (base: number, unit: Unit): number => clean(base / unit.per);
+
+/** `base` in `unit` for a box: six significant digits, so 125 000 KB/s reads 0.119209 GB/s. */
+export const display = (base: number, unit: Unit): number =>
+  Number(toUnit(base, unit).toPrecision(6));
+
+/** `shown` of `unit`, in base units. */
+export const fromUnit = (shown: number, unit: Unit): number => clean(shown * unit.per);
+
+/**
+ * The largest unit in which `base` is still a whole number of at least 1 (125 000 KB/s is
+ * 122.07... MB/s, not whole, so it stays KB/s; 131 072 KB/s is exactly 128 MB/s). Nothing to show
+ * (null or zero) gives the smallest unit.
+ */
+export function pickUnit(units: readonly Unit[], base: number | null): Unit {
+  const first = units[0] as Unit;
+  if (base === null || !(base > 0)) return first;
+  let best = first;
+  for (const u of units) {
+    const shown = base / u.per;
+    if (shown >= 1 && Number.isInteger(clean(shown))) best = u;
+  }
+  return best;
+}

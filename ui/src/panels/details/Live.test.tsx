@@ -133,7 +133,7 @@ test("a_valid_pin_is_sent_and_a_cycle_and_a_removal_name_their_endpoint", async 
   await screen.findByText("db-down");
   fireEvent.change(screen.getByLabelText("Pin"), { target: { value: "POST /orders" } });
   fireEvent.change(screen.getByLabelText("status"), { target: { value: "503" } });
-  fireEvent.change(screen.getByLabelText("delay (ms)"), { target: { value: "250" } });
+  fireEvent.change(screen.getByLabelText("delay"), { target: { value: "250" } });
   fireEvent.click(screen.getByRole("button", { name: "Pin it" }));
   await vi.waitFor(() => expect(seen.map((s) => s.key)).toContain("PUT /pins"));
   expect(seen.find((s) => s.key === "PUT /pins")?.body).toEqual({
@@ -160,9 +160,9 @@ test("the_state_decides_which_boxes_show", async () => {
   expect(screen.getByLabelText("status")).toBeTruthy(); // error: a status and a delay
   fireEvent.change(screen.getByLabelText("as"), { target: { value: "slow" } });
   expect(screen.queryByLabelText("status")).toBeNull();
-  expect(screen.getByLabelText("delay (ms)")).toBeTruthy();
+  expect(screen.getByLabelText("delay")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("as"), { target: { value: "success" } });
-  expect(screen.queryByLabelText("delay (ms)")).toBeNull();
+  expect(screen.queryByLabelText("delay")).toBeNull();
 });
 
 test("a_sample_shows_status_size_and_body_and_sends_the_seed", async () => {

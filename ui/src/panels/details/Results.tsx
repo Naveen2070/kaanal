@@ -7,7 +7,7 @@ import { useRun } from "../../data/store/run";
 import { useSelected } from "../../data/store/view";
 import { Heatmap } from "./Heatmap";
 import { Section } from "./Field";
-import { rankedByPeak, twoSignificant } from "../../canvas/metrics";
+import { fmtMs, rankedByPeak, twoSignificant } from "../../canvas/metrics";
 import { ResultsSkeleton, RANK_ROW } from "./Skeletons";
 
 const pct = (x: number | null) => (x === null ? "–" : `${Math.round(x * 100)}%`);
@@ -141,8 +141,11 @@ export function Results() {
           <ul className="space-y-1 text-xs">
             {s.links.map((l) => (
               <li key={`${l.from}>${l.to}`}>
-                {l.from} to {l.to}: {pct(l.utilization)} busy, {twoSignificant(l.mean_wait_ms)} ms
-                wait, {l.saturated ? "saturated" : "ok"}
+                {l.from} to {l.to}: {pct(l.utilization)} busy, {fmtMs(l.mean_wait_ms)} wait,{" "}
+                {l.saturated ? "saturated" : "ok"}
+                {l.saturates_at_req_s !== null
+                  ? `, fills at ${twoSignificant(l.saturates_at_req_s)} req/s`
+                  : ""}
               </li>
             ))}
           </ul>

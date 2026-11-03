@@ -1,6 +1,7 @@
 // A wire that shows traffic and its direction (spec 3). Under the lanes sits the wire itself, an
 // orthogonal path with rounded elbows: it is what is selected, and it takes a red or amber halo when
-// the node it feeds runs hot. On it run one lane per copy of that node, each in the copy's colour,
+// the node it feeds runs hot, or a stronger red when the wire itself is full (its bandwidth is the
+// limit). On it run one lane per copy of that node, each in the copy's colour,
 // each a pulse of dashes that moves toward an arrowhead at the target, faster and heavier as that
 // copy takes more load. With reduced motion the lanes stand still. A selected wire shows a button
 // to delete it (Delete or Backspace does the same).
@@ -45,7 +46,10 @@ export function LoadEdge({
   const n = laneCount(copies);
   const loads = laneLoads(n, b, feed.peakVisits);
   const offsets = laneOffsets(n);
-  const halo = HALO[edgeTone(a?.utilization ?? null, b?.utilization ?? null)];
+  // a wire that is full (its bandwidth is the limit) is red whatever its ends are doing: the nodes
+  // behind it sit idle, waiting for what the wire can carry
+  const full = from !== undefined && to !== undefined && feed.link?.(from, to)?.saturated === true;
+  const halo = full ? HALO.bad : HALO[edgeTone(a?.utilization ?? null, b?.utilization ?? null)];
 
   const geometry = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
   // bend in a gap between the cards, not through one
@@ -100,8 +104,9 @@ export function LoadEdge({
         <path
           d={path}
           fill="none"
+          data-wire-full={full ? "" : undefined}
           stroke={halo}
-          strokeOpacity={0.35}
+          strokeOpacity={full ? 0.6 : 0.35}
           strokeWidth={8 + n * 2}
           pointerEvents="none"
         />

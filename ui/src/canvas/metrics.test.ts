@@ -1,6 +1,13 @@
 import { expect, test } from "vite-plus/test";
 import { nodeSummary } from "../test/summary";
-import { capacityLine, nodeFigures, percent, plainSentence, twoSignificant } from "./metrics";
+import {
+  capacityLine,
+  fmtMs,
+  nodeFigures,
+  percent,
+  plainSentence,
+  twoSignificant,
+} from "./metrics";
 
 test("figures_take_the_peak_from_the_busy_series", () => {
   const f = nodeFigures(nodeSummary(), { type: "service" });
@@ -106,6 +113,34 @@ test("breaksFirst_picks_the_lowest_saturation_point", () => {
   expect(breaksFirst(s)).toEqual({ node: "db", atReqS: 120, saturatedNow: true });
   const calm = summaryOf(nodeSummary({ name: "web", saturates_at_req_s: 900, saturated: false }));
   expect(breaksFirst(calm)).toEqual({ node: "web", atReqS: 900, saturatedNow: false });
+});
+
+test("a_thin_wire_breaks_before_the_nodes_behind_it", () => {
+  const s = {
+    nodes: [nodeSummary({ name: "web", saturates_at_req_s: 900 })],
+    links: [
+      { from: "gw", to: "web", saturated: true, saturates_at_req_s: 1.1 },
+      { from: "web", to: "db", saturated: false, saturates_at_req_s: 5000 },
+      { from: "web", to: "cache", saturated: false, saturates_at_req_s: null },
+    ],
+  } as unknown as Summary;
+  expect(breaksFirst(s)).toEqual({
+    node: "gw → web",
+    atReqS: 1.1,
+    saturatedNow: true,
+    wire: true,
+  });
+  // a roomy wire does not hide a node that is the real limit
+  const roomy = { ...s, links: [{ from: "gw", to: "web", saturates_at_req_s: 90_000 }] } as Summary;
+  expect(breaksFirst(roomy)).toEqual({ node: "web", atReqS: 900, saturatedNow: false });
+});
+
+test("time_reads_in_the_unit_a_person_would_say", () => {
+  expect(fmtMs(32)).toBe("32 ms");
+  expect(fmtMs(15_300)).toBe("15.3 s");
+  expect(fmtMs(252_000)).toBe("4.2 min");
+  expect(fmtMs(54_080_700)).toBe("15 h");
+  expect(fmtMs(13_000_000)).toBe("3.6 h");
 });
 
 test("breaksFirst_null_without_slots_or_visits", () => {

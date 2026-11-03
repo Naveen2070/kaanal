@@ -48,8 +48,8 @@ afterEach(cleanup);
 test("a_wire_shows_its_ends_and_its_current_figures", async () => {
   await show(1);
   expect(screen.getByText("app calls db over this wire.")).toBeTruthy();
-  expect((screen.getByLabelText("Network latency (ms)") as HTMLInputElement).value).toBe("4");
-  expect((screen.getByLabelText("Bandwidth (KB/s)") as HTMLInputElement).value).toBe("2");
+  expect((screen.getByLabelText("Network latency") as HTMLInputElement).value).toBe("4");
+  expect((screen.getByLabelText("Bandwidth") as HTMLInputElement).value).toBe("2");
   expect((screen.getByLabelText("Calls per request") as HTMLInputElement).value).toBe("1");
   expect((screen.getByLabelText("Share of requests (%)") as HTMLInputElement).value).toBe("100");
 });
@@ -57,12 +57,53 @@ test("a_wire_shows_its_ends_and_its_current_figures", async () => {
 test("a_committed_latency_is_one_patch_at_the_wires_place", async () => {
   await show(1);
   const sent = mockFetch([{ json: view() }]);
-  const box = screen.getByLabelText("Network latency (ms)");
+  const box = screen.getByLabelText("Network latency");
   fireEvent.change(box, { target: { value: "12" } });
   fireEvent.blur(box);
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({
     patch: [{ op: "set", path: ["edges", 1, "net"], value: "12ms" }],
+  });
+});
+
+test("bandwidth_is_typed_in_the_unit_picked_and_written_in_bytes", async () => {
+  await show(1); // 2048 bytes a second shows as 2 KB/s
+  const unit = screen.getByLabelText("Bandwidth unit") as HTMLSelectElement;
+  expect(unit.value).toBe("KB/s");
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(unit, { target: { value: "MB/s" } });
+  const box = screen.getByLabelText("Bandwidth") as HTMLInputElement;
+  expect(Number(box.value)).toBeCloseTo(2 / 1024, 6); // the same amount, in the new unit
+  fireEvent.change(box, { target: { value: "120" } });
+  fireEvent.blur(box);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "set", path: ["edges", 1, "bandwidth"], value: 120 * 1024 * 1024 }],
+  });
+});
+
+test("a_rounded_figure_in_a_bigger_unit_is_never_written_back_on_blur", async () => {
+  // 125 000 KB/s in GB/s is 0.119209...: the box rounds it, and leaving the box must not change the file
+  await show(0, view({ edges: [{ from: "app", to: "db", bandwidth: 125_000 * 1024 }] }));
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(screen.getByLabelText("Bandwidth unit"), { target: { value: "GB/s" } });
+  const box = screen.getByLabelText("Bandwidth") as HTMLInputElement;
+  expect(box.value).toBe("0.119209");
+  fireEvent.blur(box);
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(sent).toHaveLength(0);
+});
+
+test("latency_is_typed_in_seconds_and_written_in_milliseconds", async () => {
+  await show(1);
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(screen.getByLabelText("Network latency unit"), { target: { value: "s" } });
+  const box = screen.getByLabelText("Network latency");
+  fireEvent.change(box, { target: { value: "2" } });
+  fireEvent.blur(box);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "set", path: ["edges", 1, "net"], value: "2000ms" }],
   });
 });
 
@@ -116,6 +157,6 @@ test("a_latency_spread_is_not_editable_here", async () => {
       ],
     }),
   );
-  expect(screen.queryByLabelText("Network latency (ms)")).toBeNull();
+  expect(screen.queryByLabelText("Network latency")).toBeNull();
   expect(screen.getByText(/spread of values/)).toBeTruthy();
 });

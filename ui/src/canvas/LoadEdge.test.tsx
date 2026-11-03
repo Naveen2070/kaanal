@@ -156,6 +156,27 @@ test("a_hot_target_puts_a_halo_under_the_wire_and_a_calm_one_does_not", () => {
   ).toBeNull();
 });
 
+test("a_full_wire_is_red_even_when_both_ends_are_idle", () => {
+  const link = (saturated: boolean) => ({
+    from: "gw",
+    to: "app",
+    transfers: 10,
+    mean_wait_ms: 5,
+    offered_load: saturated ? 3 : 0.1,
+    utilization: saturated ? 1 : 0.1,
+    saturated,
+    saturates_at_req_s: 40,
+  });
+  edge({ ...feed(0.0), link: () => link(true) });
+  expect(document.querySelector("path[data-wire-full]")?.getAttribute("stroke")).toBe(
+    "var(--bad-fill)",
+  );
+  cleanup();
+  edge({ ...feed(0.0), link: () => link(false) });
+  expect(document.querySelector("path[data-wire-full]")).toBeNull();
+  expect(document.querySelector('path[stroke="var(--bad-fill)"]')).toBeNull();
+});
+
 test("a_selected_wire_shows_a_button_that_deletes_exactly_that_entry", async () => {
   edge(feed(0.2));
   expect(screen.queryByRole("button", { name: /Delete the wire/ })).toBeNull();

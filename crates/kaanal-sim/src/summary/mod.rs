@@ -182,6 +182,10 @@ pub struct LinkSummary {
     pub utilization: f64,
     /// Offered load of 1.0 or more, or utilization of 0.95 or more.
     pub saturated: bool,
+    /// Requests per second the whole traffic mix can reach before this link saturates: the mix's
+    /// request rate over `offered_load` (transfer time grows in step with the rate). `None` when
+    /// nothing crossed the link. A node's counterpart is `NodeSummary::saturates_at_req_s`.
+    pub saturates_at_req_s: Option<f64>,
 }
 
 /// A running total: count, summed wait and summed busy time (seconds).
@@ -438,6 +442,7 @@ fn link_summaries(
     report: &SimReport,
     link_acc: &[Acc],
     window_s: f64,
+    mix_rate: f64,
 ) -> Vec<LinkSummary> {
     topo.edges
         .iter()
@@ -459,6 +464,7 @@ fn link_summaries(
                 offered_load: load,
                 utilization: util,
                 saturated: load >= 1.0 || util >= SATURATED,
+                saturates_at_req_s: (load > 0.0 && mix_rate > 0.0).then(|| mix_rate / load),
             }
         })
         .collect()
@@ -555,7 +561,7 @@ pub fn summarize(
             }
         })
         .collect();
-    let links = link_summaries(topo, report, &link_acc, window_s);
+    let links = link_summaries(topo, report, &link_acc, window_s, mix_rate);
     let requests = report.requests.len() as u64;
     let warnings = warnings(requests, &nodes, &links);
     let bottlenecks = bottlenecks(&nodes);
