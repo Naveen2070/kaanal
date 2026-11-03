@@ -4,7 +4,7 @@ import type { DraftView, RunRecord } from "../../data/api/types";
 import { useRun } from "../../data/store/run";
 import { useDraft } from "../../data/store/draft";
 import { mockFetch } from "../../test/fetch";
-import { TopTools } from "../../shell/topbar/TopBar";
+import { MenuPanel } from "../menu/MenuPanel";
 import { placeNote, Tour } from "./Tour";
 import { neverAgain, projectKeyOf, shouldShowWelcome } from "./flags";
 import { FirstRun } from "./FirstRun";
@@ -111,11 +111,11 @@ test("closing_the_card_starts_the_tour_and_skip_ends_it", async () => {
   expect(screen.getByRole("button", { name: "Skip tour" })).toBeTruthy();
 });
 
-test("the_question_mark_replays_the_tour_even_with_never_again", async () => {
+test("the_menu_replays_the_tour_even_with_never_again", async () => {
   await open("p1");
   fireEvent.click(screen.getByRole("button", { name: "Don't show again" }));
-  render(<TopTools />);
-  fireEvent.click(screen.getByRole("button", { name: "Show the tour" }));
+  render(<MenuPanel top={0} right={0} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /Show the tour/ }));
   expect(tour()).toBeTruthy();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(tour()).toBeNull();

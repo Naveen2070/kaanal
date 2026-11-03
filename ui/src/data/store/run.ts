@@ -22,3 +22,15 @@ export const useRun = create<RunState>(() => ({
   dimmed: false,
   lastError: null,
 }));
+
+/**
+ * The finished run before the newest one, kept so Results can say how an edit changed the numbers.
+ * Written by watching `latest`; the loop never knows about it.
+ */
+export const usePrevRun = create<{ prev: RunRecord | null }>(() => ({ prev: null }));
+
+useRun.subscribe((s, before) => {
+  if (s.latest && before.latest && s.latest.id !== before.latest.id && before.latest.summary) {
+    usePrevRun.setState({ prev: before.latest });
+  }
+});

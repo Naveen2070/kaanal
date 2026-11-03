@@ -23,6 +23,31 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
+    /// Every kind, in the order Studio lists them. A new kind goes here too: the draft view's
+    /// `kinds` and `kind_defaults` are built from this list.
+    pub const ALL: [NodeKind; 7] = [
+        NodeKind::Gateway,
+        NodeKind::Service,
+        NodeKind::Monolith,
+        NodeKind::Database,
+        NodeKind::Cache,
+        NodeKind::ExternalApi,
+        NodeKind::Auth,
+    ];
+
+    /// Whether the kind has one `proc` service time (the others price their work with `ops`,
+    /// `hit` and `miss`). Studio shows a Time control only for these.
+    pub fn has_proc(self) -> bool {
+        match self {
+            NodeKind::Gateway
+            | NodeKind::Service
+            | NodeKind::Monolith
+            | NodeKind::ExternalApi
+            | NodeKind::Auth => true,
+            NodeKind::Database | NodeKind::Cache => false,
+        }
+    }
+
     /// The YAML spelling (`external-api`), also used in status output and messages.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -40,17 +65,7 @@ impl NodeKind {
 impl NodeKind {
     /// The kind written `name` in YAML (`external-api`), if it is one.
     pub fn from_name(name: &str) -> Option<NodeKind> {
-        [
-            NodeKind::Gateway,
-            NodeKind::Service,
-            NodeKind::Monolith,
-            NodeKind::Database,
-            NodeKind::Cache,
-            NodeKind::ExternalApi,
-            NodeKind::Auth,
-        ]
-        .into_iter()
-        .find(|k| k.as_str() == name)
+        NodeKind::ALL.into_iter().find(|k| k.as_str() == name)
     }
 }
 

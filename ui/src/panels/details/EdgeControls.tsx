@@ -5,6 +5,7 @@
 
 import { ArrowRight } from "lucide-react";
 import { useFeed } from "../../canvas/feed";
+import { whyWireRed } from "../../canvas/insights";
 import { removeWires } from "../../canvas/wires";
 import { useDraft } from "../../data/store/draft";
 import type { Doc, EdgeDoc, NodeDoc } from "../../data/api/types";
@@ -38,6 +39,7 @@ export function EdgeControls({ index }: { index: number }) {
   const bandwidth = bandwidthKbOf(e);
   // a full wire: the load asks for offered_load times what it carries
   const link = feed.link?.(String(e.from), String(e.to));
+  const why = link ? whyWireRed(link, bandwidth) : null;
   const needKb =
     link?.saturated && bandwidth !== null && link.offered_load > 1
       ? bandwidth * link.offered_load
@@ -90,6 +92,7 @@ export function EdgeControls({ index }: { index: number }) {
             Full at this load: it needs at least {rateText(needKb)}.
           </p>
         ) : null}
+        {link && why ? <p className="mb-2 text-xs text-muted">{why}</p> : null}
         {bandwidth !== null ? (
           <button
             type="button"

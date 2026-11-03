@@ -1,5 +1,21 @@
-// Who may call whom (R1.24): the same table as `callees` in crates/kaanal-core/src/topology.rs, so
-// the Studio offers only wires the draft will accept. The draft still has the last word.
+// Who may call whom (R1.24), so the Studio offers only wires the draft will accept. The table is the
+// engine's own `callees` (crates/kaanal-core/src/topology.rs), which the server sends with every draft
+// view as `kinds`; the copy below is only what is used until that arrives (and in tests, and with an
+// older server). The draft still has the last word.
+
+import type { KindRules } from "../data/api/types";
+
+let served: KindRules[] | undefined;
+
+/** Called by the draft store whenever a view arrives. */
+export function setKindRules(kinds: KindRules[] | undefined): void {
+  served = kinds;
+}
+
+/** What the server says of a kind, when it has said. */
+export function kindRulesOf(kind: string): KindRules | undefined {
+  return served?.find((k) => k.kind === kind);
+}
 
 const BACKENDS = ["service", "monolith", "database", "cache", "external-api", "auth"];
 
@@ -16,6 +32,6 @@ const MAY_CALL: Record<string, string[]> = {
 /** True when a node of kind `from` may call one of kind `to`. An unknown kind is allowed: the draft decides. */
 export function mayCall(from: string | undefined, to: string | undefined): boolean {
   if (from === undefined || to === undefined) return true;
-  const allowed = MAY_CALL[from];
+  const allowed = kindRulesOf(from)?.callees ?? MAY_CALL[from];
   return allowed === undefined || allowed.includes(to);
 }

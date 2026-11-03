@@ -65,19 +65,29 @@ pub(super) fn kind_defaults() -> &'static Value {
 
 fn build_kind_defaults() -> Value {
     let mut m = Map::new();
-    for k in [
-        NodeKind::Gateway,
-        NodeKind::Service,
-        NodeKind::Monolith,
-        NodeKind::Database,
-        NodeKind::Cache,
-        NodeKind::ExternalApi,
-        NodeKind::Auth,
-    ] {
+    for k in NodeKind::ALL {
         let v = serde_yaml_ng::from_str(presets::starter(k)).unwrap_or(Value::Null);
         m.insert(k.as_str().into(), v);
     }
     Value::Object(m)
+}
+
+/// **Private.** The rules of each node kind that Studio needs and must not keep its own copy of:
+/// `[{ kind, callees: [kind], service_time }]` in the order of [`NodeKind::ALL`]. A new kind is
+/// listed here without a change to this function.
+pub(super) fn kinds() -> &'static Value {
+    static CELL: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        Value::Array(
+            NodeKind::ALL
+                .into_iter()
+                .map(|k| {
+                    let callees: Vec<&str> = k.callees().iter().map(|c| c.as_str()).collect();
+                    json!({ "kind": k.as_str(), "callees": callees, "service_time": k.has_proc() })
+                })
+                .collect(),
+        )
+    })
 }
 
 /// `GET /__kaanal/demo` — `{ text }`, Studio's self-contained starter system.

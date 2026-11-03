@@ -41,6 +41,8 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
   const [thisNode, setThisNode] = useState(false);
   const [component, setComponent] = useState("");
   const [wire, setWire] = useState("");
+  // a request number, typed as 12 or r-12: keeps the lines of requests whose number contains it
+  const [reqText, setReqText] = useState("");
   const [page, setPage] = useState<Page | null>(null);
   const [more, setMore] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -120,6 +122,10 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
     setWire("");
   };
   const count = (n: number) => n.toLocaleString("en-US");
+  const digits = reqText.replace(/\D/g, "");
+  const lines = (page?.lines ?? []).filter(
+    (l) => digits === "" || String(l.request).includes(digits),
+  );
 
   // popped out: the table is in the drawer, so the rail says where it went
   if (out && !drawer) {
@@ -237,6 +243,17 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
           </select>
         </label>
         <label className="flex items-center gap-1">
+          Request
+          <input
+            type="search"
+            inputMode="numeric"
+            placeholder="r-…"
+            value={reqText}
+            onChange={(e) => setReqText(e.currentTarget.value)}
+            className="w-16 rounded border border-control bg-sheet px-1"
+          />
+        </label>
+        <label className="flex items-center gap-1">
           Instance
           <input
             type="number"
@@ -272,7 +289,7 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
               Retry
             </button>
           </div>
-        ) : page && page.lines.length === 0 ? (
+        ) : page && lines.length === 0 ? (
           <Say>No lines match these filters.</Say>
         ) : page ? (
           <table className="w-full text-xs">
@@ -294,7 +311,7 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
               </tr>
             </thead>
             <tbody>
-              {page.lines.map((l, i) => {
+              {lines.map((l, i) => {
                 const shown =
                   open !== null &&
                   open.runId === runId &&

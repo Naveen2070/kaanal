@@ -33,6 +33,15 @@ export interface Diagnostic {
   message: string;
 }
 
+/** One node kind's rules as the server states them. */
+export interface KindRules {
+  kind: string;
+  /** The kinds a node of this kind may call. */
+  callees: string[];
+  /** True when the kind has one `proc` service time (the others price their work per operation). */
+  service_time: boolean;
+}
+
 export interface DraftView {
   text: string;
   dirty: boolean;
@@ -48,6 +57,11 @@ export interface DraftView {
   project_name: string | null;
   /** Per node kind, the node Studio creates. */
   kind_defaults: Record<string, NodeDoc>;
+  /**
+   * The rules of each node kind, from the server (the engine's own table): who may call whom, and
+   * whether the kind has one service time. Absent from an older server; Studio then uses its own copy.
+   */
+  kinds?: KindRules[];
   layout: Layout;
   layout_note: string | null;
   layout_dirty: boolean;

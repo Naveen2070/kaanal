@@ -9,7 +9,7 @@ use crate::draft::rename;
 use crate::draft::save::{self as draft_save, Plan, SaveError};
 
 /// **Private.** The draft as the API shows it: `{ text, dirty, generation, lost, rev, doc,
-/// doc_error, project_id, project_name, kind_defaults, boot, layout, layout_note, layout_dirty, saved, renames }` (`layout_dirty`: the
+/// doc_error, project_id, project_name, kind_defaults, kinds, boot, layout, layout_note, layout_dirty, saved, renames }` (`layout_dirty`: the
 /// positions differ from the sidecar, so a Save would write them) (`generation` is 0 before the first Apply of a blank
 /// start; `doc` is the text as JSON, or null with `doc_error` saying why).
 fn view(st: &AppState) -> Json<Value> {
@@ -73,6 +73,7 @@ fn view(st: &AppState) -> Json<Value> {
         "doc": doc, "doc_error": doc_error,
         "project_id": doc::project_id(file.as_deref()),
         "project_name": doc::project_name(file.as_deref()), "kind_defaults": doc::kind_defaults(),
+        "kinds": doc::kinds(),
         "layout": layout, "layout_note": layout_note, "layout_dirty": layout_dirty,
         "saved": saved, "renames": renames,
     }))

@@ -425,3 +425,15 @@ test("the_log_pops_out_to_a_drawer_and_the_rail_says_where_it_went", async () =>
   fireEvent.click(screen.getByRole("button", { name: "Bring it back here" }));
   expect(useLogDrawer.getState().out).toBe(false);
 });
+
+test("a_request_number_keeps_only_the_lines_of_matching_requests", async () => {
+  useLogDrawer.getState().set(false);
+  await show(page([line({ request: 12 }), line({ request: 13 }), line({ request: 112 })]));
+  await screen.findByText(/r-12 /);
+  fireEvent.change(screen.getByLabelText("Request"), { target: { value: "r-12" } });
+  expect(screen.getByText(/r-12 /)).toBeTruthy();
+  expect(screen.getByText(/r-112 /)).toBeTruthy();
+  expect(screen.queryByText(/r-13 /)).toBeNull();
+  fireEvent.change(screen.getByLabelText("Request"), { target: { value: "9999" } });
+  expect(screen.getByText("No lines match these filters.")).toBeTruthy();
+});

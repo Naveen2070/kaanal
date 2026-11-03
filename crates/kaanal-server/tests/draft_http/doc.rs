@@ -123,6 +123,33 @@ async fn kind_defaults_has_an_entry_for_every_node_kind() {
 }
 
 #[tokio::test]
+async fn kinds_carry_who_may_call_whom_and_which_have_a_service_time() {
+    let s = start(BASE).await;
+    let v = draft(&s).await;
+    let kinds = v["kinds"].as_array().expect("kinds is a list");
+    assert_eq!(kinds.len(), 7, "{v}");
+    let of = |name: &str| {
+        kinds
+            .iter()
+            .find(|k| k["kind"] == name)
+            .unwrap_or_else(|| panic!("{name}"))
+    };
+    // the gateway forwards to services, monoliths and auth only
+    assert_eq!(
+        of("gateway")["callees"],
+        json!(["service", "monolith", "auth"])
+    );
+    assert_eq!(of("database")["callees"], json!([]));
+    assert_eq!(of("service")["callees"].as_array().map(Vec::len), Some(6));
+    // a database and a cache price their work per operation, the others have one service time
+    assert_eq!(of("database")["service_time"], false);
+    assert_eq!(of("cache")["service_time"], false);
+    for k in ["gateway", "service", "monolith", "external-api", "auth"] {
+        assert_eq!(of(k)["service_time"], true, "{k}");
+    }
+}
+
+#[tokio::test]
 async fn the_demo_builds_validates_and_runs_in_an_empty_folder() {
     // nothing in the folder but the draft: no spec, no site, no other file
     let s = start_blank_in(new_dir()).await;

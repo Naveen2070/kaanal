@@ -9,6 +9,7 @@ import { Heatmap } from "./Heatmap";
 import { Section } from "./Field";
 import { fmtMs, rankedByPeak, twoSignificant } from "../../canvas/metrics";
 import { ResultsSkeleton, RANK_ROW } from "./Skeletons";
+import { CompareLine, PlanSection, ReportButtons, SloSection } from "./ResultsExtras";
 
 /** Starts the value of a wire in the picker, so it cannot be a component's name. */
 const WIRE = String.fromCharCode(31);
@@ -60,6 +61,7 @@ export function Results() {
       <p className="mb-2 text-xs font-medium">
         {run ? `Run ${run.id.replace(/^s/, "")} · ` : ""}A what-if, not a prediction
       </p>
+      <CompareLine runId={run?.id} s={s} />
       {s.warnings.length > 0 ? (
         <ul className="mb-3 space-y-1 rounded-lg border border-warn p-2 text-xs text-warn">
           {s.warnings.map((w, i) => (
@@ -102,6 +104,9 @@ export function Results() {
           </ol>
         )}
       </Section>
+
+      <SloSection s={s} />
+      <PlanSection s={s} />
 
       <Section title="Latency over the run">
         {node || link ? (
@@ -188,6 +193,10 @@ export function Results() {
           </ul>
         </Section>
       ) : null}
+
+      <Section title="Share this run">
+        <ReportButtons runId={run?.id} s={s} />
+      </Section>
 
       <Section title="Errors by kind">
         {Object.keys(s.errors).length === 0 ? (

@@ -338,6 +338,14 @@ impl TopologyError {
 
 impl std::error::Error for TopologyError {}
 
+impl NodeKind {
+    /// R1.24: the kinds a node of this kind may call. Studio reads this table (it is in the draft
+    /// view's `kinds`), so the page offers only wires the draft will accept.
+    pub fn callees(self) -> &'static [NodeKind] {
+        callees(self)
+    }
+}
+
 /// **Private.** R1.24: the kinds a node of kind `from` may call.
 fn callees(from: NodeKind) -> &'static [NodeKind] {
     match from {

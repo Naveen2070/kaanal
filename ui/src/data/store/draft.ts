@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { ApiError, api } from "../api/client";
 import type { DraftView, Layout, Op } from "../api/types";
 import { connectOps, lastEdgeIndex, uniqueName } from "../../canvas/edges";
+import { setKindRules } from "../../canvas/rules";
 import { notify } from "../../shell/toast/toasts";
 import { history, invertOps, useHistory } from "./history";
 import { applyOps } from "./optimistic";
@@ -70,7 +71,11 @@ export const useDraft = create<DraftState>((set, get) => {
   // the stack changed (an edit, an undo): keep it with the draft it describes
   useHistory.subscribe(() => confirmed && history.save(confirmed.boot, confirmed.rev));
 
-  const show = () => confirmed && set({ view: replay(confirmed, pending) });
+  const show = () => {
+    if (!confirmed) return;
+    setKindRules(confirmed.kinds);
+    set({ view: replay(confirmed, pending) });
+  };
 
   /** Queues `edit`: shown now, sent after the edits before it. */
   function enqueue(edit: Edit): Promise<boolean> {

@@ -3,15 +3,25 @@
 // selects it. With no run, or nothing under load, it says so plainly and keeps the old sentence.
 
 import { useFeed } from "../../canvas/feed";
+import { fixFirstLimit } from "../../canvas/insights";
+import { useDraft } from "../../data/store/draft";
+import { useRun } from "../../data/store/run";
+import { bandwidthKbOf } from "./edgeFields";
 import { closestToBreaking, percent, twoSignificant } from "../../canvas/metrics";
 import { useSelected } from "../../data/store/view";
 import { TrafficMix } from "./TrafficMix";
 
 export function SystemSummary() {
   const feed = useFeed();
+  const run = useRun((s) => s.latest);
   const [, select] = useSelected();
   const rows = closestToBreaking(feed.nodes, 3, feed.links);
   const loaded = rows.some((r) => r.peak > 0);
+  const edges = useDraft((s) => s.view?.doc?.edges);
+  const fix = fixFirstLimit(run?.summary ?? undefined, (l) => {
+    const e = edges?.find((x) => String(x.from) === l.from && String(x.to) === l.to);
+    return e ? bandwidthKbOf(e) : null;
+  });
   return (
     <div className="p-3 text-sm">
       <h3 className="m-0 mb-1 text-xs font-medium text-muted">Closest to breaking</h3>
@@ -52,6 +62,11 @@ export function SystemSummary() {
           ))}
         </ol>
       )}
+      {fix ? (
+        <p className="m-0 mt-2 text-xs">
+          <span className="font-medium">To lift the first limit ({fix.name}):</span> {fix.text}
+        </p>
+      ) : null}
       <p className="m-0 mt-3 text-muted">Select a component to see and change it.</p>
       <TrafficMix />
     </div>

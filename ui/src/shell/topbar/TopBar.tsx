@@ -4,10 +4,8 @@
 // give numbers is a notice (a toast), not a line in the bar. The key figures and the offered load
 // are the strip under it (KpiStrip.tsx).
 
-import { BookOpen, CircleHelp, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { Mark } from "../../look/brand/Mark";
-import { useFirstRun } from "../../overlays/first-run/store";
-import { useGuide } from "../../overlays/guide/store";
 import { MenuButton } from "../../overlays/menu/MenuButton";
 import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
@@ -67,31 +65,12 @@ export function TopBar({ onRun }: { onRun: () => void }) {
   );
 }
 
-/** Theme and help: the part of the top bar that is about the app, not the draft. */
+/** Theme and the menu (glossary, tour, profile): the part of the top bar that is about the app, not the draft. */
 export function TopTools() {
-  const replayTour = useFirstRun((st) => st.replayTour);
   return (
     <div className="flex items-center gap-1 p-1.5">
       <ThemeToggle />
-      <button
-        type="button"
-        aria-label="Glossary"
-        title="Glossary: what every part and figure means"
-        onClick={() => useGuide.getState().show()}
-        className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        <BookOpen size={16} aria-hidden />
-      </button>
       <MenuButton />
-      <button
-        type="button"
-        aria-label="Show the tour"
-        title="Show the tour"
-        onClick={replayTour}
-        className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        <CircleHelp size={16} aria-hidden />
-      </button>
     </div>
   );
 }

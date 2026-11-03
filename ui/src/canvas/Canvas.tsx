@@ -23,6 +23,7 @@ import { usePrefersReducedMotion } from "../overlays/first-run/motion";
 import { useLayout } from "../shell/layout/useLayout";
 import { useRail } from "../shell/layout/rail";
 import { usePickedWire } from "./picked";
+import { StarterList } from "./StarterList";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { NoteCard } from "./NoteCard";
@@ -397,7 +398,7 @@ function Flow() {
         </ReactFlow>
         {doc && Object.keys(doc.nodes ?? {}).length === 0 ? (
           // an empty draft: a ghost card pointing at the first step (review C12)
-          <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <button
               type="button"
               onClick={() => {
@@ -408,6 +409,7 @@ function Flow() {
             >
               Start with a gateway
             </button>
+            <StarterList />
           </div>
         ) : null}
       </div>

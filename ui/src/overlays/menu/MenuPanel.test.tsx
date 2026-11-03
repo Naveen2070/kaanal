@@ -43,11 +43,12 @@ afterEach(() => {
 
 const panel = (onClose = vi.fn()) => render(<MenuPanel top={10} right={10} onClose={onClose} />);
 
-test("lists_the_glossary_and_the_profile", () => {
+test("lists_the_glossary_the_tour_and_the_profile", () => {
   panel();
   const items = screen.getAllByRole("button").map((b) => b.textContent);
   expect(items[0]).toContain("Glossary");
-  expect(items[1]).toContain("Profile");
+  expect(items[1]).toContain("Show the tour");
+  expect(items[2]).toContain("Profile");
 });
 
 test("the_glossary_item_opens_the_glossary_and_closes_the_menu", () => {

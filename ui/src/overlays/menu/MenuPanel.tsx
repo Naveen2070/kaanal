@@ -2,8 +2,16 @@
 // a view (it opens in place, with Back). To add a menu later, add one entry to MENU_ITEMS.
 // A lazy chunk, with the profile view.
 
-import { ArrowLeft, BookOpen, ChevronRight, CircleUser, type LucideIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  ChevronRight,
+  CircleUser,
+  type LucideIcon,
+  CircleHelp,
+} from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType } from "react";
+import { useFirstRun } from "../first-run/store";
 import { useGuide } from "../guide/store";
 import { ProfileView } from "./ProfileView";
 
@@ -25,6 +33,13 @@ export const MENU_ITEMS: MenuItem[] = [
     hint: "What every part and figure means",
     icon: BookOpen,
     run: () => useGuide.getState().show(),
+  },
+  {
+    id: "tour",
+    label: "Show the tour",
+    hint: "A short walk through the page",
+    icon: CircleHelp,
+    run: () => useFirstRun.getState().replayTour(),
   },
   {
     id: "profile",

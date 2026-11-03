@@ -6,6 +6,8 @@ import { useId } from "react";
 import { focusName } from "../../canvas/focusName";
 import type { EdgeDoc, NodeDoc } from "../../data/api/types";
 import { ConnectMenu, targetsFor, wiringNote } from "../../canvas/ConnectMenu";
+import { fixNode, whyNodeRed, whyWireRed } from "../../canvas/insights";
+import { bandwidthKbOf } from "./edgeFields";
 import { useFeed } from "../../canvas/feed";
 import { nodeFigures, percent, replicasOf, twoSignificant } from "../../canvas/metrics";
 import { kindInfo } from "../../canvas/nodeKinds";
@@ -68,6 +70,17 @@ export function Controls({
   const spare =
     node && capacity !== null && capacity > 0 ? 1 - node.visits_per_s / capacity : out?.spare;
   const fix = suggestedFix(node);
+  const why = node ? whyNodeRed(node) : null;
+  const copyFix = node ? fixNode(node) : null;
+  // a full wire into this component starves it: it shows idle, so say why
+  const fullIn = feed.links?.find((l) => l.to === name && l.saturated);
+  const incoming = fullIn
+    ? edges.find((e) => String(e.from) === fullIn.from && String(e.to) === name)
+    : undefined;
+  const behindFull =
+    fullIn && !node?.saturated
+      ? whyWireRed(fullIn, incoming ? bandwidthKbOf(incoming) : null)
+      : null;
   const calls = edges.filter((e) => String(e.from) === name).map((e) => String(e.to));
   const doc = useDraft((s) => s.view?.doc);
   // nothing to connect, no wire out and nothing to say about wiring: the section is left out
@@ -182,6 +195,14 @@ export function Controls({
                 : `Overloaded: ${twoSignificant(node.visits_per_s)} visits/s arrive, more than it can take.`
               : "Spare capacity shows after a run."}
           </p>
+        </Section>
+      ) : null}
+
+      {why || behindFull ? (
+        <Section title={why ? "Why is it red?" : "Why does it look idle?"}>
+          {why ? <p>{why}</p> : null}
+          {why && copyFix ? <p className="mt-1 text-xs text-muted">{copyFix}</p> : null}
+          {!why && behindFull ? <p>{behindFull}</p> : null}
         </Section>
       ) : null}
 

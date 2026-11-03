@@ -3,6 +3,7 @@
 // so the field-to-patch mapping is tested as a table. A control the config has no field for is
 // not offered (retries; error rate, which is accepted but not active yet).
 
+import { kindRulesOf } from "../../canvas/rules";
 import type { NodeDoc, NodeSummary, Op } from "../../data/api/types";
 
 type Path = (string | number)[];
@@ -91,11 +92,12 @@ export function setDuration(name: string, config: NodeDoc, field: string, ms: nu
   return put(["nodes", name, field], field in config, formatMs(ms));
 }
 
-/** Node kinds that have a `proc` field (the others price their work with `ops`, `hit` and `miss`). */
+/** The fallback for the kinds that have a `proc` field (the others price their work with `ops`, `hit` and `miss`); the server's `kinds` wins. */
 const HAS_PROC = new Set(["gateway", "service", "monolith", "external-api", "auth"]);
 
 export function hasProc(kind: string): boolean {
-  return HAS_PROC.has(kind);
+  // the engine's own answer when the server has given it, else the copy above
+  return kindRulesOf(kind)?.service_time ?? HAS_PROC.has(kind);
 }
 
 /** Limits the loader enforces (or that make no sense past): a value outside them would make the draft invalid. */
