@@ -1,4 +1,4 @@
-# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`)
+# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`, `engine/finish.rs`)
 
 The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together. `engine` is a folder: `engine/state.rs` holds the data types (errors, finished-request records, per-request and per-node state) and `engine/mod.rs` keeps `impl Engine` whole (about 650 lines, on purpose: one type's hot-path impl, R3.8).
 
@@ -90,6 +90,10 @@ Full model: [../../chaos.md](../../chaos.md). The walk puts `PlanItem::Span { no
 - **`HopKind::Delay`** (endpoint latency) is handled like a `Net` hop: no gate slot, no rate-limit token (Z18), so it is never a visit and never queues.
 
 **Limit L1 (Q6).** A 429 or an overflow failure that ties with another _engine_ failure at the same instant keeps the one the engine processed first. A planned `Fail` item keeps the D17 rule: a lower plan index reached at the same instant still replaces a 429 or an overflow, and then the refusal is taken back out of `limited`/`overflowed`, so the counters equal the answers. The `parallel` branches need not be zero-cost for this: any exact tie (fixed latencies, equal hop sums) can produce it.
+
+## How a request ends (`engine/finish.rs`)
+
+Split out of `engine/mod.rs` (it was at 796 of 800 lines), moved unchanged: a span's `deadline`, `fail` (a failure cutting the request short), `settle`, `flush`, `release_slot` and the `record` the client sees. `mod.rs` keeps the hot path.
 
 ## Holding a slot across a call (`engine/hold.rs`)
 
