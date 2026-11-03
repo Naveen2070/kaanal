@@ -1,6 +1,6 @@
-// The Results tab (spec 7.2): the report label and its warnings, a latency heatmap for one
-// component, per-instance and per-link figures, errors by kind, and the bottleneck order the
-// server computed.
+// The Results tab (spec 7.2): the report label and its warnings, what breaks first (components and
+// wires), a heatmap for one component or one wire (latency, or time on the wire), per-instance and
+// per-link figures, errors by kind.
 
 import { useId, useState } from "react";
 import { useRun } from "../../data/store/run";
@@ -10,13 +10,17 @@ import { Section } from "./Field";
 import { fmtMs, rankedByPeak, twoSignificant } from "../../canvas/metrics";
 import { ResultsSkeleton, RANK_ROW } from "./Skeletons";
 
+/** Starts the value of a wire in the picker, so it cannot be a component's name. */
+const WIRE = String.fromCharCode(31);
+
 const pct = (x: number | null) => (x === null ? "–" : `${Math.round(x * 100)}%`);
 
 export function Results() {
   const run = useRun((s) => s.latest);
   const [selected] = useSelected();
   // a pick holds only for the selection it was made under: selecting on the canvas moves the heatmap
-  const [picked, setPicked] = useState<{ name: string; under: string | null } | null>(null);
+  // a key is a component's name, or a wire's place in the run's list behind a control character
+  const [picked, setPicked] = useState<{ key: string; under: string | null } | null>(null);
   const dimmed = useRun((s) => s.dimmed);
   const status = useRun((s) => s.status);
   const pickId = useId();
@@ -35,9 +39,15 @@ export function Results() {
   const ranked = rankedByPeak(s);
   const names = s.nodes.map((n) => n.name);
   const fallback = s.bottlenecks[0] !== undefined ? s.nodes[s.bottlenecks[0]]?.name : names[0];
-  const pick = picked && picked.under === selected ? picked.name : null;
-  const chosen = [pick, selected, fallback].find((n) => n && names.includes(n)) ?? names[0];
-  const node = s.nodes.find((n) => n.name === chosen);
+  const wireKeys = s.links.map((_, k) => `${WIRE}${k}`);
+  const keys = [...names, ...wireKeys];
+  const pick = picked && picked.under === selected ? picked.key : null;
+  const chosenKey =
+    [pick, selected, fallback].find(
+      (k): k is string => typeof k === "string" && keys.includes(k),
+    ) ?? keys[0];
+  const link = chosenKey?.startsWith(WIRE) ? s.links[Number(chosenKey.slice(1))] : undefined;
+  const node = link ? undefined : s.nodes.find((n) => n.name === chosenKey);
 
   return (
     <div className="p-3 text-sm">
@@ -60,19 +70,26 @@ export function Results() {
 
       <Section title="What breaks first">
         {ranked.length === 0 ? (
-          <p className="text-xs text-muted">No traffic reached any component.</p>
+          <p className="text-xs text-muted">No traffic reached any component or wire.</p>
         ) : (
           <ol className="text-xs">
             {ranked.map((r, i) => (
               <li key={r.name} className={`flex flex-col justify-center ${RANK_ROW}`}>
                 <div className="flex items-baseline gap-2">
-                  <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
-                  <span className="tabular-nums text-muted">
-                    peak {pct(r.peak)}
-                    {r.saturatesAtReqS !== null
-                      ? ` · saturates at ${twoSignificant(r.saturatesAtReqS)} req/s`
-                      : ""}
+                  <span
+                    title={r.wire ? `${r.name} (a wire)` : r.name}
+                    className="min-w-0 flex-1 truncate font-medium"
+                  >
+                    {r.name}
                   </span>
+                  <span className="tabular-nums text-muted">peak {pct(r.peak)}</span>
+                </div>
+                {/* two measures stack in one row: the name over its figure, the limit under it */}
+                <div className="tabular-nums text-[11px] text-muted">
+                  {r.wire ? "Wire · " : ""}
+                  {r.saturatesAtReqS !== null
+                    ? `saturates at ${twoSignificant(r.saturatesAtReqS)} req/s`
+                    : "no saturation point"}
                 </div>
                 <div aria-hidden className="h-1 rounded-full bg-well">
                   <div
@@ -87,24 +104,44 @@ export function Results() {
       </Section>
 
       <Section title="Latency over the run">
-        {node ? (
+        {node || link ? (
           <>
             <label htmlFor={pickId} className="mb-1 block text-xs">
-              Component{" "}
+              {s.links.length > 0 ? "Component or wire" : "Component"}{" "}
               <select
                 id={pickId}
-                value={node.name}
-                onChange={(e) => setPicked({ name: e.currentTarget.value, under: selected })}
-                className="rounded border border-control bg-sheet text-text px-1"
+                value={chosenKey}
+                onChange={(e) => setPicked({ key: e.currentTarget.value, under: selected })}
+                className="max-w-full rounded border border-control bg-sheet text-text px-1"
               >
-                {names.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
+                <optgroup label="Components">
+                  {names.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </optgroup>
+                {s.links.length > 0 ? (
+                  <optgroup label="Wires">
+                    {s.links.map((l, k) => (
+                      <option key={wireKeys[k]} value={wireKeys[k]}>
+                        {l.from} → {l.to}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </label>
-            <Heatmap name={node.name} series={node.series} buckets={s.latency.buckets} />
+            {link ? (
+              <Heatmap
+                wire
+                name={`${link.from} → ${link.to}`}
+                series={link.series}
+                buckets={s.latency.buckets}
+              />
+            ) : node ? (
+              <Heatmap name={node.name} series={node.series} buckets={s.latency.buckets} />
+            ) : null}
           </>
         ) : (
           <p className="text-xs text-muted">This run has no components.</p>

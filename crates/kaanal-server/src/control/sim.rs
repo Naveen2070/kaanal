@@ -244,6 +244,9 @@ pub async fn post_sample(
 #[serde(deny_unknown_fields)]
 pub struct LogQuery {
     node: Option<String>,
+    /// With `to`: only the hops on the wire from this node to that one.
+    from: Option<String>,
+    to: Option<String>,
     replica: Option<u16>,
     endpoint: Option<String>,
     level: Option<String>,
@@ -280,6 +283,16 @@ pub async fn get_run_log(
             ));
         }
     };
+    let wire = match (q.from, q.to) {
+        (None, None) => None,
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => {
+            return Err(reject(
+                StatusCode::BAD_REQUEST,
+                "from and to go together: they name one wire",
+            ));
+        }
+    };
     let endpoint = q
         .endpoint
         .as_deref()
@@ -304,6 +317,7 @@ pub async fn get_run_log(
     }
     let f = log::Filter {
         node: q.node,
+        wire,
         replica: q.replica,
         endpoint,
         level,

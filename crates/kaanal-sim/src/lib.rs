@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use summary::{
-    Bucket, Latency, LinkSummary, NodeSummary, ReplicaSummary, Series, StreamSummary, Summary,
-    summarize,
+    Bucket, Latency, LinkSeries, LinkSummary, NodeSummary, ReplicaSummary, Series, StreamSummary,
+    Summary, summarize,
 };
 
 use kaanal_core::{

@@ -14,7 +14,7 @@ export interface HeatmapData {
   max: number;
 }
 
-export function heatmapData(series: Series): HeatmapData {
+export function heatmapData(series: Pick<Series, "latency"> & Partial<Series>): HeatmapData {
   const cols = series.latency.length;
   const rows = series.latency.reduce((n, w) => Math.max(n, w.length), 0);
   const cells = Array.from({ length: rows }, (_, r) =>

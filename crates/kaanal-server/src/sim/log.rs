@@ -30,6 +30,10 @@ pub struct LogLine {
     pub stream: String,
     /// The node the hop ran on.
     pub node: String,
+    /// For a hop on a wire (`link request`, `link response`), the node that called over it; the
+    /// wire is `from` to `node`. Absent on every other line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
     /// The replica that ran it; `None` on a failure line (the engine does not record it).
     pub replica: Option<u16>,
     /// `served`, `queued`, `failed`, `limited`, `overflowed` or `timeout`.
@@ -92,6 +96,12 @@ fn lines_of(r: &RequestRecord, topo: &Topology, cfg: &SimConfig, out: &mut Vec<L
             request: r.n,
             stream: stream.clone(),
             node: topo.nodes[h.node].name.clone(),
+            from: match h.kind {
+                HopKind::Link { edge, .. } => {
+                    Some(topo.nodes[topo.edges[usize::from(edge)].from].name.clone())
+                }
+                _ => None,
+            },
             replica: Some(h.replica),
             event: if queued { "queued" } else { "served" },
             wait_ms: Some(w),
@@ -117,6 +127,7 @@ fn lines_of(r: &RequestRecord, topo: &Topology, cfg: &SimConfig, out: &mut Vec<L
             request: r.n,
             stream,
             node: topo.nodes[*node].name.clone(),
+            from: None,
             replica: None,
             event,
             wait_ms: None,
@@ -202,6 +213,8 @@ pub(crate) fn sample(
 pub(crate) struct Filter {
     /// Node name; an unknown one matches nothing.
     pub node: Option<String>,
+    /// A wire as (calling node, called node): only the hops on that wire.
+    pub wire: Option<(String, String)>,
     /// Replica number; matches only lines whose replica is known and equal.
     pub replica: Option<u16>,
     /// Endpoint key of the request's stream.
@@ -215,6 +228,10 @@ pub(crate) struct Filter {
 impl Filter {
     fn matches(&self, l: &LogLine) -> bool {
         self.node.as_ref().is_none_or(|n| *n == l.node)
+            && self
+                .wire
+                .as_ref()
+                .is_none_or(|(a, b)| l.from.as_deref() == Some(a.as_str()) && *b == l.node)
             && self.replica.is_none_or(|r| l.replica == Some(r))
             && self.endpoint.as_ref().is_none_or(|e| *e == l.stream)
             && self.level.as_ref().is_none_or(|v| v == l.level)
@@ -342,6 +359,44 @@ pub(super) mod tests {
             &cfg(),
         );
         assert_eq!(small.len(), 10);
+    }
+
+    #[test]
+    fn a_wire_filter_keeps_only_the_hops_on_that_wire() {
+        let cfg_yaml = Config::from_yaml(
+            "version: 1\nnodes:\n  nginx: { type: gateway, proc: 1ms }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: nginx, to: app, bandwidth: 1000 }\n",
+        )
+        .unwrap();
+        let t = Topology::build(&cfg_yaml).unwrap();
+        let mut r = rec(1, 5, false, &t);
+        r.hops.push((
+            kaanal_core::Hop {
+                node: t.id("app").unwrap(),
+                replica: 0,
+                kind: kaanal_core::HopKind::Link {
+                    edge: 0,
+                    resp: false,
+                },
+                start: Duration::ZERO,
+                dur: Duration::from_millis(3),
+            },
+            Duration::ZERO,
+        ));
+        let lines = lined(&report(vec![r]), &t, &Endpoints::default(), &cfg());
+        assert_eq!(lines.len(), 2);
+        let wire = Filter {
+            wire: Some(("nginx".into(), "app".into())),
+            ..Filter::default()
+        };
+        let got = page(&lines, &wire, None, 10).0;
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].from.as_deref(), Some("nginx"));
+        assert_eq!(got[0].note.as_deref(), Some("link request"));
+        let backwards = Filter {
+            wire: Some(("app".into(), "nginx".into())),
+            ..Filter::default()
+        };
+        assert_eq!(page(&lines, &backwards, None, 10).0.len(), 0);
     }
 
     #[test]

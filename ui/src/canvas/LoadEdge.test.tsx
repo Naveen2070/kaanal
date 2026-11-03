@@ -166,6 +166,7 @@ test("a_full_wire_is_red_even_when_both_ends_are_idle", () => {
     utilization: saturated ? 1 : 0.1,
     saturated,
     saturates_at_req_s: 40,
+    series: { window_s: 1, latency: [] },
   });
   edge({ ...feed(0.0), link: () => link(true) });
   expect(document.querySelector("path[data-wire-full]")?.getAttribute("stroke")).toBe(

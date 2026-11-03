@@ -155,6 +155,17 @@ async fn the_log_for_a_node_has_only_its_hops() {
 }
 
 #[tokio::test]
+async fn a_wire_filter_needs_both_ends_and_an_unknown_wire_matches_nothing() {
+    let s = start(&config()).await;
+    let id = flaky(&s).await;
+    // one end alone does not name a wire
+    assert_eq!(log(&s, &id, "from=gw").await.0, 400);
+    assert_eq!(log(&s, &id, "to=db").await.0, 400);
+    let (code, v) = log(&s, &id, "from=nope&to=db&limit=1000").await;
+    assert_eq!((code, lines(&v).len()), (200, 0));
+}
+
+#[tokio::test]
 async fn level_error_returns_only_failed_lines() {
     let s = start(&config()).await;
     let id = flaky(&s).await;

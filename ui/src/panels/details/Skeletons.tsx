@@ -3,7 +3,7 @@
 // it stays tiny; the sizes are shared with the real thing through these constants.
 
 /** One row of "What breaks first". */
-export const RANK_ROW = "h-7";
+export const RANK_ROW = "h-11";
 /** The latency heatmap's box (60 windows by 20 buckets). */
 export const HEAT_ASPECT = "aspect-[3/1]";
 

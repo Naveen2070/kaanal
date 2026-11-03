@@ -3,15 +3,22 @@
 // The stamp is VIRTUAL time inside the simulation, and the lines are simulated trace events, not
 // process output (the tab says so). `#2` after a node name is display only.
 
+import { fmtMs } from "../../canvas/metrics";
 import type { LogLine } from "../../data/api/types";
 
 function ms(n: number): string {
   return `${Number(n.toFixed(n < 10 ? 2 : 1))}ms`;
 }
 
+/** Who a line is about: a component (with its instance), or for a hop on a wire, "from → to". */
+export function whoOf(l: LogLine): string {
+  if (l.from) return `${l.from} → ${l.node}`;
+  return l.replica === null ? l.node : `${l.node}#${l.replica}`;
+}
+
 export function formatLine(l: LogLine): string {
   const at = `t=${(l.t_ms / 1000).toFixed(2)}s`;
-  const who = l.replica === null ? l.node : `${l.node}#${l.replica}`;
+  const who = whoOf(l);
   let what: string;
   if (l.event === "served") {
     what = `served ${ms(l.service_ms ?? 0)}`;
@@ -37,7 +44,16 @@ export function clock(t_ms: number): string {
 
 /** What happened at the hop, in words: "Waited 210 ms, then served in 98 ms". */
 export function eventWords(l: LogLine): string {
-  const t = (n: number | null) => `${Number((n ?? 0).toFixed((n ?? 0) < 10 ? 2 : 1))} ms`;
+  // a long wait reads in seconds, minutes or hours, not as 247221.6 ms
+  const t = (n: number | null) =>
+    (n ?? 0) >= 1000 ? fmtMs(n ?? 0) : `${Number((n ?? 0).toFixed((n ?? 0) < 10 ? 2 : 1))} ms`;
+  // a hop on a wire is a body crossing it: the queue for the wire, then the transfer
+  if (l.from) {
+    const what = l.note === "link response" ? "Response" : "Request";
+    return l.event === "queued"
+      ? `${what} waited ${t(l.wait_ms)}, crossed in ${t(l.service_ms)}`
+      : `${what} crossed in ${t(l.service_ms)}`;
+  }
   if (l.event === "served") return "Served, no wait";
   if (l.event === "queued") return `Waited ${t(l.wait_ms)}, then served in ${t(l.service_ms)}`;
   return ["Failed", l.status, l.note].filter((x) => x !== null && x !== "").join(" ");
@@ -72,7 +88,7 @@ export function waterfall(lines: LogLine[]): Waterfall {
   const pct = (x: number) => (x / span) * 100;
   const rows = lines.map((line) => ({
     line,
-    label: line.replica === null ? line.node : `${line.node}#${line.replica}`,
+    label: whoOf(line),
     left: pct(line.t_ms - start),
     wait: pct(line.wait_ms ?? 0),
     work: pct(line.service_ms ?? 0),

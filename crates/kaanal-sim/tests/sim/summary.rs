@@ -92,6 +92,21 @@ fn a_bandwidth_link_reports_its_transfers() {
 }
 
 #[test]
+fn a_wire_reports_its_time_on_the_wire_per_window() {
+    // 20/s x 2 KB over a 100 KB/s wire
+    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n";
+    let mut cfg = windowed(20.0, 60, 5);
+    cfg.streams[0].req_bytes = 1000;
+    cfg.streams[0].resp_bytes = 1000;
+    let (_, s) = summary_of(y, &cfg);
+    let ser = &s.links[0].series;
+    assert_eq!(ser.latency.len(), 60);
+    // every body that crossed is in exactly one cell
+    let cells: u64 = ser.latency.iter().flatten().map(|&c| u64::from(c)).sum();
+    assert_eq!(cells, s.links[0].transfers);
+}
+
+#[test]
 fn a_link_nothing_crossed_has_no_saturation_point() {
     let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
     // no payload, so the link never carries a byte

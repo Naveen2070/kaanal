@@ -234,7 +234,7 @@ export function BalanceField({
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-4 border-b pb-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase text-muted">{title}</h3>
+      <h3 className="mb-2 text-[13px] font-semibold text-text">{title}</h3>
       {children}
     </section>
   );

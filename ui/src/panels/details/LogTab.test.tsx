@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { LogLine, RunRecord } from "../../data/api/types";
 import { useRun } from "../../data/store/run";
 import { mockFetch } from "../../test/fetch";
+import { nodeSummary } from "../../test/summary";
 import { LogTab } from "./LogTab";
 import { formatLine } from "./logFormat";
 
@@ -132,6 +133,44 @@ test("filters_are_sent_as_query_parameters", async () => {
   await vi.waitFor(() => expect(sent).toHaveLength(2));
   expect(sent[1]?.url).toContain("replica=2");
   expect(sent[1]?.url).toContain("level=error");
+});
+
+test("one_component_or_one_wire_is_a_filter_and_the_two_do_not_mix", async () => {
+  const r = run();
+  const link = {
+    from: "gw",
+    to: "api",
+    transfers: 4,
+    mean_wait_ms: 1,
+    offered_load: 0.5,
+    utilization: 0.5,
+    saturated: false,
+    saturates_at_req_s: 40,
+    series: { window_s: 1, latency: [] },
+  };
+  if (r.summary) {
+    r.summary.nodes = [nodeSummary({ name: "gw" }), nodeSummary({ name: "api" })];
+    r.summary.links = [link];
+  }
+  useRun.setState({ status: "done", latest: r, dimmed: false, lastError: null });
+  const sent = mockFetch([{ json: page([]) }]);
+  mount();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  fireEvent.change(screen.getByLabelText("Component"), { target: { value: "api" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(2));
+  expect(sent[1]?.url).toBe("/__kaanal/sim/runs/s1/log?node=api&limit=200");
+  // picking the wire drops the component: a wire is two components
+  fireEvent.change(screen.getByLabelText("Wire"), { target: { value: "gwapi" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(3));
+  expect(sent[2]?.url).toBe("/__kaanal/sim/runs/s1/log?from=gw&to=api&limit=200");
+  expect((screen.getByLabelText("Component") as HTMLSelectElement).value).toBe("");
+});
+
+test("a_run_with_no_bandwidth_wire_disables_the_wire_filter_and_says_why", async () => {
+  await show();
+  const wire = screen.getByLabelText("Wire") as HTMLSelectElement;
+  expect(wire.disabled).toBe(true);
+  expect(wire.title).toMatch(/bandwidth/);
 });
 
 test("names_with_special_characters_are_url_encoded_in_the_query", async () => {

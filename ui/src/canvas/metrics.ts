@@ -207,26 +207,55 @@ export function stateWords(f: Figures): string {
   return `${Math.round(f.busy * 100)} percent busy`;
 }
 
+export interface Ranked {
+  name: string;
+  peak: number;
+  saturatesAtReqS: number | null;
+  /** A wire (named "from → to"), not a component. */
+  wire?: true;
+}
+
 /**
- * The Results tab's "What breaks first": components by their peak utilisation, highest first.
- * Ties keep the server's bottleneck order. A component with no slot limit has no peak and is left out.
+ * The Results tab's "What breaks first": components and wires with a bandwidth, by their peak
+ * utilisation, highest first. Ties keep the server's bottleneck order, components before wires. A
+ * component with no slot limit has no peak and is left out.
  */
-export function rankedByPeak(
-  summary: Summary,
-): { name: string; peak: number; saturatesAtReqS: number | null }[] {
+export function rankedByPeak(summary: Summary): Ranked[] {
   const order = (i: number) => {
     const at = summary.bottlenecks.indexOf(i);
     return at === -1 ? Number.MAX_SAFE_INTEGER : at;
   };
-  return summary.nodes
-    .map((n, i) => {
-      const busy = n.series.busy.filter(Number.isFinite);
-      const peak = busy.length > 0 ? Math.max(...busy) : n.utilization;
-      return { i, name: n.name, peak, saturatesAtReqS: finiteOrNull(n.saturates_at_req_s) };
-    })
+  const nodes = summary.nodes.map((n, i) => {
+    const busy = n.series.busy.filter(Number.isFinite);
+    const peak = busy.length > 0 ? Math.max(...busy) : n.utilization;
+    return {
+      i,
+      name: n.name,
+      peak,
+      saturatesAtReqS: finiteOrNull(n.saturates_at_req_s),
+      wire: false,
+    };
+  });
+  const wires = summary.links.map((l, k) => {
+    // demand over capacity for the whole run, at most 100%: a wire's own windows cannot be trusted
+    // when it is full (the records leave out the requests it spends the run serving)
+    return {
+      i: summary.nodes.length + k,
+      name: `${l.from} → ${l.to}`,
+      peak: Math.min(1, Math.max(l.offered_load, l.utilization)),
+      saturatesAtReqS: finiteOrNull(l.saturates_at_req_s),
+      wire: true,
+    };
+  });
+  return [...nodes, ...wires]
     .filter((r): r is typeof r & { peak: number } => r.peak !== null)
     .sort((a, b) => b.peak - a.peak || order(a.i) - order(b.i) || a.i - b.i)
-    .map(({ name, peak, saturatesAtReqS }) => ({ name, peak, saturatesAtReqS }));
+    .map(({ name, peak, saturatesAtReqS, wire }) => ({
+      name,
+      peak,
+      saturatesAtReqS,
+      ...(wire && { wire: true as const }),
+    }));
 }
 
 /** A rate in three significant figures, so "229,327" reads "229,000": more digits than that are noise. */

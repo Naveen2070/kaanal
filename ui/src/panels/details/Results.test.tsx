@@ -154,9 +154,56 @@ test("breaks_first_list_ranks_by_peak_with_saturates_at", () => {
   );
   mount();
   const items = Array.from(document.querySelectorAll("section ol li")).map((l) => l.textContent);
-  expect(items[0]).toBe("dbpeak 95% · saturates at 1,300 req/s");
+  expect(items[0]).toBe("dbpeak 95%saturates at 1,300 req/s");
   expect(items[1]).toMatch(/^gw/);
   expect(items[1]).not.toMatch(/saturates at/);
+  expect(items[1]).toMatch(/no saturation point/);
+});
+
+const wireOf = (over = {}) => ({
+  from: "gw",
+  to: "db",
+  transfers: 10,
+  mean_wait_ms: 5,
+  offered_load: 3,
+  utilization: 1,
+  saturated: true,
+  saturates_at_req_s: 1.1,
+  series: { window_s: 0.5, latency: series([[2, 7, 9]]).latency },
+  ...over,
+});
+
+test("a_full_wire_is_ranked_with_the_components_and_marked_as_a_wire", () => {
+  setRun(summary({ links: [wireOf()] }));
+  mount();
+  const items = Array.from(document.querySelectorAll("section ol li")).map((l) => l.textContent);
+  // the wire peaks at 100%, above db's, so it comes first
+  expect(items[0]).toBe("gw → dbpeak 100%Wire · saturates at 1.1 req/s");
+});
+
+test("the_heatmap_can_show_one_wire_and_says_what_its_time_is", () => {
+  setRun(summary({ links: [wireOf()] }));
+  mount();
+  const select = screen.getByLabelText(/Component or wire/) as HTMLSelectElement;
+  fireEvent.change(select, {
+    target: { value: select.querySelector("optgroup[label=Wires] option")?.getAttribute("value") },
+  });
+  expect(screen.getByText("Bodies on gw → db by time on the wire")).toBeTruthy();
+  expect(
+    screen.getByText(/queue plus the transfer|wait in the queue plus the transfer/),
+  ).toBeTruthy();
+  expect(document.querySelectorAll("svg rect")).toHaveLength(1);
+});
+
+test("a_wire_with_nothing_across_it_says_so_not_a_blank_heatmap", () => {
+  const quiet = wireOf({ series: { window_s: 1, latency: [[0, 0]] } });
+  setRun(summary({ links: [quiet] }));
+  mount();
+  const select = screen.getByLabelText(/Component or wire/) as HTMLSelectElement;
+  fireEvent.change(select, {
+    target: { value: select.querySelector("optgroup[label=Wires] option")?.getAttribute("value") },
+  });
+  expect(screen.getByText(/Nothing crossed gw → db/)).toBeTruthy();
 });
 
 test("first_row_red_others_ink", () => {

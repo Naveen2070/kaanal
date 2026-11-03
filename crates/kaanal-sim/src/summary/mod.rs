@@ -11,7 +11,7 @@ use serde::Serialize;
 
 mod series;
 
-pub use series::{Series, SystemSeries};
+pub use series::{LinkSeries, Series, SystemSeries};
 
 use crate::{SimConfig, SimReport};
 
@@ -186,6 +186,8 @@ pub struct LinkSummary {
     /// request rate over `offered_load` (transfer time grows in step with the rate). `None` when
     /// nothing crossed the link. A node's counterpart is `NodeSummary::saturates_at_req_s`.
     pub saturates_at_req_s: Option<f64>,
+    /// Busy share and time on the wire over the run, 60 windows.
+    pub series: LinkSeries,
 }
 
 /// A running total: count, summed wait and summed busy time (seconds).
@@ -439,11 +441,13 @@ fn stream_summaries(cfg: &SimConfig, lat_by: &[Vec<f64>], failed_by: &[u64]) -> 
 /// **Private.** Per edge that has a `bandwidth`.
 fn link_summaries(
     topo: &Topology,
+    cfg: &SimConfig,
     report: &SimReport,
     link_acc: &[Acc],
     window_s: f64,
     mix_rate: f64,
 ) -> Vec<LinkSummary> {
+    let mut series = series::link_series(topo, cfg, report);
     topo.edges
         .iter()
         .zip(link_acc)
@@ -465,6 +469,9 @@ fn link_summaries(
                 utilization: util,
                 saturated: load >= 1.0 || util >= SATURATED,
                 saturates_at_req_s: (load > 0.0 && mix_rate > 0.0).then(|| mix_rate / load),
+                series: series[k]
+                    .take()
+                    .expect("an edge with a bandwidth has a series"),
             }
         })
         .collect()
@@ -561,7 +568,7 @@ pub fn summarize(
             }
         })
         .collect();
-    let links = link_summaries(topo, report, &link_acc, window_s, mix_rate);
+    let links = link_summaries(topo, cfg, report, &link_acc, window_s, mix_rate);
     let requests = report.requests.len() as u64;
     let warnings = warnings(requests, &nodes, &links);
     let bottlenecks = bottlenecks(&nodes);

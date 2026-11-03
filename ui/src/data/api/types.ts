@@ -171,6 +171,9 @@ export interface NodeSummary {
   timed_out: number;
 }
 
+/** A wire over the run, in the same 60 windows as a node's `Series`: time on the wire (queue plus transfer). */
+export type LinkSeries = Pick<Series, "window_s" | "latency">;
+
 /** One wire that has a bandwidth. */
 export interface LinkSummary {
   from: string;
@@ -182,6 +185,7 @@ export interface LinkSummary {
   saturated: boolean;
   /** Requests per second the whole mix can reach before this wire saturates; null when nothing crossed it. */
   saturates_at_req_s: number | null;
+  series: LinkSeries;
 }
 
 export interface Summary {
@@ -221,6 +225,8 @@ export interface LogLine {
   request: number;
   stream: string;
   node: string;
+  /** On a wire hop (`link request`, `link response`): the node that called over it; the wire is `from` to `node`. */
+  from?: string;
   /** Null on a failure line. */
   replica: number | null;
   event: "served" | "queued" | "failed" | "limited" | "overflowed" | "timeout";
@@ -232,6 +238,9 @@ export interface LogLine {
 
 export interface LogQuery {
   node?: string;
+  /** With `to`: only the hops on the wire from one node to another. */
+  from?: string;
+  to?: string;
   replica?: number;
   endpoint?: string;
   level?: "info" | "warn" | "error";

@@ -142,6 +142,71 @@ pub(super) fn series(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Ve
         .collect()
 }
 
+/// One wire (an edge with a `bandwidth`) over time, in the same [`WINDOWS`] windows as [`Series`].
+/// There is no busy share per window: the records hold only requests that arrived after warmup, and a
+/// wire that is full spends the reporting window serving the ones that arrived during it, so a
+/// busy figure from the records would read 0 exactly when the wire is most loaded (use the link's
+/// `offered_load` and `utilization`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LinkSeries {
+    /// Width of one window in seconds (reporting window ÷ 60).
+    pub window_s: f64,
+    /// Per window, counts of the time a body spent on the wire (queue wait plus transfer) in the
+    /// same buckets as the summary's latency histogram, by the window it joined the queue in.
+    pub latency: Vec<Vec<u32>>,
+}
+
+/// **Private.** Series per edge, by edge id; `None` for an edge without a `bandwidth`.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "window indices are clamped to WINDOWS; times and counts are far below 2^52"
+)]
+pub(super) fn link_series(
+    topo: &Topology,
+    cfg: &SimConfig,
+    report: &SimReport,
+) -> Vec<Option<LinkSeries>> {
+    let warm = cfg.warmup.as_secs_f64();
+    let w = cfg.duration.saturating_sub(cfg.warmup).as_secs_f64() / WINDOWS as f64;
+    let win = |t: f64| (((t - warm) / w).max(0.0) as usize).min(WINDOWS - 1);
+    let mut lat: Vec<Vec<u32>> = topo
+        .edges
+        .iter()
+        .map(|e| {
+            vec![
+                0;
+                if e.bandwidth.is_some() {
+                    WINDOWS * COLS
+                } else {
+                    0
+                }
+            ]
+        })
+        .collect();
+    for r in &report.requests {
+        let arrival = r.arrival.as_secs_f64();
+        for (hop, wait) in &r.hops {
+            let HopKind::Link { edge, .. } = hop.kind else {
+                continue;
+            };
+            let k = usize::from(edge);
+            let (start, dur) = (arrival + hop.start.as_secs_f64(), hop.dur.as_secs_f64());
+            let joined = (start - wait.as_secs_f64()).max(0.0);
+            lat[k][win(joined) * COLS + bucket_of((dur + wait.as_secs_f64()) * 1000.0)] += 1;
+        }
+    }
+    lat.into_iter()
+        .map(|l| {
+            (!l.is_empty()).then(|| LinkSeries {
+                window_s: w,
+                latency: l.chunks(COLS).map(<[u32]>::to_vec).collect(),
+            })
+        })
+        .collect()
+}
+
 /// The whole system over time, in the same [`WINDOWS`] windows as [`Series`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SystemSeries {

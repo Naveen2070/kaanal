@@ -8,7 +8,7 @@ import { ApiError, api } from "../../data/api/client";
 import type { LogLine, LogQuery } from "../../data/api/types";
 import { useRun } from "../../data/store/run";
 import { useSelected } from "../../data/store/view";
-import { clock, eventWords, formatLine, hopMs } from "./logFormat";
+import { clock, eventWords, formatLine, hopMs, whoOf } from "./logFormat";
 import { RequestView } from "./RequestView";
 
 interface Page {
@@ -24,6 +24,10 @@ interface Page {
 
 const PAGE = 200;
 
+/** A wire as one select value: the two names, which may hold any character but this one. */
+const SEP = "\u001f";
+const wireKey = (l: { from: string; to: string }) => `${l.from}${SEP}${l.to}`;
+
 export function LogTab() {
   const run = useRun((s) => s.latest);
   const [selected] = useSelected();
@@ -31,6 +35,8 @@ export function LogTab() {
   const [replica, setReplica] = useState("");
   const [endpoint, setEndpoint] = useState("");
   const [thisNode, setThisNode] = useState(false);
+  const [component, setComponent] = useState("");
+  const [wire, setWire] = useState("");
   const [page, setPage] = useState<Page | null>(null);
   const [more, setMore] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -42,11 +48,19 @@ export function LogTab() {
   // a filter on something the newest run no longer has is dropped, not left silently on
   const endpointNow = streams.includes(endpoint) ? endpoint : "";
   const replicaNow = /^\d+$/.test(replica) && Number(replica) <= 65535 ? Number(replica) : null;
+  // a component or a wire the newest run no longer has is dropped too
+  const components = run?.summary?.nodes.map((n) => n.name) ?? [];
+  const wires = run?.summary?.links ?? [];
+  const componentNow = components.includes(component) ? component : "";
+  const wireNow = wires.find((l) => wireKey(l) === wire);
   const query: LogQuery = {
     ...(errorsOnly && { level: "error" as const }),
     ...(replicaNow !== null && { replica: replicaNow }),
     ...(endpointNow !== "" && { endpoint: endpointNow }),
-    ...(thisNode && selected !== null && { node: selected }),
+    ...(componentNow !== ""
+      ? { node: componentNow }
+      : thisNode && selected !== null && { node: selected }),
+    ...(wireNow && { from: wireNow.from, to: wireNow.to }),
   };
   const key = `${runId}|${attempt}|${JSON.stringify(query)}`;
   const loading = runId !== null && page?.key !== key;
@@ -86,12 +100,20 @@ export function LogTab() {
     }
   };
 
-  const none = !errorsOnly && endpointNow === "" && !thisNode && replicaNow === null;
+  const none =
+    !errorsOnly &&
+    endpointNow === "" &&
+    !thisNode &&
+    replicaNow === null &&
+    componentNow === "" &&
+    !wireNow;
   const clearAll = () => {
     setErrorsOnly(false);
     setEndpoint("");
     setThisNode(false);
     setReplica("");
+    setComponent("");
+    setWire("");
   };
   const count = (n: number) => n.toLocaleString("en-US");
 
@@ -136,6 +158,51 @@ export function LogTab() {
           </Chip>
         ))}
         <label className="flex items-center gap-1">
+          Component
+          <select
+            value={componentNow}
+            onChange={(e) => {
+              // a wire is two components: a wire and a component filter do not mix
+              setComponent(e.currentTarget.value);
+              setWire("");
+              setThisNode(false);
+            }}
+            className="max-w-32 rounded border border-control bg-sheet px-1"
+          >
+            <option value="">Any</option>
+            {components.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-1">
+          Wire
+          <select
+            value={wireNow ? wire : ""}
+            disabled={wires.length === 0}
+            title={
+              wires.length === 0
+                ? "Only a wire with a bandwidth logs transfers, and none has one"
+                : undefined
+            }
+            onChange={(e) => {
+              setWire(e.currentTarget.value);
+              setComponent("");
+              setThisNode(false);
+            }}
+            className="max-w-40 rounded border border-control bg-sheet px-1 disabled:opacity-50"
+          >
+            <option value="">Any</option>
+            {wires.map((l) => (
+              <option key={wireKey(l)} value={wireKey(l)}>
+                {l.from} → {l.to}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-1">
           Instance
           <input
             type="number"
@@ -179,10 +246,7 @@ export function LogTab() {
             <thead className="sticky top-0 bg-sheet text-left text-muted">
               <tr>
                 <th scope="col" className="px-2 py-1 font-normal">
-                  Time
-                </th>
-                <th scope="col" className="px-1 py-1 font-normal">
-                  Level
+                  Time and level
                 </th>
                 <th scope="col" className="px-1 py-1 font-normal">
                   Component
@@ -204,15 +268,24 @@ export function LogTab() {
                   open.request === l.request;
                 const t = hopMs(l);
                 return (
-                  <tr key={i} className={`h-8 border-t border-rule ${shown ? "bg-active" : ""}`}>
-                    <td className="px-2 tabular-nums">{clock(l.t_ms)}</td>
-                    <td className="px-1">
+                  <tr key={i} className={`h-11 border-t border-rule ${shown ? "bg-active" : ""}`}>
+                    {/* two measures stack in one cell: the time over its level */}
+                    <td className="px-2 py-1 align-top">
+                      <span className="block whitespace-nowrap tabular-nums">{clock(l.t_ms)}</span>
                       <Level level={l.level} />
                     </td>
-                    <td className="max-w-20 truncate px-1 font-mono">
-                      {l.replica === null ? l.node : `${l.node}#${l.replica}`}
+                    <td title={whoOf(l)} className="max-w-20 px-1 py-1 align-top font-mono">
+                      {/* a wire is two names: stacked, so neither is cut short */}
+                      {l.from ? (
+                        <>
+                          <span className="block truncate">{l.from} →</span>
+                          <span className="block truncate">{l.node}</span>
+                        </>
+                      ) : (
+                        <span className="block truncate">{whoOf(l)}</span>
+                      )}
                     </td>
-                    <td className="px-1">
+                    <td className="px-1 py-1 align-top">
                       <button
                         type="button"
                         aria-label={formatLine(l)}
@@ -225,8 +298,8 @@ export function LogTab() {
                         r-{l.request} · {eventWords(l)}
                       </button>
                     </td>
-                    <td className="px-2 text-right tabular-nums">
-                      {t === null ? "–" : Number(t.toFixed(t < 10 ? 2 : 1))}
+                    <td className="px-2 py-1 text-right align-top tabular-nums">
+                      {t === null ? "–" : Number(t.toFixed(t < 10 ? 2 : 1)).toLocaleString("en-US")}
                     </td>
                   </tr>
                 );
@@ -285,9 +358,7 @@ const LEVEL: Record<LogLine["level"], string> = {
 
 /** The level as a badge; the word is always there, colour only repeats it. */
 function Level({ level }: { level: LogLine["level"] }) {
-  return (
-    <span className={`rounded border px-1 text-[11px] uppercase ${LEVEL[level]}`}>{level}</span>
-  );
+  return <span className={`rounded border px-1 text-[11px] ${LEVEL[level]}`}>{level}</span>;
 }
 
 /** A readable message for a log that cannot be shown. A busy run is waiting, not an error. */

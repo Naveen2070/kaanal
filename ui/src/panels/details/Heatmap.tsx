@@ -1,5 +1,6 @@
-// A node's latency over the run: one coloured cell per (window, latency bucket). The picture is for
-// the eye; a table of the buckets below it is what a screen reader gets.
+// A node's latency over the run, or a wire's time on the wire (queue and transfer): one coloured cell
+// per (window, latency bucket). The picture is for the eye; a table of the buckets below it is what a
+// screen reader gets.
 
 import type { Bucket, Series } from "../../data/api/types";
 import { HEAT_ASPECT } from "./Skeletons";
@@ -12,16 +13,22 @@ export function Heatmap({
   name,
   series,
   buckets,
+  wire = false,
 }: {
   name: string;
-  series: Series;
+  series: Pick<Series, "window_s" | "latency">;
   buckets: Bucket[];
+  /** A wire, not a component: its bodies, not hops. */
+  wire?: boolean;
 }) {
+  const thing = wire ? "bodies" : "hops";
   const d = heatmapData(series);
   if (d.max === 0) {
     return (
       <p className="text-xs text-muted">
-        No requests reached {name} in this run, so there is no latency to draw.
+        {wire
+          ? `Nothing crossed ${name} in this run, so there is no time on the wire to draw.`
+          : `No requests reached ${name} in this run, so there is no latency to draw.`}
       </p>
     );
   }
@@ -31,7 +38,7 @@ export function Heatmap({
         viewBox={`0 0 ${d.cols * CELL} ${d.rows * CELL}`}
         className={`w-full rounded border border-border bg-well ${HEAT_ASPECT}`}
       >
-        <title>{`Latency of ${name} over the run: time across, slower hops higher up`}</title>
+        <title>{`${wire ? "Time on the wire" : "Latency"} of ${name} over the run: time across, slower ${thing} higher up`}</title>
         {d.cells.map((row, r) =>
           row.map((count, c) =>
             count > 0 ? (
@@ -45,7 +52,7 @@ export function Heatmap({
                 className="fill-accent"
                 fillOpacity={0.1 + 0.9 * intensity(count, d.max)}
               >
-                <title>{`${bucketLabel(buckets, r)}, window ${c + 1}: ${count}`}</title>
+                <title>{`${bucketLabel(buckets, r)}, window ${c + 1}: ${count} ${thing}`}</title>
               </rect>
             ) : null,
           ),
@@ -58,14 +65,17 @@ export function Heatmap({
       </div>
       <figcaption className="text-xs text-muted">
         Time runs left to right ({d.cols} windows of {Number(series.window_s.toPrecision(3))} s),
-        slower hops are higher. Colour is the number of hops, on a log scale.
+        slower {thing} are higher. Colour is the number of {thing}, on a log scale.
+        {wire ? " Time on the wire is the wait in the queue plus the transfer." : ""}
       </figcaption>
       <table className="sr-only">
-        <caption>Hops of {name} by latency</caption>
+        <caption>
+          {wire ? `Bodies on ${name} by time on the wire` : `Hops of ${name} by latency`}
+        </caption>
         <thead>
           <tr>
             <th>Latency</th>
-            <th>Hops</th>
+            <th>{wire ? "Bodies" : "Hops"}</th>
           </tr>
         </thead>
         <tbody>
