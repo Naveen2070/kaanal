@@ -236,6 +236,17 @@ impl ApiModel {
                     .map(|s| unsupported_keywords(s, &at))
                     .unwrap_or_default();
                 out.extend(paged_array_warning(e, &at));
+                // a file's size is not in the spec, and size costs need it (RULES 65)
+                if e.file_in {
+                    out.push(format!(
+                        "{at}: takes a file and the spec does not give its size; set req_bytes on its traffic journey so transfers and size costs count it"
+                    ));
+                }
+                if e.file_out {
+                    out.push(format!(
+                        "{at}: returns a file and the spec does not give its size; set resp_bytes on its traffic journey so transfers and size costs count it"
+                    ));
+                }
                 out
             })
             .collect()

@@ -72,6 +72,17 @@ pub struct EdgeConfig {
     #[serde(default, deserialize_with = "crate::units::bandwidth")]
     #[schemars(schema_with = "crate::schema::rate")]
     pub bandwidth: Option<u64>,
+    /// Size of the request body a call over this edge carries: bytes as a whole number, or text
+    /// with a unit like `200KB` (KB = 1024 bytes; at most 1 GiB). A `call:` step may override it.
+    /// Absent = the size of the request that reached the caller (it is passed on).
+    #[serde(default, deserialize_with = "crate::units::sends")]
+    #[schemars(schema_with = "crate::schema::size")]
+    pub sends: Option<u64>,
+    /// Size of the response body a call over this edge brings back, written like `sends`. Absent
+    /// = the size of the response the caller itself has to give.
+    #[serde(default, deserialize_with = "crate::units::returns")]
+    #[schemars(schema_with = "crate::schema::size")]
+    pub returns: Option<u64>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).
@@ -255,5 +266,88 @@ impl NodeBandwidth {
             NodeBandwidth::Both(b) => (Some(b), Some(b)),
             NodeBandwidth::Split(s) => (s.out, s.r#in),
         }
+    }
+}
+
+/// What an HTTP call carries besides its body (`header_bytes:` at the top of the file): one size
+/// for a request and for a response, or `{ request, response }`. Default 600 B and 400 B, a labelled
+/// estimate; `0` turns headers off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(untagged)]
+pub enum HeaderBytes {
+    /// The same size for a request and a response.
+    Both(#[schemars(schema_with = "crate::schema::size_value")] u64),
+    /// Separate sizes; a missing side keeps its default.
+    Split(HeaderBytesSplit),
+}
+
+/// The `{ request, response }` form of [`HeaderBytes`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HeaderBytesSplit {
+    /// Header bytes of a request: bytes as a whole number, or text with a unit like `1KB`.
+    #[serde(default, deserialize_with = "crate::units::header_request")]
+    #[schemars(schema_with = "crate::schema::size")]
+    pub request: Option<u64>,
+    /// Header bytes of a response, written like `request`.
+    #[serde(default, deserialize_with = "crate::units::header_response")]
+    #[schemars(schema_with = "crate::schema::size")]
+    pub response: Option<u64>,
+}
+
+/// Header bytes of a request and a response when `header_bytes` is not written: estimates of what a
+/// browser or an HTTP client sends (cookies and an auth token included) and a server answers.
+pub const DEFAULT_HEADER_BYTES: (u64, u64) = (600, 400);
+
+impl HeaderBytes {
+    /// `(request, response)` in bytes.
+    pub fn pair(self) -> (u64, u64) {
+        match self {
+            HeaderBytes::Both(b) => (b, b),
+            HeaderBytes::Split(s) => (
+                s.request.unwrap_or(DEFAULT_HEADER_BYTES.0),
+                s.response.unwrap_or(DEFAULT_HEADER_BYTES.1),
+            ),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HeaderBytes {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        /// **Private.** A number or text is both sides; a map is `{ request, response }`.
+        struct V;
+        impl<'de> de::Visitor<'de> for V {
+            type Value = HeaderBytes;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(
+                    "a size like `800B` (or a whole number of bytes), or `{ request, response }`",
+                )
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(HeaderBytes::Both(v))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                u64::try_from(v).map(HeaderBytes::Both).map_err(|_| {
+                    E::custom(format!(
+                        "header_bytes: {v} is negative; use a number of 0 or more"
+                    ))
+                })
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                crate::units::parse(v, false)
+                    .map(HeaderBytes::Both)
+                    .map_err(|m| E::custom(format!("header_bytes: {m}")))
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, m: A) -> Result<Self::Value, A::Error> {
+                HeaderBytesSplit::deserialize(de::value::MapAccessDeserializer::new(m))
+                    .map(HeaderBytes::Split)
+            }
+        }
+        d.deserialize_any(V)
     }
 }

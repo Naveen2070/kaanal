@@ -27,6 +27,8 @@ fn ep(method: &str, params: Vec<QueryParam>, schema: Value) -> Endpoint {
         status: 200,
         schema: Some(schema),
         query_params: params,
+        file_in: false,
+        file_out: false,
     }
 }
 

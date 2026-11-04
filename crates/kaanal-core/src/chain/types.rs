@@ -104,6 +104,11 @@ pub struct Call {
     pub prob: f64,
     /// The edge's `balance`, which overrides the callee's own for this call.
     pub balance: Option<Balance>,
+    /// Request body size this call carries (the step's, else the edge's); `None` passes the
+    /// incoming size on.
+    pub sends: Option<u64>,
+    /// Response body size this call brings back, likewise.
+    pub returns: Option<u64>,
     /// Which call this is, for seeding.
     pub key: StepKey,
 }

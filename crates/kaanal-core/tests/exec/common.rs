@@ -21,11 +21,29 @@ endpoints:
   "GET /health": { override: { body: { ok: true } } }
 "#;
 
+/// Most exec tests check exact byte arithmetic, so a config that does not say otherwise gets
+/// `header_bytes: 0` (RULES 65: the default is 600 B and 400 B); the header tests write their own.
+fn without_headers(src: &str) -> String {
+    if src.contains("header_bytes") {
+        src.to_string()
+    } else {
+        src.replacen("version: 1\n", "version: 1\nheader_bytes: 0\n", 1)
+    }
+}
+
+/// Like [`build`], but the config keeps the default headers when it does not set `header_bytes`.
+pub(crate) fn build_raw(src: &str) -> (Topology, Endpoints) {
+    compile_cfg(&Config::from_yaml(src).unwrap())
+}
+
 pub(crate) fn build(src: &str) -> (Topology, Endpoints) {
-    let cfg = Config::from_yaml(src).unwrap();
-    let t = Topology::build(&cfg).unwrap();
+    compile_cfg(&Config::from_yaml(&without_headers(src)).unwrap())
+}
+
+fn compile_cfg(cfg: &Config) -> (Topology, Endpoints) {
+    let t = Topology::build(cfg).unwrap();
     let routes = [RouteSpec::inferred("GET /users/{id}", t.id("app").unwrap())];
-    let e = compile(&t, &routes, EndpointsInput::inline(&cfg)).unwrap();
+    let e = compile(&t, &routes, EndpointsInput::inline(cfg)).unwrap();
     (t, e)
 }
 

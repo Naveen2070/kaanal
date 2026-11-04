@@ -70,13 +70,27 @@ fn a_five_megabyte_response_adds_bytes_over_throughput() {
 }
 
 #[test]
-fn request_and_response_each_count_once() {
+fn a_read_counts_the_response_and_a_write_the_request() {
+    // GET /users/{id} reads: only the reply body moves the object
     let (t, e) = build(&cfg(FIXED, ""));
-    let both = files_hop(&t, &hops(&t, &e, 1024 * 1024, 4 * 1024 * 1024));
-    let resp = files_hop(&t, &hops(&t, &e, 0, 5 * 1024 * 1024));
-    let req = files_hop(&t, &hops(&t, &e, 5 * 1024 * 1024, 0));
-    assert_eq!(both, resp, "5 MB in two bodies costs what 5 MB in one does");
-    assert_eq!(both, req);
+    let by_resp = files_hop(&t, &hops(&t, &e, 0, 5 * 1024 * 1024));
+    assert_eq!(files_hop(&t, &hops(&t, &e, 5 * 1024 * 1024, 0)), ms(20));
+    assert_eq!(
+        files_hop(&t, &hops(&t, &e, 1024 * 1024, 4 * 1024 * 1024)),
+        ms(20) + Duration::from_nanos(PER_KB_NS * 4096)
+    );
+    assert!(by_resp > ms(20));
+    // an upload writes: only the request body moves
+    let chain = "endpoints:
+  \"GET /users/{id}\": { chain: [ { call: files, op: write } ] }
+";
+    let (t, e) = build(&cfg(FIXED, chain));
+    assert_eq!(files_hop(&t, &hops(&t, &e, 0, 5 * 1024 * 1024)), ms(20));
+    assert_eq!(
+        files_hop(&t, &hops(&t, &e, 5 * 1024 * 1024, 0)),
+        by_resp,
+        "a 5 MiB upload costs what a 5 MiB download does"
+    );
 }
 
 #[test]
@@ -94,27 +108,33 @@ fn without_throughput_sizes_cost_nothing() {
 }
 
 #[test]
-fn a_chain_call_with_an_op_costs_the_same_for_read_write_and_scan() {
-    let mut seen = Vec::new();
-    for op in ["read", "write", "scan"] {
+fn read_and_scan_count_the_response_and_write_the_request() {
+    let big = 5 * 1024 * 1024;
+    for (op, resp_costs) in [("read", true), ("scan", true), ("write", false)] {
         let chain = format!(
-            "endpoints:\n  \"GET /users/{{id}}\": {{ chain: [ {{ call: files, op: {op} }} ] }}\n"
+            "endpoints:
+  \"GET /users/{{id}}\": {{ chain: [ {{ call: files, op: {op} }} ] }}
+"
         );
         let (t, e) = build(&cfg(FIXED, &chain));
-        let h = hops(&t, &e, 0, 5 * 1024 * 1024);
+        let h = hops(&t, &e, 0, big);
         assert!(
             h.iter().all(|h| !matches!(h.kind, HopKind::Op(_))),
             "a storage node has no op hop: {h:?}"
         );
-        seen.push(files_hop(&t, &h));
+        let by_resp = files_hop(&t, &h);
+        let by_req = files_hop(&t, &hops(&t, &e, big, 0));
+        let (costly, free) = if resp_costs {
+            (by_resp, by_req)
+        } else {
+            (by_req, by_resp)
+        };
+        assert_eq!(free, ms(20), "{op}: the other body is free");
+        assert!(
+            costly.abs_diff(ms(70)) < Duration::from_micros(10),
+            "{op}: {costly:?}"
+        );
     }
-    assert_eq!(seen[0], seen[1]);
-    assert_eq!(seen[1], seen[2]);
-    assert!(
-        seen[0].abs_diff(ms(70)) < Duration::from_micros(10),
-        "{:?}",
-        seen[0]
-    );
 }
 
 #[test]

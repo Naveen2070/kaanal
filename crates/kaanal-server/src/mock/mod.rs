@@ -58,7 +58,7 @@ use reply::{Ask, Reply, chaos_reply, no_store, pinned_reply, touched_nodes, with
 /// that goes away mid-request leaves a `client-gone` entry (see [`Flight`]). Only 404, 405 and
 /// a bad scope touch nothing else: `engine-stopped` still counts the route and samples its
 /// plan (that order predates the log).
-pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
+pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Response {
     let path = req.uri().path().to_string();
     // The control namespace never gets CORS (RULES R5.4), not even on a 404 or a preflight.
     let control = path == "/__kaanal" || path.starts_with("/__kaanal/");
@@ -123,7 +123,8 @@ pub async fn handle(State(st): State<Arc<AppState>>, req: Request) -> Response {
         route.key, route.endpoint.key,
         "a route answers with its own endpoint"
     );
-    let sizes = sizes(&g, route, req.headers(), (method, path, &params, &query));
+    let body_len = request_len(&g, route, &mut req).await;
+    let sizes = sizes(&g, route, body_len, (method, path, &params, &query));
     let body = read_body(route, &params, req).await;
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     // S10: the scoped stack, or else one snapshot of the live one (the `Arc` is cloned once here
@@ -300,13 +301,49 @@ fn plan_of(
     )
 }
 
-/// **Private.** The request body size from `Content-Length` (0 when absent or not a number).
-fn content_length(headers: &axum::http::HeaderMap) -> u64 {
+/// **Private.** The request body size from `Content-Length` (`None` when absent or not a number).
+fn content_length(headers: &axum::http::HeaderMap) -> Option<u64> {
     headers
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
-        .unwrap_or(0)
+}
+
+/// **Private.** The largest request body counted by reading it through: the largest size a journey
+/// may declare (1 GiB).
+const MAX_COUNTED: u64 = 1 << 30;
+
+/// **Private.** The size of the request body for the size costs (RULES 65 point 5): `Content-Length`
+/// when it is there, else, for a route that does not read the body itself, the bytes the client
+/// really sends (a chunked upload), counted by reading the body through and keeping none of it.
+/// 0 when the topology has no size cost, so the body is not touched then.
+async fn request_len(g: &Generation, route: &Route, req: &mut Request) -> u64 {
+    if !g.topo.payload_costs() {
+        return 0;
+    }
+    if let Some(n) = content_length(req.headers()) {
+        return n;
+    }
+    let ep = &route.endpoint;
+    let reads_itself = ep.collection.is_some() || ep.responder == Some(Responder::Login);
+    if reads_itself {
+        return 0;
+    }
+    count_body(std::mem::take(req.body_mut())).await
+}
+
+/// **Private.** The bytes of `body`, read through up to [`MAX_COUNTED`] and dropped as they come.
+async fn count_body(body: Body) -> u64 {
+    use tokio_stream::StreamExt;
+    let mut n = 0u64;
+    let mut chunks = body.into_data_stream();
+    while let Some(Ok(chunk)) = chunks.next().await {
+        n = n.saturating_add(chunk.len() as u64);
+        if n >= MAX_COUNTED {
+            return MAX_COUNTED;
+        }
+    }
+    n
 }
 
 /// **Private.** `(method, path, params, query)` of a request.
@@ -326,7 +363,7 @@ type Parts<'a> = (
 fn sizes(
     g: &Generation,
     route: &Route,
-    headers: &axum::http::HeaderMap,
+    body_len: u64,
     (method, path, params, query): Parts,
 ) -> (u64, u64) {
     // Only a topology with a payload cost looks at sizes at all.
@@ -334,7 +371,7 @@ fn sizes(
         return (0, 0);
     }
     (
-        content_length(headers),
+        body_len,
         resp_bytes(
             g,
             route,

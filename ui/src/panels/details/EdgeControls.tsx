@@ -13,18 +13,22 @@ import { BalanceField, NumberField, Section } from "./Field";
 import { balanceOf, setBalance } from "./fields";
 import {
   bandwidthKbOf,
+  BODY_MAX_BYTES,
+  bodyBytesOf,
   callsOf,
   clearBandwidth,
+  clearBody,
   EDGE_LIMITS,
   netMsOf,
   setBandwidth,
+  setBody,
   setCalls,
   setNet,
   setShare,
   shareApplies,
   shareOf,
 } from "./edgeFields";
-import { RATE_UNITS, rateText, TIME_UNITS } from "./units";
+import { BYTE_SIZE_UNITS, RATE_UNITS, rateText, TIME_UNITS } from "./units";
 
 const callee = (doc: Doc | null | undefined, e: EdgeDoc): NodeDoc | undefined =>
   doc?.nodes?.[String(e.to)];
@@ -102,6 +106,36 @@ export function EdgeControls({ index }: { index: number }) {
             Remove the bandwidth limit
           </button>
         ) : null}
+      </Section>
+
+      <Section title="What it carries">
+        {(["sends", "returns"] as const).map((field) => (
+          <div key={field}>
+            <NumberField
+              label={field === "sends" ? "Request size" : "Response size"}
+              hint={
+                field === "sends"
+                  ? "The body each call over this wire carries. Empty means the size of the request that reached the caller."
+                  : "The body each call over this wire brings back. Empty means the size of the response the caller itself gives."
+              }
+              value={bodyBytesOf(e, field)}
+              units={BYTE_SIZE_UNITS}
+              placeholder="Passed on"
+              max={BODY_MAX_BYTES}
+              step="any"
+              onCommit={(n) => patch([setBody(index, field, e, n)])}
+            />
+            {field in e ? (
+              <button
+                type="button"
+                onClick={() => void patch(clearBody(index, field, e))}
+                className="mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {field === "sends" ? "Remove the request size" : "Remove the response size"}
+              </button>
+            ) : null}
+          </div>
+        ))}
       </Section>
 
       <Section title="How often it is used">

@@ -30,16 +30,26 @@ impl Walk<'_> {
         start: Duration,
         cap: Option<u64>,
     ) -> Duration {
-        let bytes = if resp { self.bytes.1 } else { self.bytes.0 };
-        if bytes == 0 {
-            return Duration::ZERO;
-        }
         let edge_rate = edge.and_then(|e| self.topo.edges[e].bandwidth);
-        let wire = edge_rate.map(|bw| cap.map_or(bw, |c| c.min(bw)).max(1));
         let (send, recv) = (
             self.topo.nodes[from.0].bandwidth.0,
             self.topo.nodes[to.0].bandwidth.1,
         );
+        // no pipe with a rate: nothing to cross, and no need to look at sizes (the common case)
+        if edge_rate.is_none() && send.is_none() && recv.is_none() {
+            return Duration::ZERO;
+        }
+        // the body and the headers of an HTTP call (RULES 65)
+        let (body, header) = if resp {
+            (self.bytes.1, self.topo.header_bytes.1)
+        } else {
+            (self.bytes.0, self.topo.header_bytes.0)
+        };
+        let bytes = body.saturating_add(header);
+        if bytes == 0 {
+            return Duration::ZERO;
+        }
+        let wire = edge_rate.map(|bw| cap.map_or(bw, |c| c.min(bw)).max(1));
         // (rate, the hop's owner and kind, the pipe); the first narrowest wins a tie.
         let mut pipes = Vec::with_capacity(3);
         if let (Some(e), Some(bw)) = (edge, wire) {

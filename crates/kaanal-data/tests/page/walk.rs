@@ -45,6 +45,8 @@ fn spec(schema: &Value, style: Style) -> PageSpec {
         status: 200,
         schema: Some(schema.clone()),
         query_params: vec![qp(index, None), qp("limit", Some(i64::from(MAX)))],
+        file_in: false,
+        file_out: false,
     })
     .expect("paged")
 }
@@ -189,6 +191,8 @@ fn heavy_records_shrink_the_page_and_walk_without_gaps() {
             status: 200,
             schema: Some(schema.clone()),
             query_params: vec![qp(index, None), qp("limit", Some(10_000))],
+            file_in: false,
+            file_out: false,
         })
         .unwrap();
         assert_eq!(spec.style, style);

@@ -134,7 +134,7 @@ fn a_bandwidth_link_is_a_processor_sharing_queue() {
     // (RULES 62), so M/G/1-PS: a transfer takes E[S] / (1 - rho) in all, and the time lost to
     // sharing (the hop's wait) is E[S] * rho / (1 - rho) whatever the size distribution.
     let t = topo(
-        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n",
+        "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n",
     );
     let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
     let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
@@ -172,6 +172,7 @@ fn processor_sharing_slows_each_size_class_by_the_same_factor() {
     // every class. 500 B (5 ms) at 20/s and 2000 B (20 ms) at 30/s on 100 kB/s: rho = 0.1 + 0.6 = 0.7.
     let t = topo(
         "version: 1
+header_bytes: 0
 nodes:
   gw: { type: gateway }
   app: { type: service }

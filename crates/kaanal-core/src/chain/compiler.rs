@@ -47,6 +47,8 @@ impl Compiler<'_> {
             op: None,
             prob: e.prob,
             balance: e.balance.clone(),
+            sends: e.sends,
+            returns: e.returns,
             key: keys.next(e.to),
         }
     }

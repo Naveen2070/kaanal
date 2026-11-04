@@ -9,6 +9,7 @@ import { useRun } from "../../data/store/run";
 import { bandwidthKbOf } from "./edgeFields";
 import { closestToBreaking, percent, twoSignificant } from "../../canvas/metrics";
 import { useSelected } from "../../data/store/view";
+import { HeaderBytes } from "./HeaderBytes";
 import { TrafficMix } from "./TrafficMix";
 
 export function SystemSummary() {
@@ -69,6 +70,7 @@ export function SystemSummary() {
       ) : null}
       <p className="m-0 mt-3 text-muted">Select a component to see and change it.</p>
       <TrafficMix />
+      <HeaderBytes />
     </div>
   );
 }

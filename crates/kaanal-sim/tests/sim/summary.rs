@@ -69,7 +69,7 @@ fn replicas_split_visits_and_load() {
 
 #[test]
 fn a_bandwidth_link_reports_its_transfers() {
-    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
+    let y = "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
     let mut cfg = windowed(20.0, 60, 5);
     cfg.streams[0].req_bytes = 1000;
     cfg.streams[0].resp_bytes = 1000;
@@ -94,7 +94,7 @@ fn a_bandwidth_link_reports_its_transfers() {
 #[test]
 fn a_wire_reports_its_time_on_the_wire_per_window() {
     // 20/s x 2 KB over a 100 KB/s wire
-    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n";
+    let y = "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n";
     let mut cfg = windowed(20.0, 60, 5);
     cfg.streams[0].req_bytes = 1000;
     cfg.streams[0].resp_bytes = 1000;
@@ -108,7 +108,7 @@ fn a_wire_reports_its_time_on_the_wire_per_window() {
 
 #[test]
 fn a_link_nothing_crossed_has_no_saturation_point() {
-    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
+    let y = "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
     // no payload, so the link never carries a byte
     let (_, s) = summary_of(y, &windowed(20.0, 60, 5));
     assert_eq!(s.links[0].saturates_at_req_s, None);
@@ -256,7 +256,7 @@ fn a_deadline_at_a_node_without_slots_is_a_warning_not_saturation() {
 
 #[test]
 fn a_node_card_reports_its_send_and_receive_pipes() {
-    let y = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms, bandwidth: 1000000 }\nedges:\n  - { from: gw, to: app }\n";
+    let y = "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service, proc: 1ms, bandwidth: 1000000 }\nedges:\n  - { from: gw, to: app }\n";
     let mut cfg = windowed(20.0, 60, 5);
     cfg.streams[0].req_bytes = 1000;
     cfg.streams[0].resp_bytes = 1000;
@@ -314,7 +314,7 @@ fn unit_text_and_integer_bytes_give_the_same_summary() {
     // 20/s x 2 KB over a 250 KB/s wire and a 250 KB/s send pipe on the callee: links, pipes and p99
     let sys = |edge: &str, node: &str| {
         format!(
-            "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, proc: 1ms, bandwidth: {{ out: {node} }} }}\nedges:\n  - {{ from: gw, to: app, bandwidth: {edge} }}\n"
+            "version: 1\nheader_bytes: 0\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, proc: 1ms, bandwidth: {{ out: {node} }} }}\nedges:\n  - {{ from: gw, to: app, bandwidth: {edge} }}\n"
         )
     };
     let mut cfg = windowed(20.0, 60, 5);

@@ -9,6 +9,12 @@ use super::{
 };
 use crate::balance::Balance;
 
+/// The first byte of a storage node that does not write one: 25 ms, the same estimate Studio starts a
+/// new node with. An estimate, not a published figure (RULES 61).
+fn default_first_byte() -> DistConfig {
+    DistConfig::Fixed(Duration::from_millis(25))
+}
+
 /// An object store (S3, GCS, Azure Blob): a leaf that calls nothing. One call costs `first_byte`
 /// plus (request bytes + response bytes) / `throughput`; every operation (`read`, `write`,
 /// `scan`) costs the same. No provider publishes a first-byte latency, so there are no presets:
@@ -19,7 +25,9 @@ pub struct StorageConfig {
     /// Label only (`s3`, `gcs`, `blob`); it sets no numbers.
     pub flavor: Option<StorageFlavor>,
     /// Time to the first byte of a call: the node's service time. A duration like `proc`
-    /// (`25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`). Required.
+    /// (`25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`). Absent = 25 ms, a labelled estimate
+    /// (no provider publishes one, RULES 61): write your own measurement.
+    #[serde(default = "default_first_byte")]
     pub first_byte: DistConfig,
     /// Bytes per second the store moves for one call, as a whole number or text with a unit like
     /// `80MB/s` (KB = 1024 bytes); at least 1. Each call adds (request bytes + response bytes) /

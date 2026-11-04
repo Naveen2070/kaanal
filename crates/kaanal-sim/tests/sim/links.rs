@@ -7,7 +7,7 @@ use crate::shared::compiled;
 use kaanal_core::{ChainResult, ChaosKey, ChaosLayer, ChaosState, Config, HopKind};
 
 /// Two bandwidth edges and a `per_kb` node, behind a gateway.
-const LINKS: &str = "version: 1\nseed: 31\nnodes:\n  gw: { type: gateway, proc: { mean: 1ms } }\n  app: { type: service, proc: { mean: 2ms }, per_kb: 100us }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: gw, to: app, net: 1ms, bandwidth: 1000000000 }\n  - { from: app, to: db, net: { mean: 1ms }, bandwidth: 500000000 }\n";
+const LINKS: &str = "version: 1\nheader_bytes: 0\nseed: 31\nnodes:\n  gw: { type: gateway, proc: { mean: 1ms } }\n  app: { type: service, proc: { mean: 2ms }, per_kb: 100us }\n  db: { type: database, flavor: postgres }\nedges:\n  - { from: gw, to: app, net: 1ms, bandwidth: 1000000000 }\n  - { from: app, to: db, net: { mean: 1ms }, bandwidth: 500000000 }\n";
 
 #[test]
 fn link_chain_matches_execute() {

@@ -157,6 +157,10 @@ pub struct Edge {
     pub balance: Option<Balance>,
     /// Link capacity in bytes per second; `None` = unlimited (and no link hop).
     pub bandwidth: Option<u64>,
+    /// Request body size a call over this edge carries; `None` = pass the incoming size on.
+    pub sends: Option<u64>,
+    /// Response body size a call over this edge brings back; `None` = pass the incoming size on.
+    pub returns: Option<u64>,
 }
 
 /// A validated topology graph.
@@ -171,6 +175,8 @@ pub struct Topology {
     /// The auth node, if the topology has one (at most one, X2); it owns the built-in
     /// `POST /login` and `GET /.well-known/jwks.json` routes.
     pub auth: Option<NodeId>,
+    /// Header bytes `(request, response)` every wire transfer and HTTP node size cost carries.
+    pub header_bytes: (u64, u64),
     /// **Private.** name → id lookup.
     index: HashMap<String, NodeId>,
 }
@@ -545,6 +551,8 @@ impl Topology {
                 prob,
                 balance: e.balance.clone(),
                 bandwidth: e.bandwidth,
+                sends: e.sends,
+                returns: e.returns,
             });
         }
 
@@ -553,6 +561,10 @@ impl Topology {
             edges,
             gateway,
             auth,
+            header_bytes: cfg.header_bytes.map_or(
+                crate::config::DEFAULT_HEADER_BYTES,
+                crate::config::HeaderBytes::pair,
+            ),
             index,
         };
         topo.check_cycles()?;

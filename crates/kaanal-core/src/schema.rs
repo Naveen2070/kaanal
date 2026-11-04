@@ -86,6 +86,16 @@ pub(crate) fn size(_: &mut SchemaGenerator) -> Schema {
     )
 }
 
+/// **Private.** Schema of a required payload size (the one-number form of `header_bytes`).
+pub(crate) fn size_value(_: &mut SchemaGenerator) -> Schema {
+    bytes_schema(
+        SIZE_PATTERN,
+        0,
+        "A whole number of bytes, or text with a unit: `2KB`, `1.5MB`, `512B` (units B, KB, MB, GB; KB = 1024 bytes; at most 1 GiB).",
+        false,
+    )
+}
+
 /// **Private.** Schema of a `claims` map: names to strings, numbers or booleans (at most 32),
 /// for `#[schemars(schema_with = "crate::schema::claims")]`. The load rules are in `config`.
 pub(crate) fn claims(_: &mut SchemaGenerator) -> Schema {

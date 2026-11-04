@@ -9,7 +9,7 @@ use kaanal_sim::{SimConfig, Stream};
 use std::time::Duration;
 
 /// A gateway that calls `app` over a 1 MB/s wire.
-const WIRE: &str = "version: 1\nseed: 5\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
+const WIRE: &str = "version: 1\nheader_bytes: 0\nseed: 5\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 1000000 }\n";
 
 fn stream(key: &str, rate: f64, req: u64) -> Stream {
     Stream {
@@ -128,6 +128,7 @@ fn one_card_is_shared_by_every_wire_out_of_it() {
     // upload a second in all (rho 0.5). Sharing the card, the mean call takes E[S] / (1 - rho) =
     // 1.0 s (M/G/1 processor sharing); FIFO would have given 0.75 s.
     let src = "version: 1
+header_bytes: 0
 seed: 5
 nodes:
   gw: { type: gateway, bandwidth: { out: 1000000 } }

@@ -11,13 +11,52 @@ use super::{DYN_BASE, Hop, HopKind, Op, PickKind, Plan, PlanItem, fail_of, hang_
 use crate::balance::{Balance, pick_replica};
 use crate::chain::{Seq, Step};
 use crate::chaos::{EffectiveChaos, ErrorKind, FailKind, Resolved};
-use crate::config::Hold;
+use crate::config::{Hold, NodeKind};
 use crate::dist::Dist;
 use crate::rng::HopRng;
 use crate::stable_hash;
 use crate::topology::{NodeId, Topology};
 
 /// **Private.** The RNG of one hop's draws (R1.34, D8).
+/// Which bodies a hop's size cost counts (RULES 65): the way HTTP and object stores really move
+/// them. A PUT or a database write takes a body in and sends a status back; a GET or a scan sends a
+/// body out and takes only a key in; any other hop (a service doing its own work) handles both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Counted {
+    /// The request and the response.
+    Both,
+    /// Only the request body.
+    Request,
+    /// Only the response body.
+    Response,
+}
+
+impl Counted {
+    /// The bytes of `(request, response)` this counts.
+    pub(super) fn bytes(self, (req, resp): (u64, u64)) -> u64 {
+        match self {
+            Counted::Both => req.saturating_add(resp),
+            Counted::Request => req,
+            Counted::Response => resp,
+        }
+    }
+}
+
+/// What the hop `kind` of a node of `node` counts when the operation in force is `op`: the op hops
+/// of a database or an inline-ops monolith and the first-byte hop of a storage node go by the op,
+/// everything else counts both.
+pub(super) fn counted(node: NodeKind, kind: HopKind, op: Op) -> Counted {
+    let by_op = |op: Op| match op {
+        Op::Write => Counted::Request,
+        Op::Read | Op::Scan => Counted::Response,
+    };
+    match (kind, node) {
+        (HopKind::Op(o), _) => by_op(o),
+        (HopKind::Proc, NodeKind::Storage) => by_op(op),
+        _ => Counted::Both,
+    }
+}
+
 pub(crate) fn draw_rng(path: u64, node: &str, tag: &[u8]) -> HopRng {
     HopRng::seed_from_u64(stable_hash(&[&path.to_le_bytes(), node.as_bytes(), tag]))
 }
@@ -228,7 +267,7 @@ impl Walk<'_> {
                     let Some(r) = self.own_replica(*node, run, path, &mut inline) else {
                         return self.no_replica(*node, now);
                     };
-                    match self.own(*node, HopKind::Proc, path, b"proc", now, r) {
+                    match self.own(*node, HopKind::Proc, op, path, b"proc", now, r) {
                         Ok(dur) => now += dur,
                         Err(fail) => return fail,
                     }
@@ -238,7 +277,7 @@ impl Walk<'_> {
                         return self.no_replica(*node, now);
                     };
                     let kind = HopKind::Op(own.unwrap_or(op));
-                    match self.own(*node, kind, path, b"op", now, r) {
+                    match self.own(*node, kind, op, path, b"op", now, r) {
                         Ok(dur) => now += dur,
                         Err(fail) => return fail,
                     }
@@ -370,10 +409,15 @@ impl Walk<'_> {
     /// **Private.** A node's own hop (proc or op): chaos roll, then the duration. A failing
     /// node fails at its hop start (E14) and records a `Fail` instead of a hop; a hang records a
     /// hop of the node's `timeout` (else [`HANG_CAP`]) and then a 504 `Fail` at its end (Z6).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one hop's inputs; a struct would only rename them"
+    )]
     fn own(
         &mut self,
         node: NodeId,
         kind: HopKind,
+        op: Op,
         path: u64,
         tag: &[u8],
         start: Duration,
@@ -416,7 +460,10 @@ impl Walk<'_> {
             _ => &n.proc,
         };
         let mut dur = dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add);
-        let body = self.bytes.0.saturating_add(self.bytes.1);
+        let mut body = counted(n.kind, kind, op).bytes(self.bytes);
+        if kind == HopKind::Proc && n.per_kb != Dist::ZERO {
+            body = body.saturating_add(counted(n.kind, kind, op).bytes(self.topo.header_bytes));
+        }
         if matches!(kind, HopKind::Proc | HopKind::Op(_)) && body > 0 && n.per_kb != Dist::ZERO {
             // a draw of its own, so no existing draw moves
             let per_kb = n.per_kb.sample(&mut draw_rng(path, &n.name, b"perkb"));
@@ -529,5 +576,58 @@ impl Walk<'_> {
             size: self.items.len() - at - 1,
         };
         first.map_or(Ok(end), Err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_table_of_what_a_hop_counts() {
+        use Counted::{Both, Request, Response};
+        let table = [
+            (
+                NodeKind::Database,
+                HopKind::Op(Op::Write),
+                Op::Read,
+                Request,
+            ),
+            (
+                NodeKind::Database,
+                HopKind::Op(Op::Read),
+                Op::Write,
+                Response,
+            ),
+            (
+                NodeKind::Database,
+                HopKind::Op(Op::Scan),
+                Op::Write,
+                Response,
+            ),
+            (
+                NodeKind::Monolith,
+                HopKind::Op(Op::Write),
+                Op::Read,
+                Request,
+            ),
+            (NodeKind::Storage, HopKind::Proc, Op::Write, Request),
+            (NodeKind::Storage, HopKind::Proc, Op::Read, Response),
+            (NodeKind::Storage, HopKind::Proc, Op::Scan, Response),
+            (NodeKind::Service, HopKind::Proc, Op::Write, Both),
+            (NodeKind::Gateway, HopKind::Proc, Op::Read, Both),
+            (NodeKind::ExternalApi, HopKind::Proc, Op::Write, Both),
+        ];
+        for (node, kind, op, want) in table {
+            assert_eq!(
+                counted(node, kind, op),
+                want,
+                "{node:?} {kind:?} under {op:?}"
+            );
+        }
+        assert_eq!(Both.bytes((3, 4)), 7);
+        assert_eq!(Request.bytes((3, 4)), 3);
+        assert_eq!(Response.bytes((3, 4)), 4);
+        assert_eq!(Both.bytes((u64::MAX, 1)), u64::MAX, "saturates");
     }
 }

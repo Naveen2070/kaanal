@@ -212,3 +212,27 @@ test("a_wire_written_with_a_unit_shows_the_same_number_as_its_bytes", async () =
   await show(1, withBandwidth("lots")); // not a size: an empty box, never NaN
   expect((screen.getByLabelText("Bandwidth") as HTMLInputElement).value).toBe("");
 });
+
+test("request_and_response_size_are_typed_in_a_unit_and_written_in_bytes", async () => {
+  await show(1);
+  expect((screen.getByLabelText("Request size") as HTMLInputElement).value).toBe("");
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(screen.getByLabelText("Request size unit"), { target: { value: "KB" } });
+  const box = screen.getByLabelText("Request size");
+  fireEvent.change(box, { target: { value: "200" } });
+  fireEvent.blur(box);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["edges", 1, "sends"], value: 200 * 1024 }],
+  });
+});
+
+test("a_size_that_is_set_can_be_removed_to_go_back_to_passed_on", async () => {
+  await show(0, view({ edges: [{ from: "app", to: "db", returns: "5MB" }] }));
+  expect((screen.getByLabelText("Response size") as HTMLInputElement).value).toBe("5");
+  expect(screen.queryByText("Remove the request size")).toBeNull();
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.click(screen.getByText("Remove the response size"));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "returns"] }] });
+});

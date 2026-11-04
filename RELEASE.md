@@ -7,6 +7,25 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## How body sizes are costed
+
+Sizes only matter when a topology has a `bandwidth` (on an edge or a node), a `per_kb`, or a storage `throughput`.
+Then:
+
+- **Headers count.** Every wire transfer and every HTTP node's `per_kb` carries 600 B on a request and 400 B on a
+  response, an estimate of real HTTP headers. Write `header_bytes: 0` to leave them out, or a size, or
+  `{ request, response }`, to change them.
+- **Direction follows the operation.** A write (`PUT`, an insert) counts the request body, a read (`GET`) and a scan
+  count the response body, and a service counts both. This is how HTTP and object stores move data; there is no
+  switch for it.
+- **A call can carry its own sizes.** `sends:` and `returns:` on an edge or a `call:` step say what that call
+  carries (a 5 MB upload that becomes a 200 KB call to storage); without them the incoming size is passed on.
+- **Transfers share a pipe fairly** instead of queueing, so a big upload no longer blocks a small call.
+
+A file that has a `bandwidth`, a `per_kb` or a `throughput` therefore reports different times from an earlier
+build: the headers add to every transfer, and a write no longer pays for the reply it never sends.
+`kaanal validate` also warns when an OpenAPI route takes or returns a file, because the spec does not give its size.
+
 ## Install
 
 Download the archive for your system, check it against `SHA256SUMS`, unpack it and run `kaanal --help`.

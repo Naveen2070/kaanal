@@ -117,6 +117,8 @@ fn misfit_entry_is_skipped_with_a_warning_naming_the_field() {
             status: 200,
             schema: Some(s),
             query_params: vec![],
+            file_in: false,
+            file_out: false,
         }],
     };
     let w = dictionary_warnings(&model, &opts);
@@ -149,6 +151,8 @@ fn misfit_warnings_follow_what_the_generator_visits() {
                 status: 200,
                 schema: Some(s),
                 query_params: vec![],
+                file_in: false,
+                file_out: false,
             }],
         };
         !dictionary_warnings(&model, &opts).is_empty()
@@ -211,6 +215,8 @@ fn model_of(s: Value) -> ApiModel {
             status: 200,
             schema: Some(s),
             query_params: vec![],
+            file_in: false,
+            file_out: false,
         }],
     }
 }
@@ -511,6 +517,8 @@ fn write_only_fields_are_not_warned() {
             status: 200,
             schema: Some(s),
             query_params: vec![],
+            file_in: false,
+            file_out: false,
         }],
     };
     assert_eq!(dictionary_warnings(&model, &opts), Vec::<String>::new());

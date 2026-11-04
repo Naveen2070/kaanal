@@ -172,6 +172,8 @@ fn discriminator_without_mapping_uses_a_single_value_enum() {
             status: 200,
             schema: Some(s),
             query_params: vec![],
+            file_in: false,
+            file_out: false,
         }],
     };
     assert!(api.warnings().is_empty(), "{:?}", api.warnings());
@@ -276,6 +278,8 @@ fn a_reused_discriminated_schema_warns_once_per_branch() {
             status: 200,
             schema: Some(s),
             query_params: vec![],
+            file_in: false,
+            file_out: false,
         }],
     };
     let w = api.warnings();
@@ -304,6 +308,8 @@ fn nested_and_deep_one_of_stays_within_the_depth_budget() {
             status: 200,
             schema: Some(deep),
             query_params: vec![],
+            file_in: false,
+            file_out: false,
         }],
     };
     assert!(api.warnings().iter().any(|w| w.contains("deeper than 16")));

@@ -13,5 +13,6 @@ mod links;
 mod prob;
 mod replica_chaos;
 mod replicas;
+mod sizes;
 mod storage;
 mod timeouts;

@@ -106,6 +106,10 @@ impl Compiler<'_> {
         })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one step's checks in the order the messages come"
+    )]
     pub(super) fn call(
         &mut self,
         c: &CallStep,
@@ -124,11 +128,12 @@ impl Compiler<'_> {
             return Err(target.bad(format!("'{name}' is a cache; use `cache: {name}`")));
         }
         let edge = self.edge(runner, to, &target)?;
-        let (net, calls, edge_prob, balance) = (
+        let (net, calls, edge_prob, balance, edge_sizes) = (
             edge.net.clone(),
             edge.calls.get(),
             edge.prob,
             edge.balance.clone(),
+            (edge.sends, edge.returns),
         );
         let bodies = usize::from(c.chain.is_some())
             + usize::from(c.with.is_some())
@@ -212,6 +217,8 @@ impl Compiler<'_> {
             op,
             prob,
             balance,
+            sends: c.sends.or(edge_sizes.0),
+            returns: c.returns.or(edge_sizes.1),
             key: keys.next(to),
         })
     }

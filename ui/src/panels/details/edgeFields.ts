@@ -59,3 +59,45 @@ export const setBandwidth = (i: number, e: EdgeDoc, kb: number): Op =>
   put(i, "bandwidth", e, Math.max(1, Math.round(kb * 1024)));
 export const clearBandwidth = (i: number, e: EdgeDoc): Op[] =>
   "bandwidth" in e ? [{ op: "remove", path: ["edges", i, "bandwidth"] }] : [];
+
+/** The loader's cap on a body size: 1 GiB. */
+export const BODY_MAX_BYTES = 1024 ** 3;
+
+type Body = "sends" | "returns";
+
+/** The body size a call over the wire carries (`sends`) or brings back (`returns`), in bytes; null = inherited. */
+export const bodyBytesOf = (e: EdgeDoc, field: Body): number | null => parseBytes(e[field]);
+/** Whole bytes, as the loader reads them. */
+export const setBody = (i: number, field: Body, e: EdgeDoc, bytes: number): Op =>
+  put(i, field, e, Math.round(bytes));
+export const clearBody = (i: number, field: Body, e: EdgeDoc): Op[] =>
+  field in e ? [{ op: "remove", path: ["edges", i, field] }] : [];
+
+/** What the file assumes for the headers of a call when `header_bytes` is not written (RULES 65). */
+export const DEFAULT_HEADER_BYTES = { request: 600, response: 400 } as const;
+export type HeaderSide = keyof typeof DEFAULT_HEADER_BYTES;
+
+/** Header bytes of a request and a response: the file's `header_bytes` (one size, or a pair), else the defaults. */
+export function headerBytesOf(doc: Doc | null | undefined): Record<HeaderSide, number> {
+  const v = doc?.header_bytes;
+  if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+    const m = v as Record<string, unknown>;
+    return {
+      request: parseBytes(m.request) ?? DEFAULT_HEADER_BYTES.request,
+      response: parseBytes(m.response) ?? DEFAULT_HEADER_BYTES.response,
+    };
+  }
+  const both = parseBytes(v);
+  return both === null ? { ...DEFAULT_HEADER_BYTES } : { request: both, response: both };
+}
+
+/** Sets one side, writing the pair so the other side keeps what it shows. */
+export const setHeaderBytes = (
+  doc: Doc | null | undefined,
+  side: HeaderSide,
+  bytes: number,
+): Op => ({
+  op: doc && "header_bytes" in doc ? "set" : "insert",
+  path: ["header_bytes"],
+  value: { ...headerBytesOf(doc), [side]: Math.round(bytes) },
+});

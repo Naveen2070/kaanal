@@ -114,12 +114,34 @@ pub struct CallStep {
     pub prob: Option<f64>,
     /// An inline body for a service or monolith callee.
     pub chain: Option<Vec<StepConfig>>,
+    /// Request body size this call carries (overrides the edge's `sends`).
+    pub sends: Option<u64>,
+    /// Response body size this call brings back (overrides the edge's `returns`).
+    pub returns: Option<u64>,
     /// A key of the callee's `chains:`.
     pub with: Option<String>,
     /// One of the callee's own endpoints, `"METHOD /path"`.
     pub via: Option<String>,
     /// Written as a bare node name (`- db`), so errors point at the list item itself.
     pub bare: bool,
+}
+
+/// **Private.** A `sends:` value on a step: a size with units, read like the edge field.
+struct Sends(Option<u64>);
+
+impl<'de> Deserialize<'de> for Sends {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::units::sends(d).map(Sends)
+    }
+}
+
+/// **Private.** A `returns:` value on a step.
+struct Returns(Option<u64>);
+
+impl<'de> Deserialize<'de> for Returns {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::units::returns(d).map(Returns)
+    }
 }
 
 /// One `parallel` branch: a single step or a list of steps.
@@ -132,7 +154,8 @@ pub struct Branch {
 }
 
 /// **Private.** Field names a step may have, for messages.
-pub(super) const STEP_FIELDS: &str = "call, op, repeat, prob, chain, with, via, cache, parallel";
+pub(super) const STEP_FIELDS: &str =
+    "call, op, repeat, prob, sends, returns, chain, with, via, cache, parallel";
 
 impl<'de> Deserialize<'de> for StepConfig {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -187,6 +210,8 @@ impl<'de> Visitor<'de> for StepVisitor {
                 "op" => call.op = Some(m.next_value()?),
                 "repeat" => call.repeat = Some(m.next_value()?),
                 "prob" => call.prob = Some(m.next_value()?),
+                "sends" => call.sends = m.next_value::<Sends>()?.0,
+                "returns" => call.returns = m.next_value::<Returns>()?.0,
                 "chain" => call.chain = Some(m.next_value()?),
                 "with" => call.with = Some(m.next_value()?),
                 "via" => call.via = Some(m.next_value()?),

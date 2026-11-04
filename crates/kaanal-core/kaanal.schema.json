@@ -330,6 +330,40 @@
             "null"
           ]
         },
+        "returns": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Size of the response body a call over this edge brings back, written like `sends`. Absent\n= the size of the response the caller itself has to give."
+        },
+        "sends": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Size of the request body a call over this edge carries: bytes as a whole number, or text\nwith a unit like `200KB` (KB = 1024 bytes; at most 1 GiB). A `call:` step may override it.\nAbsent = the size of the request that reached the caller (it is passed on)."
+        },
         "to": {
           "description": "Name of the node it calls.",
           "type": "string"
@@ -475,6 +509,69 @@
           "type": "object"
         }
       ]
+    },
+    "HeaderBytes": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            }
+          ],
+          "description": "The same size for a request and a response."
+        },
+        {
+          "$ref": "#/$defs/HeaderBytesSplit",
+          "description": "Separate sizes; a missing side keeps its default."
+        }
+      ],
+      "description": "What an HTTP call carries besides its body (`header_bytes:` at the top of the file): one size\nfor a request and for a response, or `{ request, response }`. Default 600 B and 400 B, a labelled\nestimate; `0` turns headers off."
+    },
+    "HeaderBytesSplit": {
+      "additionalProperties": false,
+      "description": "The `{ request, response }` form of [`HeaderBytes`].",
+      "properties": {
+        "request": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header bytes of a request: bytes as a whole number, or text with a unit like `1KB`."
+        },
+        "response": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Header bytes of a response, written like `request`."
+        }
+      },
+      "type": "object"
     },
     "Hold": {
       "description": "What a node's slot covers (`hold:`), for a node that calls others.",
@@ -1743,7 +1840,7 @@
             },
             "first_byte": {
               "$ref": "#/$defs/Distribution",
-              "description": "Time to the first byte of a call: the node's service time. A duration like `proc`\n(`25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`). Required."
+              "description": "Time to the first byte of a call: the node's service time. A duration like `proc`\n(`25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`). Absent = 25 ms, a labelled estimate\n(no provider publishes one, RULES 61): write your own measurement."
             },
             "flavor": {
               "anyOf": [
@@ -1816,8 +1913,7 @@
             }
           },
           "required": [
-            "type",
-            "first_byte"
+            "type"
           ],
           "type": "object"
         }
@@ -2320,6 +2416,17 @@
         }
       ],
       "description": "Per-endpoint chains, overrides and error maps: a path to a YAML file (relative to this\nfile, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `\"METHOD /path\"`."
+    },
+    "header_bytes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HeaderBytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Header bytes an HTTP call carries on top of its body: a size for both sides, or\n`{ request, response }`. Default 600 B and 400 B (estimates); `0` is off. Charged on every\nwire transfer and on the per-KB cost of an HTTP node, so only a topology that has a\n`bandwidth`, a `per_kb` or a storage `throughput` is affected."
     },
     "locale": {
       "default": null,

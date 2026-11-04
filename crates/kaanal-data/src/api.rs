@@ -23,6 +23,11 @@ pub struct Endpoint {
     /// document order (path-item ones first; an operation parameter replaces a same-named
     /// path-item one).
     pub query_params: Vec<QueryParam>,
+    /// The request body is a file (`multipart/*`, `application/octet-stream`, an image, a PDF, or
+    /// a `format: binary` schema): its size is not in the spec.
+    pub file_in: bool,
+    /// A 2xx response is a file, likewise.
+    pub file_out: bool,
 }
 
 /// One primitive query parameter, with the bounds its schema declares.
@@ -95,12 +100,16 @@ impl ApiModel {
                 let ptr = format!("{item_ptr}/{m}");
                 let (status, schema) = pick_response(op, &doc, &ptr)?;
                 let query_params = query_params(item, op, &doc, &ptr);
+                let (file_in, file_out) =
+                    (takes_file(op, &doc, &ptr), returns_file(op, &doc, &ptr));
                 endpoints.push(Endpoint {
                     method: m.to_uppercase(),
                     path: format!("{base}{path}"),
                     status,
                     schema,
                     query_params,
+                    file_in,
+                    file_out,
                 });
             }
         }
@@ -218,6 +227,55 @@ fn query_params(item: &Value, op: &Value, doc: &Value, ptr: &str) -> Vec<QueryPa
         }
     }
     out
+}
+
+/// **Private.** Whether a media type carries a file rather than JSON: a `multipart/*` form, an
+/// octet stream, an image, audio, video, a PDF or a zip, or a schema that says `format: binary`.
+fn is_file_media(content_type: &str, media: &Value) -> bool {
+    let ct = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    ct.starts_with("multipart/")
+        || ct.starts_with("image/")
+        || ct.starts_with("audio/")
+        || ct.starts_with("video/")
+        || matches!(
+            ct.as_str(),
+            "application/octet-stream" | "application/pdf" | "application/zip"
+        )
+        || media
+            .pointer("/schema/format")
+            .and_then(Value::as_str)
+            .is_some_and(|f| matches!(f, "binary" | "byte"))
+}
+
+/// **Private.** Whether any media type of a `content` map carries a file.
+fn content_has_file(holder: &Value) -> bool {
+    holder
+        .get("content")
+        .and_then(Value::as_object)
+        .is_some_and(|c| c.iter().any(|(ct, media)| is_file_media(ct, media)))
+}
+
+/// **Private.** Whether the operation takes a file in its request body.
+fn takes_file(op: &Value, doc: &Value, ptr: &str) -> bool {
+    op.get("requestBody")
+        .and_then(|b| deref(b, doc, ptr).ok())
+        .is_some_and(content_has_file)
+}
+
+/// **Private.** Whether a 2xx response of the operation is a file.
+fn returns_file(op: &Value, doc: &Value, ptr: &str) -> bool {
+    op.get("responses")
+        .and_then(Value::as_object)
+        .is_some_and(|r| {
+            r.iter()
+                .filter(|(k, _)| k.parse::<u16>().is_ok_and(|c| (200..300).contains(&c)))
+                .any(|(_, v)| deref(v, doc, ptr).is_ok_and(content_has_file))
+        })
 }
 
 /// **Private.** Lowest 2xx response, and its application/json schema if it has one.

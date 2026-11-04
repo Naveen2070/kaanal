@@ -135,7 +135,8 @@ fn per_kb_on_a_database_adds_to_its_op_hop() {
             .dur
     };
     assert_eq!(op(&hops(&t, &e, 0, 0)), ms(4));
-    assert_eq!(op(&hops(&t, &e, 1024, 1024)), ms(4) + ms(2));
+    // GET /users/{id} reads: the 1 KB reply counts, the 1 KB request does not (RULES 65)
+    assert_eq!(op(&hops(&t, &e, 1024, 1024)), ms(4) + ms(1));
 }
 
 #[test]

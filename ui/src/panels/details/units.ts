@@ -21,6 +21,14 @@ export const SIZE_UNITS: readonly Unit[] = [
   { label: "GB", per: 1024 * 1024 },
 ];
 
+/** Body and header sizes, kept in whole bytes by the file (a header is a few hundred of them). */
+export const BYTE_SIZE_UNITS: readonly Unit[] = [
+  { label: "B", per: 1 },
+  { label: "KB", per: 1024 },
+  { label: "MB", per: 1024 ** 2 },
+  { label: "GB", per: 1024 ** 3 },
+];
+
 export const RATE_UNITS: readonly Unit[] = [
   { label: "KB/s", per: 1 },
   { label: "MB/s", per: 1024 },

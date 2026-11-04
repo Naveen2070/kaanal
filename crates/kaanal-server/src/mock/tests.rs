@@ -411,10 +411,15 @@ async fn a_hang_on_a_node_without_a_timeout_is_fault_injection() {
 
 /// `YAML` with a 1000 B/s link between `app` and `db`.
 fn narrow() -> Arc<AppState> {
-    app_with(&YAML.replace(
-        "- { from: app, to: db, net: 1ms }",
-        "- { from: app, to: db, net: 1ms, bandwidth: 1000 }",
-    ))
+    // no headers: these tests check what the body costs (the default adds 600 B and 400 B)
+    app_with(
+        &YAML
+            .replace(
+                "- { from: app, to: db, net: 1ms }",
+                "- { from: app, to: db, net: 1ms, bandwidth: 1000 }",
+            )
+            .replacen("version: 1\n", "version: 1\nheader_bytes: 0\n", 1),
+    )
 }
 
 #[tokio::test]
@@ -433,6 +438,28 @@ async fn a_mock_with_a_narrow_link_delays_the_response() {
     assert!(links[1].dur_ms > 0.0, "the response has a size");
     assert!(e.trace.contains("db.link=50"), "{}", e.trace);
     assert!(e.ms >= 50, "the client waited the transfer: {} ms", e.ms);
+}
+
+#[tokio::test]
+async fn a_chunked_upload_counts_the_bytes_the_client_really_sent() {
+    // no Content-Length: three 20 B chunks over a 1000 B/s link are 60 ms on the way in
+    let st = narrow();
+    let chunks: Vec<Result<Bytes, std::io::Error>> =
+        (0..3).map(|_| Ok(Bytes::from(vec![b'x'; 20]))).collect();
+    let body = Body::from_stream(tokio_stream::iter(chunks));
+    let req = HttpRequest::builder()
+        .method("GET")
+        .uri("/users/1")
+        .body(body)
+        .unwrap();
+    handle(State(Arc::clone(&st)), req).await;
+    let e = &entries(&st)[0];
+    let first = e
+        .hops
+        .iter()
+        .find(|h| h.kind == "link")
+        .expect("a request transfer");
+    assert_eq!(first.dur_ms, 60.0, "{}", e.trace);
 }
 
 #[tokio::test]

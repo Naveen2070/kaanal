@@ -53,7 +53,10 @@ pub use limits::{BoundedConcurrency, ConcurrencyConfig, PoolConfig, RateLimitCon
 pub use nodes::{CacheFlavor, DbFlavor, Hold, NodeConfig, NodeKind, OpsConfig};
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
-pub use shared::{DistConfig, EdgeConfig, NodeBandwidth, NodeBandwidthSplit, Override, UserConfig};
+pub use shared::{
+    DEFAULT_HEADER_BYTES, DistConfig, EdgeConfig, HeaderBytes, HeaderBytesSplit, NodeBandwidth,
+    NodeBandwidthSplit, Override, UserConfig,
+};
 pub use storage::{StorageConfig, StorageFlavor};
 pub use traffic::{JourneyConfig, MAX_DURATION, TrafficConfig, check_profile};
 use values::{
@@ -79,6 +82,12 @@ pub struct Config {
     /// Dependency edges, caller → dependency.
     #[serde(default)]
     pub edges: Vec<EdgeConfig>,
+    /// Header bytes an HTTP call carries on top of its body: a size for both sides, or
+    /// `{ request, response }`. Default 600 B and 400 B (estimates); `0` is off. Charged on every
+    /// wire transfer and on the per-KB cost of an HTTP node, so only a topology that has a
+    /// `bandwidth`, a `per_kb` or a storage `throughput` is affected.
+    #[serde(default)]
+    pub header_bytes: Option<HeaderBytes>,
     /// `controlled` (default): timings and failures follow `seed`, so a run can be replayed.
     /// `realistic`: a seed is picked at startup (and printed), so runs differ like a real system.
     #[serde(default)]

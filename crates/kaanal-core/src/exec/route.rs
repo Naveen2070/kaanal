@@ -22,6 +22,27 @@ impl Walk<'_> {
         now: &mut Duration,
         run: (NodeId, u16),
     ) -> Option<Flow> {
+        // The call carries its own sizes when it has them (`sends`, `returns`); the callee's body
+        // and its own calls see them, and the caller's go back once the call is over.
+        let saved = self.bytes;
+        self.bytes = (
+            call.sends.unwrap_or(saved.0),
+            call.returns.unwrap_or(saved.1),
+        );
+        let flow = self.call_inner(call, path, op, now, run);
+        self.bytes = saved;
+        flow
+    }
+
+    /// **Private.** [`Walk::call_step`] with the call's sizes already in `bytes`.
+    fn call_inner(
+        &mut self,
+        call: &Call,
+        path: u64,
+        op: Op,
+        now: &mut Duration,
+        run: (NodeId, u16),
+    ) -> Option<Flow> {
         let topo = self.topo;
         let chaos = self.chaos;
         let target = topo.nodes[call.node].name.as_str();

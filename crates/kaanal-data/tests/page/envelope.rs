@@ -25,6 +25,8 @@ fn spec(schema: &Value, params: &[&str]) -> PageSpec {
         status: 200,
         schema: Some(schema.clone()),
         query_params: params.iter().map(|n| qp(n)).collect(),
+        file_in: false,
+        file_out: false,
     })
     .expect("paged")
 }
@@ -383,6 +385,8 @@ fn zero_based_page_numbers_in_meta() {
         status: 200,
         schema: Some(s.clone()),
         query_params: params,
+        file_in: false,
+        file_out: false,
     })
     .unwrap();
     assert_eq!(spec.page_base, 0);

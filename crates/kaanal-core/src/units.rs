@@ -164,6 +164,10 @@ field_fns! {
     bandwidth_cap, "bandwidth_cap", true;
     req_bytes, "req_bytes", false;
     resp_bytes, "resp_bytes", false;
+    sends, "sends", false;
+    returns, "returns", false;
+    header_request, "request", false;
+    header_response, "response", false;
 }
 
 #[cfg(test)]

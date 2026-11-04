@@ -46,10 +46,14 @@ fn flavor_takes_s3_gcs_blob_and_refuses_the_rest_naming_the_choices() {
 }
 
 #[test]
-fn first_byte_is_required_and_the_error_names_it() {
-    let err = with("flavor: s3, throughput: 80MB/s").unwrap_err();
-    assert!(err.contains("missing field 'first_byte'"), "{err}");
-    assert!(err.contains("node 's3'"), "{err}");
+fn first_byte_defaults_to_a_25ms_estimate_when_not_written() {
+    // RULES 61 point 3: no published figure, so the default is a labelled estimate (Studio's too)
+    let c = with("flavor: s3, throughput: 80MB/s").unwrap();
+    let t = Topology::build(&c).unwrap();
+    assert_eq!(
+        t.nodes[t.id("s3").unwrap()].proc,
+        Dist::Fixed(std::time::Duration::from_millis(25))
+    );
 }
 
 #[test]

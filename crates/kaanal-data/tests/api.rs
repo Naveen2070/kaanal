@@ -531,3 +531,93 @@ fn date_after_param_is_not_a_cursor() {
         kaanal_data::Style::Cursor
     );
 }
+
+// ---- file routes (RULES 65 point 4): their size is not in the spec ----
+
+const FILES: &str = r#"
+openapi: 3.0.3
+info: { title: t, version: "1" }
+paths:
+  /files:
+    post:
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties: { file: { type: string, format: binary } }
+      responses:
+        "201":
+          description: stored
+          content:
+            application/json:
+              schema: { type: object, properties: { id: { type: string } } }
+  /files/{id}:
+    get:
+      responses:
+        "200":
+          description: the object
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+  /raw:
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema: { type: string, format: binary }
+      responses:
+        "204": { description: ok }
+  /notes:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { text: { type: string } } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { type: object, properties: { id: { type: string } } }
+"#;
+
+#[test]
+fn a_multipart_upload_and_an_octet_stream_download_are_flagged_as_files() {
+    let m = ApiModel::from_openapi(FILES).unwrap();
+    let up = find(&m, "POST", "/files");
+    assert!((up.file_in, up.file_out) == (true, false), "{up:?}");
+    let down = find(&m, "GET", "/files/{id}");
+    assert!((down.file_in, down.file_out) == (false, true), "{down:?}");
+    let raw = find(&m, "PUT", "/raw");
+    assert!(
+        raw.file_in,
+        "a binary schema is a file whatever the media type says"
+    );
+    let note = find(&m, "POST", "/notes");
+    assert!(!note.file_in && !note.file_out, "plain JSON is not a file");
+}
+
+#[test]
+fn a_file_route_gets_a_hint_to_set_its_size_and_a_json_route_none() {
+    let w = ApiModel::from_openapi(FILES).unwrap().warnings();
+    let has = |needle: &str| w.iter().any(|x| x.contains(needle));
+    assert!(
+        has("POST /files: takes a file") && has("req_bytes"),
+        "{w:?}"
+    );
+    assert!(
+        has("GET /files/{id}: returns a file") && has("resp_bytes"),
+        "{w:?}"
+    );
+    assert!(has("PUT /raw: takes a file"), "{w:?}");
+    assert!(!w.iter().any(|x| x.contains("/notes")), "{w:?}");
+    assert!(
+        ApiModel::from_openapi(SPEC)
+            .unwrap()
+            .warnings()
+            .iter()
+            .all(|x| !x.contains("file")),
+        "a spec with no file routes has no file hints"
+    );
+}
