@@ -6,17 +6,19 @@ Parsing of `kaanal.yaml` into typed config.
 
 `config` is a folder module. Every public item is re-exported from `mod.rs`, so no path changed (checked name by name against the old file). The sections below describe all of it.
 
-| File           | What it holds                                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mod.rs`       | `Config`, `Determinism`, `SeedSource`, `ConfigError`, `Config::from_yaml`; re-exports every public name, so `kaanal_core::config::X` is unchanged. |
-| `balancer.rs`  | `LoadBalancerConfig`, the load-balancer node's fields (split out of `nodes.rs`, which passed 800 lines).                                           |
-| `nodes.rs`     | The node kinds and the per-kind structs (gateway, service, monolith, database, cache, external API, auth, load balancer), the flavor enums.        |
-| `limits.rs`    | Concurrency, pools and rate limits.                                                                                                                |
-| `shared.rs`    | Users, edges, latency distributions (`DistConfig`) and endpoint overrides.                                                                         |
-| `endpoints.rs` | The `endpoints:` map, error maps and the step deserializers (`call`, `cache`, `parallel`, `repeat`).                                               |
-| `scenario.rs`  | Scenario files: `chaos:` entries, `pins:`, `parse_scenario`.                                                                                       |
-| `values.rs`    | Field-level serde helpers (ratios, rates, statuses, URLs, durations, unique names).                                                                |
-| `checks.rs`    | Cross-field checks serde cannot place: auth, capacity, locales.                                                                                    |
+| File           | What it holds                                                                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mod.rs`       | `Config`, `Determinism`, `SeedSource`, `ConfigError`, `Config::from_yaml`; re-exports every public name, so `kaanal_core::config::X` is unchanged.                                       |
+| `balancer.rs`  | `LoadBalancerConfig`, the load-balancer node's fields (split out of `nodes.rs`, which passed 800 lines).                                                                                 |
+| `storage.rs`   | `StorageConfig` and `StorageFlavor`, the storage node (an object store): required `first_byte`, optional `throughput`, `StorageConfig::per_kb()` (the size term as `1024 / throughput`). |
+| `kinds.rs`     | The per-kind config structs of gateway, service, monolith, database, cache, external API and auth (split out of `nodes.rs`, which reached 800 lines).                                    |
+| `nodes.rs`     | `NodeKind`, `Hold`, `NodeConfig` and its accessors, `OpsConfig` and the flavor enums; the load-balancer and storage structs live in `balancer.rs` and `storage.rs`.                      |
+| `limits.rs`    | Concurrency, pools and rate limits.                                                                                                                                                      |
+| `shared.rs`    | Users, edges, latency distributions (`DistConfig`) and endpoint overrides.                                                                                                               |
+| `endpoints.rs` | The `endpoints:` map, error maps and the step deserializers (`call`, `cache`, `parallel`, `repeat`).                                                                                     |
+| `scenario.rs`  | Scenario files: `chaos:` entries, `pins:`, `parse_scenario`.                                                                                                                             |
+| `values.rs`    | Field-level serde helpers (ratios, rates, statuses, URLs, durations, unique names).                                                                                                      |
+| `checks.rs`    | Cross-field checks serde cannot place: auth, capacity, locales, a storage `throughput` of at least 1.                                                                                    |
 
 ## What it does
 

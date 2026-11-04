@@ -4,7 +4,7 @@ What Kaanal actually simulates, in plain terms.
 
 ## Topology
 
-Your system is a graph of **nodes** (`gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`) connected by **edges** (dependencies). The graph must be acyclic and have at most one gateway and one auth node; anything Kaanal can't simulate is rejected when the file loads, with a message naming the problem — never silently ignored.
+Your system is a graph of **nodes** (`gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer`, `storage`) connected by **edges** (dependencies). The graph must be acyclic and have at most one gateway and one auth node; anything Kaanal can't simulate is rejected when the file loads, with a message naming the problem — never silently ignored.
 
 Requests enter at the gateway, or at the service that owns the route when there is none, then follow the endpoint's chain (by default every node reachable from the owner); `POST /login` and the JWKS enter at the auth node (after the gateway, if any). A config with only an auth node is valid. See the [endpoints reference](endpoints.md) to change it.
 

@@ -8,7 +8,7 @@ A request's `Plan` is walked against per-node limits: a slot limit ([`Gate`](#ga
 
 ## Bucket
 
-`Bucket::new(&RateLimit)` makes a full bucket; `Bucket::take(now) -> Result<(), u64>` takes one token.
+`Bucket::new(&RateLimit)` makes a full bucket; `Bucket::take(now) -> Result<(), u64>` takes one token. A bucket turns a call away with the status it holds: 429, or whatever `with_status` set (`Units::new` gives a storage node 503, from `NodeKind::rate_limit_status`); `status()` reads it.
 
 - It is the generic cell rate algorithm (GCRA) in integer nanoseconds. State is one `tat` (theoretical arrival time of the next cell), starting at 0.
 - `take(now)`: with `window = (burst - 1) * interval`, if `tat > now + window` the bucket is empty and `Err(tat - now - window)` says how many nanoseconds until a token exists. Otherwise `tat = max(tat, now) + interval` and the result is `Ok(())`.

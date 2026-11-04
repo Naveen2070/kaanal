@@ -205,6 +205,16 @@ export function configLine(label: string, config: NodeDoc | undefined): string {
     const ms = durationMs(config.proc);
     parts.push(ms === null ? "varies" : `${Number(ms.toFixed(3))} ms`);
   }
+  if (config?.type === "storage") {
+    const fb = config.first_byte;
+    const median = typeof fb === "object" && fb !== null ? durationMs((fb as NodeDoc).p50) : null;
+    const ms = durationMs(fb) ?? median;
+    parts.push(
+      ms === null
+        ? "first byte varies"
+        : `first byte ${median !== null ? "p50 " : ""}${Number(ms.toFixed(3))} ms`,
+    );
+  }
   return parts.join(" · ");
 }
 

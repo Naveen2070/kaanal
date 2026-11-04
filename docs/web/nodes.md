@@ -160,6 +160,39 @@ lb:
 
 The chosen component then picks a copy by its own `balance`, and the wire to it keeps its `net`, `calls` and `bandwidth`. An edge out of a balancer takes no `prob` (the spread decides). With every callee down the call fails with a 503 at the balancer. Round robin counts the calls each copy of the balancer gets, so copies of a balancer do not lock to the components behind them. **A route behind a balancer.** When the gateway has no wire to the service that owns a route but has one to a balancer that reaches it (through one balancer or several in a row), the request crosses each balancer on the way: path-based routing, as an nginx or an ALB rule does, so the route decides the target and the balancer does not pick; its time, slots, queue, bandwidth and `hold` are paid on every such route. A direct wire from the gateway to the owner wins when there is one. To spread one route over several identical backends, give the owner `replicas` and a `balance` (a pool); `spread` is for a balancer that really chooses between different components (a call from a service, a `call:` step, a gateway chain). **Not built yet:** `least-conn` and `p2c` (they need the live queues; the next step).
 
+## `storage`
+
+An object store (S3, Google Cloud Storage, Azure Blob): a **leaf** that calls nothing. Whatever may call a database may call it (`service`, `monolith`, `auth`, and a `load-balancer` in front of it).
+
+```yaml
+assets:
+  type: storage
+  flavor: s3
+  first_byte: 25ms
+  throughput: 80MB/s
+```
+
+| Field                                                   | Meaning                                                                                                                                                                                                     | Default            |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `first_byte`                                            | Time to the first byte of a call, the node's service time. A duration like `proc`: `25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`. **Required**: a node without it is a load error naming the field | none               |
+| `throughput`                                            | Bytes per second the store moves for one call: a whole number or text like `80MB/s`, `250KB/s` (KB = 1024 bytes, see [units](#payload-cost)); at least 1 byte per second. A larger body takes longer        | none: no size term |
+| `flavor`                                                | `s3`, `gcs` or `blob`. A **label only** (shown on the page and in status output); it sets no number                                                                                                         | none               |
+| `concurrency`                                           | A number, or `{ limit, queue, overflow_status }`: calls served at once                                                                                                                                      | unlimited          |
+| `rate_limit`                                            | Token bucket: `rps` and `burst`; over it a call fails with **503** (S3's "Slow Down"), not 429 like the other kinds                                                                                         | none               |
+| `timeout`, `replicas`, `balance`, `bandwidth`, `locale` | As on the other nodes                                                                                                                                                                                       |                    |
+
+**Cost of one call** is `first_byte + (request bytes + response bytes) / throughput`, with KB = 1024. The bytes are the request and response sizes already in the traffic (a stream's `req_bytes` and `resp_bytes`; the live mock's `Content-Length` and body size), so there is no size field of its own; with no sizes, or no `throughput`, the size term is nothing. Example: `first_byte: 20ms`, `throughput: 100MB/s` and a 5 MB response cost 20 ms + 5 MiB / (100 MiB/s) = 20 ms + 50 ms = 70 ms; a 5 KB object adds under a millisecond. It runs on the same machinery as `proc` and `per_kb`: the node's service time is `first_byte` and the size term is `per_kb` worked out as `1024 / throughput` seconds per KB (held to the nanosecond, so a size term is exact to about 1 part in 10^4 at 100 MB/s). A storage node therefore refuses `proc` and `per_kb` (use `first_byte` and `throughput`), and `ops`, `pool`, `hit_ratio` and `hold` (it calls nothing, and its concurrency is `concurrency`), each as a load error that says so.
+
+**Operations.** A step or route `op: read`, `write` or `scan` toward a storage node is accepted exactly as for a database, and means `GET`, `PUT` and `LIST`. All three cost the same `first_byte` plus the size term, so the op changes nothing about timing. A bare `call: assets` works, and a service's default body calls its storage nodes after its database-style callees. Whether a storage call holds the caller's slot follows the caller's own `hold` setting; the node holds one of its own slots only for its own work.
+
+**Rate limit, and why there are no presets.** `rate_limit` is the node's request rate (one limit per node; the simulator has no key prefixes). It is off unless you set it and the flavor does not set it. No provider publishes a first-byte latency for standard object storage, so **there are no presets**: `first_byte` and `throughput` are numbers you write from your own measurements. The request-rate figures that are published (searched 2026-11-04) are:
+
+- AWS S3: at least 3,500 PUT, COPY, POST and DELETE requests and 5,500 GET and HEAD requests per second per prefix, and a sizing guideline of one request per 85 to 90 MB/s; it answers 503 Slow Down while it scales (docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance-design-patterns.html).
+- Google Cloud Storage: about 5,000 object reads and 1,000 object writes per second per bucket to start, scaling as it goes; it exposes no latency metric (docs.cloud.google.com/storage/docs/request-rate).
+- Azure Blob: up to 3,000 requests per second for one block blob; throughput is bounded by the storage account (learn.microsoft.com/azure/storage/blobs/scalability-targets).
+
+**A storage node in Studio** starts as `{ type: storage, flavor: s3, first_byte: 25ms, throughput: 80MB/s }`. Those two numbers are **placeholders to edit, not published figures** (see above). It has no `concurrency` on purpose: the request-rate figures belong to `rate_limit`. Studio edits every field above in boxes (see the Storage entry of [Studio](studio.md)); its **Add a request limit** button writes `rate_limit: { rps: 5500, burst: 5500 }`, S3's published read rate per prefix, as a starting point to change.
+
 ## Nodes added in Studio
 
 `add_node` (see the [control API](control-api.md#draft)) writes a node that is valid as it stands and has a capacity, so the bottleneck report can rank it. These are **estimates**: typical sizes for a small deployment, meant to be edited.
@@ -174,6 +207,7 @@ The chosen component then picks a copy by its own `balance`, and the wire to it 
 | `external-api`  | `{ type: external-api, pool: { size: 10 } }`                                                                                  |
 | `auth`          | `{ type: auth, concurrency: { limit: 32, queue: 100 } }` (needs a signing key, which `kaanal up` and `kaanal studio` provide) |
 | `load-balancer` | `{ type: load-balancer, concurrency: { limit: 1000, queue: 100 }, proc: 200us }`                                              |
+| `storage`       | `{ type: storage, flavor: s3, first_byte: 25ms, throughput: 80MB/s }` (placeholders, not published; no slots)                 |
 
 Every node with a slot limit is written with `queue: 100`, and the gateway (the entry node) with a client `timeout: 30s`, which is the deadline for a whole request through it. Both are **estimates**: 100 waiting requests is a modest backlog, and 30 s is the low end of the 30 to 60 s where real clients and proxies give up. They are written into the file only. Unset still means unlimited (`queue`) and never (`timeout`), so a file without them behaves as before. `kaanal init` and the Studio starters write the same values.
 
@@ -181,13 +215,13 @@ Every node with a slot limit is written with `queue: 100`, and the gateway (the 
 
 An edge `{ from: a, to: b, net: 1ms, calls: 2 }` means `a` depends on `b`. `net` is the network latency (default zero). `calls` is how many times `b` is called per request (default 1, at least 1; active now: how many times a chain calls the edge, at most 1 000 when repeated). `prob` (above 0, at most 1, default 1) is the share of requests that take the edge; see [Endpoints](endpoints.md#steps). `bandwidth` (bytes per second, at least 1) limits the link: with a payload size a transfer takes `bytes / bandwidth` on a FIFO link, and without it the link costs nothing and adds no hop. No cycles, no self edges, no duplicate edges.
 
-| From                                | May call                                                                            |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `gateway`                           | `service`, `monolith`, `auth`, `load-balancer`                                      |
-| `service`, `monolith`               | `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer` |
-| `auth`                              | `service`, `monolith`, `database`, `cache`, `external-api`, `load-balancer`         |
-| `load-balancer`                     | `service`, `monolith`, `database`, `external-api`, `auth`, `load-balancer`          |
-| `database`, `cache`, `external-api` | nothing                                                                             |
+| From                                           | May call                                                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `gateway`                                      | `service`, `monolith`, `auth`, `load-balancer`                                                 |
+| `service`, `monolith`                          | `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer`, `storage` |
+| `auth`                                         | `service`, `monolith`, `database`, `cache`, `external-api`, `load-balancer`, `storage`         |
+| `load-balancer`                                | `service`, `monolith`, `database`, `external-api`, `auth`, `load-balancer`, `storage`          |
+| `database`, `cache`, `external-api`, `storage` | nothing                                                                                        |
 
 An edge that breaks the table is rejected with a message listing what that kind may call.
 

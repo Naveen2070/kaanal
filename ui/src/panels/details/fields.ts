@@ -108,6 +108,100 @@ export function hasProc(kind: string): boolean {
   return kindRulesOf(kind)?.service_time ?? HAS_PROC.has(kind);
 }
 
+// ---- storage: `first_byte` is its time (a storage node refuses `proc`), `throughput` its transfer rate ----
+
+/** A storage node's `first_byte` as plain milliseconds; null when unset or a spread of values. */
+export const firstByteMs = (config: NodeDoc): number | null => durationMs(config.first_byte);
+
+/** `first_byte` is a plain duration (one box) or absent; a `{ p50, p99 }` spread has its own two boxes, anything else (`{ mean }`) stays in the file. */
+export const firstByteEditable = (config: NodeDoc): boolean =>
+  !("first_byte" in config) || firstByteMs(config) !== null;
+
+/** The two ends of a `{ p50, p99 }` first byte in milliseconds; null when it is not that shape. */
+export function firstByteSpread(config: NodeDoc): { p50: number; p99: number } | null {
+  const f = config.first_byte;
+  if (!isObject(f)) return null;
+  const p50 = durationMs(f.p50);
+  const p99 = durationMs(f.p99);
+  return p50 === null || p99 === null ? null : { p50, p99 };
+}
+
+/** A `{ mean }` first byte (exponential) in milliseconds; null when it is not that shape. */
+export function firstByteMean(config: NodeDoc): number | null {
+  const f = config.first_byte;
+  return isObject(f) && Object.keys(f).length === 1 ? durationMs(f.mean) : null;
+}
+
+export const setFirstByteMean = (name: string, ms: number): Op[] => [
+  put(["nodes", name, "first_byte"], true, { mean: formatMs(ms) }),
+];
+
+/** One end of the spread changed: the whole pair is written at once so p50 never sits above a stale p99 in between. */
+export function setSpread(name: string, config: NodeDoc, end: "p50" | "p99", ms: number): Op[] {
+  const cur = firstByteSpread(config);
+  if (cur === null) return [];
+  const next = { ...cur, [end]: ms };
+  return [
+    put(["nodes", name, "first_byte"], true, { p50: formatMs(next.p50), p99: formatMs(next.p99) }),
+  ];
+}
+
+/** A node's `rate_limit` (`rps`, `burst`); null when it is absent or not that shape. */
+export function rateLimitOf(config: NodeDoc): { rps: number; burst: number } | null {
+  const r = config.rate_limit;
+  return isObject(r) && typeof r.rps === "number" && typeof r.burst === "number"
+    ? { rps: r.rps, burst: r.burst }
+    : null;
+}
+
+/** The limit "Add" starts with: S3's published 5,500 GET/HEAD requests a second per prefix (GCS and Azure publish similar orders of magnitude); the burst is the same figure. */
+export const DEFAULT_RATE_LIMIT = { rps: 5500, burst: 5500 } as const;
+
+/** Adds the default `rate_limit` when the node has none. */
+export const addRateLimit = (name: string, config: NodeDoc): Op[] =>
+  "rate_limit" in config ? [] : [put(["nodes", name, "rate_limit"], false, DEFAULT_RATE_LIMIT)];
+
+/** One field of the rate limit changed (the map is rewritten whole); null removes the limit. */
+export function setRateLimit(
+  name: string,
+  config: NodeDoc,
+  field: "rps" | "burst" | null,
+  n = 0,
+): Op[] {
+  const path = ["nodes", name, "rate_limit"];
+  if (field === null) return "rate_limit" in config ? [{ op: "remove", path }] : [];
+  const cur = rateLimitOf(config);
+  if (cur === null) return [];
+  return [put(path, true, { ...cur, [field]: field === "burst" ? Math.max(1, Math.round(n)) : n })];
+}
+
+/** A storage node's throughput in KB/s (1024 bytes); null = no limit on the size cost. */
+export function throughputKb(config: NodeDoc): number | null {
+  const bytes = parseBytes(config.throughput, true);
+  return bytes === null ? null : Number((bytes / 1024).toFixed(3));
+}
+
+/** The patch for a throughput of `kb` KB/s: whole bytes a second (at least 1); null removes the field. */
+export function setThroughput(name: string, config: NodeDoc, kb: number | null): Op[] {
+  const path = ["nodes", name, "throughput"];
+  const present = "throughput" in config;
+  if (kb === null) return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, Math.max(1, Math.round(kb * 1024)))];
+}
+
+export const FLAVORS = ["s3", "gcs", "blob"] as const;
+
+export function setFlavor(name: string, config: NodeDoc, flavor: string): Op {
+  return put(["nodes", name, "flavor"], "flavor" in config, flavor);
+}
+
+/** The starter values of a new storage node (`kind_defaults.storage`): estimates, not published figures. */
+export function carriesEstimates(config: NodeDoc): boolean {
+  return (
+    durationMs(config.first_byte) === 25 && parseBytes(config.throughput, true) === 80 * 1024 * 1024
+  );
+}
+
 /** Limits the loader enforces (or that make no sense past): a value outside them would make the draft invalid. */
 export const LIMITS = {
   slots: { min: 1, max: 100_000 },

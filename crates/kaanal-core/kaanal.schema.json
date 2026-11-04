@@ -1702,6 +1702,124 @@
             "type"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An object store: a leaf with `first_byte` and `throughput`.",
+          "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Balance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How traffic entering this node picks a replica (default `round-robin`); a calling edge\nmay override it."
+            },
+            "bandwidth": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeBandwidth"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Absent = no limit."
+            },
+            "concurrency": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "$ref": "#/$defs/BoundedConcurrency"
+                }
+              ],
+              "description": "Most calls this node serves at once, as a number (the rest wait without limit) or a map\n`{ limit, queue, overflow_status }`. Absent = unlimited."
+            },
+            "first_byte": {
+              "$ref": "#/$defs/Distribution",
+              "description": "Time to the first byte of a call: the node's service time. A duration like `proc`\n(`25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`). Required."
+            },
+            "flavor": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StorageFlavor"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Label only (`s3`, `gcs`, `blob`); it sets no numbers."
+            },
+            "locale": {
+              "default": null,
+              "description": "Locale pack; a storage node generates no data, so this only passes down.",
+              "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rate_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RateLimitConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Token-bucket limit on how fast calls may reach this node (the store's request rate):\n`rps` refilled per second, at most `burst` at once; beyond it the call fails with 503\n(S3's \"Slow Down\"), not 429 like the other kinds."
+            },
+            "replicas": {
+              "default": null,
+              "description": "Copies of this node, 1 to 64 (default 1). Each has its own slots, queue and rate limit;\n`balance` picks one per request.",
+              "format": "uint16",
+              "maximum": 64,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "throughput": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*(/[sS])?\\s*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Bytes per second the store moves for one call, as a whole number or text with a unit like\n`80MB/s` (KB = 1024 bytes); at least 1. Each call adds (request bytes + response bytes) /\n`throughput`. Absent = no size term."
+            },
+            "timeout": {
+              "default": null,
+              "description": "Deadline for a call to this node: queue wait plus its own work. `0 < timeout <= 5 min`;\nabsent = no deadline.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
+            },
+            "type": {
+              "const": "storage",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "first_byte"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2062,6 +2180,26 @@
             "parallel"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "StorageFlavor": {
+      "description": "Object-store flavors: a label for the card and docs, no numbers.",
+      "oneOf": [
+        {
+          "const": "s3",
+          "description": "Amazon S3.",
+          "type": "string"
+        },
+        {
+          "const": "gcs",
+          "description": "Google Cloud Storage.",
+          "type": "string"
+        },
+        {
+          "const": "blob",
+          "description": "Azure Blob Storage.",
+          "type": "string"
         }
       ]
     },

@@ -107,3 +107,18 @@ test("wiring_note_explains_auth_wires_and_a_gateway_that_forwards_nowhere", asyn
   expect(wiringNote("gw", nodes, [])).toBeNull();
   expect(wiringNote("api", nodes, [])).toBeNull();
 });
+
+test("a_service_may_connect_to_storage_and_storage_connects_to_nothing", () => {
+  const nodes = {
+    gw: { type: "gateway" },
+    s: { type: "service" },
+    m: { type: "monolith" },
+    a: { type: "auth" },
+    lb: { type: "load-balancer" },
+    st: { type: "storage" },
+    d: { type: "database" },
+  };
+  for (const from of ["s", "m", "a", "lb"]) expect(targetsFor(from, nodes, [])).toContain("st");
+  expect(targetsFor("gw", nodes, [])).not.toContain("st");
+  expect(targetsFor("st", nodes, [])).toEqual([]);
+});

@@ -135,6 +135,13 @@ export const CHAPTERS: Chapter[] = [
         real: "nginx, HAProxy, Envoy or a cloud load balancer in front of a tier.",
         sample: { kind: "tile", of: "load-balancer" },
       },
+      {
+        id: "storage",
+        term: "Storage",
+        text: "An object store. Each call costs a first byte, then the size of the request and the reply over the throughput. The numbers are yours: no provider publishes a first-byte latency, so a new Storage node starts with placeholders, not published figures. The flavor (S3, GCS or Blob) is only a label.",
+        real: "Amazon S3, Google Cloud Storage or Azure Blob Storage.",
+        sample: { kind: "tile", of: "storage" },
+      },
     ],
   },
   {
@@ -354,7 +361,7 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "who-calls-whom",
         term: "Who may call whom",
-        text: "Gateway: service, monolith, auth, load balancer. Service and monolith: service, monolith, database, cache, external API, auth, load balancer. Auth: service, monolith, database, cache, external API, load balancer. Load balancer: service, monolith, database, external API, auth, load balancer. Database, cache and external API call nothing. There are no loops, and nothing calls the gateway.",
+        text: "Gateway: service, monolith, auth, load balancer. Service and monolith: service, monolith, database, cache, external API, auth, load balancer, storage. Auth: service, monolith, database, cache, external API, load balancer, storage. Load balancer: service, monolith, database, external API, auth, load balancer, storage. Database, cache, external API and storage call nothing. There are no loops, and nothing calls the gateway.",
         sample: {
           kind: "calls",
           rows: [
@@ -369,15 +376,32 @@ export const CHAPTERS: Chapter[] = [
                 "external-api",
                 "auth",
                 "load-balancer",
+                "storage",
               ],
             },
             {
               from: "auth",
-              to: ["service", "monolith", "database", "cache", "external-api", "load-balancer"],
+              to: [
+                "service",
+                "monolith",
+                "database",
+                "cache",
+                "external-api",
+                "load-balancer",
+                "storage",
+              ],
             },
             {
               from: "load-balancer",
-              to: ["service", "monolith", "database", "external-api", "auth", "load-balancer"],
+              to: [
+                "service",
+                "monolith",
+                "database",
+                "external-api",
+                "auth",
+                "load-balancer",
+                "storage",
+              ],
             },
           ],
         },

@@ -7,13 +7,15 @@
 import { StickyNote } from "lucide-react";
 import { useLayout } from "../shell/layout/useLayout";
 import { addNote } from "./addNote";
-import { catColour, NODE_KINDS } from "./nodeKinds";
+import { useDraft } from "../data/store/draft";
+import { catColour, offeredKinds } from "./nodeKinds";
 
 /** The drag payload's type: what a drop on the canvas reads the kind from. */
 export const KIND_MIME = "application/x-kaanal-kind";
 
 export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
   const rail = useLayout() === "rail";
+  const kinds = offeredKinds(useDraft((s) => s.view?.kinds));
   return (
     <aside
       data-tour="palette"
@@ -23,7 +25,7 @@ export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
       {rail ? null : (
         <h2 className="px-2 pt-1 pb-1.5 text-xs font-semibold text-muted">Add a node</h2>
       )}
-      {NODE_KINDS.map(({ kind, label, icon: Icon, description }) => {
+      {kinds.map(({ kind, label, icon: Icon, description }) => {
         const hue = catColour(kind);
         return (
           <button

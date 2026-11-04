@@ -373,6 +373,7 @@ fn callees(from: NodeKind) -> &'static [NodeKind] {
             NodeKind::ExternalApi,
             NodeKind::Auth,
             NodeKind::LoadBalancer,
+            NodeKind::Storage,
         ],
         NodeKind::Auth => &[
             NodeKind::Service,
@@ -381,6 +382,7 @@ fn callees(from: NodeKind) -> &'static [NodeKind] {
             NodeKind::Cache,
             NodeKind::ExternalApi,
             NodeKind::LoadBalancer,
+            NodeKind::Storage,
         ],
         // a balancer fronts any tier, another balancer too; not a cache (a lookup is a step of
         // its caller) and not the gateway
@@ -391,8 +393,9 @@ fn callees(from: NodeKind) -> &'static [NodeKind] {
             NodeKind::ExternalApi,
             NodeKind::Auth,
             NodeKind::LoadBalancer,
+            NodeKind::Storage,
         ],
-        NodeKind::Database | NodeKind::Cache | NodeKind::ExternalApi => &[],
+        NodeKind::Database | NodeKind::Cache | NodeKind::ExternalApi | NodeKind::Storage => &[],
     }
 }
 
@@ -483,7 +486,11 @@ impl Topology {
                 hold: n.hold(),
                 spread: n.spread().cloned().unwrap_or_default(),
                 bandwidth: n.bandwidth(),
-                per_kb: Dist::from_config(n.per_kb()),
+                per_kb: match n {
+                    // storage: the size term is 1024 / throughput seconds per KB (RULES 61)
+                    NodeConfig::Storage(s) => Dist::from_config(s.per_kb().as_ref()),
+                    _ => Dist::from_config(n.per_kb()),
+                },
                 chains: n.chains().cloned().unwrap_or_default(),
                 locale: n.locale().map(str::to_string),
             });

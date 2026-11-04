@@ -44,7 +44,7 @@ Compiles `endpoints:`, node `chains:` and the topology into resolved call trees,
 Built once per node, callees first, shared through `Arc`, and op-free: a database step runs the op of its caller, so one tree serves reads and writes.
 
 - A node's own work always comes first: its `proc` (plus its inline op for a monolith with inline ops).
-- Service and monolith: callees in edge order (service, monolith, external API, auth), then cache lookups (an edge with `calls: N` gives N lookups, marked `reads_only`, so writes skip them), then databases.
+- Service and monolith: callees in edge order (service, monolith, external API, auth), then cache lookups (an edge with `calls: N` gives N lookups, marked `reads_only`, so writes skip them), then databases and storage nodes (a `storage` callee is a database-style leaf: a `Proc` hop of `first_byte` with the `throughput` size term as its `per_kb`); a `call:` step with `op:` to a storage node is accepted and the op changes nothing (`has_ops`).
 - Database: its op. External API and auth: their `proc` only. Gateway: `proc` plus one call per auth edge. A cache is never a body; it is reached by `cache` steps.
 - A custom `chain:` replaces the walk but keeps the owner's own work first.
 

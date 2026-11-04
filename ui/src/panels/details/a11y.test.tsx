@@ -17,6 +17,8 @@ import { useRun } from "../../data/store/run";
 import { expectNoViolations } from "../../test/axe";
 import { nodeSummary } from "../../test/summary";
 import { UndoRedo } from "../../shell/topbar/UndoRedo";
+import { EMPTY_FEED, FeedContext } from "../../canvas/feed";
+import { Controls } from "./Controls";
 import { Rail } from "./Rail";
 import { Results } from "./Results";
 import { LogSkeleton, ResultsSkeleton } from "./Skeletons";
@@ -28,7 +30,14 @@ const view: DraftView = {
   lost: [],
   rev: 0,
   boot: "b",
-  doc: { nodes: { gw: { type: "gateway" }, app: { type: "service" } }, edges: [] },
+  doc: {
+    nodes: {
+      gw: { type: "gateway" },
+      app: { type: "service" },
+      assets: { type: "storage", first_byte: "20ms", throughput: "80MB/s" },
+    },
+    edges: [],
+  },
   doc_error: null,
   project_id: "p",
   project_name: null,
@@ -124,4 +133,34 @@ test("the_command_palette_has_no_axe_violations", async () => {
   );
   await expectNoViolations(container);
   expect(screen.getByRole("combobox")).toBeTruthy();
+});
+
+test("the_controls_of_a_storage_node_have_no_axe_violations", async () => {
+  const noop = () => {};
+  const { container } = render(
+    <FeedContext.Provider value={EMPTY_FEED}>
+      <Controls
+        name="assets"
+        config={{
+          type: "storage",
+          first_byte: "20ms",
+          throughput: "80MB/s",
+          rate_limit: { rps: 5 },
+        }}
+        edges={[{ from: "app", to: "assets" }]}
+        {...{ onDeleted: noop, onRenamed: noop, onChaos: noop }}
+      />
+      <Controls
+        name="assets"
+        config={{
+          type: "storage",
+          first_byte: { p50: "25ms", p99: "100ms" },
+          throughput: "80MB/s",
+        }}
+        edges={[]}
+        {...{ onDeleted: noop, onRenamed: noop, onChaos: noop }}
+      />
+    </FeedContext.Provider>,
+  );
+  await expectNoViolations(container);
 });

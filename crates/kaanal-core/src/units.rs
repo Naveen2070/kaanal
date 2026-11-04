@@ -1,6 +1,6 @@
 //! Byte and rate values in the config: a whole number of bytes (a rate: bytes a second) or text
 //! like `250KB`, `1.5MB`, `512B`, `1MB/s`. One parser and one set of `deserialize_with` functions
-//! serve every field (node and edge `bandwidth`, a journey's `req_bytes` and `resp_bytes`, the
+//! serve every field (node and edge `bandwidth`, a storage node's `throughput`, a journey's `req_bytes` and `resp_bytes`, the
 //! `bandwidth_cap` chaos value, in YAML and in the control API's JSON), so they all read and fail
 //! the same way. KB = 1024 bytes, the same as Studio's unit picker. Bounds (at least 1, at most
 //! 1 GiB) stay with each field's own check and run on the converted number.
@@ -158,6 +158,7 @@ macro_rules! field_fns {
 
 field_fns! {
     bandwidth, "bandwidth", true;
+    throughput, "throughput", true;
     out, "out", true;
     inbound, "in", true;
     bandwidth_cap, "bandwidth_cap", true;

@@ -10,4 +10,5 @@ mod common;
 mod events_ui;
 mod guard;
 mod mock;
+mod storage;
 mod wire;

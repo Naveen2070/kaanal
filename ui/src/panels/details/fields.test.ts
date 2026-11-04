@@ -3,15 +3,21 @@ import type { NodeDoc } from "../../data/api/types";
 import { nodeSummary } from "../../test/summary";
 import {
   balanceOf,
+  carriesEstimates,
   cardOf,
   chaosBody,
   controlRows,
   deleteOps,
   durationMs,
+  firstByteEditable,
+  firstByteMs,
   clearQueueLimit,
   queueOf,
   setBalance,
   setCard,
+  setFlavor,
+  setThroughput,
+  throughputKb,
   hasProc,
   setQueue,
   setSlots,
@@ -243,4 +249,46 @@ test("least_conn_and_p2c_are_balances_the_page_can_write", () => {
   expect(setBalance(["nodes", "a", "balance"], true, "p2c")).toEqual([
     { op: "set", path: ["nodes", "a", "balance"], value: "p2c" },
   ]);
+});
+
+test("storage_fields_read_the_files_text_and_write_whole_bytes", () => {
+  expect(hasProc("storage")).toBe(false);
+  expect(throughputKb({ type: "storage", throughput: "80MB/s" })).toBe(81_920);
+  expect(throughputKb({ type: "storage", throughput: "250KB/s" })).toBe(250);
+  expect(throughputKb({ type: "storage", throughput: 2048 })).toBe(2);
+  expect(throughputKb({ type: "storage" })).toBeNull();
+  expect(throughputKb({ type: "storage", throughput: "fast" })).toBeNull();
+  expect(setThroughput("s", { type: "storage" }, 100)).toEqual([
+    { op: "insert", path: ["nodes", "s", "throughput"], value: 102_400 },
+  ]);
+  expect(setThroughput("s", { type: "storage", throughput: "80MB/s" }, 0.0001)).toEqual([
+    { op: "set", path: ["nodes", "s", "throughput"], value: 1 },
+  ]);
+  expect(setThroughput("s", { type: "storage", throughput: "80MB/s" }, null)).toEqual([
+    { op: "remove", path: ["nodes", "s", "throughput"] },
+  ]);
+  expect(setThroughput("s", { type: "storage" }, null)).toEqual([]);
+  expect(setFlavor("s", { type: "storage" }, "blob")).toEqual({
+    op: "insert",
+    path: ["nodes", "s", "flavor"],
+    value: "blob",
+  });
+  expect(firstByteMs({ type: "storage", first_byte: "20ms" })).toBe(20);
+  expect(firstByteEditable({ type: "storage", first_byte: { p50: "25ms", p99: "100ms" } })).toBe(
+    false,
+  );
+});
+
+test("only_the_starter_values_count_as_estimates", () => {
+  const starter = {
+    type: "storage",
+    first_byte: "25ms",
+    throughput: "80MB/s",
+  };
+  expect(carriesEstimates(starter)).toBe(true);
+  expect(carriesEstimates({ ...starter, throughput: 83_886_080 })).toBe(true);
+  expect(carriesEstimates({ ...starter, throughput: "81MB/s" })).toBe(false);
+  expect(carriesEstimates({ ...starter, first_byte: "26ms" })).toBe(false);
+  expect(carriesEstimates({ ...starter, first_byte: { p50: "25ms", p99: "100ms" } })).toBe(false);
+  expect(carriesEstimates({ type: "storage" })).toBe(false);
 });

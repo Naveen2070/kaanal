@@ -12,6 +12,7 @@ import { LazyBoundary } from "../../kit/LazyBoundary";
 import { runNow } from "../../data/store/loopRuntime";
 import { openTrafficBuilder } from "../../panels/traffic/store";
 import { addNote } from "../../canvas/addNote";
+import { offeredKinds } from "../../canvas/nodeKinds";
 import { commands } from "./commands";
 
 const CommandPalette = lazy(() =>
@@ -57,6 +58,7 @@ export function PaletteHost() {
     );
   if (!open) return null;
   const all = commands({
+    kinds: offeredKinds(useDraft.getState().view?.kinds),
     add: addNode,
     run: runNow,
     press: (name) => document.querySelector<HTMLElement>(`[data-command="${name}"]`)?.click(),

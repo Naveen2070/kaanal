@@ -20,7 +20,7 @@ export function systemCounts(doc: Doc | null | undefined): Counts {
     components: kinds.length,
     traffic: n("gateway", "load-balancer"),
     compute: n("service", "monolith", "auth"),
-    data: n("database", "cache"),
+    data: n("database", "cache", "storage"),
     external: n("external-api"),
     connections: Array.isArray(doc?.edges) ? doc.edges.length : 0,
   };

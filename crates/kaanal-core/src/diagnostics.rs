@@ -50,7 +50,8 @@ const MAX_NEST: usize = 128;
 const MAX_DEPTH: usize = 32;
 
 /// **Private.** The seven `type:` values, for messages.
-const KINDS: &str = "gateway, service, monolith, database, cache, external-api, auth";
+const KINDS: &str =
+    "gateway, service, monolith, database, cache, external-api, auth, load-balancer, storage";
 
 /// One step of a path into `kaanal.yaml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,7 +418,7 @@ fn check_node(
             )
         });
     };
-    schema_problem(schema, branch, validator, name, key, node)
+    schema_problem(schema, branch, validator, &kind, name, key, node)
         .or_else(|| serde_problem(&kind, name, fields))
 }
 
@@ -427,6 +428,7 @@ fn schema_problem(
     schema: &Value,
     branch: &Value,
     validator: &Validator,
+    kind: &str,
     name: &str,
     key: &MarkedYamlOwned,
     node: &MarkedYamlOwned,
@@ -449,9 +451,16 @@ fn schema_problem(
                 } else {
                     format!(" (expected: {})", allowed.join(", "))
                 };
+                let hint = match at.as_slice() {
+                    [field] => storage_hint(kind, field),
+                    _ => "",
+                };
                 Some((
                     pos,
-                    format!("node '{name}': unknown field '{}'{expected}", dotted(&at)),
+                    format!(
+                        "node '{name}': unknown field '{}'{expected}{hint}",
+                        dotted(&at)
+                    ),
                 ))
             }
             Problem::Missing(field) => {
@@ -474,6 +483,29 @@ fn schema_problem(
             col: Some(col),
             msg,
         })
+}
+
+/// **Private.** What to say after "unknown field" for a field a storage node refuses on purpose
+/// (RULES 61): its time is `first_byte` and its size term `throughput`; it calls nothing.
+fn storage_hint(kind: &str, field: &PathSeg) -> &'static str {
+    let PathSeg::Key(f) = field else { return "" };
+    if kind != "storage" {
+        return "";
+    }
+    match f.as_str() {
+        "proc" => " - a storage node's service time is `first_byte`, not `proc`",
+        "per_kb" => {
+            " - a storage node's size cost is `throughput` (bytes per second), not `per_kb`"
+        }
+        "hold" => " - a storage node calls nothing, so it has no `hold`",
+        "ops" => {
+            " - a storage node has no `ops`; read, write and scan all cost `first_byte` plus the size term"
+        }
+        "pool" | "hit_ratio" => {
+            " - a storage node has no pool or hit ratio; use `concurrency` and `rate_limit`"
+        }
+        _ => "",
+    }
 }
 
 /// **Private.** Collects unknown/missing fields from `err`, looking inside `anyOf` (how

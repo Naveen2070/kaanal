@@ -63,6 +63,11 @@ pub fn cache_defaults(flavor: CacheFlavor) -> CacheParams {
 /// (a database and a cache take a flavor, whose preset fills the costs). **Estimates**, like
 /// every preset here: typical sizes for a small deployment, to be edited.
 ///
+/// A storage node (an object store) starts as `flavor: s3`, `first_byte: 25ms`
+/// and `throughput: 80MB/s`. **Placeholders to edit, not published figures**: no provider
+/// publishes a first-byte latency for standard object storage (RULES 61), so these are estimates.
+/// It has no slot limit: its request-rate figures belong to `rate_limit`, which is off unless set.
+///
 /// Every node with a slot limit is written with a bounded queue, `concurrency: { limit: N,
 /// queue: 100 }` (F3, RULES 56), and the gateway, the entry node, with a client `timeout: 30s`
 /// (the low end of the 30 to 60 s where real clients and proxies give up). Both are written
@@ -85,6 +90,7 @@ pub fn starter(kind: NodeKind) -> &'static str {
         NodeKind::LoadBalancer => {
             "{ type: load-balancer, concurrency: { limit: 1000, queue: 100 }, proc: 200us }"
         }
+        NodeKind::Storage => "{ type: storage, flavor: s3, first_byte: 25ms, throughput: 80MB/s }",
     }
 }
 

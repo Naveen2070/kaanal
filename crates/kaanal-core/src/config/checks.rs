@@ -250,6 +250,12 @@ pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
                 format!("node '{name}': bandwidth must be at least 1 byte per second (got 0)"),
             ));
         }
+        if matches!(n, NodeConfig::Storage(s) if s.throughput == Some(0)) {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "throughput"]),
+                format!("node '{name}': throughput must be at least 1 byte per second (got 0)"),
+            ));
+        }
     }
     for (i, e) in cfg.edges.iter().enumerate() {
         if e.bandwidth == Some(0) {

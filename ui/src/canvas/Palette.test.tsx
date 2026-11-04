@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vite-plus/test";
+import { useDraft } from "../data/store/draft";
 import { NODE_KINDS } from "./nodeKinds";
 import { Palette } from "./Palette";
 import { useNotes } from "./notes";
@@ -65,4 +66,30 @@ test("add_a_note_pins_a_caption_on_the_wide_palette_only", () => {
   vi.stubGlobal("innerWidth", 1000);
   render(<Palette onAdd={() => {}} />);
   expect(screen.queryByRole("button", { name: /Add a note/ })).toBeNull();
+});
+
+test("storage_is_offered_with_its_one_line_description", () => {
+  vi.stubGlobal("innerWidth", 1440);
+  const onAdd = vi.fn();
+  render(<Palette onAdd={onAdd} />);
+  const button = screen.getByRole("button", { name: /Storage/ });
+  expect(button.title).toContain("Object storage like S3");
+  fireEvent.click(button);
+  expect(onAdd).toHaveBeenCalledWith("storage");
+});
+
+test("the_palette_offers_the_kinds_the_server_lists_and_a_plain_box_for_an_unknown_one", () => {
+  useDraft.setState({
+    view: {
+      kinds: [
+        { kind: "storage", callees: [] },
+        { kind: "queue", callees: [] },
+      ],
+    },
+  } as never);
+  render(<Palette onAdd={vi.fn()} />);
+  expect(screen.getByRole("button", { name: /Storage/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /queue/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Gateway/ })).toBeNull();
+  useDraft.setState({ view: null });
 });

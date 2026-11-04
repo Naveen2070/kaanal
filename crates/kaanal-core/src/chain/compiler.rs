@@ -52,7 +52,7 @@ impl Compiler<'_> {
     }
 
     /// **Private.** Section 5.2: service/monolith/external-api/auth callees in edge order, then
-    /// caches (reads and scans only), then databases.
+    /// caches (reads and scans only), then databases and storage.
     pub(super) fn walk(&self, n: NodeId, keys: &mut Keys) -> Vec<Step> {
         let kind = |e: &&Edge| self.topo.nodes[e.to].kind;
         let mut out: Vec<Step> = Vec::new();
@@ -85,7 +85,7 @@ impl Compiler<'_> {
         for e in self
             .topo
             .out_edges(n)
-            .filter(|e| kind(e) == NodeKind::Database)
+            .filter(|e| matches!(kind(e), NodeKind::Database | NodeKind::Storage))
         {
             out.push(self.default_call(e, keys));
         }

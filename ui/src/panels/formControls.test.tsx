@@ -21,8 +21,15 @@ import { openTrafficBuilder } from "./traffic/store";
 import { TrafficBuilder } from "./traffic/TrafficBuilder";
 
 const app = { type: "service", concurrency: 8, replicas: 3, proc: "12ms" };
+const assets = {
+  type: "storage",
+  flavor: "s3",
+  first_byte: "20ms",
+  throughput: "80MB/s",
+  rate_limit: { rps: 100 },
+};
 const doc = {
-  nodes: { gw: { type: "gateway" }, app, db: { type: "database" } },
+  nodes: { gw: { type: "gateway" }, app, db: { type: "database" }, assets },
   edges: [
     { from: "gw", to: "app" },
     { from: "app", to: "db", bandwidth: 2048 },
@@ -82,6 +89,12 @@ test("no_form_control_in_the_main_panels_lacks_an_id_or_name", () => {
         <Controls
           name="app"
           config={app}
+          edges={doc.edges}
+          {...{ onDeleted: noop, onRenamed: noop, onChaos: noop }}
+        />
+        <Controls
+          name="assets"
+          config={assets}
           edges={doc.edges}
           {...{ onDeleted: noop, onRenamed: noop, onChaos: noop }}
         />

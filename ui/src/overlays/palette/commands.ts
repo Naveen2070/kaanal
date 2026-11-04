@@ -1,7 +1,7 @@
 // What the command palette can do (spec 7): add a component, run, apply, save, switch theme, replay
 // the tour, fit the view. Pure data over a context of callbacks, so it is tested without the page.
 
-import { NODE_KINDS } from "../../canvas/nodeKinds";
+import { type KindInfo, NODE_KINDS } from "../../canvas/nodeKinds";
 
 export type Command = { id: string; label: string; shortcut?: string; run: () => void };
 
@@ -20,11 +20,13 @@ export interface CommandContext {
   /** The components on the canvas, to jump to by name. */
   nodes?: string[];
   select?: (name: string) => void;
+  /** The kinds to offer (the server's registry); the static list when absent. */
+  kinds?: KindInfo[];
 }
 
 export function commands(ctx: CommandContext): Command[] {
   return [
-    ...NODE_KINDS.map((k) => ({
+    ...(ctx.kinds ?? NODE_KINDS).map((k) => ({
       id: `add-${k.kind}`,
       label: `Add ${/^[aeiou]/i.test(k.label) ? "an" : "a"} ${k.label.toLowerCase()}`,
       run: () => ctx.add(k.kind),

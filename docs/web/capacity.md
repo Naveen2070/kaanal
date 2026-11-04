@@ -48,7 +48,7 @@ A rate limit takes one token per **visit**, not per hop. A visit is a run of con
 
 ## What clients see
 
-- **A rate limit says `429`** with a `Retry-After` header in whole seconds (rounded up, at least 1). A frontend can read it from JavaScript, because Kaanal exposes the header to browsers.
+- **A rate limit says `429`** with a `Retry-After` header in whole seconds (rounded up, at least 1). A frontend can read it from JavaScript, because Kaanal exposes the header to browsers. The one exception is a [`storage`](nodes.md#storage) node, whose limit says `503` (S3's "Slow Down") and sends no `Retry-After`; the summary still counts those requests as limited for that node.
 - **A full line says the overflow status** (503 unless you changed it).
 - **`error_map` applies to both**, like any other failure. If it turns a 429 into something else, the `Retry-After` header is dropped: it only appears while the final status is 429 and a rate limit caused it (a 429 you create with `error_map` from another failure carries no `Retry-After`).
 - **Chaos wins over a limit.** A node you have set `down` fails with its own status and uses no token and no slot, so it never becomes a 429.

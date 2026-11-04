@@ -147,7 +147,8 @@ impl Compiler<'_> {
                     .key("op")
                     .bad("op cannot be used with via (the endpoint's own op is used)"));
             }
-            let has_ops = kind == NodeKind::Database
+            // a storage node takes the op as GET, PUT, LIST: all three cost the same (RULES 61)
+            let has_ops = matches!(kind, NodeKind::Database | NodeKind::Storage)
                 || (kind == NodeKind::Monolith && self.topo.nodes[to].ops.is_some());
             if !has_ops {
                 return Err(at.key("op").bad(format!("'{name}' ({kind}) has no ops")));

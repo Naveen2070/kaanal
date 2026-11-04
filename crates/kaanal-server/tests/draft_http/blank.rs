@@ -97,6 +97,7 @@ async fn add_node_gets_a_default_capacity_and_validates() {
         ("cache", "flavor: redis"),
         ("external-api", "proc: 100ms"),
         ("auth", "proc: 10ms"),
+        ("storage", "throughput: 80MB/s"),
     ];
     for (kind, has) in table {
         let s = start_blank().await;

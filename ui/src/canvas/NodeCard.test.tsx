@@ -101,6 +101,8 @@ test("the_card_has_no_axe_violations_idle_busy_or_saturated", async () => {
     await expectNoViolations(document.body);
     cleanup();
   }
+  card(feedOf(undefined), { type: "storage", first_byte: "20ms" });
+  await expectNoViolations(document.body);
 });
 
 test("a_distribution_and_a_database_have_their_own_config_words", () => {
@@ -133,4 +135,24 @@ test("the_kind_and_the_settings_sit_on_two_lines_with_the_whole_text_kept", () =
   // read aloud (and as a tooltip) it is still the one sentence
   expect(part.textContent).toBe("Load balancer · 1 copy × 512 slots · varies");
   expect(part.title).toBe("Load balancer · 1 copy × 512 slots · varies");
+});
+
+test("a_storage_card_names_the_kind_and_reads_its_first_byte_without_nan", () => {
+  card(feedOf(undefined), {
+    type: "storage",
+    flavor: "s3",
+    first_byte: { p50: "25ms", p99: "100ms" },
+    throughput: "80MB/s",
+  });
+  expect(screen.getByRole("group").getAttribute("aria-label")).toBe("app, Storage, no run yet");
+  const part = document.querySelector('[data-part="config"]') as HTMLElement;
+  const lines = [...part.querySelectorAll(".block")].map((l) => l.textContent);
+  expect(lines).toEqual(["Storage", "1 copy · no slot limit · first byte p50 25 ms"]);
+  expect(document.body.textContent).not.toMatch(/NaN|undefined/);
+  cleanup();
+  card(feedOf(undefined), { type: "storage", first_byte: "20ms" });
+  expect(screen.getByTitle("Storage · 1 copy · no slot limit · first byte 20 ms")).toBeTruthy();
+  cleanup();
+  card(feedOf(undefined), { type: "storage", first_byte: { mean: "30ms" } });
+  expect(screen.getByTitle("Storage · 1 copy · no slot limit · first byte varies")).toBeTruthy();
 });

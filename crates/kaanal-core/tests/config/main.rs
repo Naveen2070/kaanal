@@ -12,5 +12,6 @@ mod nodes;
 mod payload;
 mod prob;
 mod replicas;
+mod storage;
 mod traffic;
 mod units;

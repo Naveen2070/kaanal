@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView, EdgeDoc, NodeDoc, RunRecord } from "../../data/api/types";
+import type { NodeDoc, RunRecord } from "../../data/api/types";
 import { FeedContext } from "../../canvas/feed";
 import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
@@ -8,75 +8,7 @@ import { useToasts } from "../../shell/toast/toasts";
 import { mockFetch } from "../../test/fetch";
 import { nodeSummary } from "../../test/summary";
 import { Controls } from "./Controls";
-
-const app: NodeDoc = { type: "service", concurrency: 12, proc: "98ms", replicas: 2 };
-const edges: EdgeDoc[] = [
-  { from: "gw", to: "app" },
-  { from: "app", to: "db" },
-];
-
-function view(over: Partial<DraftView> = {}): DraftView {
-  return {
-    text: "",
-    dirty: false,
-    generation: 1,
-    lost: [],
-    rev: 0,
-    boot: "b",
-    doc: { nodes: { gw: { type: "gateway" }, app, db: { type: "database" } }, edges },
-    doc_error: null,
-    project_id: "none",
-    project_name: null,
-    kind_defaults: {},
-    layout: {},
-    layout_note: null,
-    layout_dirty: false,
-    saved: true,
-    ...over,
-  };
-}
-
-const topology = {
-  nodes: [
-    { name: "gw", type: "gateway" },
-    { name: "app", type: "service" },
-    { name: "db", type: "database" },
-  ],
-  edges: [
-    { from: "gw", to: "app" },
-    { from: "app", to: "db" },
-  ],
-  routes: [],
-  endpoints: [],
-};
-
-async function show(
-  summary = nodeSummary(),
-  cfg: NodeDoc = app,
-  opts: { applied?: boolean; name?: string } = {},
-) {
-  const name = opts.name ?? "app";
-  // the draft, then (when the panel asks) the running system
-  mockFetch([
-    { json: view({ doc: { nodes: { [name]: cfg }, edges } }) },
-    opts.applied === false ? { status: 409, json: { error: "no system" } } : { json: topology },
-  ]);
-  await useDraft.getState().load();
-  const calls = { onDeleted: vi.fn(), onRenamed: vi.fn(), onChaos: vi.fn() };
-  render(
-    <FeedContext.Provider
-      value={{
-        node: (n) => (n === name ? summary : undefined),
-        nodes: [],
-        dimmed: false,
-        peakVisits: 0,
-      }}
-    >
-      <Controls name={name} config={cfg} edges={edges} {...calls} />
-    </FeedContext.Provider>,
-  );
-  return calls;
-}
+import { app, change, edges, show, topology, view } from "./controlsHarness";
 
 beforeEach(() => {
   useDraft.setState({ view: null, error: null, restarted: false });
@@ -103,15 +35,6 @@ test("the_retries_control_is_absent_and_so_is_an_error_rate", async () => {
   expect(screen.queryByText(/retries/i)).toBeNull();
   expect(screen.queryByLabelText(/error rate/i)).toBeNull();
 });
-
-async function change(label: string, value: string) {
-  const sent = mockFetch([{ json: view() }]);
-  const input = screen.getByLabelText(label);
-  fireEvent.change(input, { target: { value } });
-  fireEvent.keyDown(input, { key: "Enter" });
-  await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
-  return sent[0]?.body;
-}
 
 test("each_field_in_the_panel_patches_its_path", async () => {
   await show();

@@ -13,4 +13,5 @@ mod links;
 mod prob;
 mod replica_chaos;
 mod replicas;
+mod storage;
 mod timeouts;

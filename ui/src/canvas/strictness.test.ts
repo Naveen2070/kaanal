@@ -51,3 +51,18 @@ test("an edge bandwidth counts as set", () => {
 test("hold own is not hold call", () => {
   expect(strictnessNote(doc({}, { hold: "own" }))).toContain("two limits");
 });
+
+test("a_storage_node_in_the_draft_does_not_change_the_note", () => {
+  const withStorage = doc({
+    nodes: {
+      a: { type: "service" },
+      assets: {
+        type: "storage",
+        first_byte: { p50: "25ms", p99: "100ms" },
+        throughput: "80MB/s",
+      },
+    },
+    edges: [{ from: "a", to: "assets" }],
+  });
+  expect(strictnessNote(withStorage)).toBe(strictnessNote(doc()));
+});

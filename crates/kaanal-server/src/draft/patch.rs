@@ -130,7 +130,7 @@ fn edit(o: &Op) -> Result<Edit, String> {
             need(o.kind.as_ref(), "kind")?,
         );
         let kind = NodeKind::from_name(kind).ok_or_else(|| {
-            format!("unknown node kind '{kind}' (gateway, service, monolith, database, cache, external-api, auth)")
+            format!("unknown node kind '{kind}' (gateway, service, monolith, database, cache, external-api, auth, load-balancer, storage)")
         })?;
         return Ok(Edit::Insert {
             parent: vec![PathSeg::Key("nodes".into())],

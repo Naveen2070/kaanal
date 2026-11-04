@@ -261,7 +261,8 @@ fn schema_has_one_branch_per_kind() {
             "cache",
             "external-api",
             "auth",
-            "load-balancer"
+            "load-balancer",
+            "storage"
         ]
     );
     for b in branches {

@@ -51,3 +51,12 @@ test("a cache that is down is left out: it fails nothing by design, a miss goes 
   // without kinds (older callers) nothing is skipped
   expect(chaosHiddenHint(chaos, clean).map((h) => h.node)).toEqual(["cache", "db"]);
 });
+
+test("a_storage_node_is_treated_like_any_leaf", () => {
+  const down = chaosHiddenHint({ assets: { down: true } }, clean, { assets: "storage" });
+  expect(down).toHaveLength(1);
+  expect(down[0]?.node).toBe("assets");
+  expect(chaosHiddenHint({ assets: { down: true } }, { failed: 2 }, { assets: "storage" })).toEqual(
+    [],
+  );
+});

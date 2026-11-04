@@ -14,6 +14,7 @@ mod hold;
 mod links;
 mod replicas;
 mod series;
+mod storage;
 mod streams;
 mod summary;
 mod visits;

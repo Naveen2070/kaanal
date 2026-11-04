@@ -25,17 +25,27 @@ const BACKENDS = [
   "external-api",
   "auth",
   "load-balancer",
+  "storage",
 ];
 
 const MAY_CALL: Record<string, string[]> = {
   gateway: ["service", "monolith", "auth", "load-balancer"],
   service: BACKENDS,
   monolith: BACKENDS,
-  auth: ["service", "monolith", "database", "cache", "external-api", "load-balancer"],
-  "load-balancer": ["service", "monolith", "database", "external-api", "auth", "load-balancer"],
+  auth: ["service", "monolith", "database", "cache", "external-api", "load-balancer", "storage"],
+  "load-balancer": [
+    "service",
+    "monolith",
+    "database",
+    "external-api",
+    "auth",
+    "load-balancer",
+    "storage",
+  ],
   database: [],
   cache: [],
   "external-api": [],
+  storage: [],
 };
 
 /** Whether a node of this kind can call others at all (a database, a cache and an external API cannot). */

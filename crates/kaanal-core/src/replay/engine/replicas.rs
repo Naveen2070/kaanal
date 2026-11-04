@@ -37,7 +37,10 @@ impl Units {
             for _ in 0..n.replicas.max(1) {
                 states.push(NodeState {
                     gate: n.admission.as_ref().map(Gate::new),
-                    bucket: n.rate_limit.as_ref().map(Bucket::new),
+                    bucket: n
+                        .rate_limit
+                        .as_ref()
+                        .map(|r| Bucket::new(r).with_status(n.kind.rate_limit_status())),
                     since: 0,
                 });
             }

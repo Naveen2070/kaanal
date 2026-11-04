@@ -10,7 +10,7 @@
 //! `drop_holds` is the last net, when the request's table slot is freed.
 
 use super::state::{Failure, HoldState, NOT_STARTED, live};
-use super::{Admit, Engine, FailCause, FailKind, Gate, NodeId, PlanItem};
+use super::{Admit, Bucket, Engine, FailCause, FailKind, Gate, NodeId, PlanItem};
 use std::time::Duration;
 
 impl Engine {
@@ -36,13 +36,19 @@ impl Engine {
             if counted {
                 self.count(node, rep, |c| c.limited += 1);
             }
+            let status = self
+                .units
+                .state(node, rep)
+                .bucket
+                .as_ref()
+                .map_or(429, Bucket::status);
             self.fail(
                 r,
                 Failure {
                     at: now,
                     idx,
                     node,
-                    status: 429,
+                    status,
                     kind: FailKind::Status,
                     retry_after: Some(Duration::from_nanos(wait)),
                     refused: counted.then_some((node, rep, true)),

@@ -451,13 +451,19 @@ impl Engine {
                     self.count(node, rep, |c| c.limited += 1);
                 }
                 let retry_after = Some(Duration::from_nanos(wait));
+                let status = self
+                    .units
+                    .state(node, rep)
+                    .bucket
+                    .as_ref()
+                    .map_or(429, Bucket::status);
                 self.fail(
                     r,
                     Failure {
                         at: now,
                         idx,
                         node,
-                        status: 429,
+                        status,
                         kind: FailKind::Status,
                         retry_after,
                         refused: counted.then_some((node, rep, true)),

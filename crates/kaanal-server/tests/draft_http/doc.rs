@@ -115,9 +115,19 @@ async fn kind_defaults_has_an_entry_for_every_node_kind() {
         "cache",
         "external-api",
         "auth",
+        "load-balancer",
+        "storage",
     ] {
         assert_eq!(v["kind_defaults"][kind]["type"], kind, "{kind}: {v}");
     }
+    let storage = &v["kind_defaults"]["storage"];
+    assert_eq!(storage["flavor"], "s3");
+    assert_eq!(
+        storage["first_byte"], "25ms",
+        "a plain value, so Studio can edit it"
+    );
+    assert_eq!(storage["throughput"], "80MB/s");
+    assert!(storage.get("proc").is_none() && storage.get("concurrency").is_none());
     assert_eq!(v["kind_defaults"]["gateway"]["concurrency"]["limit"], 256);
     assert_eq!(v["kind_defaults"]["gateway"]["concurrency"]["queue"], 100);
     assert_eq!(v["kind_defaults"]["gateway"]["timeout"], "30s");
@@ -129,7 +139,7 @@ async fn kinds_carry_who_may_call_whom_and_which_have_a_service_time() {
     let s = start(BASE).await;
     let v = draft(&s).await;
     let kinds = v["kinds"].as_array().expect("kinds is a list");
-    assert_eq!(kinds.len(), 8, "{v}");
+    assert_eq!(kinds.len(), 9, "{v}");
     let of = |name: &str| {
         kinds
             .iter()
@@ -150,11 +160,36 @@ async fn kinds_carry_who_may_call_whom_and_which_have_a_service_time() {
             "database",
             "external-api",
             "auth",
-            "load-balancer"
+            "load-balancer",
+            "storage"
         ])
     );
     assert_eq!(of("database")["callees"], json!([]));
-    assert_eq!(of("service")["callees"].as_array().map(Vec::len), Some(7));
+    // an object store is a leaf: it calls nothing, and has no `proc` (its time is `first_byte`)
+    assert_eq!(of("storage")["callees"], json!([]));
+    assert_eq!(of("storage")["service_time"], false);
+    assert!(
+        of("service")["callees"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("storage"))
+    );
+    assert!(
+        of("auth")["callees"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("storage"))
+    );
+    for k in ["gateway", "cache", "database", "external-api", "storage"] {
+        assert!(
+            !of(k)["callees"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("storage")),
+            "{k}"
+        );
+    }
+    assert_eq!(of("service")["callees"].as_array().map(Vec::len), Some(8));
     // a database and a cache price their work per operation, the others have one service time
     assert_eq!(of("database")["service_time"], false);
     assert_eq!(of("cache")["service_time"], false);

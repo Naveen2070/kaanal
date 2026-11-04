@@ -172,7 +172,7 @@ pub struct RequestRecord {
     /// Completion minus arrival: service times plus queue waits.
     pub latency: Duration,
     /// Ok, or where and how the request failed: a chaos failure (its `kind`: status, reset,
-    /// malformed or hang; a hang is reported as kind `timeout`, 504), a deadline that fired (kind `timeout`, 504), a rate limit (429,
+    /// malformed or hang; a hang is reported as kind `timeout`, 504), a deadline that fired (kind `timeout`, 504), a rate limit (429, or 503 at a storage node,
     /// with `retry_after`) or a full queue (the node's overflow status).
     pub result: ChainResult,
     /// Why it failed, as the engine decided it; `None` when `result` is Ok.
@@ -203,7 +203,7 @@ pub struct NodeStats {
     /// Longest queue seen when a request joined at or after warmup (so it can include
     /// requests that arrived earlier; a queue that only drains after warmup is not counted).
     pub max_queue: usize,
-    /// Requests refused at this node by its rate limit (429), over reported requests.
+    /// Requests refused at this node by its rate limit (429, 503 at a storage node), over reported requests.
     pub limited: u64,
     /// Requests refused at this node by a full queue, over reported requests.
     pub overflowed: u64,
@@ -214,7 +214,7 @@ pub struct NodeStats {
 
 /// Simulates `cfg` on `topo` under fixed `chaos`. Deterministic: same inputs, same report.
 /// Nodes with `concurrency` or a `pool` queue requests (bounded queues overflow with the
-/// configured status); nodes with a `rate_limit` refuse with 429; both run in the shared replay
+/// configured status); nodes with a `rate_limit` refuse with 429 (503 for storage); both run in the shared replay
 /// engine, exactly as live mode does.
 ///
 /// # Errors

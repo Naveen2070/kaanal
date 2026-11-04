@@ -25,10 +25,12 @@ mod aliases;
 mod balancer;
 mod checks;
 mod endpoints;
+mod kinds;
 mod limits;
 mod nodes;
 mod scenario;
 mod shared;
+mod storage;
 mod traffic;
 mod values;
 
@@ -43,14 +45,16 @@ use endpoints::default_calls;
 pub use endpoints::{
     Branch, CallStep, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig, parse_endpoints,
 };
-pub use limits::{BoundedConcurrency, ConcurrencyConfig, PoolConfig, RateLimitConfig};
-pub use nodes::{
-    AuthConfig, CacheConfig, CacheFlavor, DatabaseConfig, DbFlavor, ExternalApiConfig,
-    GatewayConfig, Hold, MonolithConfig, NodeConfig, NodeKind, OpsConfig, ServiceConfig,
+pub use kinds::{
+    AuthConfig, CacheConfig, DatabaseConfig, ExternalApiConfig, GatewayConfig, MonolithConfig,
+    ServiceConfig,
 };
+pub use limits::{BoundedConcurrency, ConcurrencyConfig, PoolConfig, RateLimitConfig};
+pub use nodes::{CacheFlavor, DbFlavor, Hold, NodeConfig, NodeKind, OpsConfig};
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
 pub use shared::{DistConfig, EdgeConfig, NodeBandwidth, NodeBandwidthSplit, Override, UserConfig};
+pub use storage::{StorageConfig, StorageFlavor};
 pub use traffic::{JourneyConfig, MAX_DURATION, TrafficConfig, check_profile};
 use values::{
     MAX_BURST_WINDOW_S, NOT_TEXT, call_timeout, http_url, password_text, positive_rps, ratio,

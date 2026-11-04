@@ -16,6 +16,7 @@ import { useDraft } from "../../data/store/draft";
 import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section, StyleField } from "./Field";
 import { callsOthers } from "../../canvas/rules";
+import { StorageFields } from "./StorageFields";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { RATE_UNITS, TIME_UNITS } from "./units";
 import {
@@ -125,7 +126,9 @@ export function Controls({
             onChange={(c) => void patch(setStyle(name, config, c))}
           />
         ) : null}
-        {!hasProc(config.type) ? (
+        {config.type === "storage" ? (
+          <StorageFields name={name} config={config} />
+        ) : !hasProc(config.type) ? (
           <p className="mb-2 text-xs text-muted">
             This kind prices its work per operation (reads, writes, hits), not with one service
             time. Edit those in kaanal.yaml for now.

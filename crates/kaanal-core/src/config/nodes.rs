@@ -1,5 +1,10 @@
 //! The node kinds and their per-kind config structs (gateway, service, monolith, database, cache, external API, auth) with the flavor enums.
 
+use super::kinds::{
+    AuthConfig, CacheConfig, DatabaseConfig, ExternalApiConfig, GatewayConfig, MonolithConfig,
+    ServiceConfig,
+};
+use super::storage::{StorageConfig, StorageFlavor};
 use super::*;
 use crate::balance::Balance;
 
@@ -22,6 +27,8 @@ pub enum NodeKind {
     Auth,
     /// A load balancer: picks one of its callee components for each call.
     LoadBalancer,
+    /// An object store (S3, GCS, Azure Blob): a leaf with a first-byte time and a throughput.
+    Storage,
 }
 
 /// What a node's slot covers (`hold:`), for a node that calls others.
@@ -41,7 +48,7 @@ pub enum Hold {
 impl NodeKind {
     /// Every kind, in the order Studio lists them. A new kind goes here too: the draft view's
     /// `kinds` and `kind_defaults` are built from this list.
-    pub const ALL: [NodeKind; 8] = [
+    pub const ALL: [NodeKind; 9] = [
         NodeKind::Gateway,
         NodeKind::Service,
         NodeKind::Monolith,
@@ -50,10 +57,12 @@ impl NodeKind {
         NodeKind::ExternalApi,
         NodeKind::Auth,
         NodeKind::LoadBalancer,
+        NodeKind::Storage,
     ];
 
     /// Whether the kind has one `proc` service time (the others price their work with `ops`,
-    /// `hit` and `miss`). Studio shows a Time control only for these.
+    /// `hit` and `miss`; storage with `first_byte` and `throughput`). Studio shows a Time control
+    /// only for these.
     pub fn has_proc(self) -> bool {
         match self {
             NodeKind::Gateway
@@ -62,8 +71,14 @@ impl NodeKind {
             | NodeKind::ExternalApi
             | NodeKind::Auth
             | NodeKind::LoadBalancer => true,
-            NodeKind::Database | NodeKind::Cache => false,
+            NodeKind::Database | NodeKind::Cache | NodeKind::Storage => false,
         }
+    }
+
+    /// The status a call turned away by this kind's `rate_limit` gets: 503 for storage (S3's
+    /// "Slow Down"), 429 for every other kind.
+    pub fn rate_limit_status(self) -> u16 {
+        if self == NodeKind::Storage { 503 } else { 429 }
     }
 
     /// The YAML spelling (`external-api`), also used in status output and messages.
@@ -77,6 +92,7 @@ impl NodeKind {
             NodeKind::ExternalApi => "external-api",
             NodeKind::Auth => "auth",
             NodeKind::LoadBalancer => "load-balancer",
+            NodeKind::Storage => "storage",
         }
     }
 }
@@ -114,6 +130,8 @@ pub enum NodeConfig {
     Auth(AuthConfig),
     /// A load balancer: a real hop that spreads calls over several components.
     LoadBalancer(LoadBalancerConfig),
+    /// An object store: a leaf with `first_byte` and `throughput`.
+    Storage(StorageConfig),
 }
 
 impl NodeConfig {
@@ -128,12 +146,15 @@ impl NodeConfig {
             NodeConfig::ExternalApi(_) => NodeKind::ExternalApi,
             NodeConfig::Auth(_) => NodeKind::Auth,
             NodeConfig::LoadBalancer(_) => NodeKind::LoadBalancer,
+            NodeConfig::Storage(_) => NodeKind::Storage,
         }
     }
 
-    /// Processing time per request (gateway, service, monolith, external-api, auth).
+    /// Processing time per request (gateway, service, monolith, external-api, auth, load
+    /// balancer); a storage node's is its `first_byte`.
     pub fn proc(&self) -> Option<&DistConfig> {
         match self {
+            NodeConfig::Storage(n) => Some(&n.first_byte),
             NodeConfig::Gateway(n) => n.proc.as_ref(),
             NodeConfig::Service(n) => n.proc.as_ref(),
             NodeConfig::Monolith(n) => n.proc.as_ref(),
@@ -173,6 +194,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.concurrency.as_ref(),
             NodeConfig::Auth(n) => n.concurrency.as_ref(),
             NodeConfig::LoadBalancer(n) => n.concurrency.as_ref(),
+            NodeConfig::Storage(n) => n.concurrency.as_ref(),
         }
     }
 
@@ -196,6 +218,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.rate_limit.as_ref(),
             NodeConfig::Auth(n) => n.rate_limit.as_ref(),
             NodeConfig::LoadBalancer(n) => n.rate_limit.as_ref(),
+            NodeConfig::Storage(n) => n.rate_limit.as_ref(),
         }
     }
 
@@ -210,6 +233,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.timeout,
             NodeConfig::Auth(n) => n.timeout,
             NodeConfig::LoadBalancer(n) => n.timeout,
+            NodeConfig::Storage(n) => n.timeout,
         }
     }
 
@@ -224,6 +248,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.replicas,
             NodeConfig::Auth(n) => n.replicas,
             NodeConfig::LoadBalancer(n) => n.replicas,
+            NodeConfig::Storage(n) => n.replicas,
         }
         .unwrap_or(1)
     }
@@ -239,6 +264,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.balance.as_ref(),
             NodeConfig::Auth(n) => n.balance.as_ref(),
             NodeConfig::LoadBalancer(n) => n.balance.as_ref(),
+            NodeConfig::Storage(n) => n.balance.as_ref(),
         }
     }
 
@@ -253,6 +279,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.bandwidth,
             NodeConfig::Auth(n) => n.bandwidth,
             NodeConfig::LoadBalancer(n) => n.bandwidth,
+            NodeConfig::Storage(n) => n.bandwidth,
             NodeConfig::Cache(_) => None,
         }
         .map_or((None, None), NodeBandwidth::pair)
@@ -275,7 +302,10 @@ impl NodeConfig {
             NodeConfig::Monolith(n) => n.hold,
             NodeConfig::Auth(n) => n.hold,
             NodeConfig::LoadBalancer(n) => n.hold,
-            NodeConfig::Database(_) | NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) => None,
+            NodeConfig::Database(_)
+            | NodeConfig::Cache(_)
+            | NodeConfig::ExternalApi(_)
+            | NodeConfig::Storage(_) => None,
         }
         .unwrap_or_default()
     }
@@ -291,6 +321,8 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.per_kb.as_ref(),
             NodeConfig::Auth(n) => n.per_kb.as_ref(),
             NodeConfig::LoadBalancer(n) => n.per_kb.as_ref(),
+            // a storage node's size cost comes from `throughput` ([`StorageConfig::per_kb`])
+            NodeConfig::Storage(_) => None,
         }
     }
 
@@ -305,6 +337,7 @@ impl NodeConfig {
             NodeConfig::ExternalApi(n) => n.locale.as_deref(),
             NodeConfig::Auth(n) => n.locale.as_deref(),
             NodeConfig::LoadBalancer(n) => n.locale.as_deref(),
+            NodeConfig::Storage(n) => n.locale.as_deref(),
         }
     }
 
@@ -316,402 +349,10 @@ impl NodeConfig {
             NodeConfig::Monolith(n) => n.flavor.map(DbFlavor::as_str),
             NodeConfig::Database(n) => n.flavor.map(DbFlavor::as_str),
             NodeConfig::Cache(n) => n.flavor.map(CacheFlavor::as_str),
+            NodeConfig::Storage(n) => n.flavor.map(StorageFlavor::as_str),
             _ => None,
         }
     }
-}
-
-/// A reverse proxy / API gateway / load balancer (nginx, Envoy). Optional, at most one.
-/// With one, every request pays its `proc` first and it answers static routes.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct GatewayConfig {
-    /// Cosmetic label shown in status output (`nginx`, `envoy`); not a preset.
-    pub flavor: Option<String>,
-    /// Processing time per request.
-    pub proc: Option<DistConfig>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
-    /// does its own work; `call` holds it until everything the node calls has answered, as a
-    /// thread-per-request server does, so a slow dependency fills this node's slots too.
-    #[serde(default)]
-    pub hold: Option<Hold>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
-    #[serde(default)]
-    pub bandwidth: Option<NodeBandwidth>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
-}
-
-/// A backend service. Without a gateway, requests for the routes in its `spec` enter here.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ServiceConfig {
-    /// `OpenAPI` 3.0 spec file, relative to this config file.
-    pub spec: Option<String>,
-    /// Processing time per request.
-    pub proc: Option<DistConfig>,
-    /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.
-    #[serde(default)]
-    pub chains: IndexMap<String, Vec<StepConfig>>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
-    /// does its own work; `call` holds it until everything the node calls has answered, as a
-    /// thread-per-request server does, so a slow dependency fills this node's slots too.
-    #[serde(default)]
-    pub hold: Option<Hold>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
-    #[serde(default)]
-    pub bandwidth: Option<NodeBandwidth>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
-}
-
-/// A service that can also be its own database: with `ops` (or a `flavor`) it has inline
-/// read/write/scan costs; with edges to databases it behaves as a service. Both together
-/// are allowed.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct MonolithConfig {
-    /// `OpenAPI` 3.0 spec file, relative to this config file.
-    pub spec: Option<String>,
-    /// Processing time per request.
-    pub proc: Option<DistConfig>,
-    /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.
-    #[serde(default)]
-    pub chains: IndexMap<String, Vec<StepConfig>>,
-    /// Inline read/write/scan costs; any op left out comes from `flavor`. Used once
-    /// endpoint chains land.
-    pub ops: Option<OpsConfig>,
-    /// Preset that fills inline ops the user left out (estimates).
-    pub flavor: Option<DbFlavor>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
-    /// does its own work; `call` holds it until everything the node calls has answered, as a
-    /// thread-per-request server does, so a slow dependency fills this node's slots too.
-    #[serde(default)]
-    pub hold: Option<Hold>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
-    #[serde(default)]
-    pub bandwidth: Option<NodeBandwidth>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
-}
-
-/// A data store with read/write/scan costs.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DatabaseConfig {
-    /// Read/write/scan costs. Required in full unless `flavor` fills the gaps.
-    pub ops: Option<OpsConfig>,
-    /// Preset that fills ops the user left out (estimates).
-    pub flavor: Option<DbFlavor>,
-    /// Connection pool: the slot limit `size`, a wait queue of `queue` and the status
-    /// `overflow_status` when it is full; the same as the map form of `concurrency`; set one
-    /// of the two.
-    pub pool: Option<PoolConfig>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
-    #[serde(default)]
-    pub bandwidth: Option<NodeBandwidth>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
-}
-
-/// A cache in front of slower nodes. Its costs are used once endpoint chains land.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CacheConfig {
-    /// Preset for `hit_ratio`, `hit` and `miss` (estimates).
-    pub flavor: Option<CacheFlavor>,
-    /// Share of lookups that hit, 0 to 1.
-    #[serde(default, deserialize_with = "ratio")]
-    #[schemars(extend("minimum" = 0, "maximum" = 1))]
-    pub hit_ratio: Option<f64>,
-    /// Cost of a hit.
-    pub hit: Option<DistConfig>,
-    /// Cost of finding out it is a miss.
-    pub miss: Option<DistConfig>,
-    /// Entry lifetime. Accepted and validated; no effect yet.
-    #[serde(default, with = "humantime_serde")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub ttl: Option<Duration>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
-}
-
-/// A third-party HTTP API (payments, email). Targets come from config only.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ExternalApiConfig {
-    /// Response time of the API.
-    pub proc: Option<DistConfig>,
-    /// Baseline share of failing calls, 0 to 1. Accepted and validated; no effect yet.
-    #[serde(default, deserialize_with = "ratio")]
-    #[schemars(extend("minimum" = 0, "maximum" = 1))]
-    pub error_rate: Option<f64>,
-    /// Real upstream URL to forward to. Accepted and validated; no effect yet.
-    #[serde(default, deserialize_with = "http_url")]
-    #[schemars(extend("pattern" = "^https?://.+"))]
-    pub proxy: Option<String>,
-    /// Connection pool: the slot limit `size`, a wait queue of `queue` and the status
-    /// `overflow_status` when it is full; the same as the map form of `concurrency`; set one
-    /// of the two.
-    pub pool: Option<PoolConfig>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
-    #[serde(default)]
-    pub bandwidth: Option<NodeBandwidth>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
-}
-
-/// An identity provider: serves `POST /login` (a signed RS256 token for one of its `users`)
-/// and `GET /.well-known/jwks.json` (the public key). At most one per topology.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AuthConfig {
-    /// Cost of one login, one JWKS request or one gateway token check.
-    pub proc: Option<DistConfig>,
-    /// Accounts that can log in (synthetic only); usernames are unique, at most 1000 users.
-    #[serde(default, deserialize_with = "unique_users")]
-    pub users: Vec<UserConfig>,
-    /// Lifetime of issued tokens: whole seconds, 1s to 1 day (default 1h).
-    #[serde(default, deserialize_with = "token_ttl")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub token_ttl: Option<Duration>,
-    /// Extra claims in every token this node issues (string, number or boolean; at most 32).
-    /// A user's own `claims` win. Reserved: sub, iss, exp, iat, jti, roles, scope.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::claims")]
-    pub claims: IndexMap<String, serde_json::Value>,
-    /// Most requests this node serves at once, as a number (the rest wait without limit) or a
-    /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
-    /// `overflow_status`). Absent = unlimited.
-    #[serde(default)]
-    #[schemars(schema_with = "crate::schema::concurrency")]
-    pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
-    /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
-    /// running keeps its slot until it ends. `0 < timeout <= 5 min`; absent = no deadline.
-    #[serde(default, deserialize_with = "call_timeout")]
-    #[schemars(schema_with = "crate::schema::duration_text")]
-    pub timeout: Option<Duration>,
-    /// Copies of this node, 1 to 64 (default 1). Each has its own slots, queue, pool and rate
-    /// limit; `balance` picks one per request.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1, "maximum" = 64))]
-    pub replicas: Option<u16>,
-    /// How traffic entering this node picks a replica (default `round-robin`); a calling edge
-    /// may override it.
-    #[serde(default)]
-    pub balance: Option<Balance>,
-    /// What a slot of this node covers (default `own`): `own` holds a slot only while the node
-    /// does its own work; `call` holds it until everything the node calls has answered, as a
-    /// thread-per-request server does, so a slow dependency fills this node's slots too.
-    #[serde(default)]
-    pub hold: Option<Hold>,
-    /// Extra processing time per KB of payload (request and response each, once per body), a
-    /// duration like `proc`. Absent = none.
-    pub per_kb: Option<DistConfig>,
-    /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
-    #[serde(default)]
-    pub bandwidth: Option<NodeBandwidth>,
-    /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
-    /// `locale`.
-    #[serde(default)]
-    #[schemars(extend("pattern" = LOCALE_PATTERN))]
-    pub locale: Option<String>,
 }
 
 /// Read/write/scan costs. Without a `flavor`, all three are required.

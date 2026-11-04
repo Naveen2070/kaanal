@@ -10,17 +10,33 @@ pub struct Bucket {
     interval: u64,
     burst: u32,
     tat: u128,
+    /// Status of a call this bucket turns away.
+    status: u16,
 }
 
 impl Bucket {
-    /// A full bucket for `limit` (interval and burst at least 1, as `Topology::build` makes them).
+    /// A full bucket for `limit` (interval and burst at least 1, as `Topology::build` makes them);
+    /// it turns calls away with 429 unless [`Bucket::with_status`] says otherwise.
     pub fn new(limit: &RateLimit) -> Bucket {
         debug_assert!(limit.interval_ns >= 1 && limit.burst >= 1);
         Bucket {
             interval: limit.interval_ns,
             burst: limit.burst,
             tat: 0,
+            status: 429,
         }
+    }
+
+    /// The same bucket, turning calls away with `status` (a storage node's is 503).
+    #[must_use]
+    pub fn with_status(mut self, status: u16) -> Bucket {
+        self.status = status;
+        self
+    }
+
+    /// The status of a call this bucket turns away.
+    pub fn status(&self) -> u16 {
+        self.status
     }
 
     /// Back to full, as if never used.

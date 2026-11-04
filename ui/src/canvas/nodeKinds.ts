@@ -3,6 +3,8 @@
 // looks in the palette and on the canvas.
 
 import {
+  Archive,
+  Box,
   Boxes,
   Database,
   DoorOpen,
@@ -13,6 +15,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import type { KindRules } from "../data/api/types";
 
 export interface KindInfo {
   /** The `type` tag and the name `add_node` takes. */
@@ -81,7 +84,29 @@ export const NODE_KINDS: KindInfo[] = [
     accent: "border-yellow-500 text-yellow-600",
     description: "Sends each call to one of several components",
   },
+  {
+    kind: "storage",
+    label: "Storage",
+    icon: Archive,
+    accent: "border-slate-500 text-slate-600",
+    description: "Object storage like S3: a first byte, then the transfer",
+  },
 ];
+
+/** The kinds to offer: the server's registry when it has sent one (a kind the page has no look for gets a plain box), else the static list. */
+export function offeredKinds(served: KindRules[] | undefined): KindInfo[] {
+  if (!served || served.length === 0) return NODE_KINDS;
+  return served.map(
+    ({ kind }) =>
+      kindInfo(kind) ?? {
+        kind,
+        label: kind,
+        icon: Box,
+        accent: "border-slate-500 text-slate-600",
+        description: `A ${kind} node`,
+      },
+  );
+}
 
 export function kindInfo(kind: string | undefined): KindInfo | undefined {
   return NODE_KINDS.find((k) => k.kind === kind);
@@ -97,6 +122,7 @@ const HUE: Record<string, string> = {
   "external-api": "external",
   auth: "auth",
   "load-balancer": "balancer",
+  storage: "storage",
 };
 
 /** The CSS colour of a kind: its own hue, or a neutral for a kind the Studio does not know. */
