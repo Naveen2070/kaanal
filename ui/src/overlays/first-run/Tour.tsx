@@ -38,7 +38,8 @@ const STEPS: {
     side: "left",
     text: "Connect two components so requests flow between them: drag from one card to another, or pick Connect to… in the details panel.",
     waiting: "Waiting for a connection.",
-    done: (n, s) => n.edges > s.edges,
+    // a starter loaded mid-tour brings its own wires: any connection at all completes the step
+    done: (n) => n.edges > 0,
   },
   {
     id: "break",
@@ -142,9 +143,11 @@ export function Tour() {
       }
     }, SETTLE_MS);
     return () => clearTimeout(t);
-    // `progress` is rebuilt every render; `finished` is what it decided
+    // `progress` is rebuilt every render; `finished` is what it decided. `i` is a dependency too: a
+    // starter loaded at step 1 leaves step 2 already done, so `finished` stays true across the move
+    // and only a new step makes the timer run again.
     // eslint-disable-next-line react/exhaustive-deps
-  }, [finished]);
+  }, [finished, i]);
 
   // Back and Next: the same move the real action makes, so a step can be skipped or revisited
   const go = (n: number) => {

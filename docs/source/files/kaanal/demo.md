@@ -4,6 +4,8 @@
 
 ## Flow
 
+The template's `demo/kaanal.yaml` ends with a `traffic:` section, one profile `peak` (100 rps, 30 s, a journey per `endpoints:` key, GET 3 and others 1; RULES 58). Studio's starter (`GET /__kaanal/demo`) is the separate `kaanal-server/demo/studio.yaml`, which already had its own `peak`.
+
 `demo` with `--eject` goes to `eject` first (no instance probe, no `.kaanal/`, no lock). Otherwise it checks without writing anything: `lifecycle::lock_probe` on `.kaanal/` (a running instance, any config, is usage 64 naming its port) and `check_locale` (usage 64 listing the tags). Only then `private_dir(".kaanal")`, `lock_instance` (lost a race since the probe: the usual "already running", exit 1), `write_template(".kaanal/demo", locale)`, a stderr note when `./kaanal.yaml` exists, `load`, and `serve_locked` bound to `127.0.0.1` with `--port` (default: the template's 8080 and `serve`'s +20 search). `.kaanal/` stays the state dir, so `down`, `chaos`, `logs` and `scenario` in the same folder find it through `run.json`.
 
 ## Items

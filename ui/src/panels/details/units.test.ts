@@ -1,5 +1,13 @@
 import { expect, test } from "vite-plus/test";
-import { fromUnit, pickUnit, RATE_UNITS, SIZE_UNITS, TIME_UNITS, toUnit } from "./units";
+import {
+  fromUnit,
+  parseBytes,
+  pickUnit,
+  RATE_UNITS,
+  SIZE_UNITS,
+  TIME_UNITS,
+  toUnit,
+} from "./units";
 
 const [ms, s, min] = TIME_UNITS as [
   (typeof TIME_UNITS)[0],
@@ -36,4 +44,46 @@ test("nothing_to_show_gives_the_smallest_unit", () => {
   expect(pickUnit(TIME_UNITS, null)).toBe(ms);
   expect(pickUnit(TIME_UNITS, 0)).toBe(ms);
   expect(pickUnit(TIME_UNITS, Number.NaN)).toBe(ms);
+});
+
+test("a_byte_field_reads_numbers_and_unit_text_like_the_loader", () => {
+  const ok: [unknown, boolean, number][] = [
+    [256_000, false, 256_000],
+    ["250KB", false, 256_000],
+    ["250 KB", false, 256_000],
+    ["250kb", false, 256_000],
+    ["250KiB", false, 256_000],
+    ["1.5MB", false, 1_572_864],
+    ["2GB", false, 2 * 1024 ** 3],
+    ["512B", false, 512],
+    ["512", false, 512],
+    ["1.5B", false, 2],
+    ["0KB", false, 0],
+    ["1MB/s", true, 1024 ** 2],
+    ["250 kb/S", true, 256_000],
+  ];
+  for (const [v, rate, want] of ok) expect(parseBytes(v, rate), String(v)).toBe(want);
+});
+
+test("a_byte_field_the_loader_would_refuse_reads_as_nothing_never_nan", () => {
+  const bad: [unknown, boolean][] = [
+    ["KB", false],
+    ["", true],
+    ["-5KB", false],
+    [-5, false],
+    [1.5, false], // a fractional YAML number is not whole bytes
+    ["5XB", false],
+    ["NaNKB", false],
+    ["1e400KB", true],
+    ["5KB/s", false], // a size takes no /s
+    ["5.KB", false],
+    ["9999999999999999GB", false], // past what a JS number holds exactly
+    [Number.NaN, false],
+    [Infinity, true],
+    [null, false],
+    [undefined, true],
+    [{ out: 1 }, true],
+    ["constructor", false],
+  ];
+  for (const [v, rate] of bad) expect(parseBytes(v, rate), String(v)).toBeNull();
 });

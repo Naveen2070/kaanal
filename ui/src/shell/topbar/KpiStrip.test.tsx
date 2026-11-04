@@ -243,3 +243,23 @@ test("the_strip_has_no_axe_violations", async () => {
   run(summary());
   await expectNoViolations(document.body);
 });
+
+test("goodput_is_qualified_when_a_component_is_saturated", async () => {
+  await show(300);
+  run(summary());
+  expect(value("Goodput").textContent).toBe("90/s");
+  expect(value("Goodput").title).toBe("");
+  run(summary({ nodes: [nodeSummary({ name: "db", saturated: true, saturates_at_req_s: 1280 })] }));
+  expect(value("Goodput").textContent).toBe("90/s · queue still growing");
+  expect(value("Goodput").title).toMatch(/not a sustained rate/i);
+});
+
+test("a_system_p99_over_30s_carries_a_hint_and_one_under_does_not", async () => {
+  await show(300);
+  run(summary());
+  expect(value("System p99").textContent).not.toContain("too slow");
+  run(summary({ latency: { p50_ms: 1, p95_ms: 5, p99_ms: 31_000, max_ms: 40_000, buckets: [] } }));
+  const cell = value("System p99");
+  expect(cell.textContent).toContain("too slow for a client");
+  expect(cell.title).toMatch(/No client waits this long/);
+});

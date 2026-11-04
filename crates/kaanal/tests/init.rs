@@ -192,6 +192,321 @@ fn json_with_piped_stdin_prints_exactly_the_object() {
     );
 }
 
+fn yaml_of(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap()
+}
+
+fn validates(dir: &Path) {
+    let v = bin().arg("validate").current_dir(dir).output().unwrap();
+    assert_eq!(v.status.code(), Some(0), "{}", stderr(&v));
+}
+
+#[test]
+fn init_writes_real_numbers_and_an_endpoint_per_route() {
+    let dir = project("defaults");
+    let o = init(&dir, &["openapi.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    validates(&dir);
+    let yaml = yaml_of(&dir);
+    for want in [
+        "concurrency: { limit: 256, queue: 100 }, proc: 2ms, timeout: 30s",
+        "concurrency: { limit: 32, queue: 100 }, proc: 25ms",
+        "net: { p50: 1ms, p99: 3ms }",
+        "database: { type: database, flavor: postgres }",
+        "cache: { type: cache, flavor: redis }",
+        "\"GET /users\": { op: scan, chain: [{ call: database }] }",
+        "\"GET /users/{id}\": { op: read, chain: [{ cache: cache }, { call: database }] }",
+        "\"POST /orders\": { op: write, chain: [{ call: database }] }",
+    ] {
+        assert!(yaml.contains(want), "missing `{want}` in\n{yaml}");
+    }
+    assert_eq!(yaml.matches("net: { p50: 1ms, p99: 3ms }").count(), 3);
+    assert!(!yaml.contains("hold") && !yaml.contains("per_kb"), "{yaml}");
+    assert!(yaml.matches("estimate").count() >= 2, "{yaml}");
+    // one summary line between `Wrote` and `Next`
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert_eq!(
+        out.lines().collect::<Vec<_>>(),
+        [
+            "Wrote kaanal.yaml, .gitignore",
+            "Chose: event loop, 32 slots, queue 100, 30 s timeout (estimates; edit kaanal.yaml)",
+            "Next: kaanal up"
+        ],
+        "{out}"
+    );
+}
+
+#[test]
+fn thread_per_request_writes_hold_call_and_200_slots() {
+    let dir = project("threads");
+    let o = init(
+        &dir,
+        &[
+            "openapi.yaml",
+            "--yes",
+            "--server-style",
+            "thread-per-request",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    validates(&dir);
+    let yaml = yaml_of(&dir);
+    assert!(
+        yaml.contains("concurrency: { limit: 200, queue: 100 }, proc: 25ms, hold: call"),
+        "{yaml}"
+    );
+    assert!(!yaml.contains("limit: 32"), "{yaml}");
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(
+        out.contains("Chose: thread per request, 200 slots, queue 100, 30 s timeout (estimates; edit kaanal.yaml)"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_bad_server_style_flag_is_refused_and_names_the_values() {
+    let dir = project("badstyle");
+    let o = init(&dir, &["openapi.yaml", "--yes", "--server-style", "fibers"]);
+    assert_eq!(o.status.code(), Some(64), "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("event-loop or thread-per-request"),
+        "{}",
+        stderr(&o)
+    );
+    assert_eq!(listing(&dir), ["openapi.yaml"]);
+}
+
+#[test]
+fn json_output_keeps_its_shape_with_a_style_flag() {
+    let dir = project("json-style");
+    let o = bin()
+        .args([
+            "--json",
+            "init",
+            "openapi.yaml",
+            "--yes",
+            "--server-style",
+            "thread-per-request",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout),
+        "{\"written\":[\"kaanal.yaml\",\".gitignore\"]}\n"
+    );
+}
+
+const ODD: &str = "openapi: 3.0.3
+info: { title: odd, version: \"1\" }
+paths:
+  /users:
+    get: { responses: { \"200\": { description: ok } } }
+    post: { responses: { \"201\": { description: ok } } }
+    head: { responses: { \"200\": { description: ok } } }
+    options: { responses: { \"200\": { description: ok } } }
+  /users/{id}:
+    get: { parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { \"200\": { description: ok } } }
+    put: { parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { \"200\": { description: ok } } }
+    patch: { parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { \"200\": { description: ok } } }
+    delete: { parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { \"204\": { description: ok } } }
+  /orders/{oid}/items:
+    get: { parameters: [ { name: oid, in: path, required: true, schema: { type: string } } ], responses: { \"200\": { description: ok } } }
+  /reports/:
+    get: { responses: { \"200\": { description: ok } } }
+";
+
+#[test]
+fn the_endpoints_block_follows_the_method_and_validates_for_odd_specs() {
+    let dir = project("odd");
+    std::fs::write(dir.join("odd.yaml"), ODD).unwrap();
+    let o = init(&dir, &["odd.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    validates(&dir);
+    let yaml = yaml_of(&dir);
+    let (read, scan, write) = (
+        "op: read, chain: [{ cache: cache }, { call: database }]",
+        "op: scan, chain: [{ call: database }]",
+        "op: write, chain: [{ call: database }]",
+    );
+    for (key, op) in [
+        ("GET /users", scan),
+        ("POST /users", write),
+        ("GET /users/{id}", read),
+        ("PUT /users/{id}", write),
+        ("PATCH /users/{id}", write),
+        ("DELETE /users/{id}", write),
+        ("GET /orders/{oid}/items", scan),
+        ("GET /reports/", scan),
+    ] {
+        let line = yaml
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("\"{key}\":")))
+            .unwrap_or_else(|| panic!("no entry for {key}:\n{yaml}"));
+        assert!(line.contains(op), "{key}: {line}");
+    }
+    // HEAD and OPTIONS get no entry of their own
+    assert!(
+        !yaml.contains("\"HEAD") && !yaml.contains("\"OPTIONS"),
+        "{yaml}"
+    );
+    // every route of the spec that has an entry is listed once, none is left over
+    assert_eq!(yaml.matches("op: ").count(), 8, "{yaml}");
+    // and `kaanal endpoints` has only the HEAD and OPTIONS routes left to offer
+    let e = bin().arg("endpoints").current_dir(&dir).output().unwrap();
+    let shown = String::from_utf8_lossy(&e.stdout).into_owned();
+    assert_eq!(shown.matches(": {}").count(), 2, "{shown}");
+    assert!(shown.contains("HEAD /users"), "{shown}");
+    assert!(shown.contains("OPTIONS /users"), "{shown}");
+}
+
+#[test]
+fn a_spec_of_only_head_and_options_gets_a_valid_file_with_no_endpoints_block() {
+    let dir = project("headonly");
+    std::fs::write(
+        dir.join("h.yaml"),
+        "openapi: 3.0.3\ninfo: { title: h, version: \"1\" }\npaths:\n  /ping:\n    head: { responses: { \"200\": { description: ok } } }\n    options: { responses: { \"200\": { description: ok } } }\n",
+    )
+    .unwrap();
+    let o = init(&dir, &["h.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    validates(&dir);
+    assert!(!yaml_of(&dir).contains("endpoints:"));
+}
+
+/// The generated `peak` profile of `dir`, read back through the config loader.
+fn peak_of(dir: &Path) -> kaanal_core::config::TrafficConfig {
+    let cfg = kaanal_core::Config::from_yaml(&yaml_of(dir)).unwrap();
+    cfg.traffic["peak"].clone()
+}
+
+#[test]
+fn init_writes_a_peak_profile_with_one_journey_per_endpoint() {
+    let dir = project("peak");
+    std::fs::write(dir.join("odd.yaml"), ODD).unwrap();
+    let o = init(&dir, &["odd.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    validates(&dir);
+    let yaml = yaml_of(&dir);
+    assert!(
+        yaml.contains("\ntraffic:\n  peak:\n    rps: 100\n    duration: 30s\n"),
+        "{yaml}"
+    );
+    assert!(
+        yaml.contains("# traffic:") && yaml.contains("An estimate"),
+        "{yaml}"
+    );
+    let p = peak_of(&dir);
+    assert_eq!((p.rps, p.duration), (100.0, Some(Duration::from_secs(30))));
+    let mut got: Vec<(&str, f64)> = p
+        .journeys
+        .iter()
+        .map(|j| (j.endpoint.as_str(), j.weight))
+        .collect();
+    got.sort_by(|a, b| a.0.cmp(b.0));
+    // the endpoints: keys; HEAD and OPTIONS have none
+    let mut want = [
+        ("GET /users", 3.0),
+        ("POST /users", 1.0),
+        ("GET /users/{id}", 3.0),
+        ("PUT /users/{id}", 1.0),
+        ("PATCH /users/{id}", 1.0),
+        ("DELETE /users/{id}", 1.0),
+        ("GET /orders/{oid}/items", 3.0),
+        ("GET /reports/", 3.0),
+    ];
+    want.sort_by(|a, b| a.0.cmp(b.0));
+    assert_eq!(got, want);
+}
+
+#[test]
+fn the_generated_peak_profile_runs_in_the_simulator() {
+    use kaanal_core::chain::{EndpointsInput, compile};
+    use kaanal_core::{ChaosState, Config, endpoint_key};
+    use kaanal_sim::{SimConfig, Stream, run, summarize};
+    let dir = project("peak-run");
+    let o = init(&dir, &["openapi.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    let p = peak_of(&dir);
+    let cfg = Config::from_yaml(&yaml_of(&dir)).unwrap();
+    let (topo, routes) = kaanal_server::spec_routes(&cfg, &dir).unwrap();
+    let eps = compile(&topo, &routes, EndpointsInput::inline(&cfg)).unwrap();
+    let total: f64 = p.journeys.iter().map(|j| j.weight).sum();
+    let sim = SimConfig {
+        streams: p
+            .journeys
+            .iter()
+            .map(|j| Stream {
+                endpoint_key: endpoint_key(&j.endpoint).unwrap(),
+                rate_per_s: p.rps * j.weight / total,
+                req_bytes: 0,
+                resp_bytes: 0,
+            })
+            .collect(),
+        duration: Duration::from_secs(10),
+        warmup: Duration::from_secs(1),
+        seed: 42,
+    };
+    let rep = run(&topo, &eps, &ChaosState::default(), &sim).unwrap();
+    let s = summarize(&topo, &eps, &sim, &rep);
+    assert!(
+        s.requests > 0 && s.failed == 0,
+        "{} / {}",
+        s.requests,
+        s.failed
+    );
+}
+
+#[test]
+fn a_head_and_options_only_spec_gets_no_traffic_section() {
+    let dir = project("peak-none");
+    std::fs::write(
+        dir.join("h.yaml"),
+        "openapi: 3.0.3\ninfo: { title: h, version: \"1\" }\npaths:\n  /ping:\n    head: { responses: { \"200\": { description: ok } } }\n    options: { responses: { \"200\": { description: ok } } }\n",
+    )
+    .unwrap();
+    let o = init(&dir, &["h.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    validates(&dir);
+    assert!(!yaml_of(&dir).contains("traffic:"));
+}
+
+/// p50 of one request a second through the generated file, from the simulator.
+fn sim_p50_ms(dir: &Path, key: &str) -> f64 {
+    use kaanal_core::chain::{EndpointsInput, compile};
+    use kaanal_core::{ChaosState, Config};
+    use kaanal_sim::{SimConfig, Stream, run, summarize};
+    let cfg = Config::from_yaml(&yaml_of(dir)).unwrap();
+    let (topo, routes) = kaanal_server::spec_routes(&cfg, dir).unwrap();
+    let eps = compile(&topo, &routes, EndpointsInput::inline(&cfg)).unwrap();
+    let sim = SimConfig {
+        streams: vec![Stream {
+            endpoint_key: key.into(),
+            rate_per_s: 1.0,
+            req_bytes: 0,
+            resp_bytes: 0,
+        }],
+        duration: Duration::from_secs(60),
+        warmup: Duration::ZERO,
+        seed: 42,
+    };
+    let rep = run(&topo, &eps, &ChaosState::default(), &sim).unwrap();
+    summarize(&topo, &eps, &sim, &rep).latency.p50_ms
+}
+
+#[test]
+fn the_defaults_make_a_request_take_real_time() {
+    let dir = project("sim");
+    let o = init(&dir, &["openapi.yaml", "--yes"]);
+    assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
+    // 2 ms gateway + 25 ms service + 1 ms nets + a database read: well over the old 0 ms
+    let read = sim_p50_ms(&dir, "GET /users/{id}");
+    assert!(read > 20.0, "GET by id p50 {read} ms");
+    let write = sim_p50_ms(&dir, "POST /orders");
+    assert!(write > 20.0, "POST p50 {write} ms");
+}
+
 /// A `kaanal up` child, killed on drop.
 struct Up(Child);
 
@@ -247,7 +562,8 @@ fn init_output_validates_and_starts() {
 
     let e = bin().arg("endpoints").current_dir(&dir).output().unwrap();
     assert_eq!(e.status.code(), Some(0), "{}", stderr(&e));
-    assert!(String::from_utf8_lossy(&e.stdout).contains("GET /users"));
+    // init wrote an entry for every route, so there is nothing left to add
+    assert!(String::from_utf8_lossy(&e.stdout).contains("nothing to add"));
 }
 
 #[test]

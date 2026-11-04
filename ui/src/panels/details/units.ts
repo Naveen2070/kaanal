@@ -27,6 +27,36 @@ export const RATE_UNITS: readonly Unit[] = [
   { label: "GB/s", per: 1024 * 1024 },
 ];
 
+const BYTE_UNITS = new Map([
+  ["", 1],
+  ["b", 1],
+  ["kb", 1024],
+  ["kib", 1024],
+  ["mb", 1024 ** 2],
+  ["mib", 1024 ** 2],
+  ["gb", 1024 ** 3],
+  ["gib", 1024 ** 3],
+]);
+const BYTES_TEXT = /^\s*(\d+(?:\.\d+)?)\s*([a-z]*)\s*(\/s)?\s*$/i;
+
+/**
+ * A byte or rate field of the draft as whole bytes (a rate: bytes a second), the way the loader
+ * reads it (`units.rs`): a whole number, or text like `250KB`, `1.5 MB`, `512B`, `1MB/s`. KB is 1024
+ * bytes, units are case-insensitive (`KiB` is the same), a fraction rounds to the nearest byte, and
+ * `/s` is only for a `rate`. Anything else (negative, no number, an unknown unit, text that is not
+ * a size) is null, so a field the page cannot read shows empty, never NaN.
+ */
+export function parseBytes(value: unknown, rate = false): number | null {
+  if (typeof value === "number") return Number.isInteger(value) && value >= 0 ? value : null;
+  if (typeof value !== "string") return null;
+  const m = BYTES_TEXT.exec(value);
+  if (!m || (m[3] && !rate)) return null;
+  const per = BYTE_UNITS.get((m[2] ?? "").toLowerCase());
+  if (per === undefined) return null;
+  const bytes = Math.round(Number(m[1]) * per);
+  return Number.isSafeInteger(bytes) ? bytes : null;
+}
+
 /** "280 KB/s", "1.5 MB/s": a rate in KB/s in the unit that reads best, three significant digits. */
 export function rateText(kb: number): string {
   const u = [...RATE_UNITS].reverse().find((x) => kb >= x.per) ?? (RATE_UNITS[0] as Unit);

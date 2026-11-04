@@ -64,12 +64,10 @@ fn run(
                 ))
             })?
         }
-        _ => {
-            return Err(Fail::usage(
-                "name a profile with --profile NAME, or give one with --file FILE",
-            ));
-        }
+        // none given: an empty name, so the server says what the project has (RULES 58)
+        _ => json!(""),
     };
+    let unnamed = profile == json!("");
     let mut body = json!({ "profile": profile });
     if let Some(d) = duration {
         body["duration_s"] = json!(secs("--duration", d)?);
@@ -83,7 +81,13 @@ fn run(
     if let Some(s) = scenario {
         body["scenario"] = json!(s);
     }
-    let started = call("POST", "/__kaanal/sim/run", Some(body))?;
+    let started = call("POST", "/__kaanal/sim/run", Some(body)).map_err(|f| match f {
+        // still a usage error (64), as when the CLI refused it before asking: only the text is new
+        Fail(1, m) if unnamed && m.contains("HTTP 404: ") => {
+            Fail::usage(m.split_once("HTTP 404: ").map_or(m.as_str(), |(_, t)| t))
+        }
+        f => f,
+    })?;
     let id = started["id"].as_str().unwrap_or_default().to_string();
     if no_wait {
         output::emit(&started, || println!("{}", clean(&id)));

@@ -192,3 +192,23 @@ test("a_full_wire_says_what_bandwidth_the_load_needs", async () => {
   );
   expect(screen.queryByText(/Full at this load/)).toBeNull();
 });
+
+test("a_wire_written_with_a_unit_shows_the_same_number_as_its_bytes", async () => {
+  const withBandwidth = (bandwidth: unknown) =>
+    view({
+      edges: [
+        { from: "gw", to: "app" },
+        { from: "app", to: "db", bandwidth },
+      ],
+    });
+  await show(1, withBandwidth("250KB"));
+  expect((screen.getByLabelText("Bandwidth") as HTMLInputElement).value).toBe("250");
+  expect((screen.getByLabelText("Bandwidth unit") as HTMLSelectElement).value).toBe("KB/s");
+  cleanup();
+  await show(1, withBandwidth("2 MB/s"));
+  expect((screen.getByLabelText("Bandwidth") as HTMLInputElement).value).toBe("2");
+  expect((screen.getByLabelText("Bandwidth unit") as HTMLSelectElement).value).toBe("MB/s");
+  cleanup();
+  await show(1, withBandwidth("lots")); // not a size: an empty box, never NaN
+  expect((screen.getByLabelText("Bandwidth") as HTMLInputElement).value).toBe("");
+});

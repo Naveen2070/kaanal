@@ -357,3 +357,39 @@ test("next_and_back_move_between_steps_and_done_ends_the_tour", () => {
   fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(useFirstRun.getState().phase).toBe("off");
 });
+
+test("connect_step_completes_when_a_starter_already_has_wires", () => {
+  vi.useFakeTimers();
+  const settle = () => act(() => void vi.advanceTimersByTime(500));
+  withDoc({}, [], false);
+  useFirstRun.setState({ phase: "tour", projectKey: "p" });
+  render(<Tour />);
+  act(() => withDoc({ a: { type: "service" } }, [], false));
+  settle();
+  expect(tour()?.getAttribute("aria-label")).toBe("Tour, step 2 of 4");
+  // a starter loads mid-tour with wires of its own: no new wire will ever be drawn
+  act(() =>
+    withDoc({ a: { type: "service" }, b: { type: "service" } }, [{ from: "a", to: "b" }], false),
+  );
+  settle();
+  expect(tour()?.getAttribute("aria-label")).toBe("Tour, step 3 of 4");
+  vi.useRealTimers();
+});
+
+test("a_starter_loaded_at_step_one_carries_the_tour_past_the_connect_step", () => {
+  // the real flow: nodes and wires arrive together, so step 2 is already done the moment it shows
+  // and `finished` stays true across the move (it must not wait for a change that never comes)
+  vi.useFakeTimers();
+  const settle = () => act(() => void vi.advanceTimersByTime(500));
+  withDoc({}, [], false);
+  useFirstRun.setState({ phase: "tour", projectKey: "p" });
+  render(<Tour />);
+  expect(tour()?.getAttribute("aria-label")).toBe("Tour, step 1 of 4");
+  act(() =>
+    withDoc({ a: { type: "service" }, b: { type: "service" } }, [{ from: "a", to: "b" }], false),
+  );
+  settle(); // step 1 (a new component) is done
+  settle(); // step 2 (a connection) is already done
+  expect(tour()?.getAttribute("aria-label")).toBe("Tour, step 3 of 4");
+  vi.useRealTimers();
+});

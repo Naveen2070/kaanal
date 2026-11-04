@@ -13,6 +13,7 @@ export function NoteCard({ id, data }: NodeProps) {
   return (
     <div className="group relative w-52 rounded-xl border border-dashed border-control bg-raised p-2 shadow-float">
       <textarea
+        name="note"
         // `nodrag` and `nowheel`: selecting text must not drag the card, scrolling it must not zoom
         className="nodrag nowheel block h-20 w-full resize-none bg-transparent text-sm italic text-text outline-none placeholder:text-muted"
         aria-label="Note"

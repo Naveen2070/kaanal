@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import type { DraftView, EdgeDoc, NodeDoc } from "../../data/api/types";
+import type { DraftView, EdgeDoc, NodeDoc, RunRecord } from "../../data/api/types";
 import { FeedContext } from "../../canvas/feed";
 import { useDraft } from "../../data/store/draft";
+import { useRun } from "../../data/store/run";
 import { useToasts } from "../../shell/toast/toasts";
 import { mockFetch } from "../../test/fetch";
 import { nodeSummary } from "../../test/summary";
@@ -424,4 +425,48 @@ test("a_thread_per_request_on_a_node_with_no_limit_also_sets_a_typical_pool", as
       { op: "insert", path: ["nodes", "app", "concurrency"], value: { limit: 200, queue: 100 } },
     ],
   });
+});
+
+test("a_chaos_hint_shows_in_the_controls_of_the_component_that_has_chaos", async () => {
+  useRun.setState({
+    latest: { id: "s1", state: "done", summary: { failed: 0 } } as unknown as RunRecord,
+  });
+  mockFetch([
+    { json: view({ doc: { nodes: { app }, edges } }) },
+    { json: { effective: { nodes: { app: { down: true } } } } },
+    { json: topology },
+  ]);
+  await useDraft.getState().load();
+  render(
+    <FeedContext.Provider
+      value={{ node: () => undefined, nodes: [], dimmed: false, peakVisits: 0 }}
+    >
+      <Controls
+        name="app"
+        config={app}
+        edges={edges}
+        onDeleted={vi.fn()}
+        onRenamed={vi.fn()}
+        onChaos={vi.fn()}
+      />
+    </FeedContext.Provider>,
+  );
+  expect(await screen.findByText(/Nothing failed although app is down/)).toBeTruthy();
+  useRun.setState({ latest: null });
+});
+
+test("a_network_card_written_with_a_unit_shows_the_same_number_as_its_bytes", async () => {
+  await show(nodeSummary(), { ...app, bandwidth: "250KB" });
+  expect((screen.getByLabelText("Sends up to") as HTMLInputElement).value).toBe("250");
+  expect((screen.getByLabelText("Receives up to") as HTMLInputElement).value).toBe("250");
+  cleanup();
+  await show(nodeSummary(), { ...app, bandwidth: 256_000 });
+  expect((screen.getByLabelText("Sends up to") as HTMLInputElement).value).toBe("250");
+  cleanup();
+  await show(nodeSummary(), { ...app, bandwidth: { out: "1 MB/s" } });
+  expect((screen.getByLabelText("Sends up to") as HTMLInputElement).value).toBe("1");
+  expect((screen.getByLabelText("Receives up to") as HTMLInputElement).value).toBe("");
+  cleanup();
+  await show(nodeSummary(), { ...app, bandwidth: "fast" });
+  expect((screen.getByLabelText("Sends up to") as HTMLInputElement).value).toBe("");
 });

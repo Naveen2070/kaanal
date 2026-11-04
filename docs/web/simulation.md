@@ -23,6 +23,8 @@ The body:
 | `scenario`   | Run under this [scenario](scenarios.md)'s chaos alone. Without it the run uses the **live chaos** in force when it starts.   |
 | `source`     | `applied` (default) runs the system in force; `draft` runs the draft text without Apply (see below). Anything else is `400`. |
 
+A profile name the config does not have is a `404` whose message says what to do: that no profile is defined (add a `traffic:` section or pass `-f`), or the names that are (`name one with -p: peak`); see [traffic](traffic.md).
+
 A run is answered at once with `202`; poll `GET /sim/runs/{id}` until `state` is `done` (or `failed`, with an `error`). `GET /sim/runs` lists the last eight runs without their reports.
 
 ## Run on the draft
@@ -49,7 +51,7 @@ With `"source": "draft"` the run simulates the text of the draft (`GET /draft`) 
 - **`streams`**: percentiles per endpoint.
 - **`warnings`**: read these first.
 
-**Offered load and utilization.** `offered_load` is hop time over capacity (for a node with `hold: call`, the time its slots were held, which includes the wait on what it called) and can pass 1; `utilization` is the share of slot time actually busy and tops out at 1. A node is `saturated` when its offered load is 1 or more, its utilization is 0.95 or more, or it already refuses work (a full queue or a fired `timeout:`). Its queue then grows for as long as the run lasts, so its latency is not a steady-state figure.
+**Offered load and utilization.** `offered_load` is hop time over capacity (for a node with `hold: call`, the time its slots were held, which includes the wait on what it called) and can pass 1; `utilization` is the share of slot time actually busy and tops out at 1. A node is `saturated` when its offered load is 1 or more, its utilization is 0.95 or more, or it already refuses work (a full queue or a fired `timeout:`). Its queue then grows for as long as the run lasts (with a queue limit it fills and the node turns requests away instead), so its latency is not a steady-state figure.
 
 **Warnings about noise.** With fewer than 1000 reported requests the p99 is noise; with fewer than 100, so is p95. One run is one sample of a random process and has no confidence interval: run longer, or run twice with different seeds and compare.
 
@@ -75,6 +77,10 @@ kaanal skeleton -o specs/app.yaml        # refuses to overwrite without --force
 ```
 
 Paths are written as they are (a catch-all `{*rest}` stays one, since the router reads spec paths unchanged), repeated parameters are declared once, and a skeleton covers at most 10000 endpoints. The skeleton lists every key in `endpoints:`, because an entry does not say which node owns it; use it on a node that has no spec of its own. Payload sizes still come from the traffic profile.
+
+## What the figures leave out
+
+Two real limits are off unless you turn them on, so a healthy-looking run can be optimistic. With `hold: own` (the default) a request frees its slot while it waits on what it calls; real servers that block on a call (`hold: call`, Studio's Server style) keep it. And without a `bandwidth` on a node or a wire, bodies cross the network for free. When a run has components that call each other and neither is set, Results says so in a quiet grey note; set the one that fits your system and run again. A real system may saturate earlier than the run shows.
 
 ## Known limits
 

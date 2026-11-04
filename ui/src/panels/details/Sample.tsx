@@ -45,6 +45,7 @@ export function Sample({ endpoints }: { endpoints: string[] }) {
       <div className="flex flex-wrap items-center gap-1">
         <label htmlFor={`${id}-ep`}>Endpoint</label>
         <select
+          name="endpoint"
           id={`${id}-ep`}
           value={endpoint}
           onChange={(e) => setEndpoint(e.currentTarget.value)}
@@ -61,6 +62,7 @@ export function Sample({ endpoints }: { endpoints: string[] }) {
       <div className="flex flex-wrap items-center gap-1">
         <label htmlFor={`${id}-seed`}>Seed</label>
         <input
+          name="seed"
           id={`${id}-seed`}
           type="number"
           min={0}

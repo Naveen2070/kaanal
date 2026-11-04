@@ -89,6 +89,8 @@ pub struct ChaosPatch {
     pub(super) error_status: Option<u16>,
     pub(super) down: Option<bool>,
     pub(super) jitter_ms: Option<u64>,
+    /// Bytes per second as a number, or text with a unit (`"500KB/s"`).
+    #[serde(default, deserialize_with = "kaanal_core::units::bandwidth_cap")]
     pub(super) bandwidth_cap: Option<u64>,
     pub(super) mode: Option<String>,
     pub(super) ttl: Option<String>,
@@ -139,6 +141,8 @@ pub struct KeyedPatch {
     pub(super) error_status: Option<u16>,
     pub(super) down: Option<bool>,
     pub(super) jitter_ms: Option<u64>,
+    /// Bytes per second as a number, or text with a unit (`"500KB/s"`).
+    #[serde(default, deserialize_with = "kaanal_core::units::bandwidth_cap")]
     pub(super) bandwidth_cap: Option<u64>,
     pub(super) mode: Option<String>,
     pub(super) ttl: Option<String>,
@@ -332,7 +336,7 @@ pub async fn set_chaos(
     payload: Result<Json<ChaosPatch>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
     let id = node_id(&g, &node)?;
-    let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
+    let Json(p) = payload.map_err(|e| reject(e.status(), &tidy(&e.body_text())))?;
     apply_patch(&st, &g, &ChaosKey::Node(id), &p)
 }
 
@@ -404,7 +408,7 @@ pub async fn set_chaos_keyed(
     Gen(g): Gen,
     payload: Result<Json<KeyedPatch>, JsonRejection>,
 ) -> Result<Json<Value>, Reject> {
-    let Json(p) = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
+    let Json(p) = payload.map_err(|e| reject(e.status(), &tidy(&e.body_text())))?;
     let node = p.node.as_deref().map(|n| node_id(&g, n)).transpose()?;
     let endpoint = match p.endpoint.as_deref() {
         None => None,
@@ -531,4 +535,10 @@ pub async fn clear_keyed(
 )]
 fn is_zero(n: &u64) -> bool {
     *n == 0
+}
+
+/// **Private.** The extractor's text with a doubled field name collapsed: a unit-parse error names
+/// its field and the extractor puts the path in front, so `bandwidth_cap: bandwidth_cap: ...`.
+fn tidy(text: &str) -> String {
+    text.replace("bandwidth_cap: bandwidth_cap: ", "bandwidth_cap: ")
 }

@@ -93,6 +93,7 @@ export function NumberField({
         />
         {units && unit ? (
           <select
+            id={`${id}-unit`}
             aria-label={`${label} unit`}
             value={unit.label}
             onChange={(e) =>
@@ -147,6 +148,7 @@ export function UnitInput({
   /** Classes for both boxes (their look); the number box adds its own width. */
   className?: string;
 }) {
+  const uid = useId();
   const [unit, setUnit] = useState<Unit>(units[0] as Unit);
   const [typed, setTyped] = useState<string | null>(null);
   const base = Number(value);
@@ -158,7 +160,7 @@ export function UnitInput({
   return (
     <>
       <input
-        id={id}
+        id={id ?? uid}
         aria-label={ariaLabel}
         type="number"
         min={min === undefined ? undefined : toUnit(min, unit)}
@@ -175,6 +177,7 @@ export function UnitInput({
         className={`${className} w-20`}
       />
       <select
+        id={`${id ?? uid}-unit`}
         aria-label={unitLabel}
         value={unit.label}
         onChange={(e) => setUnit(units.find((u) => u.label === e.currentTarget.value) ?? unit)}
@@ -197,6 +200,7 @@ export function BalanceField({
   defaultLabel,
   label = "Balance",
   dynamic = true,
+  overrides = false,
   onChange,
 }: {
   hint: string;
@@ -207,6 +211,11 @@ export function BalanceField({
   defaultLabel: string;
   /** Offer least connections and power of two choices (default); a balancer's spread cannot use them. */
   dynamic?: boolean;
+  /**
+   * An explicit round robin is its own entry only where it overrides something (a wire over its
+   * callee's setting). Elsewhere it is the default: one entry, and it clears the field.
+   */
+  overrides?: boolean;
   onChange: (choice: "" | BalanceChoice) => void;
 }) {
   const id = useId();
@@ -217,13 +226,13 @@ export function BalanceField({
       </label>
       <select
         id={id}
-        value={value ?? ""}
+        value={!overrides && value === "round-robin" ? "" : (value ?? "")}
         aria-describedby={`${id}-hint`}
         onChange={(e) => onChange(e.currentTarget.value as "" | BalanceChoice)}
         className="h-7 rounded border border-control bg-sheet text-text px-1"
       >
         <option value="">{defaultLabel}</option>
-        <option value="round-robin">Round robin</option>
+        {overrides ? <option value="round-robin">Round robin</option> : null}
         <option value="random">Random</option>
         {dynamic ? <option value="least-conn">Least connections</option> : null}
         {dynamic ? <option value="p2c">Power of two choices</option> : null}

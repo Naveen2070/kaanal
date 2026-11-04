@@ -82,7 +82,7 @@ pub(crate) enum Cmd {
         #[arg(value_enum, default_value_t = SchemaKind::Config)]
         kind: SchemaKind,
     },
-    /// Create a starter kaanal.yaml from an `OpenAPI` 3.0 file
+    /// Create a starter kaanal.yaml (estimated timings, queues, endpoints) from an `OpenAPI` 3.0 file
     Init(init::InitArgs),
     /// Run a demo shop with a chaos bar in your browser (writes only .kaanal/; Ctrl-C to stop)
     Demo(demo::DemoArgs),
@@ -240,9 +240,9 @@ pub(crate) enum ChaosCmd {
         /// Link only: random extra latency of up to this much either way, e.g. 5ms
         #[arg(long, requires = "edge")]
         jitter: Option<String>,
-        /// Link only: cap the edge's bandwidth, in bytes per second (at most its own)
+        /// Link only: cap the edge's bandwidth, bytes per second or with a unit like 500KB/s (at most its own)
         #[arg(long = "bandwidth-cap", requires = "edge")]
-        bandwidth_cap: Option<u64>,
+        bandwidth_cap: Option<String>,
         /// One replica (0-based) of the node, whatever the endpoint
         #[arg(long, requires = "node", conflicts_with = "route")]
         replica: Option<u16>,

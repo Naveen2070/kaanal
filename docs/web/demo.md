@@ -60,7 +60,7 @@ Wrote the demo project (N files) to /home/you/kaanal-demo
 Next:  cd kaanal-demo && kaanal up
 ```
 
-The ejected project is an ordinary Kaanal project: `kaanal up` serves the same storefront and the same stories, with no demo-only code path. `--eject` works while a demo is running.
+The ejected project is an ordinary Kaanal project: `kaanal up` serves the same storefront and the same stories, with no demo-only code path. `--eject` works while a demo is running. The project's `kaanal.yaml` ends with a `traffic:` section holding one profile, `peak` (100 requests a second for 30 s, one journey per route, reads weighted 3 and writes 1; estimates), so `kaanal sim run -p peak` works against `kaanal demo` or the ejected project. The chaos stories are unchanged.
 
 - `.kaanal/` is added to the folder's `.gitignore` (created if missing, appended to otherwise), because `kaanal up` keeps the token and signing key there. A `.gitignore` that cannot be updated is a warning, not an error.
 - A new folder is created. An existing folder must be empty; otherwise `--eject` stops (exit code 64) and changes nothing.

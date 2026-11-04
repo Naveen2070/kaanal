@@ -116,7 +116,7 @@ pub(crate) fn chaos_patch(
     error: Option<u16>,
     kind: Option<String>,
     down: bool,
-    (jitter, bandwidth_cap): (Option<String>, Option<u64>),
+    (jitter, bandwidth_cap): (Option<String>, Option<String>),
 ) -> Result<Map<String, Value>, Fail> {
     let mut patch = Map::new();
     if let Some(l) = latency {
@@ -144,7 +144,9 @@ pub(crate) fn chaos_patch(
         );
     }
     if let Some(c) = bandwidth_cap {
-        patch.insert("bandwidth_cap".into(), json!(c));
+        let bytes = kaanal_core::units::parse(&c, true)
+            .map_err(|m| Fail::usage(format!("--bandwidth-cap: {m}")))?;
+        patch.insert("bandwidth_cap".into(), json!(bytes));
     }
     if down {
         patch.insert("down".into(), json!(true));

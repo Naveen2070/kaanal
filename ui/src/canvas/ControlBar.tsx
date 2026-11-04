@@ -96,7 +96,11 @@ export function ControlBar({
    * What is typed in a box and not yet committed. The boxes are controlled by this (the real value
    * shows when a row has none), so a commit never rebuilds the element under the cursor.
    */
-  const [texts, setTexts] = useState<Partial<Record<Id, string>>>({});
+  const [texts, setTexts] = useState<Partial<Record<Id, { text: string; base: number | null }>>>(
+    {},
+  );
+  /** The box being edited: its text is kept even if the value changes under it. */
+  const [editing, setEditing] = useState<Id | null>(null);
   /** Set while Escape closes the bar: the blur that follows must not commit what was typed. */
   const cancelling = useRef(false);
 
@@ -106,6 +110,11 @@ export function ControlBar({
     copies: replicasOf(config),
   };
   const shown = (id: Id) => (moving?.id === id ? moving.value : real[id]);
+  // typed text outlives a change of the real value (reload, undo, file edit) only while it is edited
+  const typedText = (id: Id) => {
+    const t = texts[id];
+    return t !== undefined && (editing === id || t.base === real[id]) ? t.text : undefined;
+  };
 
   const specs: Record<Id, Spec> = {
     time: {
@@ -185,7 +194,7 @@ export function ControlBar({
     void send(s.write(m.value));
   };
   const commitTyped = (id: Id) => {
-    const raw = texts[id];
+    const raw = typedText(id);
     if (raw === undefined || cancelling.current) return;
     setTexts((t) => ({ ...t, [id]: undefined })); // the box shows the real value again
     const s = specs[id];
@@ -240,16 +249,28 @@ export function ControlBar({
                 {row.editable ? (
                   <span className="flex items-center gap-1 text-muted">
                     <input
+                      name={`${row.id}-typed`}
                       type="number"
                       aria-label={`${s.label}, typed (${s.unit})`}
                       min={row.id === "time" ? 0 : 1}
+                      max={
+                        row.id === "time"
+                          ? LIMITS.serviceMs.max
+                          : row.id === "slots"
+                            ? LIMITS.slots.max
+                            : LIMITS.instances.max
+                      }
                       step={row.id === "time" ? "any" : 1}
-                      value={texts[row.id] ?? String(v ?? "")}
+                      value={typedText(row.id) ?? String(v ?? "")}
+                      onFocus={() => setEditing(row.id)}
                       onChange={(e) => {
                         const text = e.currentTarget.value;
-                        setTexts((t) => ({ ...t, [row.id]: text }));
+                        setTexts((t) => ({ ...t, [row.id]: { text, base: real[row.id] } }));
                       }}
-                      onBlur={() => commitTyped(row.id)}
+                      onBlur={() => {
+                        commitTyped(row.id);
+                        setEditing(null);
+                      }}
                       onKeyDown={(e) => e.key === "Enter" && commitTyped(row.id)}
                       className="h-6 w-20 rounded border border-control bg-sheet px-1 text-right text-text tabular-nums"
                     />

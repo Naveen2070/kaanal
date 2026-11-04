@@ -105,6 +105,22 @@ fn stream(g: &Generation, j: &JourneyConfig, rate: f64) -> Result<Stream, SimErr
     })
 }
 
+/// What to tell a client whose profile `name` is not in the config (RULES 58): an empty `name`
+/// means none was given. The defined names are sorted, at most ten.
+fn missing_profile(g: &Generation, name: &str) -> String {
+    let mut names: Vec<&str> = g.traffic.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    let more = if names.len() > 10 { ", ..." } else { "" };
+    names.truncate(10);
+    let list = names.join(", ");
+    match (name.is_empty(), names.is_empty()) {
+        (true, true) => "no traffic profile is defined: add a traffic: section to kaanal.yaml or pass -f profile.yaml (see docs/web/traffic.md)".into(),
+        (true, false) => format!("no traffic profile named; name one with -p: {list}{more}"),
+        (false, true) => format!("no traffic profile named '{name}'; none is defined: add a traffic: section to kaanal.yaml (see docs/web/traffic.md)"),
+        (false, false) => format!("no traffic profile named '{name}'; defined: {list}{more}"),
+    }
+}
+
 /// The simulator input for `req` on the system `g`.
 ///
 /// # Errors
@@ -114,7 +130,7 @@ pub(crate) fn to_sim(g: &Generation, req: &RunRequest) -> Result<Planned, SimErr
     let p = match &req.profile {
         Profile::Named(n) => g.traffic.get(n).ok_or_else(|| SimError {
             status: StatusCode::NOT_FOUND,
-            message: format!("no traffic profile named '{n}'"),
+            message: missing_profile(g, n),
         })?,
         Profile::Inline(p) => {
             check_profile("inline", p).map_err(|e| bad(e.msg))?;
@@ -326,6 +342,67 @@ traffic:
     fn a_named_profile_that_does_not_exist_is_404() {
         let e = to_sim(&generation(), &named("nope")).unwrap_err();
         assert_eq!(e.status, StatusCode::NOT_FOUND);
+        assert_eq!(e.message, "no traffic profile named 'nope'; defined: peak");
+    }
+
+    fn with_profiles(n: usize) -> Arc<Generation> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let mut yaml = YAML.split("traffic:").next().unwrap().to_string();
+        if n > 0 {
+            yaml.push_str("traffic:\n");
+        }
+        for i in (0..n).rev() {
+            let _ = std::fmt::Write::write_fmt(
+                &mut yaml,
+                format_args!(
+                    "  p{i:02}:\n    rps: 1\n    journeys: [ {{ endpoint: 'GET /users' }} ]\n"
+                ),
+            );
+        }
+        let cfg = Config::from_yaml(&yaml).unwrap();
+        AppState::build(&cfg, &dir, "t".into(), 0)
+            .unwrap()
+            .generation()
+            .unwrap()
+    }
+
+    #[test]
+    fn no_profile_given_says_what_to_do() {
+        // (a) none defined
+        let e = to_sim(&with_profiles(0), &named("")).unwrap_err();
+        assert_eq!(e.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            e.message,
+            "no traffic profile is defined: add a traffic: section to kaanal.yaml or pass -f profile.yaml (see docs/web/traffic.md)"
+        );
+        // (b) some defined, none named: sorted, one
+        let e = to_sim(&generation(), &named("")).unwrap_err();
+        assert_eq!(e.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            e.message,
+            "no traffic profile named; name one with -p: peak"
+        );
+        let e = to_sim(&with_profiles(3), &named("")).unwrap_err();
+        assert_eq!(
+            e.message,
+            "no traffic profile named; name one with -p: p00, p01, p02"
+        );
+        // at most ten, then "..."
+        let e = to_sim(&with_profiles(12), &named("")).unwrap_err();
+        assert!(
+            e.message
+                .ends_with("-p: p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, ..."),
+            "{}",
+            e.message
+        );
+        // (c) a wrong name lists them too; with none defined it says so
+        let e = to_sim(&with_profiles(2), &named("x")).unwrap_err();
+        assert_eq!(e.message, "no traffic profile named 'x'; defined: p00, p01");
+        let e = to_sim(&with_profiles(0), &named("x")).unwrap_err();
+        assert!(
+            e.message
+                .starts_with("no traffic profile named 'x'; none is defined")
+        );
     }
 
     #[test]

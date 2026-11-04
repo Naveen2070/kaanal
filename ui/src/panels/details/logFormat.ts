@@ -42,11 +42,15 @@ export function clock(t_ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(f).padStart(3, "0")}`;
 }
 
+/** A time in words: a long wait reads in seconds, minutes or hours, not as 247221.6 ms. */
+export function dur(n: number | null): string {
+  const v = n ?? 0;
+  return v >= 1000 ? fmtMs(v) : `${Number(v.toFixed(v < 10 ? 2 : 1))} ms`;
+}
+
 /** What happened at the hop, in words: "Waited 210 ms, then served in 98 ms". */
 export function eventWords(l: LogLine): string {
-  // a long wait reads in seconds, minutes or hours, not as 247221.6 ms
-  const t = (n: number | null) =>
-    (n ?? 0) >= 1000 ? fmtMs(n ?? 0) : `${Number((n ?? 0).toFixed((n ?? 0) < 10 ? 2 : 1))} ms`;
+  const t = dur;
   // a hop on a wire is a body crossing it: the queue for the wire, then the transfer
   if (l.from) {
     const what = l.note === "link response" ? "Response" : "Request";
@@ -56,7 +60,9 @@ export function eventWords(l: LogLine): string {
   }
   if (l.event === "served") return "Served, no wait";
   if (l.event === "queued") return `Waited ${t(l.wait_ms)}, then served in ${t(l.service_ms)}`;
-  return ["Failed", l.status, l.note].filter((x) => x !== null && x !== "").join(" ");
+  // "Failed with 503, queue full"; the chaos kind `status` only repeats the status, so it is dropped
+  const cause = l.note === "status" || l.note === "" ? null : l.note;
+  return `Failed${l.status === null ? "" : ` with ${l.status}`}${cause === null ? "" : `, ${cause}`}`;
 }
 
 /** The hop's time in the right-hand column: wait plus service; null for a failure line. */
@@ -106,4 +112,80 @@ export function waterfall(lines: LogLine[]): Waterfall {
         : "Little of it was spent waiting in line";
   }
   return { rows, finding, failure };
+}
+
+export interface HopType {
+  /** The badge's plain-words label. */
+  label: string;
+  /** `bad` only for a failure; every other hop is a neutral chip. */
+  tone: "neutral" | "bad";
+}
+
+const KIND: Record<string, string> = {
+  proc: "Work",
+  net: "Network",
+  op: "Data",
+  "cache hit": "Cache hit",
+  "cache miss": "Cache miss",
+  delay: "Delay",
+  "link request": "Send",
+  "link response": "Reply",
+  "node uplink": "Uplink",
+  "node downlink": "Downlink",
+};
+const FAILURE: Record<string, string> = {
+  limited: "Rate limited",
+  overflowed: "Queue full",
+  timeout: "Timed out",
+};
+
+/** The type badge of a line: the hop kind the server noted, or on a failure its cause in words. */
+export function hopType(l: LogLine): HopType {
+  if (l.event !== "served" && l.event !== "queued") {
+    return { label: FAILURE[l.event] ?? "Failed", tone: "bad" };
+  }
+  const note = l.note ?? "";
+  // a kind this build does not know is shown as the server wrote it, not guessed at
+  const label = KIND[note] ?? (note === "" ? "Work" : note.charAt(0).toUpperCase() + note.slice(1));
+  return { label, tone: "neutral" };
+}
+
+/** Where a line happened, without the instance: "api", or "gw → api" on a wire. */
+export const placeOf = (l: LogLine): string => (l.from ? `${l.from} → ${l.node}` : l.node);
+
+/**
+ * How deep each component sits in the call graph: the longest path from a root (a component
+ * nothing calls), so gateway 0, balancer 1, api 2, db 3. Cycle-safe: configs are acyclic, but an
+ * edge that closes a loop is ignored rather than followed forever.
+ */
+export function callDepths(
+  edges: readonly { from: unknown; to: unknown }[] | null | undefined,
+): Map<string, number> {
+  const parents = new Map<string, string[]>();
+  for (const e of Array.isArray(edges) ? edges : []) {
+    if (!e) continue;
+    const from = String(e.from);
+    const to = String(e.to);
+    if (!parents.has(from)) parents.set(from, []);
+    parents.set(to, [...(parents.get(to) ?? []), from]);
+  }
+  const depth = new Map<string, number>();
+  const walking = new Set<string>();
+  const of = (n: string): number => {
+    const known = depth.get(n);
+    if (known !== undefined) return known;
+    walking.add(n);
+    let d = 0;
+    for (const p of parents.get(n) ?? []) if (!walking.has(p)) d = Math.max(d, of(p) + 1);
+    walking.delete(n);
+    depth.set(n, d);
+    return d;
+  };
+  for (const n of parents.keys()) of(n);
+  return depth;
+}
+
+/** A hop's depth: its component's, or on a wire the caller's plus half a step. */
+export function hopDepth(l: LogLine, depths: Map<string, number>): number {
+  return l.from ? (depths.get(l.from) ?? 0) + 0.5 : (depths.get(l.node) ?? 0);
 }

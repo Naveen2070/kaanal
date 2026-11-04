@@ -100,6 +100,7 @@ export function Live() {
             <div className="mb-2 flex items-center gap-1 text-xs">
               <label htmlFor="live-lease">Turn on</label>
               <select
+                name="lease"
                 id="live-lease"
                 value={lease}
                 onChange={(e) => setLease(Number(e.currentTarget.value))}
@@ -272,6 +273,7 @@ function PinForm({ endpoints, btn, act }: { endpoints: string[]; btn: string; ac
       <div className="flex flex-wrap items-center gap-1">
         <label htmlFor={`${id}-ep`}>Pin</label>
         <select
+          name="pin-endpoint"
           id={`${id}-ep`}
           value={endpoint}
           onChange={(e) => setEndpoint(e.currentTarget.value)}
@@ -288,6 +290,7 @@ function PinForm({ endpoints, btn, act }: { endpoints: string[]; btn: string; ac
       <div className="flex flex-wrap items-center gap-1">
         <label htmlFor={`${id}-st`}>as</label>
         <select
+          name="pin-state"
           id={`${id}-st`}
           value={state}
           onChange={(e) => setState(e.currentTarget.value as PinState)}
@@ -303,6 +306,7 @@ function PinForm({ endpoints, btn, act }: { endpoints: string[]; btn: string; ac
           <>
             <label htmlFor={`${id}-sc`}>status</label>
             <input
+              name="pin-status"
               id={`${id}-sc`}
               type="number"
               min={range.min}

@@ -428,8 +428,14 @@ fn warnings(
         warnings.push(format!("p99 rests on {requests} requests; run longer"));
     }
     for n in nodes.iter().filter(|n| n.saturated) {
+        // a queue with a limit does not grow for ever: once full it turns requests away instead
+        let then = if n.overflowed > 0 {
+            "its queue is full and it turns requests away, so its latency is not a steady-state figure"
+        } else {
+            "its queue grows for as long as the run lasts, so its latency is not a steady-state figure"
+        };
         warnings.push(format!(
-            "node {} is saturated (offered load {:.2}, utilization {:.2}): its queue grows for as long as the run lasts, so its latency is not a steady-state figure",
+            "node {} is saturated (offered load {:.2}, utilization {:.2}): {then}",
             n.name,
             n.offered_load.unwrap_or(0.0),
             n.utilization.unwrap_or(0.0)

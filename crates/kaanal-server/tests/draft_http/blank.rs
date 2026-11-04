@@ -89,8 +89,9 @@ async fn the_first_apply_creates_the_first_generation() {
 async fn add_node_gets_a_default_capacity_and_validates() {
     // (kind, what the new node's line must contain)
     let table = [
-        ("gateway", "proc: 2ms"),
-        ("service", "proc: 25ms"),
+        ("gateway", "timeout: 30s"),
+        ("gateway", "queue: 100"),
+        ("service", "queue: 100"),
         ("monolith", "proc: 40ms"),
         ("database", "size: 20"),
         ("cache", "flavor: redis"),

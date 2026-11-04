@@ -6,8 +6,13 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 mod fetch;
+mod gitignore;
+mod render;
 
-use crate::{Fail, STATE_DIR, err, load, located_err, output};
+pub use gitignore::ignore_state_dir;
+use render::{Style, render_config};
+
+use crate::{Fail, err, load, located_err, output};
 
 /// Written at the top of the config so editors offer completion (R1.15, `kaanal schema`).
 const SCHEMA_HEADER: &str =
@@ -37,6 +42,9 @@ pub struct InitArgs {
     /// Locale tag for generated data, e.g. de-DE (default: en-IN)
     #[arg(long)]
     locale: Option<String>,
+    /// What a slot covers: event-loop or thread-per-request (default: event-loop)
+    #[arg(long)]
+    server_style: Option<String>,
 }
 
 /// **Private.** Everything `render_config` needs, already validated.
@@ -46,6 +54,7 @@ pub struct Params {
     pub port: u16,
     pub locale: String,
     pub spec: String,
+    pub style: Style,
 }
 
 /// **Private.** `^[a-z][a-z0-9_-]{0,31}$`, hand-checked: the only text that goes into YAML
@@ -291,78 +300,40 @@ fn gather(
         ("Locale", "en-IN"),
         parse_locale,
     )?;
+    let style = field(
+        a.server_style.clone(),
+        prompting,
+        prompts,
+        input,
+        (
+            "Server style: event-loop (Node, Go, async Python) or thread-per-request (Tomcat, sync Gunicorn, Puma)?",
+            "event-loop",
+        ),
+        Style::parse,
+    )?;
     Ok(Params {
         service,
         port,
         locale,
         spec,
+        style,
     })
 }
 
-/// **Private.** The generated `kaanal.yaml`: gateway to one service to a database and a cache, with
-/// flavor presets for the timings and no `endpoints:` block (the default chain gives every route
-/// cache-then-database timing; `kaanal endpoints --write` refines it later). The spec path goes in
-/// as a JSON string, which is a valid YAML double-quoted scalar for any path.
-pub fn render_config(p: &Params) -> String {
-    let spec = serde_json::to_string(&p.spec).unwrap_or_default();
-    let (svc, port, locale) = (&p.service, p.port, &p.locale);
-    format!(
-        "{SCHEMA_HEADER}\n\
-         version: 1\n\
-         port: {port}\n\
-         locale: {locale}\n\
-         nodes:\n\
-         \x20 gateway: {{ type: gateway, flavor: nginx }}\n\
-         \x20 {svc}: {{ type: service, spec: {spec} }}\n\
-         \x20 database: {{ type: database, flavor: postgres }}\n\
-         \x20 cache: {{ type: cache, flavor: redis }}\n\
-         edges:\n\
-         \x20 - {{ from: gateway, to: {svc} }}\n\
-         \x20 - {{ from: {svc}, to: database }}\n\
-         \x20 - {{ from: {svc}, to: cache }}\n"
-    )
-}
-
-/// **Private.** A `.gitignore` line that already ignores the state directory.
-fn ignores_state_dir(line: &str) -> bool {
-    matches!(
-        line.trim(),
-        ".kaanal" | ".kaanal/" | "/.kaanal" | "/.kaanal/" | ".kaanal/*" | ".kaanal/**"
-    )
-}
-
-/// **Private.** Adds `.kaanal/` to `.gitignore` (created when missing): the file is read only to
-/// find the line, then appended to, so existing bytes are never rewritten, and in its own line
-/// ending. `Ok(false)` when it was already listed; `Err` carries the reason it was left alone (a
-/// file that cannot be read as UTF-8 is never touched).
-pub fn ignore_state_dir(path: &Path) -> Result<bool, String> {
-    let old = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(e) => return Err(e.to_string()),
-    };
-    let text = std::str::from_utf8(&old).map_err(|_| "it is not valid UTF-8".to_string())?;
-    if text
-        .strip_prefix('\u{feff}')
-        .unwrap_or(text)
-        .lines()
-        .any(ignores_state_dir)
-    {
-        return Ok(false);
+/// **Private.** The config text for `p`: the spec's routes are read from a first render with no
+/// `endpoints:` (read exactly as `validate` reads them, so a bad spec is reported here, placed in
+/// `kaanal.yaml`), then rendered again with one entry per route. An empty route list is an error.
+fn build_config(p: &Params) -> Result<String, Fail> {
+    let base = render_config(p, &[]);
+    let path = Path::new(CONFIG);
+    let cfg = kaanal_core::config::Config::from_yaml(&base).map_err(|e| err(e.to_string()))?;
+    let (_, routes) = kaanal_server::spec_routes(&cfg, Path::new("."))
+        .map_err(|e| located_err(path, &base, &e))?;
+    if routes.is_empty() {
+        return Err(err("the OpenAPI file has no paths to mock"));
     }
-    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    let lead = if text.is_empty() || text.ends_with('\n') {
-        ""
-    } else {
-        nl
-    };
-    std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(path)
-        .and_then(|mut f| write!(f, "{lead}{STATE_DIR}/{nl}"))
-        .map_err(|e| e.to_string())?;
-    Ok(true)
+    let keys: Vec<String> = routes.into_iter().map(|r| r.key).collect();
+    Ok(render_config(p, &keys))
 }
 
 /// **Private.** Writes the config to a new temp file, runs `load` and `check` on it, and renames
@@ -426,7 +397,7 @@ pub fn init(
     (p.spec, saved) = resolve_spec(&p.spec, a.force)?;
     let spec = Path::new(&p.spec);
     let done = if spec.is_file() {
-        write_checked(&render_config(&p))
+        build_config(&p).and_then(|text| write_checked(&text))
     } else {
         Err(err(format!(
             "{}: not a readable file",
@@ -465,6 +436,7 @@ pub fn init(
         for r in &replaced {
             let _ = writeln!(out, "Replaced the existing {r} (--force)");
         }
+        let _ = writeln!(out, "{}", p.style.summary());
         let _ = writeln!(out, "Next: kaanal up");
     });
     Ok(())
@@ -473,8 +445,6 @@ pub fn init(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kaanal_core::config::{Config, NodeConfig};
-    use std::path::PathBuf;
 
     fn args(spec: Option<&str>) -> InitArgs {
         InitArgs {
@@ -484,61 +454,8 @@ mod tests {
             service: None,
             port: None,
             locale: None,
+            server_style: None,
         }
-    }
-
-    fn params() -> Params {
-        Params {
-            service: "app".into(),
-            port: 9000,
-            locale: "en-US".into(),
-            spec: "openapi.yaml".into(),
-        }
-    }
-
-    fn scratch(name: &str) -> PathBuf {
-        let d =
-            std::env::temp_dir().join(format!("kaanal-init-unit-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    #[test]
-    fn render_config_is_a_valid_project() {
-        let text = render_config(&params());
-        assert!(text.starts_with(SCHEMA_HEADER), "{text}");
-        assert!(
-            !text.contains("endpoints:") && !text.contains("Project"),
-            "{text}"
-        );
-        assert!(text.contains("locale: en-US") && text.contains("port: 9000"));
-        let cfg = Config::from_yaml(&text).unwrap();
-        let kinds: Vec<_> = cfg.nodes.keys().map(String::as_str).collect();
-        assert_eq!(kinds, ["gateway", "app", "database", "cache"]);
-        assert!(matches!(cfg.nodes["gateway"], NodeConfig::Gateway(_)));
-        let NodeConfig::Service(s) = &cfg.nodes["app"] else {
-            panic!("app is not a service")
-        };
-        assert_eq!(s.spec.as_deref(), Some("openapi.yaml"));
-        assert_eq!(cfg.nodes["database"].flavor(), Some("postgres"));
-        assert_eq!(cfg.nodes["cache"].flavor(), Some("redis"));
-        let edges: Vec<_> = cfg.edges.iter().map(|e| (&*e.from, &*e.to)).collect();
-        assert_eq!(
-            edges,
-            [("gateway", "app"), ("app", "database"), ("app", "cache")]
-        );
-    }
-
-    #[test]
-    fn a_spec_path_with_quotes_stays_one_string() {
-        let mut p = params();
-        p.spec = "a \"b\"\\c.yaml".into();
-        let cfg = Config::from_yaml(&render_config(&p)).unwrap();
-        let NodeConfig::Service(s) = &cfg.nodes["app"] else {
-            panic!()
-        };
-        assert_eq!(s.spec.as_deref(), Some("a \"b\"\\c.yaml"));
     }
 
     #[test]
@@ -568,6 +485,7 @@ mod tests {
     fn flags_answer_their_prompt_so_nothing_is_asked() {
         let mut a = args(Some("o.yaml"));
         (a.service, a.port, a.locale) = (Some("s".into()), Some(81), Some("de-DE".into()));
+        a.server_style = Some("event-loop".into());
         let mut out = Vec::new();
         let p = gather(&a, &mut "".as_bytes(), &mut out, true).unwrap();
         assert_eq!(String::from_utf8_lossy(&out), "");
@@ -593,6 +511,7 @@ mod tests {
             let p = gather(&a, &mut "boom\n".as_bytes(), &mut out, interactive).unwrap();
             assert_eq!(String::from_utf8_lossy(&out), "");
             assert_eq!((p.service.as_str(), p.port), ("app", 8080));
+            assert_eq!(p.style, Style::EventLoop);
         }
         let e = gather(&args(None), &mut "".as_bytes(), &mut Vec::new(), false).unwrap_err();
         assert_eq!(e.0, 64);
@@ -611,6 +530,7 @@ mod tests {
             a.service = Some(service.into());
             a.port = Some(port);
             a.locale = Some(locale.into());
+            a.server_style = Some("event-loop".into());
             // Prompting is on, yet a flag is never re-asked.
             let mut out = Vec::new();
             let e = gather(&a, &mut "app\n1\nen-US\n".as_bytes(), &mut out, true).unwrap_err();
@@ -650,46 +570,68 @@ mod tests {
     }
 
     #[test]
-    fn gitignore_is_appended_to_in_its_own_line_ending() {
-        let dir = scratch("ignore");
-        let f = dir.join(".gitignore");
-        assert_eq!(ignore_state_dir(&f), Ok(true));
-        assert_eq!(std::fs::read(&f).unwrap(), b".kaanal/\n");
-        std::fs::write(&f, "a\r\nb").unwrap();
-        assert_eq!(ignore_state_dir(&f), Ok(true));
-        assert_eq!(std::fs::read(&f).unwrap(), b"a\r\nb\r\n.kaanal/\r\n");
-        assert_eq!(ignore_state_dir(&f), Ok(false));
-        std::fs::write(&f, "a").unwrap();
-        assert_eq!(ignore_state_dir(&f), Ok(true));
-        assert_eq!(std::fs::read(&f).unwrap(), b"a\n.kaanal/\n");
+    fn the_fourth_question_is_the_server_style() {
+        let mut out = Vec::new();
+        let mut input = "o.yaml\n\n\n\n\n".as_bytes();
+        let p = gather(&args(None), &mut input, &mut out, true).unwrap();
+        assert_eq!(p.style, Style::EventLoop);
+        let shown = String::from_utf8(out).unwrap();
+        assert!(
+            shown.ends_with(
+                "Server style: event-loop (Node, Go, async Python) or thread-per-request (Tomcat, sync Gunicorn, Puma)? [event-loop]: "
+            ),
+            "{shown}"
+        );
+        // a typed answer, and end of input is the default
+        let mut input = "o.yaml\n\n\n\nthread-per-request\n".as_bytes();
+        let p = gather(&args(None), &mut input, &mut Vec::new(), true).unwrap();
+        assert_eq!(p.style, Style::ThreadPerRequest);
+        let p = gather(
+            &args(None),
+            &mut "o.yaml\n".as_bytes(),
+            &mut Vec::new(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(p.style, Style::EventLoop);
     }
 
     #[test]
-    fn existing_ignore_lines_add_nothing() {
-        let dir = scratch("variants");
-        let f = dir.join(".gitignore");
-        for line in [
-            ".kaanal",
-            ".kaanal/",
-            "/.kaanal",
-            "/.kaanal/",
-            ".kaanal/*",
-            ".kaanal/**",
-            "  .kaanal/  ",
-        ] {
-            let text = format!("# c\n{line}\nx\n");
-            std::fs::write(&f, &text).unwrap();
-            assert_eq!(ignore_state_dir(&f), Ok(false), "{line}");
-            assert_eq!(std::fs::read_to_string(&f).unwrap(), text);
-        }
+    fn a_bad_server_style_answer_is_asked_again_and_three_fail() {
+        let mut out = Vec::new();
+        let mut input = "o.yaml\n\n\n\nasync\nThread\nthread-per-request\n".as_bytes();
+        let p = gather(&args(None), &mut input, &mut out, true).unwrap();
+        assert_eq!(p.style, Style::ThreadPerRequest);
+        let shown = String::from_utf8(out).unwrap();
+        assert!(
+            shown.contains("server style 'async' must be event-loop or thread-per-request"),
+            "{shown}"
+        );
+        let mut input = "o.yaml\n\n\n\na\nb\nc\nevent-loop\n".as_bytes();
+        let e = gather(&args(None), &mut input, &mut Vec::new(), true).unwrap_err();
+        assert_eq!(e.0, 64);
+        assert!(
+            e.1.contains("server style 'c'") && e.1.contains("event-loop or thread-per-request"),
+            "{}",
+            e.1
+        );
     }
 
     #[test]
-    fn a_bom_on_the_first_gitignore_line_does_not_hide_the_entry() {
-        let dir = scratch("bom");
-        let f = dir.join(".gitignore");
-        std::fs::write(&f, "\u{feff}.kaanal/\nx\n").unwrap();
-        assert_eq!(ignore_state_dir(&f), Ok(false));
+    fn the_server_style_flag_answers_its_question_and_a_bad_one_is_refused() {
+        let mut a = args(Some("o.yaml"));
+        a.server_style = Some("thread-per-request".into());
+        let mut out = Vec::new();
+        let p = gather(&a, &mut "\n\n\n".as_bytes(), &mut out, true).unwrap();
+        assert_eq!(p.style, Style::ThreadPerRequest);
+        assert!(!String::from_utf8_lossy(&out).contains("Server style"));
+        a.server_style = Some("fibers".into());
+        let mut out = Vec::new();
+        let e = gather(&a, &mut "event-loop\n".as_bytes(), &mut out, true).unwrap_err();
+        assert_eq!(e.0, 64);
+        assert!(e.1.contains("event-loop or thread-per-request"), "{}", e.1);
+        // refused, never re-asked
+        assert!(!String::from_utf8_lossy(&out).contains("Server style"));
     }
 
     #[test]
@@ -699,18 +641,5 @@ mod tests {
         }
         assert_eq!(parse_port("0080"), Ok(80));
         assert_eq!(parse_port("65535"), Ok(65535));
-    }
-
-    #[test]
-    fn an_unreadable_gitignore_is_left_alone() {
-        let dir = scratch("unreadable");
-        let f = dir.join(".gitignore");
-        let utf16: Vec<u8> = [0xff, 0xfe, b'a', 0, b'\n', 0].to_vec();
-        std::fs::write(&f, &utf16).unwrap();
-        assert!(ignore_state_dir(&f).is_err());
-        assert_eq!(std::fs::read(&f).unwrap(), utf16);
-        let d = dir.join("sub");
-        std::fs::create_dir(&d).unwrap();
-        assert!(ignore_state_dir(&d).is_err());
     }
 }

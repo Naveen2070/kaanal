@@ -1,17 +1,21 @@
-// The Log tab: a bounded sample of one run, one line per hop (spec 7.4). It follows the newest run,
-// pages with "Load more", filters on the server (errors only, instance, endpoint, this component),
-// and a click on a line opens that one request as a waterfall. Everything here is virtual time and
-// simulated trace events, and the tab says so.
+// The Log tab: a bounded sample of one run, grouped per request (spec 7.4). Each request is one block
+// whose header opens and closes it; its hops sit beneath, indented by call depth, each with a type
+// badge and a wait-versus-work bar on the request's own axis. It follows the newest run, pages with
+// "Load more", and filters on the server (errors only, instance, endpoint, component, wire). Every
+// time here is virtual and every line a simulated trace event, and the tab says so.
 
 import { PanelBottomOpen } from "lucide-react";
-import { useLogDrawer } from "./logDrawer";
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { ApiError, api } from "../../data/api/client";
 import type { LogLine, LogQuery } from "../../data/api/types";
+import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
 import { useSelected } from "../../data/store/view";
-import { clock, eventWords, formatLine, hopMs, whoOf } from "./logFormat";
-import { RequestView } from "./RequestView";
+import { useLogDrawer } from "./logDrawer";
+import { callDepths } from "./logFormat";
+import { groupRequests, sampleFinding } from "./log/groups";
+import { RequestBlock } from "./log/RequestBlock";
+import { Toolbar, type FilterState } from "./log/Toolbar";
 
 interface Page {
   /** What this page of lines was fetched for: `runId` and the filters, as text. */
@@ -25,16 +29,22 @@ interface Page {
 }
 
 const PAGE = 200;
+/** How many requests start open: enough to show the shape, few enough to leave the list scannable. */
+const OPEN_FIRST = 5;
 
 /** A wire as one select value: the two names, which may hold any character but this one. */
 const SEP = "\u001f";
 const wireKey = (l: { from: string; to: string }) => `${l.from}${SEP}${l.to}`;
+
+const BTN =
+  "rounded-md border border-control bg-sheet px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent";
 
 export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
   const out = useLogDrawer((s) => s.out);
   const setOut = useLogDrawer((s) => s.set);
   const run = useRun((s) => s.latest);
   const [selected] = useSelected();
+  const edges = useDraft((s) => s.view?.doc?.edges);
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [replica, setReplica] = useState("");
   const [endpoint, setEndpoint] = useState("");
@@ -43,11 +53,15 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
   const [wire, setWire] = useState("");
   // a request number, typed as 12 or r-12: keeps the lines of requests whose number contains it
   const [reqText, setReqText] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState<Page | null>(null);
   const [more, setMore] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [open, setOpen] = useState<{ runId: string; stream: string; request: number } | null>(null);
+  // a request the person opened or closed by hand; the rest follow the default (the first few open)
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const dimmed = useRun((s) => s.dimmed);
+  // how deep each component sits in the call graph; no readable graph means every hop at depth 0
+  const depths = useMemo(() => callDepths(edges), [edges]);
 
   const runId = run?.state === "done" ? run.id : null;
   const streams = run?.summary?.streams.map((s) => s.endpoint) ?? [];
@@ -74,6 +88,7 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
   // the first page, again whenever the run or a filter changes; an answer for an older key is dropped
   useEffect(() => {
     if (runId === null) return;
+    setToggled({});
     const ctl = new AbortController();
     api
       .getLog(runId, { ...query, limit: PAGE }, { signal: ctl.signal })
@@ -106,13 +121,27 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
     }
   };
 
-  const none =
-    !errorsOnly &&
-    endpointNow === "" &&
-    !thisNode &&
-    replicaNow === null &&
-    componentNow === "" &&
-    !wireNow;
+  const digits = reqText.replace(/\D/g, "");
+  // the groups are made from every loaded line, so a request cut by a page boundary joins up
+  const groups = useMemo(
+    () =>
+      groupRequests(
+        runId ?? "",
+        (page?.lines ?? []).filter((l) => digits === "" || String(l.request).includes(digits)),
+      ),
+    [page?.lines, runId, digits],
+  );
+  const finding = page && !loading && !page.problem ? sampleFinding(groups) : null;
+
+  const on = [
+    errorsOnly && "Errors only",
+    digits !== "" && `Request ${digits}`,
+    thisNode && selected !== null && "This component",
+    endpointNow !== "" && endpointNow,
+    componentNow !== "" && `Component ${componentNow}`,
+    wireNow && "Wire",
+    replicaNow !== null && `Instance ${replicaNow}`,
+  ].filter((x): x is string => typeof x === "string");
   const clearAll = () => {
     setErrorsOnly(false);
     setEndpoint("");
@@ -120,23 +149,63 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
     setReplica("");
     setComponent("");
     setWire("");
+    setReqText("");
   };
   const count = (n: number) => n.toLocaleString("en-US");
-  const digits = reqText.replace(/\D/g, "");
-  const lines = (page?.lines ?? []).filter(
-    (l) => digits === "" || String(l.request).includes(digits),
-  );
 
-  // popped out: the table is in the drawer, so the rail says where it went
+  const filters: FilterState = {
+    errorsOnly,
+    setErrorsOnly,
+    reqText,
+    setReqText,
+    thisNode,
+    setThisNode,
+    selected,
+    endpoint: endpointNow,
+    setEndpoint,
+    streams,
+    component: componentNow,
+    components,
+    // a wire is two components: a wire and a component filter do not mix
+    setComponent: (v) => {
+      setComponent(v);
+      setWire("");
+      setThisNode(false);
+    },
+    wire: wireNow ? wire : "",
+    wires: wires.map((l) => ({ key: wireKey(l), label: `${l.from} → ${l.to}` })),
+    setWire: (v) => {
+      setWire(v);
+      setComponent("");
+      setThisNode(false);
+    },
+    replica,
+    replicaBad: replica !== "" && replicaNow === null,
+    setReplica,
+  };
+
+  // Escape closes the Filters panel; otherwise it collapses the request the focus is in
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !root.current?.contains(e.target as Node)) return;
+      if (filtersOpen) {
+        setFiltersOpen(false);
+        return;
+      }
+      const k = (e.target as HTMLElement).closest<HTMLElement>("[data-group]")?.dataset.group;
+      if (k) setToggled((t) => ({ ...t, [k]: false }));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filtersOpen]);
+
+  // popped out: the list is in the drawer, so the rail says where it went
   if (out && !drawer) {
     return (
       <div className="p-3 text-sm">
         <p className="mb-2 text-muted">The log is open along the bottom of the window.</p>
-        <button
-          type="button"
-          onClick={() => setOut(false)}
-          className="min-h-7 rounded border border-control bg-sheet px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-        >
+        <button type="button" onClick={() => setOut(false)} className={`${BTN} min-h-8`}>
           Bring it back here
         </button>
       </div>
@@ -144,7 +213,7 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
   }
 
   return (
-    <div className="p-3 text-sm">
+    <div ref={root} className="p-3 text-sm">
       {dimmed ? (
         <p className="mb-2 text-xs text-warn">
           Out of date: the newest run could not finish, so this is the last one that did.
@@ -160,112 +229,27 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
             type="button"
             title="Open the log along the bottom of the window, where it has room"
             onClick={() => setOut(true)}
-            className="flex shrink-0 items-center gap-1 rounded border border-control bg-sheet px-1.5 py-0.5 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+            className={`${BTN} flex shrink-0 items-center gap-1 py-0.5`}
           >
             <PanelBottomOpen size={12} aria-hidden />
             Pop out
           </button>
         )}
       </div>
-      <p className="mb-2 text-xs text-muted">
+      {finding ? <p className="mt-1 text-sm font-medium">{finding}</p> : null}
+      <p className="mt-1 mb-2 text-xs text-muted">
         {page && !loading && !page.problem
           ? `${count(page.lines.length)} of ${count(page.total)} hops sampled. `
           : ""}
         Simulated trace events, not process output, and only a sample of the run.
       </p>
-      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
-        <Chip on={none} onClick={clearAll}>
-          All
-        </Chip>
-        <Chip on={errorsOnly} onClick={() => setErrorsOnly((v) => !v)}>
-          Errors only
-        </Chip>
-        <Chip
-          on={thisNode && selected !== null}
-          disabled={selected === null}
-          title={selected ?? "Select a component first"}
-          onClick={() => setThisNode((v) => !v)}
-        >
-          This component
-        </Chip>
-        {streams.map((s) => (
-          <Chip
-            key={s}
-            on={endpointNow === s}
-            onClick={() => setEndpoint(endpointNow === s ? "" : s)}
-          >
-            {s}
-          </Chip>
-        ))}
-        <label className="flex items-center gap-1">
-          Component
-          <select
-            value={componentNow}
-            onChange={(e) => {
-              // a wire is two components: a wire and a component filter do not mix
-              setComponent(e.currentTarget.value);
-              setWire("");
-              setThisNode(false);
-            }}
-            className="max-w-32 rounded border border-control bg-sheet px-1"
-          >
-            <option value="">Any</option>
-            {components.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1">
-          Wire
-          <select
-            value={wireNow ? wire : ""}
-            disabled={wires.length === 0}
-            title={
-              wires.length === 0
-                ? "Only a wire with a bandwidth logs transfers, and none has one"
-                : undefined
-            }
-            onChange={(e) => {
-              setWire(e.currentTarget.value);
-              setComponent("");
-              setThisNode(false);
-            }}
-            className="max-w-40 rounded border border-control bg-sheet px-1 disabled:opacity-50"
-          >
-            <option value="">Any</option>
-            {wires.map((l) => (
-              <option key={wireKey(l)} value={wireKey(l)}>
-                {l.from} → {l.to}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1">
-          Request
-          <input
-            type="search"
-            inputMode="numeric"
-            placeholder="r-…"
-            value={reqText}
-            onChange={(e) => setReqText(e.currentTarget.value)}
-            className="w-16 rounded border border-control bg-sheet px-1"
-          />
-        </label>
-        <label className="flex items-center gap-1">
-          Instance
-          <input
-            type="number"
-            min={0}
-            max={65535}
-            value={replica}
-            aria-invalid={replica !== "" && replicaNow === null}
-            onChange={(e) => setReplica(e.currentTarget.value)}
-            className="w-14 rounded border border-control bg-sheet px-1"
-          />
-        </label>
-      </div>
+      <Toolbar
+        f={filters}
+        open={filtersOpen}
+        setOpen={setFiltersOpen}
+        onClear={clearAll}
+        anyOn={on.length > 0}
+      />
       {endpoint !== "" && endpointNow === "" && runId !== null ? (
         <p className="mb-2 text-xs text-warn">
           The newest run has no endpoint “{endpoint}”, so that filter was dropped.
@@ -273,90 +257,54 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
       ) : null}
 
       {/* every state stays inside this frame, so the tab does not jump */}
-      <div className="min-h-40 rounded-lg border border-border">
+      <div className="@container min-h-40 overflow-hidden rounded-lg border border-border">
         {runId === null ? (
           <Say>No finished run yet. The log appears after the first run.</Say>
         ) : loading ? (
-          <Say>Loading the log...</Say>
+          <output aria-label="Loading the log" className="block">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} aria-hidden className="m-2 h-6 rounded bg-well" />
+            ))}
+          </output>
         ) : page?.problem ? (
           <div role="alert" className="p-3 text-muted">
             <p>{page.problem}</p>
             <button
               type="button"
               onClick={() => setAttempt((n) => n + 1)}
-              className="mt-2 rounded border border-control px-2 py-0.5"
+              className={`${BTN} mt-2 min-h-8`}
             >
               Retry
             </button>
           </div>
-        ) : page && lines.length === 0 ? (
-          <Say>No lines match these filters.</Say>
+        ) : page && groups.length === 0 ? (
+          on.length > 0 ? (
+            <Say>
+              No hops match. Clear {on.join(", ")} to see more.
+              <button type="button" onClick={clearAll} className="ml-2 underline">
+                Clear filters
+              </button>
+            </Say>
+          ) : (
+            <Say>This run kept no requests in its sample.</Say>
+          )
         ) : page ? (
-          <table className="w-full text-xs">
-            <caption className="sr-only">{page.note}</caption>
-            <thead className="sticky top-0 bg-sheet text-left text-muted">
-              <tr>
-                <th scope="col" className="px-2 py-1 font-normal">
-                  Time and level
-                </th>
-                <th scope="col" className="px-1 py-1 font-normal">
-                  Component
-                </th>
-                <th scope="col" className="px-1 py-1 font-normal">
-                  Event
-                </th>
-                <th scope="col" className="px-2 py-1 text-right font-normal">
-                  ms
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((l, i) => {
-                const shown =
-                  open !== null &&
-                  open.runId === runId &&
-                  open.stream === l.stream &&
-                  open.request === l.request;
-                const t = hopMs(l);
-                return (
-                  <tr key={i} className={`h-11 border-t border-rule ${shown ? "bg-active" : ""}`}>
-                    {/* two measures stack in one cell: the time over its level */}
-                    <td className="px-2 py-1 align-top">
-                      <span className="block whitespace-nowrap tabular-nums">{clock(l.t_ms)}</span>
-                      <Level level={l.level} />
-                    </td>
-                    <td title={whoOf(l)} className="max-w-20 px-1 py-1 align-top font-mono">
-                      {/* a wire is two names: stacked, so neither is cut short */}
-                      {l.from ? (
-                        <>
-                          <span className="block truncate">{l.from} →</span>
-                          <span className="block truncate">{l.node}</span>
-                        </>
-                      ) : (
-                        <span className="block truncate">{whoOf(l)}</span>
-                      )}
-                    </td>
-                    <td className="px-1 py-1 align-top">
-                      <button
-                        type="button"
-                        aria-label={formatLine(l)}
-                        aria-pressed={shown}
-                        onClick={() =>
-                          setOpen({ runId: runId as string, stream: l.stream, request: l.request })
-                        }
-                        className="text-left hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-                      >
-                        r-{l.request} · {eventWords(l)}
-                      </button>
-                    </td>
-                    <td className="px-2 py-1 text-right align-top tabular-nums">
-                      {t === null ? "–" : Number(t.toFixed(t < 10 ? 2 : 1)).toLocaleString("en-US")}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <>
+            <p className="sr-only">{page.note}</p>
+            <ol className="m-0 list-none p-0">
+              {groups.map((g, i) => (
+                <RequestBlock
+                  key={g.key}
+                  group={g}
+                  depths={depths}
+                  open={toggled[g.key] ?? i < OPEN_FIRST}
+                  onToggle={() =>
+                    setToggled((t) => ({ ...t, [g.key]: !(t[g.key] ?? i < OPEN_FIRST) }))
+                  }
+                />
+              ))}
+            </ol>
+          </>
         ) : null}
       </div>
       {page && !page.problem && page.next !== null ? (
@@ -364,55 +312,18 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
           type="button"
           disabled={more}
           onClick={() => void loadMore()}
-          className="mt-2 rounded border border-control px-2 py-0.5 text-xs"
+          className={`${BTN} mt-2 min-h-8`}
         >
           {more
             ? "Loading..."
             : `Load more (${count(page.lines.length)} of ${count(page.total)} shown)`}
         </button>
       ) : null}
-
-      {/* an opened request belongs to the run it was opened in: a newer run closes it */}
-      {open && open.runId === runId ? (
-        <RequestView {...open} onClose={() => setOpen(null)} />
-      ) : null}
     </div>
   );
 }
 
-function Chip({
-  on,
-  children,
-  ...rest
-}: { on: boolean } & Omit<ComponentProps<"button">, "aria-pressed">) {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      {...rest}
-      className={`rounded-full border px-2 py-0.5 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent ${
-        on ? "border-accent bg-active font-medium" : "border-control"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 const Say = ({ children }: { children: ReactNode }) => <p className="p-3 text-muted">{children}</p>;
-
-const LEVEL: Record<LogLine["level"], string> = {
-  info: "border-border text-muted",
-  warn: "border-warn text-warn",
-  error: "border-negative text-negative",
-};
-
-/** The level as a badge; the word is always there, colour only repeats it. */
-function Level({ level }: { level: LogLine["level"] }) {
-  // "info" is the normal case: only a warning or an error earns a badge
-  if (level === "info") return null;
-  return <span className={`rounded border px-1 text-[11px] ${LEVEL[level]}`}>{level}</span>;
-}
 
 /** A readable message for a log that cannot be shown. A busy run is waiting, not an error. */
 function problemOf(e: unknown): string {

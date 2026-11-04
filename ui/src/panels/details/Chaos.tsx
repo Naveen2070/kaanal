@@ -5,6 +5,7 @@
 import { useEffect, useId, useState } from "react";
 import { ApiError, api } from "../../data/api/client";
 import type { Topology } from "../../data/api/types";
+import { useChaosHints } from "../../data/store/chaosHints";
 import { useDraft } from "../../data/store/draft";
 import { notify } from "../../shell/toast/toasts";
 import { UnitInput } from "./Field";
@@ -25,6 +26,7 @@ export function Chaos({
   onApplied: () => void;
 }) {
   const id = useId();
+  const hints = useChaosHints();
   const generation = useDraft((s) => s.view?.generation);
   /** The applied system: undefined while loading, null when there is none (a blank start). */
   const [applied, setApplied] = useState<Topology | null | undefined>(undefined);
@@ -99,6 +101,7 @@ export function Chaos({
         Break
       </label>
       <select
+        name="chaos-target"
         id={`${id}-t`}
         value={target}
         onChange={(e) => setTarget(e.currentTarget.value)}
@@ -172,6 +175,7 @@ export function Chaos({
       <div className="mt-1 flex items-center gap-1 text-sm">
         <label htmlFor={`${id}-p`}>Drop (%)</label>
         <input
+          name="drop-percent"
           id={`${id}-p`}
           type="number"
           min={0}
@@ -192,6 +196,13 @@ export function Chaos({
           Apply
         </button>
       </div>
+      {hints
+        .filter((h) => h.node === name)
+        .map((h) => (
+          <p key={h.node} className="mt-1 text-xs text-muted">
+            {h.text}
+          </p>
+        ))}
       <p id={`${id}-why`} className="mt-1 text-xs text-muted">
         {nodeKnown
           ? dirty

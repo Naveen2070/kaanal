@@ -70,8 +70,13 @@ export function NodeCard({ data, selected }: NodeProps) {
           ) : null}
           <span className="truncate text-sm font-semibold">{name}</span>
         </button>
-        <div className="truncate text-xs text-muted" title={configLine(label, config)}>
-          {configLine(label, config)}
+        {/* two lines on every card (kind, then the settings) so none is cut short or taller */}
+        <div className="text-xs text-muted" title={configLine(label, config)} data-part="config">
+          <span className="block truncate">{label}</span>
+          <span className="sr-only"> · </span>
+          <span className="block truncate">
+            {configLine(label, config).slice(label.length + 3)}
+          </span>
         </div>
         <div className={feed.dimmed ? "opacity-60" : ""}>
           <Meter ratio={f.busy} label={f.sentence} stale={feed.dimmed || (pending && f.hasRun)} />

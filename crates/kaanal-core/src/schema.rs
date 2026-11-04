@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::balance::Balance;
 use crate::config::{
@@ -35,6 +35,55 @@ pub(crate) fn duration_text(_: &mut SchemaGenerator) -> Schema {
         "pattern": DURATION_PATTERN,
         "description": "A duration with a unit: `5ms`, `1.5s`, `2h`."
     })
+}
+
+/// **Private.** Loose shape of a byte rate (`250KB`, `1.5 MB/s`, `512B`). `units::parse` has the
+/// final say; this only helps editors.
+const RATE_PATTERN: &str = r"^\s*[0-9]+(\.[0-9]+)?\s*([kKmMgG][iI]?)?[bB]\s*(/[sS])?\s*$";
+/// **Private.** Loose shape of a byte size (`2KB`, `1.5 MB`, `512B`): a rate without `/s`.
+const SIZE_PATTERN: &str = r"^\s*[0-9]+(\.[0-9]+)?\s*([kKmMgG][iI]?)?[bB]\s*$";
+
+/// **Private.** A whole number of at least `min`, or text with a byte unit; `null` when `optional`.
+fn bytes_schema(pattern: &str, min: u32, what: &str, optional: bool) -> Schema {
+    let mut any = vec![
+        json!({ "type": "integer", "minimum": min }),
+        json!({ "type": "string", "pattern": pattern }),
+    ];
+    if optional {
+        any.push(json!({ "type": "null" }));
+    }
+    json_schema!({ "description": what, "anyOf": any })
+}
+
+/// **Private.** Schema of an optional byte rate field (`node` and edge `bandwidth`, `out`, `in`,
+/// `bandwidth_cap`): `#[schemars(schema_with = "crate::schema::rate")]`.
+pub(crate) fn rate(_: &mut SchemaGenerator) -> Schema {
+    bytes_schema(
+        RATE_PATTERN,
+        1,
+        "Bytes per second as a whole number (at least 1), or text with a unit: `250KB`, `1.5MB/s`, `512B` (units B, KB, MB, GB; KB = 1024 bytes; `/s` optional).",
+        true,
+    )
+}
+
+/// **Private.** Schema of a required byte rate (the one-number form of a node's `bandwidth`).
+pub(crate) fn rate_value(_: &mut SchemaGenerator) -> Schema {
+    bytes_schema(
+        RATE_PATTERN,
+        1,
+        "Bytes per second as a whole number (at least 1), or text with a unit: `250KB`, `1.5MB/s`, `512B` (units B, KB, MB, GB; KB = 1024 bytes; `/s` optional).",
+        false,
+    )
+}
+
+/// **Private.** Schema of an optional payload size (`req_bytes`, `resp_bytes`).
+pub(crate) fn size(_: &mut SchemaGenerator) -> Schema {
+    bytes_schema(
+        SIZE_PATTERN,
+        0,
+        "A whole number of bytes, or text with a unit: `2KB`, `1.5MB`, `512B` (units B, KB, MB, GB; KB = 1024 bytes; at most 1 GiB).",
+        true,
+    )
 }
 
 /// **Private.** Schema of a `claims` map: names to strings, numbers or booleans (at most 32),

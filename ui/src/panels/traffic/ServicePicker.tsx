@@ -30,6 +30,7 @@ export function ServicePicker({
     <div className="flex flex-col gap-1.5">
       <label className="flex items-center gap-2 font-medium">
         <input
+          name="service-search"
           type="checkbox"
           className="size-5"
           checked={services.every((s) => value.includes(s))}
@@ -43,6 +44,7 @@ export function ServicePicker({
           return (
             <label key={s} className="flex items-center gap-2">
               <input
+                name="service"
                 type="checkbox"
                 className="size-5"
                 checked={value.includes(s)}

@@ -41,7 +41,7 @@ test("a_card_with_no_run_says_no_run_yet", () => {
 
 test("card_shows_config_line_and_up_to_n_waiting", () => {
   card(feedOf(nodeSummary({ utilization: 0.78, max_queue: 12, visits_per_s: 1000, p99_ms: 120 })));
-  expect(screen.getByText("Service · 1 copy × 12 slots · 98 ms")).toBeTruthy();
+  expect(screen.getByTitle("Service · 1 copy × 12 slots · 98 ms")).toBeTruthy();
   expect(screen.getByText("78% busy · up to 12 waiting")).toBeTruthy();
   expect(screen.getByText("Arriving").nextElementSibling?.textContent).toBe("1,000/s");
   expect(screen.getByText("Slowest work under").nextElementSibling?.textContent).toBe("120 ms");
@@ -68,7 +68,7 @@ test("the_group_label_says_saturated_idle_and_no_run_in_words", () => {
 test("card_without_slots_says_not_set_never_saturates", () => {
   card(feedOf(nodeSummary({ utilization: null, saturates_at_req_s: null })), { type: "gateway" });
   expect(screen.getByText("No slot limit · never saturates")).toBeTruthy();
-  expect(screen.getByText("Gateway · 1 copy · no slot limit")).toBeTruthy();
+  expect(screen.getByTitle("Gateway · 1 copy · no slot limit")).toBeTruthy();
 });
 
 test("the_header_is_a_button_for_selection_and_the_card_itself_is_not", () => {
@@ -86,7 +86,7 @@ test("a_saturated_node_is_red_and_says_why_in_text_not_only_colour", () => {
 
 test("copies_show_in_the_config_line_and_a_stale_feed_marks_the_figures", () => {
   card(feedOf(nodeSummary(), true), { ...config, replicas: 3 });
-  expect(screen.getByText("Service · 3 copies × 12 slots · 98 ms")).toBeTruthy();
+  expect(screen.getByTitle("Service · 3 copies × 12 slots · 98 ms")).toBeTruthy();
   expect(screen.getByText("updating")).toBeTruthy(); // stale_marker_shows_while_a_run_is_pending
   expect(document.querySelector(".opacity-60")).not.toBeNull();
 });
@@ -105,10 +105,10 @@ test("the_card_has_no_axe_violations_idle_busy_or_saturated", async () => {
 
 test("a_distribution_and_a_database_have_their_own_config_words", () => {
   card(feedOf(undefined), { type: "service", concurrency: 4, proc: { p50: "4ms", p99: "20ms" } });
-  expect(screen.getByText("Service · 1 copy × 4 slots · varies")).toBeTruthy();
+  expect(screen.getByTitle("Service · 1 copy × 4 slots · varies")).toBeTruthy();
   cleanup();
   card(feedOf(undefined), { type: "database", pool: { size: 10 } });
-  expect(screen.getByText("Database · 1 copy × 10 slots")).toBeTruthy(); // no Time row for a database
+  expect(screen.getByTitle("Database · 1 copy × 10 slots")).toBeTruthy(); // no Time row for a database
 });
 
 // the card reads a feed; if it imported the run store a later live stream would have to rewrite it
@@ -123,4 +123,14 @@ test("the_card_does_not_import_the_run_store", () => {
     expect(sources[f], f).toBeDefined();
     expect(sources[f], f).not.toMatch(/store\/run|useRun/);
   }
+});
+
+test("the_kind_and_the_settings_sit_on_two_lines_with_the_whole_text_kept", () => {
+  card(feedOf(undefined), { type: "load-balancer", concurrency: 512, proc: {} });
+  const part = document.querySelector('[data-part="config"]') as HTMLElement;
+  const lines = [...part.querySelectorAll(".block")].map((l) => l.textContent);
+  expect(lines).toEqual(["Load balancer", "1 copy × 512 slots · varies"]);
+  // read aloud (and as a tooltip) it is still the one sentence
+  expect(part.textContent).toBe("Load balancer · 1 copy × 512 slots · varies");
+  expect(part.title).toBe("Load balancer · 1 copy × 512 slots · varies");
 });

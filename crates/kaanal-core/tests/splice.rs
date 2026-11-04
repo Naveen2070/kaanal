@@ -561,3 +561,59 @@ fn append_refuses_what_it_cannot_do_safely() {
         Err(SpliceError::NotFound(_))
     ));
 }
+
+#[test]
+fn insert_after_a_nested_map_keeps_the_flow_spacing() {
+    let src = "api: { type: service, proc: { p50: 12ms, p99: 40ms } }\n";
+    assert_eq!(
+        run(src, &[insert(&["api"], "hold", "call")]).0,
+        "api: { type: service, proc: { p50: 12ms, p99: 40ms }, hold: call }\n"
+    );
+    // no space inside the braces: nothing is added there either
+    assert_eq!(
+        run("a: {b: {c: 1}}\n", &[insert(&["a"], "d", "2")]).0,
+        "a: {b: {c: 1}, d: 2}\n"
+    );
+    // an empty nested map as the last value, and a flow map that spans lines
+    assert_eq!(
+        run("a: { b: {} }\n", &[insert(&["a"], "d", "2")]).0,
+        "a: { b: {}, d: 2 }\n"
+    );
+    assert_eq!(
+        run("a: { b: { c: 1 }\n  }\n", &[insert(&["a"], "d", "2")]).0,
+        "a: { b: { c: 1 }, d: 2\n  }\n"
+    );
+}
+
+/// A file with unit suffixes (F7): an edit elsewhere keeps those lines byte for byte, and an
+/// edit to the field itself writes the integer it is given.
+#[test]
+fn a_unit_suffix_survives_edits_to_other_fields() {
+    let src = "version: 1
+nodes:
+  gw: { type: gateway, bandwidth: { out: 1MB/s } }   # wide
+  app: { type: service, proc: 1ms, bandwidth: 250 KB/s }
+edges:
+  - { from: gw, to: app, bandwidth: 250KB }
+traffic:
+  p: { rps: 5, journeys: [ { endpoint: 'GET /a', req_bytes: 2KB } ] }
+";
+    let (text, lost) = run(
+        src,
+        &[
+            set(&["nodes", "app", "proc"], "9ms"),
+            set(&["traffic", "p", "rps"], "7"),
+        ],
+    );
+    assert_eq!(
+        text,
+        src.replace("proc: 1ms", "proc: 9ms")
+            .replace("rps: 5", "rps: 7")
+    );
+    assert!(lost.is_empty(), "{lost:?}");
+    let (text, _) = run(src, &[set(&["edges", "0", "bandwidth"], "256000")]);
+    assert_eq!(
+        text,
+        src.replace("bandwidth: 250KB }", "bandwidth: 256000 }")
+    );
+}

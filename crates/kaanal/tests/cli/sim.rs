@@ -83,6 +83,40 @@ fn sim_run_needs_a_profile_and_a_good_duration() {
 }
 
 #[test]
+fn sim_run_without_a_name_lists_the_profiles_and_a_wrong_name_lists_them_too() {
+    let (up, _) = up("sim-names");
+    // exit 64 as before (the CLI used to refuse it before asking); only the text is new
+    let err = usage_fails(&up, &["sim", "run"]);
+    assert_eq!(
+        err.trim(),
+        "no traffic profile named; name one with -p: big, peak"
+    );
+    // a name the file lacks: exit 1 (the server's 404), and the names that exist
+    let err = fails(&up, &["sim", "run", "-p", "x"]);
+    assert!(
+        err.trim()
+            .ends_with("HTTP 404: no traffic profile named 'x'; defined: big, peak"),
+        "{err}"
+    );
+}
+
+#[test]
+fn sim_run_in_a_project_without_traffic_says_what_to_add() {
+    let dir = project("sim-none", "");
+    let up = Up::start_in(dir);
+    let err = usage_fails(&up, &["sim", "run"]);
+    assert_eq!(
+        err.trim(),
+        "no traffic profile is defined: add a traffic: section to kaanal.yaml or pass -f profile.yaml (see docs/web/traffic.md)"
+    );
+    let err = fails(&up, &["sim", "run", "-p", "peak"]);
+    assert!(
+        err.contains("no traffic profile named 'peak'; none is defined"),
+        "{err}"
+    );
+}
+
+#[test]
 fn sample_prints_a_body_that_parses() {
     let (up, _) = up("sample");
     let out = ok(&up, &["sample", "GET /users"]);

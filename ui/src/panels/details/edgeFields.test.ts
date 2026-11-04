@@ -101,3 +101,19 @@ test("balance_reads_the_three_shapes_and_the_patch_sets_or_removes_it", () => {
   expect(setBalance(path, true, "")).toEqual([{ op: "remove", path }]);
   expect(setBalance(path, false, "")).toEqual([]); // nothing to remove
 });
+
+test("a_wire_written_with_a_unit_reads_the_same_as_its_bytes", () => {
+  expect(bandwidthKbOf({ ...plain, bandwidth: "250KB" })).toBe(250);
+  expect(bandwidthKbOf({ ...plain, bandwidth: "1MB/s" })).toBe(1024);
+  expect(bandwidthKbOf({ ...plain, bandwidth: "250KB" })).toBe(
+    bandwidthKbOf({ ...plain, bandwidth: 256_000 }),
+  );
+  // text the page cannot read shows empty
+  expect(bandwidthKbOf({ ...plain, bandwidth: "fast" })).toBeNull();
+  // an edit still writes whole bytes, not a suffix
+  expect(setBandwidth(0, { ...plain, bandwidth: "250KB" }, 300)).toEqual({
+    op: "set",
+    path: ["edges", 0, "bandwidth"],
+    value: 307_200,
+  });
+});

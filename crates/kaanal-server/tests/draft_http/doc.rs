@@ -118,7 +118,9 @@ async fn kind_defaults_has_an_entry_for_every_node_kind() {
     ] {
         assert_eq!(v["kind_defaults"][kind]["type"], kind, "{kind}: {v}");
     }
-    assert_eq!(v["kind_defaults"]["gateway"]["concurrency"], 256);
+    assert_eq!(v["kind_defaults"]["gateway"]["concurrency"]["limit"], 256);
+    assert_eq!(v["kind_defaults"]["gateway"]["concurrency"]["queue"], 100);
+    assert_eq!(v["kind_defaults"]["gateway"]["timeout"], "30s");
     assert_eq!(v["kind_defaults"]["database"]["pool"]["size"], 20);
 }
 

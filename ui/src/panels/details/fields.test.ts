@@ -202,6 +202,12 @@ describe("a node's network card", () => {
     expect(cardOf(svc({ bandwidth: 2048 }))).toEqual({ send: 2, receive: 2 });
     expect(cardOf(svc({ bandwidth: { out: 1024 } }))).toEqual({ send: 1, receive: null });
     expect(cardOf(svc())).toEqual({ send: null, receive: null });
+    expect(cardOf(svc({ bandwidth: "250KB/s" }))).toEqual({ send: 250, receive: 250 });
+    expect(cardOf(svc({ bandwidth: { out: "1MB/s", in: 262144 } }))).toEqual({
+      send: 1024,
+      receive: 256,
+    });
+    expect(cardOf(svc({ bandwidth: "soon" }))).toEqual({ send: null, receive: null });
   });
   it("writes one number for equal sides, a pair otherwise, and removes when none is left", () => {
     expect(setCard("a", svc(), "send", 1)).toEqual([

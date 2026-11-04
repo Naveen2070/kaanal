@@ -47,12 +47,15 @@ pub struct JourneyConfig {
     /// Relative share of the profile's rate (above 0, default 1).
     #[serde(default = "one", deserialize_with = "weight_above_zero")]
     pub weight: f64,
-    /// Bytes of each request body (default 0: no link or `per_kb` cost).
-    #[serde(default)]
+    /// Size of each request body: bytes as a whole number, or text with a unit like `2KB` (KB =
+    /// 1024 bytes; at most 1 GiB). Default 0: no link or `per_kb` cost.
+    #[serde(default, deserialize_with = "crate::units::req_bytes")]
+    #[schemars(schema_with = "crate::schema::size")]
     pub req_bytes: Option<u64>,
-    /// Bytes of each response body (default: the size of one generated body for a route with a
-    /// response schema, else 0).
-    #[serde(default)]
+    /// Size of each response body, written like `req_bytes` (default: the size of one generated
+    /// body for a route with a response schema, else 0).
+    #[serde(default, deserialize_with = "crate::units::resp_bytes")]
+    #[schemars(schema_with = "crate::schema::size")]
     pub resp_bytes: Option<u64>,
 }
 

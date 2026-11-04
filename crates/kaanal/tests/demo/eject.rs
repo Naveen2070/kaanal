@@ -63,6 +63,39 @@ fn eject_writes_the_project_and_starts_no_server() {
 }
 
 #[test]
+fn the_ejected_project_has_a_peak_profile_over_its_own_endpoints() {
+    let work = empty("eject-traffic");
+    let _clean = Cleanup(work.clone());
+    assert_eq!(run(&work, &["demo", "--eject"]).status.code(), Some(0));
+    let dir = work.join("kaanal-demo");
+    let text = std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap();
+    let cfg = kaanal_core::Config::from_yaml(&text).unwrap();
+    let Some(kaanal_core::config::EndpointsConfig::Inline(eps)) = &cfg.endpoints else {
+        panic!("the demo writes its endpoints inline")
+    };
+    let p = &cfg.traffic["peak"];
+    assert_eq!(
+        (p.rps, p.duration),
+        (100.0, Some(std::time::Duration::from_secs(30)))
+    );
+    // one journey per endpoints: key, reads 3, writes 1
+    let got: Vec<(&str, f64)> = p
+        .journeys
+        .iter()
+        .map(|j| (j.endpoint.as_str(), j.weight))
+        .collect();
+    let want: Vec<(&str, f64)> = eps
+        .keys()
+        .map(|k| (k.as_str(), if k.starts_with("GET ") { 3.0 } else { 1.0 }))
+        .collect();
+    assert_eq!(got, want);
+    // no "not a route" warning: every journey is a route of the spec
+    let v = run(&dir, &["validate"]);
+    assert_eq!(v.status.code(), Some(0));
+    assert!(!String::from_utf8_lossy(&v.stderr).contains("not a route"));
+}
+
+#[test]
 fn eject_refuses_a_non_empty_directory_without_force() {
     let work = empty("eject-busy");
     let _clean = Cleanup(work.clone());

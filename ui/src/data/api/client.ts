@@ -111,6 +111,9 @@ export const api = {
   /** Sets live chaos (merged into what is there); the body names a structured target. */
   setChaos: (body: Record<string, unknown>, o: Opts = {}) =>
     call<Record<string, unknown>>("PUT", "/chaos", body, o),
+  /** The live chaos; `effective.nodes` is what requests meet (scenarios and hand-set together). */
+  getChaos: (o: Opts = {}) =>
+    call<{ effective?: { nodes?: Record<string, unknown> } }>("GET", "/chaos", undefined, o),
   listScenarios: (o: Opts = {}) => call<ScenarioRow[]>("GET", "/scenarios", undefined, o),
   /** Pushes a scenario on the stack; `ttl` (text such as `30s`) deactivates it when the time is up. */
   activateScenario: (name: string, ttl?: string, o: Opts = {}) =>

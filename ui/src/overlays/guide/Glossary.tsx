@@ -78,6 +78,7 @@ export function Glossary() {
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
         <h2 className="m-0 text-base font-semibold">Glossary</h2>
         <input
+          name="glossary-search"
           type="search"
           aria-label="Search the glossary"
           placeholder="Search every chapter"

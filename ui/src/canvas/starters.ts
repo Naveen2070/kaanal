@@ -17,8 +17,8 @@ export interface Starter {
 const SIMPLE = `version: 1
 seed: 7
 nodes:
-  gateway: { type: gateway, concurrency: 256, proc: { p50: 1ms, p99: 3ms } }
-  app: { type: monolith, concurrency: 16, proc: { p50: 12ms, p99: 40ms } }
+  gateway: { type: gateway, concurrency: { limit: 256, queue: 100 }, proc: { p50: 1ms, p99: 3ms }, timeout: 30s }
+  app: { type: monolith, concurrency: { limit: 16, queue: 100 }, proc: { p50: 12ms, p99: 40ms } }
   db: { type: database, flavor: postgres, pool: { size: 10 } }
 edges:
   - { from: gateway, to: app, net: { p50: 1ms, p99: 3ms } }
@@ -39,11 +39,11 @@ traffic:
 const FAN_OUT = `version: 1
 seed: 7
 nodes:
-  gateway: { type: gateway, concurrency: 256, proc: { p50: 1ms, p99: 3ms } }
-  web: { type: service, concurrency: 16, proc: { p50: 4ms, p99: 12ms } }
-  users: { type: service, concurrency: 8, proc: { p50: 6ms, p99: 20ms } }
-  orders: { type: service, concurrency: 8, proc: { p50: 9ms, p99: 30ms } }
-  catalog: { type: service, concurrency: 8, proc: { p50: 5ms, p99: 18ms } }
+  gateway: { type: gateway, concurrency: { limit: 256, queue: 100 }, proc: { p50: 1ms, p99: 3ms }, timeout: 30s }
+  web: { type: service, concurrency: { limit: 16, queue: 100 }, proc: { p50: 4ms, p99: 12ms } }
+  users: { type: service, concurrency: { limit: 8, queue: 100 }, proc: { p50: 6ms, p99: 20ms } }
+  orders: { type: service, concurrency: { limit: 8, queue: 100 }, proc: { p50: 9ms, p99: 30ms } }
+  catalog: { type: service, concurrency: { limit: 8, queue: 100 }, proc: { p50: 5ms, p99: 18ms } }
   db: { type: database, flavor: postgres, pool: { size: 20 } }
 edges:
   - { from: gateway, to: web, net: { p50: 1ms, p99: 3ms } }
@@ -74,9 +74,9 @@ traffic:
 const BALANCED = `version: 1
 seed: 7
 nodes:
-  gateway: { type: gateway, concurrency: 256, proc: { p50: 1ms, p99: 3ms } }
-  balancer: { type: load-balancer, concurrency: 512, proc: { p50: 200us, p99: 600us } }
-  api: { type: service, concurrency: 8, replicas: 3, balance: p2c, proc: { p50: 12ms, p99: 40ms } }
+  gateway: { type: gateway, concurrency: { limit: 256, queue: 100 }, proc: { p50: 1ms, p99: 3ms }, timeout: 30s }
+  balancer: { type: load-balancer, concurrency: { limit: 512, queue: 100 }, proc: { p50: 200us, p99: 600us } }
+  api: { type: service, concurrency: { limit: 8, queue: 100 }, replicas: 3, balance: p2c, proc: { p50: 12ms, p99: 40ms } }
   db: { type: database, flavor: postgres, pool: { size: 20 } }
 edges:
   - { from: gateway, to: balancer, net: { p50: 1ms, p99: 3ms } }
@@ -107,7 +107,8 @@ export const STARTERS: Starter[] = [
     id: "simple",
     title: "One app and a database",
     blurb: "The smallest useful system",
-    tryThis: "Lower the app's slots to 2 and see the queue build.",
+    tryThis:
+      "Lower the app's slots to 1: the queue builds up to 100, then requests are turned away.",
     text: async () => SIMPLE,
   },
   {

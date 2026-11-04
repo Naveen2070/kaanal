@@ -109,7 +109,8 @@ export function EdgeControls({ index }: { index: number }) {
           <BalanceField
             hint="How calls over this wire pick a copy of the callee. It overrides the callee's own setting."
             value={balanceOf(e.balance)}
-            defaultLabel="The component's own"
+            defaultLabel="Same as the component (default)"
+            overrides
             onChange={(c) => void patch(setBalance(["edges", index, "balance"], "balance" in e, c))}
           />
         ) : null}

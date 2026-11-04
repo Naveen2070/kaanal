@@ -5,6 +5,7 @@
 
 import { kindRulesOf } from "../../canvas/rules";
 import type { NodeDoc, NodeSummary, Op } from "../../data/api/types";
+import { parseBytes } from "./units";
 
 type Path = (string | number)[];
 
@@ -272,7 +273,10 @@ export function controlRows(kind: string, config: NodeDoc): Row[] {
 
 /** A node's network card in KB/s (1024 bytes), `{ send, receive }`; null = no limit that way. */
 export function cardOf(config: NodeDoc): { send: number | null; receive: number | null } {
-  const kb = (v: unknown) => (typeof v === "number" ? Number((v / 1024).toFixed(3)) : null);
+  const kb = (v: unknown) => {
+    const bytes = parseBytes(v, true);
+    return bytes === null ? null : Number((bytes / 1024).toFixed(3));
+  };
   const b = config.bandwidth;
   if (isObject(b)) return { send: kb(b.out), receive: kb(b.in) };
   return { send: kb(b), receive: kb(b) };

@@ -487,3 +487,33 @@ test("an_open_bar_has_no_axe_violations", async () => {
   );
   await expectNoViolations(document.body);
 });
+
+// ---- Chrome-pass findings ----
+
+test("typed_text_gives_way_when_the_config_changes_from_outside", async () => {
+  await loaded();
+  const r = bar();
+  fireEvent.change(typed("Slots"), { target: { value: "10" } }); // typed, not committed, not focused
+  expect(typed("Slots").value).toBe("10");
+  r.rerender(<ControlBar name="app" config={{ ...config, concurrency: 8 }} />); // reload, undo
+  expect(typed("Slots").value).toBe("8");
+});
+
+test("typed_text_is_kept_while_the_box_is_being_edited", async () => {
+  await loaded();
+  const r = bar();
+  act(() => typed("Slots").focus());
+  fireEvent.change(typed("Slots"), { target: { value: "10" } });
+  r.rerender(<ControlBar name="app" config={{ ...config, concurrency: 8 }} />);
+  expect(typed("Slots").value).toBe("10");
+});
+
+test("typed_boxes_have_a_real_max_and_sliders_say_their_value", async () => {
+  await loaded({ ...config, replicas: 3 });
+  bar({ ...config, replicas: 3 });
+  for (const n of ["Slots", "Copies", "Time"]) {
+    expect(Number(typed(n).max), n).toBeGreaterThan(0);
+  }
+  expect(slider("Slots").getAttribute("aria-valuetext")).toBe("12 slots at once");
+  expect(slider("Copies").getAttribute("aria-valuetext")).toBe("3 copies");
+});

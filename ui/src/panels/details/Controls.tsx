@@ -314,6 +314,7 @@ export function Controls({
           Name
         </label>
         <input
+          name="node-name"
           id={nameId}
           key={name}
           ref={(el) => {

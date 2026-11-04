@@ -121,6 +121,7 @@ export function TrafficBuilder() {
               <li key={i} className="rounded-xl border border-border bg-card p-2">
                 <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_4.5rem_2rem] items-center gap-2">
                   <select
+                    name="method"
                     aria-label={`Method of endpoint ${n}`}
                     value={r.method}
                     onChange={(e) => set(i, { method: e.currentTarget.value as Method })}
@@ -131,6 +132,7 @@ export function TrafficBuilder() {
                     ))}
                   </select>
                   <input
+                    name="path"
                     aria-label={`Path of endpoint ${n}`}
                     value={r.path}
                     spellCheck={false}
@@ -138,6 +140,7 @@ export function TrafficBuilder() {
                     className={`${field} font-mono`}
                   />
                   <input
+                    name="weight"
                     aria-label={`Weight of endpoint ${n}`}
                     title="Weight: this endpoint's share of the requests"
                     type="number"

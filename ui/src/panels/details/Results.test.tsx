@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
-import type { RunRecord, Series, Summary } from "../../data/api/types";
+import type { DraftView, RunRecord, Series, Summary } from "../../data/api/types";
+import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
+import { mockFetch } from "../../test/fetch";
 import { nodeSummary } from "../../test/summary";
 import { bucketLabel, heatmapData, intensity } from "./heatmapData";
 import { Results } from "./Results";
@@ -73,7 +75,10 @@ function mount() {
   );
 }
 
-beforeEach(() => useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null }));
+beforeEach(() => {
+  useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null });
+  useDraft.setState({ view: null });
+});
 afterEach(cleanup);
 
 test("heatmap_data_has_one_row_per_bucket_and_sixty_columns", () => {
@@ -305,4 +310,71 @@ test("a_pick_in_the_dropdown_gives_way_when_the_canvas_selection_changes", () =>
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
   expect(select.value).toBe("db");
+});
+
+function withDraft(doc: unknown) {
+  useDraft.setState({ view: { doc } as unknown as DraftView });
+}
+const slowLatency = (p99_ms: number) => ({ latency: { ...summary().latency, p99_ms } });
+
+test("a_p99_over_30s_warns_that_no_client_waits_that_long", () => {
+  withDraft({ nodes: { gw: { type: "gateway" } }, edges: [] });
+  setRun(summary(slowLatency(31_000)));
+  mount();
+  expect(
+    screen.getByText(/No client waits this long: add a queue limit or a timeout/),
+  ).toBeTruthy();
+});
+
+test("no_p99_warning_under_the_limit_and_the_entry_timeout_is_the_limit_when_set", () => {
+  withDraft({ nodes: { gw: { type: "gateway" } }, edges: [] });
+  setRun(summary(slowLatency(16_000)));
+  mount();
+  expect(screen.queryByText(/No client waits/)).toBeNull();
+  cleanup();
+  withDraft({ nodes: { gw: { type: "gateway", timeout: "5s" } }, edges: [] });
+  setRun(summary(slowLatency(8_000)));
+  mount();
+  expect(screen.getByText(/longer than the timeout of gw \(5 s\)/)).toBeTruthy();
+});
+
+const callsDoc = (nodes: Record<string, { type: string; [k: string]: unknown }>) =>
+  ({ doc: { nodes, edges: [{ from: "gw", to: "db" }] } }) as unknown as DraftView;
+
+test("a_quiet_note_names_the_two_limits_a_run_leaves_out_until_both_are_on", () => {
+  mockFetch([{ json: {} }]);
+  useDraft.setState({ view: callsDoc({ gw: { type: "gateway" }, db: { type: "database" } }) });
+  setRun(summary());
+  mount();
+  const note = screen.getByText(/This run leaves out two limits/);
+  expect(note.className).toContain("text-muted");
+  cleanup();
+  useDraft.setState({
+    view: callsDoc({
+      gw: { type: "gateway", hold: "call", bandwidth: { out: 1000 } },
+      db: { type: "database" },
+    }),
+  });
+  mount();
+  expect(screen.queryByText(/This run leaves out/)).toBeNull();
+});
+
+test("a_hint_shows_when_chaos_is_set_and_nothing_failed_and_goes_when_something_did", async () => {
+  mockFetch([{ json: { effective: { nodes: { db: { down: true } } } } }]);
+  setRun(summary({ failed: 0, errors: {} }));
+  mount();
+  expect(await screen.findByText(/Nothing failed although db is down/)).toBeTruthy();
+  cleanup();
+  setRun(summary({ failed: 4 }));
+  mount();
+  await act(async () => {});
+  expect(screen.queryByText(/Nothing failed although/)).toBeNull();
+});
+
+test("no_hint_without_chaos", async () => {
+  mockFetch([{ json: { effective: {} } }]);
+  setRun(summary({ failed: 0, errors: {} }));
+  mount();
+  await act(async () => {});
+  expect(screen.queryByText(/Nothing failed although/)).toBeNull();
 });

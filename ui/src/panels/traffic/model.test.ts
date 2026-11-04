@@ -326,3 +326,37 @@ test("a_new_weight_is_one_patch_at_the_journeys_place", () => {
     value: 3,
   });
 });
+
+test("sizes_written_with_a_unit_are_read_and_stay_as_written_until_the_row_changes", () => {
+  const d = doc({
+    traffic: {
+      peak: {
+        rps: 300,
+        journeys: [
+          { endpoint: "GET /products", weight: 4, resp_bytes: "2KB" },
+          { endpoint: "POST /orders", weight: 1, req_bytes: "1.5 KB" },
+        ],
+      },
+    },
+  });
+  const rows = rowsFrom(d, "peak");
+  expect(rows.map((r) => [r.reqKb, r.respKb])).toEqual([
+    [0, 2],
+    [1.5, 0],
+  ]);
+  const journeys = (x: Doc) =>
+    (x.traffic as never as Record<string, { journeys: unknown[] }>).peak?.journeys;
+  // applying the rows as they are keeps the text
+  expect(journeys(after(d, buildOps(d, "peak", rows)))).toEqual(journeys(d));
+  // a row the person changed is written as bytes, as before
+  const edited = rows.map((r, i) => (i === 0 ? { ...r, respKb: 3 } : r));
+  expect(journeys(after(d, buildOps(d, "peak", edited)))).toEqual([
+    { endpoint: "GET /products", weight: 4, resp_bytes: 3072 },
+    { endpoint: "POST /orders", weight: 1, req_bytes: "1.5 KB" },
+  ]);
+  // text the page cannot read is an empty box
+  const odd = doc({
+    traffic: { peak: { rps: 1, journeys: [{ endpoint: "GET /a", req_bytes: "big" }] } },
+  });
+  expect(rowsFrom(odd, "peak")[0]?.reqKb).toBe(0);
+});

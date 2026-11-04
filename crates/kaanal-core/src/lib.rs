@@ -31,6 +31,7 @@ pub mod schema;
 pub mod spec_skeleton;
 pub mod splice;
 pub mod topology;
+pub mod units;
 pub mod visits;
 
 pub use balance::{Balance, MAX_REPLICAS, pick_replica};

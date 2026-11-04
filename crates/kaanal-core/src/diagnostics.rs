@@ -255,8 +255,12 @@ fn edge_error(edges: &MarkedYamlOwned) -> Option<ConfigError> {
             if field == "from" || field == "to" {
                 return None;
             }
-            probe::<EdgeConfig>(&fixed, &field, v)
-                .map(|e| error_at(v, format!("edge #{i}: field '{field}': {e}")))
+            probe::<EdgeConfig>(&fixed, &field, v).map(|e| {
+                error_at(
+                    v,
+                    format!("edge #{i}: field '{field}': {}", unprefixed(&e, &field)),
+                )
+            })
         })
     })
 }
@@ -511,8 +515,12 @@ fn serde_problem(
         if field == "type" {
             return None;
         }
-        probe::<NodeConfig>(&fixed, &field, v)
-            .map(|e| error_at(v, format!("node '{name}': field '{field}': {e}")))
+        probe::<NodeConfig>(&fixed, &field, v).map(|e| {
+            error_at(
+                v,
+                format!("node '{name}': field '{field}': {}", unprefixed(&e, &field)),
+            )
+        })
     })
 }
 
@@ -734,4 +742,12 @@ fn to_json(n: &MarkedYamlOwned, depth: usize, text: bool) -> Value {
         YamlDataOwned::Tagged(_, inner) => to_json(inner, depth + 1, text),
         _ => Value::Null,
     }
+}
+
+/// **Private.** `text` without a leading `<field>: `: a unit-parse error already names its field,
+/// and the line above it names it again.
+fn unprefixed<'a>(text: &'a str, field: &str) -> &'a str {
+    text.strip_prefix(field)
+        .and_then(|rest| rest.strip_prefix(": "))
+        .unwrap_or(text)
 }

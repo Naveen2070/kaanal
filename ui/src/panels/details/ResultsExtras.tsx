@@ -84,6 +84,7 @@ export function PlanSection({ s }: { s: Summary }) {
       <label className="mb-1 block text-xs">
         Requests a second{" "}
         <input
+          name="plan-rate"
           type="number"
           min={1}
           value={rate}

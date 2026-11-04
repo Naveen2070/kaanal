@@ -64,11 +64,12 @@ pub struct EdgeConfig {
     /// `balance`.
     #[serde(default)]
     pub balance: Option<crate::balance::Balance>,
-    /// Link capacity in bytes per second (at least 1). With a payload size, a transfer takes
+    /// Link capacity: bytes per second (at least 1) as a whole number, or text with a unit like
+    /// `250KB` or `1MB/s` (KB = 1024 bytes). With a payload size, a transfer takes
     /// `bytes / bandwidth` on a FIFO link that other transfers queue behind. Absent = no limit,
     /// and no link hop.
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1))]
+    #[serde(default, deserialize_with = "crate::units::bandwidth")]
+    #[schemars(schema_with = "crate::schema::rate")]
     pub bandwidth: Option<u64>,
 }
 
@@ -175,28 +176,74 @@ pub(super) fn default_status() -> u16 {
     200
 }
 
-/// A node's network card (`bandwidth:`): bytes per second, one number for both directions or
-/// `{ out, in }`. Each direction is at least 1; a missing side of the pair is unlimited.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+/// A node's network card (`bandwidth:`): a rate (bytes per second as a whole number, or text
+/// with a unit like `250KB/s`), one for both directions or `{ out, in }`. Each direction is at
+/// least 1; a missing side of the pair is unlimited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
 #[serde(untagged)]
 pub enum NodeBandwidth {
     /// The same rate sending and receiving.
-    Both(#[schemars(extend("minimum" = 1))] u64),
+    Both(#[schemars(schema_with = "crate::schema::rate_value")] u64),
     /// Separate rates (full duplex).
     Split(NodeBandwidthSplit),
+}
+
+impl<'de> Deserialize<'de> for NodeBandwidth {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        /// **Private.** A number or text is both directions; a map is `{ out, in }`.
+        struct V;
+        impl<'de> de::Visitor<'de> for V {
+            type Value = NodeBandwidth;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(
+                    "a rate like `250KB/s` (or a whole number of bytes a second), or `{ out, in }`",
+                )
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(NodeBandwidth::Both(v))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                u64::try_from(v).map(NodeBandwidth::Both).map_err(|_| {
+                    E::custom(format!(
+                        "bandwidth: {v} is negative; use a number of 0 or more"
+                    ))
+                })
+            }
+
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                Err(E::custom(format!(
+                    "bandwidth: {v} is not a whole number of bytes; write it in text with a unit, like `1.5KB/s`"
+                )))
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                crate::units::node_rate(v).map(NodeBandwidth::Both)
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, m: A) -> Result<Self::Value, A::Error> {
+                NodeBandwidthSplit::deserialize(de::value::MapAccessDeserializer::new(m))
+                    .map(NodeBandwidth::Split)
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 /// The `{ out, in }` form of [`NodeBandwidth`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NodeBandwidthSplit {
-    /// Bytes per second this node can send (its calls out and its responses).
-    #[serde(default)]
-    #[schemars(extend("minimum" = 1))]
+    /// Rate this node can send (its calls out and its responses): bytes per second, or text
+    /// like `1MB/s`.
+    #[serde(default, deserialize_with = "crate::units::out")]
+    #[schemars(schema_with = "crate::schema::rate")]
     pub out: Option<u64>,
-    /// Bytes per second this node can receive.
-    #[serde(default, rename = "in")]
-    #[schemars(extend("minimum" = 1))]
+    /// Rate this node can receive: bytes per second, or text like `1MB/s`.
+    #[serde(default, rename = "in", deserialize_with = "crate::units::inbound")]
+    #[schemars(schema_with = "crate::schema::rate")]
     pub r#in: Option<u64>,
 }
 

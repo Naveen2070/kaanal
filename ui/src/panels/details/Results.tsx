@@ -3,7 +3,11 @@
 // per-link figures, errors by kind.
 
 import { useId, useState } from "react";
+import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
+import { p99WarningFor } from "../../canvas/p99Warning";
+import { strictnessNote } from "../../canvas/strictness";
+import { useChaosHints } from "../../data/store/chaosHints";
 import { useSelected } from "../../data/store/view";
 import { Heatmap } from "./Heatmap";
 import { Section } from "./Field";
@@ -25,6 +29,8 @@ export function Results() {
   const dimmed = useRun((s) => s.dimmed);
   const status = useRun((s) => s.status);
   const pickId = useId();
+  const doc = useDraft((st) => st.view?.doc);
+  const hints = useChaosHints();
   const s = run?.summary;
 
   if (!s && status === "running") return <ResultsSkeleton />;
@@ -35,6 +41,9 @@ export function Results() {
       </p>
     );
   }
+
+  const slow = s.requests > 0 ? p99WarningFor(s.latency.p99_ms, doc) : null;
+  const strict = strictnessNote(doc);
 
   // the heatmap follows the selected component, else the first bottleneck, else the first node
   const ranked = rankedByPeak(s);
@@ -62,6 +71,13 @@ export function Results() {
         {run ? `Run ${run.id.replace(/^s/, "")} · ` : ""}A what-if, not a prediction
       </p>
       <CompareLine runId={run?.id} s={s} />
+      {slow !== null ? <p className="mb-2 text-xs text-warn">{slow}</p> : null}
+      {hints.map((h) => (
+        <p key={h.node} className="mb-2 text-xs text-muted">
+          {h.text}
+        </p>
+      ))}
+      {strict !== null ? <p className="mb-2 text-xs text-muted">{strict}</p> : null}
       {s.warnings.length > 0 ? (
         <ul className="mb-3 space-y-1 rounded-lg border border-warn p-2 text-xs text-warn">
           {s.warnings.map((w, i) => (
@@ -114,6 +130,7 @@ export function Results() {
             <label htmlFor={pickId} className="mb-1 block text-xs">
               {s.links.length > 0 ? "Component or wire" : "Component"}{" "}
               <select
+                name="pick"
                 id={pickId}
                 value={chosenKey}
                 onChange={(e) => setPicked({ key: e.currentTarget.value, under: selected })}

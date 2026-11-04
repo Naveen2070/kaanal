@@ -5,6 +5,7 @@
 
 import type { Doc, EdgeDoc, Op } from "../../data/api/types";
 import { durationMs, formatMs } from "./fields";
+import { parseBytes } from "./units";
 
 export const EDGE_LIMITS = {
   netMs: { min: 0, max: 60_000 },
@@ -49,8 +50,10 @@ export function shareApplies(doc: Doc | null | undefined, e: EdgeDoc): boolean {
 }
 
 /** The link's capacity in KB/s (1024 bytes), or null when there is no limit. */
-export const bandwidthKbOf = (e: EdgeDoc): number | null =>
-  typeof e.bandwidth === "number" ? Number((e.bandwidth / 1024).toFixed(3)) : null;
+export const bandwidthKbOf = (e: EdgeDoc): number | null => {
+  const bytes = parseBytes(e.bandwidth, true);
+  return bytes === null ? null : Number((bytes / 1024).toFixed(3));
+};
 /** Bytes per second, at least 1 and whole, as the loader reads them. */
 export const setBandwidth = (i: number, e: EdgeDoc, kb: number): Op =>
   put(i, "bandwidth", e, Math.max(1, Math.round(kb * 1024)));

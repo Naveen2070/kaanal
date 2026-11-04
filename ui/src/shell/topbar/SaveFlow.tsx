@@ -88,6 +88,7 @@ function CopyDraft({ text }: { text: string }) {
         <label className="mt-2 block text-xs">
           Copying was blocked. Select this text and copy it yourself:
           <textarea
+            name="draft-copy"
             readOnly
             value={text}
             rows={6}

@@ -8,6 +8,7 @@
 // cannot show as a list of services (one a person wrote by hand) is kept as it is.
 
 import type { Doc, EdgeDoc, NodeDoc, Op } from "../../data/api/types";
+import { parseBytes } from "../details/units";
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type Method = (typeof METHODS)[number];
@@ -75,7 +76,10 @@ export function targetsOfChain(chain: unknown): string[] | null {
   return callSteps(chain)?.map((st) => callOf(st) as string) ?? null;
 }
 
-const toKb = (bytes: unknown) => (typeof bytes === "number" && bytes > 0 ? bytes / 1024 : 0);
+const toKb = (bytes: unknown) => {
+  const n = parseBytes(bytes);
+  return n !== null && n > 0 ? n / 1024 : 0;
+};
 
 /** The rows of `profile`: its journeys, each with what the endpoint of that name does. */
 export function rowsFrom(doc: Doc | null | undefined, profile: string): Row[] {
@@ -225,14 +229,22 @@ export function buildOps(doc: Doc, profile: string, rows: Row[]): Op[] {
   }
 
   // the mix
+  const traffic = isObj(doc.traffic) ? (doc.traffic as Obj) : null;
+  const current = traffic && isObj(traffic[profile]) ? (traffic[profile] as Obj) : null;
+  // A size the file wrote as text (`2KB`) stays as written while the row still means the same bytes.
+  const was = (Array.isArray(current?.journeys) ? (current.journeys as unknown[]) : []).filter(
+    isObj,
+  );
+  const sized = (r: Row, field: "req_bytes" | "resp_bytes", kb: number): string | number => {
+    const raw = was.find((j) => j.endpoint === r.from)?.[field];
+    return typeof raw === "string" && parseBytes(raw) === bytes(kb) ? raw : bytes(kb);
+  };
   const journeys = rows.map((r) => ({
     endpoint: keyOf(r.method, r.path),
     weight: r.weight,
-    ...(r.reqKb > 0 && { req_bytes: bytes(r.reqKb) }),
-    ...(r.respKb > 0 && { resp_bytes: bytes(r.respKb) }),
+    ...(r.reqKb > 0 && { req_bytes: sized(r, "req_bytes", r.reqKb) }),
+    ...(r.respKb > 0 && { resp_bytes: sized(r, "resp_bytes", r.respKb) }),
   }));
-  const traffic = isObj(doc.traffic) ? (doc.traffic as Obj) : null;
-  const current = traffic && isObj(traffic[profile]) ? (traffic[profile] as Obj) : null;
   if (current) {
     ops.push({
       op: "journeys" in current ? "set" : "insert",

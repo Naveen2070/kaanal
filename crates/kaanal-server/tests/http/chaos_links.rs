@@ -173,3 +173,36 @@ async fn a_link_cap_and_a_partition_are_flagged() {
     let e = last_entry(&s).await;
     assert!(e["flags"].as_array().unwrap().contains(&json!("FI")), "{e}");
 }
+
+#[tokio::test]
+async fn a_cap_takes_a_unit_like_the_yaml_and_is_rejected_like_it() {
+    let s = linked().await;
+    let edge = json!({ "from": "app", "to": "db" });
+    // `500KB/s` is 512000 bytes a second, under the edge's 1000000
+    let r = put(&s, json!({ "edge": edge, "bandwidth_cap": "500KB/s" })).await;
+    assert_eq!(r.status(), 200);
+    let all: Value = s.get_authed("/__kaanal/chaos").await.json().await.unwrap();
+    assert_eq!(all["edges"][0]["bandwidth_cap"], 512_000, "{all}");
+    // above the edge's own bandwidth: the same rule as for a number
+    let (c, m) = error_of(put(&s, json!({ "edge": edge, "bandwidth_cap": "2MB/s" })).await).await;
+    assert!(
+        c == 400 && m.contains("above the edge's bandwidth"),
+        "{c} {m}"
+    );
+    // a unit that does not exist, and zero after the conversion
+    let (c, m) = error_of(put(&s, json!({ "edge": edge, "bandwidth_cap": "5XB" })).await).await;
+    assert!(
+        c == 422 && m.contains("bandwidth_cap: unknown unit in `5XB`"),
+        "{c} {m}"
+    );
+    let (c, m) = error_of(put(&s, json!({ "edge": edge, "bandwidth_cap": "0KB" })).await).await;
+    assert!(
+        c == 400 && m.contains("bandwidth_cap must be at least 1"),
+        "{c} {m}"
+    );
+    let (c, m) = error_of(put(&s, json!({ "edge": edge, "bandwidth_cap": -5 })).await).await;
+    assert!(
+        c == 422 && m.contains("bandwidth_cap: -5 is negative"),
+        "{c} {m}"
+    );
+}

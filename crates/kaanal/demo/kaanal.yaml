@@ -41,3 +41,17 @@ endpoints:
   "POST /checkout": { collection: orders, op: write, chain: [{ call: payments }, { call: db }] }
   "GET /orders": { collection: orders, op: read, chain: [{ call: db }] }
   "GET /orders/{id}": { collection: orders, op: read, chain: [{ call: db }] }
+# The load `kaanal sim run -p peak` replays: 100 requests a second, reads three times as likely as writes. These numbers are estimates; edit freely.
+traffic:
+  peak:
+    rps: 100
+    duration: 30s
+    journeys:
+      - { endpoint: "GET /products", weight: 3 }
+      - { endpoint: "GET /products/{id}", weight: 3 }
+      - { endpoint: "GET /cart", weight: 3 }
+      - { endpoint: "POST /cart", weight: 1 }
+      - { endpoint: "DELETE /cart/{id}", weight: 1 }
+      - { endpoint: "POST /checkout", weight: 1 }
+      - { endpoint: "GET /orders", weight: 3 }
+      - { endpoint: "GET /orders/{id}", weight: 3 }

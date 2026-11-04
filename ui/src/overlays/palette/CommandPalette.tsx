@@ -43,6 +43,7 @@ export function CommandPalette({ all, onClose }: { all: Command[]; onClose: () =
       className="fixed top-24 left-1/2 m-0 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-border bg-sheet p-2 text-sm text-text backdrop:bg-black/30"
     >
       <input
+        name="command"
         type="text"
         role="combobox"
         aria-label="Type a command"
@@ -72,6 +73,7 @@ export function CommandPalette({ all, onClose }: { all: Command[]; onClose: () =
       />
       {/* a native listbox: the input keeps focus and points at the active option */}
       <select
+        name="command-scope"
         id={listId}
         size={Math.max(shown.length, 1)}
         hidden={shown.length === 0}

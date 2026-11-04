@@ -58,3 +58,14 @@ test("a_refusal_is_shown_beside_the_list", async () => {
   fireEvent.click(screen.getByRole("button", { name: /A fan-out/ }));
   await screen.findByRole("alert");
 });
+
+test("the_written_starters_bound_every_queue_and_give_the_gateway_a_30s_timeout", async () => {
+  for (const s of STARTERS.filter((x) => x.id !== "shop")) {
+    const text = await s.text();
+    expect(text, s.id).not.toMatch(/concurrency: \d/); // the long form only
+    const slotted = text.match(/concurrency: \{ limit: \d+, queue: 100 \}/g) ?? [];
+    expect(slotted.length, s.id).toBeGreaterThan(1);
+    expect(text.match(/concurrency: \{/g)?.length, s.id).toBe(slotted.length);
+    expect(text, s.id).toMatch(/gateway: \{ type: gateway,[^\n]*timeout: 30s \}/);
+  }
+});

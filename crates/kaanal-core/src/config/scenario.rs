@@ -87,9 +87,13 @@ pub struct ChaosEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jitter_ms: Option<u64>,
     /// Edge only: caps the edge's `bandwidth` (bytes per second, at least 1, at most the
-    /// edge's own).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("minimum" = 1))]
+    /// edge's own; a whole number or text with a unit like `500KB/s`).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::units::bandwidth_cap"
+    )]
+    #[schemars(schema_with = "crate::schema::rate")]
     pub bandwidth_cap: Option<u64>,
     /// Hard outage.
     #[serde(default, skip_serializing_if = "Option::is_none")]

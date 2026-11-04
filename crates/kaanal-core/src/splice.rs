@@ -333,7 +333,7 @@ fn parse(text: &str) -> Result<Option<Node>, SpliceError> {
                     return Err(SpliceError::Parse("unbalanced mapping".into()));
                 };
                 let end = if flow {
-                    e
+                    flow_end(text, e)
                 } else {
                     entries.last().map_or(start, |x| x.value.end)
                 };
@@ -358,7 +358,7 @@ fn parse(text: &str) -> Result<Option<Node>, SpliceError> {
                     return Err(SpliceError::Parse("unbalanced sequence".into()));
                 };
                 let end = if flow {
-                    e
+                    flow_end(text, e)
                 } else {
                     items.last().map_or(start, |x| x.end)
                 };
@@ -378,6 +378,12 @@ fn parse(text: &str) -> Result<Option<Node>, SpliceError> {
     }
     // a document that is only comments (or nothing) parses to an empty scalar: no root
     Ok(root.filter(|n| !(matches!(n.kind, Kind::Scalar) && n.start == n.end)))
+}
+
+/// **Private.** Where a flow collection ends: just after its closing bracket. The parser's span
+/// can run on over the spaces behind it, and an insert after the collection would land past them.
+fn flow_end(text: &str, e: usize) -> usize {
+    text[..e].trim_end().len()
 }
 
 /// **Private.** `path` of the node, dotted for messages.

@@ -10,6 +10,7 @@ import type { HelpId } from "../../overlays/help/copy";
 import { useState } from "react";
 import { rpsFromSlider, SLIDER_MAX, sliderFromRps } from "../../canvas/logScale";
 import { breaksFirst, fmtMs, twoSignificant } from "../../canvas/metrics";
+import { p99WarningFor } from "../../canvas/p99Warning";
 import { LIMITS, setRate } from "../../panels/details/fields";
 import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
@@ -82,9 +83,14 @@ export function KpiStrip() {
 
   const s = latest?.summary ?? undefined;
   const hasRequests = s !== undefined && s.requests > 0 && Number.isFinite(s.latency.p99_ms);
+  const slow = hasRequests && s ? p99WarningFor(s.latency.p99_ms, view?.doc) : null;
   const goodput = s && s.window_s > 0 ? (s.requests - s.failed) / s.window_s : undefined;
   const dropped = s?.nodes.reduce((n, x) => n + x.limited + x.overflowed, 0);
   const breaks = breaksFirst(s);
+  // a finite run with a growing queue counts waiting requests as done: not a sustained rate
+  const overloaded =
+    s !== undefined &&
+    [...s.nodes, ...(s.links ?? []), ...(s.pipes ?? [])].some((x) => x.saturated);
 
   const write = (n: number) => {
     if (profile === undefined) return;
@@ -150,6 +156,7 @@ export function KpiStrip() {
         <Cell label="Offered load" divider grow className="text-lg font-semibold">
           <span className="flex w-full items-center gap-2">
             <input
+              name="offered-load-typed"
               key={`${shown}`}
               type="number"
               aria-label="Offered load, typed (requests per second)"
@@ -164,6 +171,7 @@ export function KpiStrip() {
             <span className="text-base text-muted">/s</span>
             <span className="relative flex min-w-16 max-w-96 flex-1 items-center">
               <input
+                name="offered-load"
                 type="range"
                 aria-label="Offered load"
                 aria-valuetext={
@@ -206,16 +214,28 @@ export function KpiStrip() {
           label="System p99"
           divider
           help="p99"
+          title={slow ?? undefined}
           className={`text-sm ${hasRequests ? "" : "text-muted"}`}
         >
           {hasRequests && s ? fmtMs(s.latency.p99_ms, 1) : "–"}
+          {slow !== null ? (
+            <span className="font-sans text-xs text-warn"> · too slow for a client</span>
+          ) : null}
         </Cell>
         <Cell
           label="Goodput"
           help="goodput"
+          title={
+            overloaded
+              ? "Not a sustained rate: a component is saturated, so this run counts requests still waiting in a queue as done."
+              : undefined
+          }
           className={`text-sm ${goodput === undefined ? "text-muted" : ""}`}
         >
           {goodput === undefined ? "–" : `${nf(goodput)}/s`}
+          {goodput !== undefined && overloaded ? (
+            <span className="font-sans text-xs text-warn"> · queue still growing</span>
+          ) : null}
         </Cell>
         <Cell label="Errors" className={`text-sm ${s ? "" : "text-muted"}`}>
           {s ? nf(s.failed) : "–"}

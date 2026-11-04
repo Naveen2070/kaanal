@@ -308,3 +308,25 @@ fn a_balancer_splits_the_load_and_adds_its_own_hop() {
     let load = s.nodes[t.id("lb").unwrap()].offered_load.unwrap();
     assert!((load - 0.02).abs() < 0.01, "{load}");
 }
+
+#[test]
+fn unit_text_and_integer_bytes_give_the_same_summary() {
+    // 20/s x 2 KB over a 250 KB/s wire and a 250 KB/s send pipe on the callee: links, pipes and p99
+    let sys = |edge: &str, node: &str| {
+        format!(
+            "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, proc: 1ms, bandwidth: {{ out: {node} }} }}\nedges:\n  - {{ from: gw, to: app, bandwidth: {edge} }}\n"
+        )
+    };
+    let mut cfg = windowed(20.0, 60, 5);
+    cfg.streams[0].req_bytes = 2048;
+    cfg.streams[0].resp_bytes = 2048;
+    let (_, text) = summary_of(&sys("250KB/s", "'250 KB/s'"), &cfg);
+    let (_, ints) = summary_of(&sys("256000", "256000"), &cfg);
+    assert!(!text.links.is_empty() && !text.pipes.is_empty());
+    assert!(
+        text.latency.p99_ms > 1.0,
+        "the wires cost time: {}",
+        text.latency.p99_ms
+    );
+    assert_eq!(format!("{text:?}"), format!("{ints:?}"));
+}
