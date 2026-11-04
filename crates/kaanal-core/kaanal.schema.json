@@ -295,7 +295,7 @@
             }
           ],
           "default": null,
-          "description": "Link capacity: bytes per second (at least 1) as a whole number, or text with a unit like\n`250KB` or `1MB/s` (KB = 1024 bytes). With a payload size, a transfer takes\n`bytes / bandwidth` on a FIFO link that other transfers queue behind. Absent = no limit,\nand no link hop."
+          "description": "Link capacity: bytes per second (at least 1) as a whole number, or text with a unit like\n`250KB` or `1MB/s` (KB = 1024 bytes). With a payload size, a transfer takes\n`bytes / bandwidth` when alone on the link, and more while other transfers share its rate\nfairly. Absent = no limit,\nand no link hop."
         },
         "calls": {
           "default": 1,
@@ -635,7 +635,7 @@
                   "type": "null"
                 }
               ],
-              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads share\nthe rate fairly, so calls to different services share the uplink. Absent = no limit."
             },
             "concurrency": {
               "anyOf": [
@@ -760,7 +760,7 @@
                   "type": "null"
                 }
               ],
-              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads share\nthe rate fairly, so calls to different services share the uplink. Absent = no limit."
             },
             "chains": {
               "additionalProperties": {
@@ -895,7 +895,7 @@
                   "type": "null"
                 }
               ],
-              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads share\nthe rate fairly, so calls to different services share the uplink. Absent = no limit."
             },
             "chains": {
               "additionalProperties": {
@@ -1052,7 +1052,7 @@
                   "type": "null"
                 }
               ],
-              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads share\nthe rate fairly, so calls to different services share the uplink. Absent = no limit."
             },
             "concurrency": {
               "anyOf": [
@@ -1316,7 +1316,7 @@
                   "type": "null"
                 }
               ],
-              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads share\nthe rate fairly, so calls to different services share the uplink. Absent = no limit."
             },
             "concurrency": {
               "anyOf": [
@@ -1454,7 +1454,7 @@
                   "type": "null"
                 }
               ],
-              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue\nFIFO on them, so calls to different services share the uplink. Absent = no limit."
+              "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Each copy has its own send and receive pipe; payloads share\nthe rate fairly, so calls to different services share the uplink. Absent = no limit."
             },
             "claims": {
               "additionalProperties": {

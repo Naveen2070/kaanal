@@ -51,11 +51,11 @@ export function dur(n: number | null): string {
 /** What happened at the hop, in words: "Waited 210 ms, then served in 98 ms". */
 export function eventWords(l: LogLine): string {
   const t = dur;
-  // a hop on a wire is a body crossing it: the queue for the wire, then the transfer
+  // a hop on a wire is a body crossing it; the wait is the time lost sharing the wire with other bodies
   if (l.from) {
     const what = l.note === "link response" ? "Response" : "Request";
     return l.event === "queued"
-      ? `${what} waited ${t(l.wait_ms)}, crossed in ${t(l.service_ms)}`
+      ? `${what} crossed in ${t((l.service_ms ?? 0) + (l.wait_ms ?? 0))}, ${t(l.wait_ms)} of it sharing the wire`
       : `${what} crossed in ${t(l.service_ms)}`;
   }
   if (l.event === "served") return "Served, no wait";

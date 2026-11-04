@@ -58,7 +58,7 @@ pub struct Node {
     /// How a load balancer picks the component a call goes to; the default for every other kind.
     pub spread: Balance,
     /// Network card in bytes per second as `(send, receive)`; `None` = unlimited that way. Each
-    /// replica has its own pair of FIFO pipes.
+    /// replica has its own pair of pipes.
     pub bandwidth: (Option<u64>, Option<u64>),
     /// Extra processing time per KB of payload, request and response each, once per body
     /// (zero when unconfigured).

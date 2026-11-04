@@ -1,4 +1,4 @@
-// A node's latency over the run, or a wire's time on the wire (queue and transfer): one coloured cell
+// A node's latency over the run, or a wire's time on the wire (transfer and time lost sharing it): one coloured cell
 // per (window, latency bucket). The picture is for the eye; a table of the buckets below it is what a
 // screen reader gets.
 
@@ -84,7 +84,9 @@ export function Heatmap({
       <figcaption className="text-xs text-muted">
         Time runs left to right ({d.cols} windows of {Number(series.window_s.toPrecision(3))} s),
         slower {thing} are higher. Colour is the number of {thing}, on a log scale.
-        {wire ? " Time on the wire is the wait in the queue plus the transfer." : ""}
+        {wire
+          ? " Time on the wire is the transfer plus the time lost while other bodies shared the wire."
+          : ""}
       </figcaption>
       <table className="sr-only">
         <caption>

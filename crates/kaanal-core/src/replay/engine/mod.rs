@@ -2,7 +2,8 @@
 //! caller-supplied clock in integer nanoseconds. See `docs/source/files/kaanal-core/replay.md`.
 //!
 //! File size (R3.8): the data types are in `state.rs`, holding a slot across a call in `hold.rs`, and
-//! how a request ends (deadline, failure, settling, the record) in `finish.rs`. The hot path (submit,
+//! how a request ends (deadline, failure, settling, the record) in `finish.rs`, and transfers sharing
+//! pipes fairly in `flows.rs` (event and counters) over the pure solver in `fluid.rs` (RULES 62). The hot path (submit,
 //! advance, start and end of a hop) stays in this one file on purpose: its methods call each other,
 //! and one module keeps the optimizer's view of them as before the split.
 
@@ -19,6 +20,8 @@ use crate::exec::{ChainResult, Hop, HopKind, PickKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
 mod dispatch;
 mod finish;
+mod flows;
+mod fluid;
 mod hold;
 mod replicas;
 mod state;
@@ -31,6 +34,7 @@ pub use state::{EngineError, FailCause, Finished, FinishedHold, FinishedHop, Nod
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].
 pub struct Engine {
     units: Units,
+    flows: flows::Flows,
     counters: Vec<NodeCounters>,
     /// Hop-end events ordered by `(time, seq)`: (time, seq, request slot, token).
     heap: BinaryHeap<Reverse<(u64, u64, usize, usize)>>,
@@ -51,8 +55,10 @@ pub struct Engine {
 impl Engine {
     /// An engine with every gate free. The window is `[0, u64::MAX]` until [`Engine::set_window`].
     pub fn new(topo: &Topology) -> Engine {
+        let units = Units::new(topo);
         Engine {
-            units: Units::new(topo),
+            flows: flows::Flows::new(units.caps().to_vec()),
+            units,
             counters: vec![NodeCounters::default(); topo.nodes.len() * 3 + topo.edges.len()],
             heap: BinaryHeap::new(),
             seq: 0,
@@ -86,6 +92,7 @@ impl Engine {
     pub fn set_window(&mut self, warmup: u64, end: u64) {
         self.warmup = warmup;
         self.end = end;
+        self.flows.set_window(warmup, end);
     }
 
     /// The next sequence number. Callers that keep their own event queue (the simulator's
@@ -208,7 +215,9 @@ impl Engine {
             return Ok(false);
         };
         self.now = at;
-        if seq & DEADLINE != 0 {
+        if r == usize::MAX {
+            self.flow_event(k);
+        } else if seq & DEADLINE != 0 {
             self.deadline(r, k, seq);
         } else {
             self.hop_done(r, k);
@@ -515,6 +524,10 @@ impl Engine {
             }
         }
         live(&mut self.reqs, r).starts[idx] = now;
+        if let Some(x) = live(&mut self.reqs, r).plan.xfer(idx).copied() {
+            self.join_flow(r, k, &x);
+            return;
+        }
         let done = self.after(nanos(h.dur));
         self.push(done, r, k);
     }

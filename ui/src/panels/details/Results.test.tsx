@@ -195,7 +195,7 @@ test("the_heatmap_can_show_one_wire_and_says_what_its_time_is", () => {
   });
   expect(screen.getByText("Bodies on gw → db by time on the wire")).toBeTruthy();
   expect(
-    screen.getByText(/queue plus the transfer|wait in the queue plus the transfer/),
+    screen.getByText(/transfer plus the time lost while other bodies shared the wire/),
   ).toBeTruthy();
   expect(document.querySelectorAll("svg rect")).toHaveLength(1);
 });

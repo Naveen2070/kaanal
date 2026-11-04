@@ -129,8 +129,10 @@ fn md1_matches_pollaczek_khinchine() {
 }
 
 #[test]
-fn a_bandwidth_link_is_an_md1_queue() {
-    // 1000 B over 100 kB/s: 10 ms of deterministic transfer on a FIFO link, so M/D/1.
+fn a_bandwidth_link_is_a_processor_sharing_queue() {
+    // 1000 B over 100 kB/s: 10 ms of deterministic transfer on a link that shares its rate equally
+    // (RULES 62), so M/G/1-PS: a transfer takes E[S] / (1 - rho) in all, and the time lost to
+    // sharing (the hop's wait) is E[S] * rho / (1 - rho) whatever the size distribution.
     let t = topo(
         "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\nedges:\n  - { from: gw, to: app, bandwidth: 100000 }\n",
     );
@@ -156,7 +158,71 @@ fn a_bandwidth_link_is_an_md1_queue() {
             .filter(|(h, _)| matches!(h.kind, HopKind::Link { .. }))
             .map(|(_, w)| *w)
     }));
-    assert_close(wait, rho / (2.0 * MU * (1.0 - rho)), "link wait at ρ = 0.7");
+    assert_close(
+        wait,
+        rho / (MU * (1.0 - rho)),
+        "link time lost to sharing at ρ = 0.7",
+    );
+}
+
+#[test]
+fn processor_sharing_slows_each_size_class_by_the_same_factor() {
+    // A property no FIFO queue has (RULES 62): in M/G/1 processor sharing a transfer of size x
+    // takes x / (1 - rho) whatever else is on the link, so the time lost is x * rho / (1 - rho) for
+    // every class. 500 B (5 ms) at 20/s and 2000 B (20 ms) at 30/s on 100 kB/s: rho = 0.1 + 0.6 = 0.7.
+    let t = topo(
+        "version: 1
+nodes:
+  gw: { type: gateway }
+  app: { type: service }
+edges:
+  - { from: gw, to: app, bandwidth: 100000 }
+",
+    );
+    let app = t.id("app").unwrap();
+    let specs = [
+        RouteSpec::inferred("GET /x/{id}", app),
+        RouteSpec::inferred("POST /y", app),
+    ];
+    let e = compile(&t, &specs, EndpointsInput::default()).unwrap();
+    let (rho, requests) = (0.7, 250_000.0);
+    let duration = requests / 50.0 / 0.9;
+    let stream = |key: &str, rate: f64, bytes: u64| Stream {
+        endpoint_key: key.into(),
+        rate_per_s: rate,
+        req_bytes: bytes,
+        resp_bytes: 0,
+    };
+    let cfg = SimConfig {
+        streams: vec![
+            stream("GET /x/{id}", 20.0, 500),
+            stream("POST /y", 30.0, 2_000),
+        ],
+        duration: Duration::from_secs_f64(duration),
+        warmup: Duration::from_secs_f64(duration * 0.1),
+        seed: 11,
+    };
+    let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+    let lost = |class: usize| {
+        mean_secs(
+            rep.requests
+                .iter()
+                .filter(|r| r.stream == class)
+                .flat_map(|r| {
+                    r.hops
+                        .iter()
+                        .filter(|(h, _)| matches!(h.kind, HopKind::Link { .. }))
+                        .map(|(_, w)| *w)
+                }),
+        )
+    };
+    for (class, secs) in [(0, 0.005), (1, 0.020)] {
+        assert_close(
+            lost(class),
+            secs * rho / (1.0 - rho),
+            &format!("time lost by the {secs} s class at rho 0.7"),
+        );
+    }
 }
 
 #[test]

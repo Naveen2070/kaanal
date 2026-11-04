@@ -127,17 +127,39 @@ fn core(rows: &mut Vec<Row>) {
     ));
 }
 
-/// NFR-05, unchanged from the old `kaanal-sim` bench: 1M simulated requests through `run`.
+/// A rated variant of [`SIM_YAML`]: a 25 MB/s wire into `app`, a 25 MB/s card on `app` and 12 kB of
+/// body per request at 1000 a second (about half the wire, so several transfers share it at once
+/// and the fair-sharing solver (RULES 62) runs on most events).
+const SIM_RATED_YAML: &str = "version: 1
+nodes:
+  gw: { type: gateway, proc: { p50: 1ms, p99: 3ms } }
+  app: { type: service, concurrency: 4, proc: { mean: 2ms }, bandwidth: 25000000 }
+  db: { type: database, concurrency: 2, ops: { read: { mean: 0.5ms }, write: 1ms, scan: 3ms } }
+edges:
+  - { from: gw, to: app, net: 1ms, bandwidth: 25000000 }
+  - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }
+";
+
+/// NFR-05, unchanged from the old `kaanal-sim` bench: 1M simulated requests through `run`, then the
+/// same with rates and body sizes so the pipes are shared (`_rated` rows).
 fn sim(rows: &mut Vec<Row>) {
-    let t = Topology::build(&Config::from_yaml(SIM_YAML).unwrap()).unwrap();
+    sim_case(rows, SIM_YAML, (0, 0), "");
+    sim_case(rows, SIM_RATED_YAML, (2_000, 10_000), "_rated");
+    // the same wire at about nine tenths full (22 kB a request): many transfers in flight at once,
+    // the case that shows whether the solver's cost grows with the number of flows (RULES 63)
+    sim_case(rows, SIM_RATED_YAML, (4_000, 18_000), "_rated_high");
+}
+
+fn sim_case(rows: &mut Vec<Row>, yaml: &str, (req_bytes, resp_bytes): (u64, u64), suffix: &str) {
+    let t = Topology::build(&Config::from_yaml(yaml).unwrap()).unwrap();
     let spec = RouteSpec::inferred("GET /users/{id}", t.id("app").unwrap());
     let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
     let cfg = SimConfig {
         streams: vec![Stream {
             endpoint_key: "GET /users/{id}".into(),
             rate_per_s: 1_000.0,
-            req_bytes: 0,
-            resp_bytes: 0,
+            req_bytes,
+            resp_bytes,
         }],
         duration: Duration::from_secs(1_000),
         warmup: Duration::ZERO,
@@ -149,18 +171,33 @@ fn sim(rows: &mut Vec<Row>) {
         let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
         let took = start.elapsed();
         let n = rep.requests.len();
-        println!("NFR-05: {n} simulated requests in {took:.2?}");
-        // The suite's only hard checks.
-        assert!(n > 990_000, "NFR-05: only {n} requests");
-        assert!(took < Duration::from_secs(10), "NFR-05: {took:?} >= 10 s");
+        println!("NFR-05{suffix}: {n} simulated requests in {took:.2?}");
+        // The suite's only hard checks: NFR-05 is about the original topology. The rated variant
+        // pays for sharing the pipes (about 1 us a transfer, RULES 63) and a loaded machine swings
+        // it past 10 s, so it asserts the count and reports a slow run instead of failing on it;
+        // the baseline column is what guards its speed.
+        assert!(n > 990_000, "NFR-05{suffix}: only {n} requests");
+        if suffix.is_empty() {
+            assert!(took < Duration::from_secs(10), "NFR-05: {took:?} >= 10 s");
+        } else if took >= Duration::from_secs(10) {
+            println!("NFR-05{suffix}: WARNING {took:?} >= 10 s (not a failure: see the baseline)");
+        }
         runs.push(took.as_secs_f64() * 1e3);
         // the summary of the same run: percentiles, series, bottlenecks (what the Studio asks for)
         let start = Instant::now();
         black_box(summarize(&t, &e, &cfg, &rep));
         sums.push(start.elapsed().as_secs_f64() * 1e3);
     }
-    rows.push(row("sim/one_million_requests", "ms", runs));
-    rows.push(row("sim/summarize_one_million", "ms", sums));
+    rows.push(row(
+        &format!("sim/one_million_requests{suffix}"),
+        "ms",
+        runs,
+    ));
+    rows.push(row(
+        &format!("sim/summarize_one_million{suffix}"),
+        "ms",
+        sums,
+    ));
 }
 
 fn data(rows: &mut Vec<Row>) {

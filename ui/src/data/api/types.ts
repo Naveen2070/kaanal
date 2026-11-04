@@ -185,7 +185,7 @@ export interface NodeSummary {
   timed_out: number;
 }
 
-/** A wire over the run, in the same 60 windows as a node's `Series`: time on the wire (queue plus transfer). */
+/** A wire over the run, in the same 60 windows as a node's `Series`: time on the wire (transfer plus time lost sharing it). */
 export type LinkSeries = Pick<Series, "window_s" | "latency">;
 
 /** One wire that has a bandwidth. */

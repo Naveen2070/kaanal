@@ -1,6 +1,6 @@
 // The Controls tab for one picked wire: what the link costs and carries. Latency is paid on every
 // call over it; calls per request and the share of requests say how often it is used; bandwidth
-// turns a payload into a transfer time on a link other transfers queue behind. Every edit is a
+// turns a payload into a transfer time on a link whose rate other transfers share. Every edit is a
 // patch of the draft; the auto re-run follows.
 
 import { ArrowRight } from "lucide-react";

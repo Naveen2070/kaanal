@@ -6,7 +6,7 @@ use std::time::Duration;
 use rand::Rng;
 
 use super::walk::{Walk, draw_rng};
-use super::{Hop, HopKind, PlanItem, hang_cap};
+use super::{Hop, HopKind, Pipe, PlanItem, Xfer, hang_cap};
 use crate::chaos::{ErrorKind, FailKind, Resolved};
 use crate::topology::{EdgeId, NodeId};
 
@@ -17,8 +17,9 @@ pub(super) const MAX_HOP: Duration = Duration::from_hours(10);
 impl Walk<'_> {
     /// **Private.** A payload crossing `edge` from `from` to `to` (each a node and replica) as
     /// one transfer, pipelined: `bytes / rate` at the narrowest of the sender's send pipe, the
-    /// wire and the receiver's receive pipe, capped at 10 h. The hop queues FIFO on that
-    /// narrowest pipe (the wire on a tie, then the sender). Nothing (zero, no hop) when no pipe
+    /// wire and the receiver's receive pipe, capped at 10 h. The hop is owned by that
+    /// narrowest pipe (the wire on a tie, then the sender); `xfer` names every pipe, and the
+    /// engine shares each fairly between the transfers on it (RULES 62). Nothing (zero, no hop) when no pipe
     /// has a rate or there are no bytes this way. A link chaos `bandwidth_cap` (`cap`) lowers the
     /// wire's rate.
     pub(super) fn link(
@@ -33,32 +34,58 @@ impl Walk<'_> {
         if bytes == 0 {
             return Duration::ZERO;
         }
-        let wire = edge.and_then(|e| self.topo.edges[e].bandwidth);
-        let wire = wire.map(|bw| cap.map_or(bw, |c| c.min(bw)).max(1));
+        let edge_rate = edge.and_then(|e| self.topo.edges[e].bandwidth);
+        let wire = edge_rate.map(|bw| cap.map_or(bw, |c| c.min(bw)).max(1));
         let (send, recv) = (
             self.topo.nodes[from.0].bandwidth.0,
             self.topo.nodes[to.0].bandwidth.1,
         );
-        // (rate, the hop's owner and kind); the first narrowest wins a tie.
+        // (rate, the hop's owner and kind, the pipe); the first narrowest wins a tie.
         let mut pipes = Vec::with_capacity(3);
         if let (Some(e), Some(bw)) = (edge, wire) {
             let edge = u16::try_from(e).expect("a topology has at most u16::MAX edges");
             // the wire belongs to the edge's target (the callee), whichever way the body goes
             let callee = if resp { from } else { to };
-            pipes.push((bw, callee, HopKind::Link { edge, resp }));
+            pipes.push((
+                bw,
+                callee,
+                HopKind::Link { edge, resp },
+                Pipe::Wire { edge },
+            ));
         }
         if let Some(bw) = send {
-            pipes.push((bw, from, HopKind::Nic { send: true, resp }));
+            let pipe = Pipe::Send {
+                node: from.0,
+                replica: from.1,
+            };
+            pipes.push((bw, from, HopKind::Nic { send: true, resp }, pipe));
         }
         if let Some(bw) = recv {
-            pipes.push((bw, to, HopKind::Nic { send: false, resp }));
+            let pipe = Pipe::Recv {
+                node: to.0,
+                replica: to.1,
+            };
+            pipes.push((bw, to, HopKind::Nic { send: false, resp }, pipe));
         }
-        let Some((bw, (node, replica), kind)) = pipes.into_iter().min_by_key(|p| p.0) else {
+        let Some(&(bw, (node, replica), kind, _)) = pipes.iter().min_by_key(|p| p.0) else {
             return Duration::ZERO;
         };
         let ns =
             (u128::from(bytes) * 1_000_000_000 / u128::from(bw.max(1))).min(MAX_HOP.as_nanos());
         let dur = Duration::from_nanos(u64::try_from(ns).unwrap_or(u64::MAX));
+        let mut used = [None; 3];
+        for (slot, p) in used.iter_mut().zip(&pipes) {
+            *slot = Some(p.3);
+        }
+        self.xfers.push((
+            self.items.len(),
+            Xfer {
+                bytes,
+                pipes: used,
+                // the chaos cap lowers the wire's share of this transfer only
+                limit: edge_rate.and(cap).map(|c| c.max(1)),
+            },
+        ));
         self.items.push(PlanItem::Hop(Hop {
             node,
             replica,
@@ -106,7 +133,7 @@ impl Walk<'_> {
     /// **Private.** A call the link dropped, as it ends at `now`: a reset is a 502 `Fail` at once;
     /// a hang (or partition) is a `Net` hop of the callee's `timeout` (else [`HANG_CAP`]) and
     /// then a 504 `Fail` at its end, the same shape as a node hang (Z6). A `Net` hop, not a
-    /// `Link` hop: a dead link carries nothing, so it must not hold the link's FIFO slot.
+    /// `Link` hop: a dead link carries nothing, so it must not take a share of the link.
     pub(super) fn link_fail(
         &mut self,
         kind: ErrorKind,

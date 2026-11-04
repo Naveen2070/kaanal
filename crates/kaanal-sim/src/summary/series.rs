@@ -176,7 +176,7 @@ pub(super) fn series(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Ve
 pub struct LinkSeries {
     /// Width of one window in seconds (reporting window ÷ 60).
     pub window_s: f64,
-    /// Per window, counts of the time a body spent on the wire (queue wait plus transfer) in the
+    /// Per window, counts of the time a body spent on the wire (time lost to sharing plus transfer) in the
     /// same buckets as the summary's latency histogram, by the window it joined the queue in.
     pub latency: Vec<Vec<u32>>,
 }

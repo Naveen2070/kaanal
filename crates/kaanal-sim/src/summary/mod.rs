@@ -176,7 +176,7 @@ pub struct LinkSummary {
     pub to: String,
     /// Bodies carried (request and response each count).
     pub transfers: u64,
-    /// Mean queue wait before a transfer, ms.
+    /// Mean time a transfer lost to sharing the rate with others, ms.
     pub mean_wait_ms: f64,
     /// Transfer time over the window: the share of the link's capacity in use.
     pub offered_load: f64,
@@ -202,7 +202,7 @@ pub struct PipeSummary {
     /// Bodies carried over this pipe (request and response each count) that it was the narrowest
     /// pipe for.
     pub transfers: u64,
-    /// Mean queue wait before a transfer, ms.
+    /// Mean time a transfer lost to sharing the rate with others, ms.
     pub mean_wait_ms: f64,
     /// Transfer time over the window and the node's replicas: the share of capacity in use.
     pub offered_load: f64,

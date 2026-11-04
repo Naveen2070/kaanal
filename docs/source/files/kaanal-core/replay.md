@@ -1,4 +1,4 @@
-# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`, `engine/finish.rs`, `engine/dispatch.rs`)
+# `crates/kaanal-core/src/replay/` (`mod.rs`, `bucket.rs`, `gate.rs`, `engine/mod.rs`, `engine/state.rs`, `engine/hold.rs`, `engine/finish.rs`, `engine/dispatch.rs`, `engine/flows.rs`, `engine/fluid.rs`)
 
 The replay machine both drivers share (B1, rules R2.5 and R2.10). One page covers the whole directory: four small files that read better together. `engine` is a folder: `engine/state.rs` holds the data types (errors, finished-request records, per-request and per-node state) and `engine/mod.rs` keeps `impl Engine` whole (about 650 lines, on purpose: one type's hot-path impl, R3.8).
 
@@ -23,11 +23,11 @@ A node with `replicas: N` has N independent copies of its queueing state: its ow
 
 Counters are kept twice. `node_counters()` is per node, summed over its replicas, and is what `NodeStats` reports (frozen, R1.48(5)): `max_queue` is the longest queue of any replica and `area` the busy slot-time of all of them. `replica_counters()[node][replica]` is the same fields per replica, for the Studio report. A deadline belongs to a call, not a replica, so `timed_out` is per node only. The simulator divides `area` by `slots x replicas x window`, so a replicated node's utilization is per slot of every replica.
 
-## Node pipes
+## Pipes and transfers (RULES 62)
 
-A node with a `bandwidth` has a send and a receive pipe per replica: two more pseudo-nodes per node after the edges (`nodes + edges + 2 * node + (0 send, 1 receive)`), each replica one single-slot FIFO gate, gated only when that side has a rate. A `Nic` hop maps to its owner's pipe (`Units::target`); `Engine::nic_counters` holds the totals, `SimReport::nic_utilization` the measured busy share (busy time over the window and the node's copies). A pipe holds no node slot.
+A pipe is a rate, not a gate. Units after the real nodes are one pseudo-node per edge (the wire, `nodes + edge`, replica 0) and a send and a receive pseudo-node per node (`nodes + edges + 2 * node + side`, one unit per replica); none has a gate. A transfer hop (`Link`, `Nic`) has an entry in `Plan::xfers` (the bytes and every pipe with a rate on its path, plus the wire's chaos cap as a ceiling); `start_hop` joins it to the solver in `engine/fluid.rs` instead of scheduling `now + dur`.
 
-## Links An edge with a `bandwidth` is a unit of its own: a single-slot, unbounded FIFO gate, kept after the nodes in the same table (pseudo-node `nodes + edge`, replica 0), so a `Link` hop queues, hands over and cancels like any queued hop and holds no node slot. `Engine::link_counters()` (indexed by `EdgeId`) reports transfers started, summed wait and busy time; `node_counters()` and `replica_counters()` still cover the real nodes only. An edge without a bandwidth plans no link hop and has no gate.
+`fluid.rs` is a pure max-min solver: progressive filling over the pipes each flow crosses, redone on every join or leave, integer bytes a second (floored, at least 1), bytes left in nano-bytes (rate x ns), flows ending in join order on a tie. `flows.rs` keeps one pending heap event for the flow that ends first (`(time, seq, usize::MAX, epoch)`; a stale epoch is skipped), re-armed after every change, and on firing ends every flow due now like `hop_done`. A transfer's real end moves as others join and leave, so the time it lost against its zero-load `dur` is the hop's `wait` (also added to the pipe's `wait` counter inside the window). A pipe's `area` is what it carried inside the window over its rate (busy time at full rate); `max_queue` stays 0. `Engine::link_counters()` and `nic_counters()` keep their shape. A transfer hop without an entry takes its `dur` and holds nothing. A topology with no rate has no transfer hop and none of this runs.
 
 ## Gate
 

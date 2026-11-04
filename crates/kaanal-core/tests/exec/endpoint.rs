@@ -233,7 +233,7 @@ fn endpoint_chaos_hang_is_a_delay_hop_of_the_cap_then_a_504_at_the_cap() {
                 replica: 0,
                 kind: HopKind::Delay,
                 start: Duration::ZERO,
-                dur: HANG_CAP
+                dur: HANG_CAP,
             }),
             PlanItem::Fail {
                 node: nginx,

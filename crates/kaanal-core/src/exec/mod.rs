@@ -79,7 +79,7 @@ pub enum HopKind {
     /// A fault-injection delay before the entry node: holds no slot and no rate-limit token.
     Delay,
     /// A payload crossing a bandwidth-limited edge (`resp`: the response direction). It belongs
-    /// to the edge's target and queues FIFO behind other transfers on the same edge.
+    /// to the edge's target and shares the edge's rate with other transfers on it.
     Link {
         /// The edge crossed.
         edge: u16,
@@ -88,13 +88,58 @@ pub enum HopKind {
     },
     /// A payload held up by a node's network card when that is the narrowest pipe on its path
     /// (`bandwidth:` on a node). The hop belongs to the node and replica whose pipe it is, and
-    /// queues FIFO behind other transfers on that pipe.
+    /// shares that pipe's rate with other transfers on it.
     Nic {
         /// True for the node's send pipe, false for its receive pipe.
         send: bool,
         /// False for the request body, true for the response body.
         resp: bool,
     },
+}
+
+/// A pipe a transfer crosses (RULES 62): the edge's wire, or the send or receive pipe of one copy
+/// of a node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pipe {
+    /// The wire of an edge (`bandwidth` on the edge).
+    Wire {
+        /// The edge.
+        edge: u16,
+    },
+    /// The send pipe of a copy of a node (`bandwidth` on the node).
+    Send {
+        /// The node.
+        node: NodeId,
+        /// The copy.
+        replica: u16,
+    },
+    /// The receive pipe of a copy of a node.
+    Recv {
+        /// The node.
+        node: NodeId,
+        /// The copy.
+        replica: u16,
+    },
+}
+
+/// What the engine needs to share pipes fairly (RULES 62): the bytes of a transfer and every pipe
+/// with a rate that it crosses. The hop's own `dur` stays `bytes / the narrowest rate`, the time at
+/// zero load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Xfer {
+    /// Bytes to move.
+    pub bytes: u64,
+    /// The pipes with a rate on the path (at most three, the used ones first).
+    pub pipes: [Option<Pipe>; 3],
+    /// A ceiling on the rate (bytes a second): a link chaos `bandwidth_cap` on the wire.
+    pub limit: Option<u64>,
+}
+
+impl Xfer {
+    /// The pipes used.
+    pub fn pipes(&self) -> impl Iterator<Item = Pipe> + '_ {
+        self.pipes.iter().flatten().copied()
+    }
 }
 
 /// One timed step of a request.
@@ -205,6 +250,18 @@ pub enum PickKind {
 pub struct Plan {
     /// Items in depth-first order.
     pub items: Vec<PlanItem>,
+    /// What the engine shares pipes by for each transfer hop ([`HopKind::Link`], [`HopKind::Nic`]),
+    /// as `(index in items, transfer)` in item order. A side table, not a field of [`Hop`]: a hop is
+    /// walked a lot and must stay at 48 bytes. A transfer hop without an entry just takes its `dur`.
+    pub xfers: Vec<(usize, Xfer)>,
+}
+
+impl Plan {
+    /// The transfer of the hop at `idx`, if it has one.
+    pub fn xfer(&self, idx: usize) -> Option<&Xfer> {
+        let i = self.xfers.binary_search_by_key(&idx, |(i, _)| *i).ok()?;
+        Some(&self.xfers[i].1)
+    }
 }
 
 /// How a chain walk ended.
@@ -283,6 +340,17 @@ impl Plan {
         let extra = skew
             .and_then(|s| s.get(usize::from(copy)).copied())
             .map_or(Duration::ZERO, Duration::from_nanos);
+        for (i, x) in &mut self.xfers {
+            if *i > pick {
+                for p in x.pipes.iter_mut().flatten() {
+                    if let Pipe::Send { replica, .. } | Pipe::Recv { replica, .. } = p
+                        && *replica == code
+                    {
+                        *replica = copy;
+                    }
+                }
+            }
+        }
         for item in &mut self.items[pick + 1..] {
             match item {
                 PlanItem::Hop(h) if h.replica == code => {
@@ -482,6 +550,7 @@ pub fn sample_plan(
         dyn_picks: 0,
         bytes: (req.req_bytes, req.resp_bytes),
         items: Vec::new(),
+        xfers: Vec::new(),
     };
     let entry = ep.entry_node;
     // The entry node has no calling edge, so its own balance picks its replica.
@@ -561,7 +630,8 @@ pub fn sample_plan(
         Flow::Fail { at, idx } => Some((idx, at)),
         Flow::Done(_) | Flow::Hit(_) => None,
     };
-    (Plan { items: w.items }, fail)
+    let (items, xfers) = (w.items, w.xfers);
+    (Plan { items, xfers }, fail)
 }
 
 /// **Private.** How a chaos error kind (with its configured status) looks to the caller;

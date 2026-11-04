@@ -66,7 +66,8 @@ pub struct EdgeConfig {
     pub balance: Option<crate::balance::Balance>,
     /// Link capacity: bytes per second (at least 1) as a whole number, or text with a unit like
     /// `250KB` or `1MB/s` (KB = 1024 bytes). With a payload size, a transfer takes
-    /// `bytes / bandwidth` on a FIFO link that other transfers queue behind. Absent = no limit,
+    /// `bytes / bandwidth` when alone on the link, and more while other transfers share its rate
+    /// fairly. Absent = no limit,
     /// and no link hop.
     #[serde(default, deserialize_with = "crate::units::bandwidth")]
     #[schemars(schema_with = "crate::schema::rate")]

@@ -39,7 +39,13 @@ fn straight(hops: Vec<Hop>) -> (Plan, Finished) {
             wait: Duration::ZERO,
         })
         .collect();
-    (Plan { items }, finished(ran, ChainResult::Ok, None))
+    (
+        Plan {
+            items,
+            xfers: Vec::new(),
+        },
+        finished(ran, ChainResult::Ok, None),
+    )
 }
 
 fn finished(hops: Vec<FinishedHop>, result: ChainResult, cause: Option<FailCause>) -> Finished {
@@ -221,7 +227,10 @@ fn structured_hops_rerender_to_the_trace_text_while_not_truncated() {
         ChainResult::Ok,
         None,
     );
-    let plan = Plan { items };
+    let plan = Plan {
+        items,
+        xfers: Vec::new(),
+    };
     let p = trace_parts(&plan, &fin.hops, &fin.result, &t, None);
     let e = entry_of(&t, &plan, &fin, None);
     assert!(!e.truncated);
@@ -310,7 +319,15 @@ fn flags_per_cause() {
         kind: FailKind::Timeout,
         retry_after: None,
     };
-    let e = entry_of(&t, &Plan { items }, &fin, None);
+    let e = entry_of(
+        &t,
+        &Plan {
+            items,
+            xfers: Vec::new(),
+        },
+        &fin,
+        None,
+    );
     assert_eq!(e.flags, ["FI"]);
     assert_eq!(e.hops[0].why, None);
 }
@@ -367,6 +384,7 @@ fn a_cache_hang_is_a_fault_not_injected_delay() {
         let h = hung(node, dur);
         let plan = Plan {
             items: vec![PlanItem::Hop(h.hop.clone())],
+            xfers: Vec::new(),
         };
         let fin = finished(vec![h], ChainResult::Ok, None);
         entry_with(&t, &chaos_of(node, 40, true), &plan, &fin)
@@ -499,7 +517,15 @@ fn lanes_for_a_parallel_block() {
         ChainResult::Ok,
         None,
     );
-    let e = entry_of(&t, &Plan { items }, &fin, None);
+    let e = entry_of(
+        &t,
+        &Plan {
+            items,
+            xfers: Vec::new(),
+        },
+        &fin,
+        None,
+    );
     let got: Vec<_> = e.hops.iter().map(|h| (h.lane, h.fork)).collect();
     assert_eq!(got, [(0, None), (1, Some(0)), (2, Some(0)), (0, None)]);
 }

@@ -70,6 +70,8 @@ pub(super) struct Walk<'a> {
     /// Request and response body sizes, for link hops and `per_kb`.
     pub(super) bytes: (u64, u64),
     pub(super) items: Vec<PlanItem>,
+    /// The side table of [`Plan::xfers`], filled as transfer hops are pushed.
+    pub(super) xfers: Vec<(usize, super::Xfer)>,
 }
 
 impl Walk<'_> {

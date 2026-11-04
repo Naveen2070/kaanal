@@ -50,8 +50,8 @@ pub struct GatewayConfig {
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads share
+    /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -105,8 +105,8 @@ pub struct ServiceConfig {
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads share
+    /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -167,8 +167,8 @@ pub struct MonolithConfig {
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads share
+    /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -218,8 +218,8 @@ pub struct DatabaseConfig {
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads share
+    /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -327,8 +327,8 @@ pub struct ExternalApiConfig {
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads share
+    /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -390,8 +390,8 @@ pub struct AuthConfig {
     /// duration like `proc`. Absent = none.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
-    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads queue
-    /// FIFO on them, so calls to different services share the uplink. Absent = no limit.
+    /// directions or `{ out, in }`. Each copy has its own send and receive pipe; payloads share
+    /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level

@@ -7,8 +7,8 @@
 
 use super::state::{NodeCounters, NodeState};
 use super::{Bucket, Engine, Gate, NodeId, Topology};
+use crate::exec::Pipe;
 use crate::exec::{Hop, HopKind};
-use crate::topology::Admission;
 
 /// **Private.** The queueing state of every replica of every node.
 pub(super) struct Units {
@@ -25,6 +25,11 @@ pub(super) struct Units {
     pub(super) nodes: usize,
     /// Number of edges (links).
     pub(super) edges: usize,
+    /// The rate of every unit as a pipe (bytes a second; 1 for a unit that is not a rated pipe),
+    /// indexed like `states`: the capacities the fair-sharing solver starts from.
+    caps: Vec<u64>,
+    /// The pseudo-node and copy that unit `i` of `states` belongs to.
+    owners: Vec<(NodeId, u16)>,
 }
 
 impl Units {
@@ -50,30 +55,25 @@ impl Units {
             .iter()
             .map(|&c| vec![NodeCounters::default(); usize::from(c)])
             .collect();
-        // One FIFO single-slot unit per edge, with a gate only when the edge has a bandwidth.
-        let link = Admission {
-            slots: 1,
-            queue: None,
-            overflow_status: 503,
-        };
-        for e in &topo.edges {
+        // One pseudo-node per edge for its wire. A pipe has no gate: transfers share its rate
+        // fairly (`fluid.rs`, RULES 62) instead of queueing.
+        for _ in &topo.edges {
             first.push(states.len());
             states.push(NodeState {
-                gate: e.bandwidth.map(|_| Gate::new(&link)),
+                gate: None,
                 bucket: None,
                 since: 0,
             });
             count.push(1);
             counters.push(vec![NodeCounters::default()]);
         }
-        // Then a send and a receive pipe per node, one per replica, gated only when the node has
-        // a bandwidth that way.
+        // Then a send and a receive pipe per node, one per replica.
         for n in &topo.nodes {
-            for rate in [n.bandwidth.0, n.bandwidth.1] {
+            for _ in 0..2 {
                 first.push(states.len());
                 for _ in 0..n.replicas.max(1) {
                     states.push(NodeState {
-                        gate: rate.map(|_| Gate::new(&link)),
+                        gate: None,
                         bucket: None,
                         since: 0,
                     });
@@ -85,14 +85,71 @@ impl Units {
                 ]);
             }
         }
-        Units {
+        let mut u = Units {
             first,
             nodes: topo.nodes.len(),
             edges: topo.edges.len(),
             count,
             states,
             counters,
+            caps: Vec::new(),
+            owners: Vec::new(),
+        };
+        u.caps = u.pipe_caps(topo);
+        u.owners = (0..u.states.len())
+            .map(|i| {
+                let node = u.first.partition_point(|&f| f <= i) - 1;
+                let rep = u16::try_from(i - u.first[node]).expect("at most u16::MAX copies");
+                (node, rep)
+            })
+            .collect();
+        u
+    }
+
+    /// The rate of every unit as a pipe (bytes a second; 1 for a unit that is not a rated pipe),
+    /// indexed like `states`: the capacities the fair-sharing solver starts from.
+    fn pipe_caps(&self, topo: &Topology) -> Vec<u64> {
+        let mut caps = vec![1; self.states.len()];
+        for (e, edge) in topo.edges.iter().enumerate() {
+            if let Some(bw) = edge.bandwidth {
+                caps[self.at(self.nodes + e, 0)] = bw.max(1);
+            }
         }
+        for (n, node) in topo.nodes.iter().enumerate() {
+            for (side, rate) in [node.bandwidth.0, node.bandwidth.1].into_iter().enumerate() {
+                for rep in 0..node.replicas.max(1) {
+                    if let Some(bw) = rate {
+                        caps[self.at(self.nodes + self.edges + 2 * n + side, rep)] = bw.max(1);
+                    }
+                }
+            }
+        }
+        caps
+    }
+
+    /// The unit index of a pipe (the solver's pipe id).
+    pub(super) fn pipe_unit(&self, p: Pipe) -> usize {
+        match p {
+            Pipe::Wire { edge } => self.at(self.nodes + usize::from(edge), 0),
+            Pipe::Send { node, replica } => self.at(self.nodes + self.edges + 2 * node, replica),
+            Pipe::Recv { node, replica } => {
+                self.at(self.nodes + self.edges + 2 * node + 1, replica)
+            }
+        }
+    }
+
+    /// The pseudo-node and replica whose counters belong to unit `i` of `states`.
+    pub(super) fn owner(&self, i: usize) -> (NodeId, u16) {
+        self.owners[i]
+    }
+
+    pub(super) fn caps(&self) -> &[u64] {
+        &self.caps
+    }
+
+    /// The rate of unit `i` as a pipe (bytes a second).
+    pub(super) fn cap(&self, i: usize) -> u64 {
+        self.caps[i]
     }
 
     /// Index in `states` of `replica` of `node`.

@@ -34,7 +34,10 @@ pub(crate) fn hop(node: NodeId, kind: HopKind, ms: u64) -> PlanItem {
 }
 
 pub(crate) fn plan(items: Vec<PlanItem>) -> Arc<Plan> {
-    Arc::new(Plan { items })
+    Arc::new(Plan {
+        items,
+        xfers: Vec::new(),
+    })
 }
 
 /// Steps until nothing is scheduled and returns everything that finished.
