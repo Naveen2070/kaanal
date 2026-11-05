@@ -43,6 +43,7 @@ fn straight(hops: Vec<Hop>) -> (Plan, Finished) {
         Plan {
             items,
             xfers: Vec::new(),
+            scoped: Vec::new(),
         },
         finished(ran, ChainResult::Ok, None),
     )
@@ -230,6 +231,7 @@ fn structured_hops_rerender_to_the_trace_text_while_not_truncated() {
     let plan = Plan {
         items,
         xfers: Vec::new(),
+        scoped: Vec::new(),
     };
     let p = trace_parts(&plan, &fin.hops, &fin.result, &t, None);
     let e = entry_of(&t, &plan, &fin, None);
@@ -324,6 +326,7 @@ fn flags_per_cause() {
         &Plan {
             items,
             xfers: Vec::new(),
+            scoped: Vec::new(),
         },
         &fin,
         None,
@@ -385,6 +388,7 @@ fn a_cache_hang_is_a_fault_not_injected_delay() {
         let plan = Plan {
             items: vec![PlanItem::Hop(h.hop.clone())],
             xfers: Vec::new(),
+            scoped: Vec::new(),
         };
         let fin = finished(vec![h], ChainResult::Ok, None);
         entry_with(&t, &chaos_of(node, 40, true), &plan, &fin)
@@ -522,6 +526,7 @@ fn lanes_for_a_parallel_block() {
         &Plan {
             items,
             xfers: Vec::new(),
+            scoped: Vec::new(),
         },
         &fin,
         None,

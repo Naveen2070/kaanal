@@ -29,6 +29,7 @@ mod endpoints;
 mod kinds;
 mod limits;
 mod nodes;
+mod retry;
 mod scenario;
 mod shared;
 mod storage;
@@ -53,6 +54,7 @@ pub use kinds::{
 };
 pub use limits::{BoundedConcurrency, ConcurrencyConfig, PoolConfig, RateLimitConfig};
 pub use nodes::{CacheFlavor, DbFlavor, Hold, NodeConfig, NodeKind, OpsConfig};
+pub use retry::{Budget, DEFAULT_MAX_ATTEMPTS, MAX_ATTEMPTS, RetryConfig};
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
 pub use shared::{

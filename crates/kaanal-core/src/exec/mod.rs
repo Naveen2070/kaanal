@@ -12,11 +12,17 @@
 mod conn;
 mod link;
 mod loss;
+#[cfg_attr(not(test), allow(dead_code))] // wired in step 7a task 3
+mod retry;
 mod route;
+mod scope;
 mod stream;
 mod walk;
 mod wire;
 
+pub use retry::Jitter;
+pub(crate) use retry::retryable;
+pub use scope::ScopedFail;
 pub(crate) use walk::draw_rng;
 use walk::{Flow, Walk};
 
@@ -268,6 +274,42 @@ pub enum PlanItem {
         /// Items after this one that belong to the span.
         size: usize,
     },
+    /// A call that may be tried again (RULES 82-84, pre-order): `attempts` [`PlanItem::Attempt`]s follow,
+    /// `size` items in all. Every attempt is sampled up front, because whether one fails can depend on
+    /// load the sampler cannot see; the replay engine runs them in order until one succeeds, and
+    /// [`Plan::scoped`] says which failed at zero load.
+    Retry {
+        /// Tries, the first included.
+        attempts: u8,
+        /// Items after this one that belong to the scope (the attempts and their markers).
+        size: usize,
+        /// The retry budget this call draws on, when it has one.
+        budget: Option<RetryBudget>,
+    },
+    /// One try of the enclosing [`PlanItem::Retry`]: its `size` items follow. A failure inside it, that
+    /// is transient, starts the next attempt after `backoff` instead of failing the request. Walking
+    /// onto the next `Attempt` means this one succeeded.
+    Attempt {
+        /// The wait before this try (zero for the first): the sampled, jittered backoff.
+        backoff: Duration,
+        /// Items after this one that belong to the attempt.
+        size: usize,
+    },
+}
+
+/// The gRPC A6 retry throttling a retried call draws on (RULES 82-84): the engine keeps a token count per
+/// `(edge, caller replica)`, as a client process keeps one per channel. Integers (thousandths of a token),
+/// as A6 itself allows at most three decimals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryBudget {
+    /// The edge the call goes over.
+    pub edge: u16,
+    /// The caller replica holding the budget (a [`DYN_BASE`] code until its pick is bound).
+    pub replica: u16,
+    /// `maxTokens` in thousandths: the count starts here and never rises above it.
+    pub max_milli: u32,
+    /// `tokenRatio` in thousandths: what a success adds back (a failure costs 1000).
+    pub ratio_milli: u16,
 }
 
 /// First `replica` value that is a [`PlanItem::Pick`] code, not a copy (a node has at most 64).
@@ -291,6 +333,9 @@ pub struct Plan {
     /// as `(index in items, transfer)` in item order. A side table, not a field of [`Hop`]: a hop is
     /// walked a lot and must stay at 48 bytes. A transfer hop without an entry just takes its `dur`.
     pub xfers: Vec<(usize, Xfer)>,
+    /// How each failed attempt of a [`PlanItem::Retry`] ended at zero load (the sampler's decision), in
+    /// plan order. Empty for a plan without retries. The replay engine ignores it.
+    pub scoped: Vec<ScopedFail>,
 }
 
 impl Plan {
@@ -340,11 +385,15 @@ impl ChainOutcome {
     /// the failure instant. A planned failure starts where an earlier hop ended, or at 0; a span
     /// deadline lands mid-hop, and [`ChainOutcome::hops`] is clipped there.
     pub fn total(&self) -> Duration {
-        self.hops
-            .iter()
-            .map(|h| h.start + h.dur)
-            .max()
-            .unwrap_or(Duration::ZERO)
+        let hops = self.hops.iter().map(|h| h.start + h.dur).max();
+        // a failure is felt at its instant even when nothing runs then: a call waiting out a retry
+        // backoff has no hop, and the caller's deadline or the last attempt's failure ends the request
+        let failed = self.fail.and_then(|i| match self.plan.items[i] {
+            PlanItem::Fail { at, .. } => Some(at),
+            PlanItem::Span { at, timeout, .. } => Some(at + timeout),
+            _ => None,
+        });
+        hops.max(failed).unwrap_or(Duration::ZERO)
     }
 }
 
@@ -401,6 +450,9 @@ impl Plan {
                     }
                 }
                 PlanItem::Hold { replica, .. } if *replica == code => *replica = copy,
+                PlanItem::Retry {
+                    budget: Some(b), ..
+                } if b.replica == code => b.replica = copy,
                 _ => {}
             }
         }
@@ -469,16 +521,39 @@ impl Plan {
     ///
     /// `cut_all`: the deciding failure is a span deadline, so every hop is clipped or dropped
     /// at that instant (not just sibling branches).
-    fn visible(&self, fail: Option<(usize, Duration)>, cut_all: bool) -> (Vec<Hop>, Vec<usize>) {
+    fn visible(
+        &self,
+        fail: Option<(usize, Duration)>,
+        cut_all: bool,
+        retried: bool,
+    ) -> (Vec<Hop>, Vec<usize>) {
         let cut = match fail {
             Some((i, _)) if !cut_all => self.cancelled_by(i),
             _ => Vec::new(),
         };
         let at = fail.map_or(Duration::MAX, |(_, t)| t);
+        // no retry scope, nothing to look up (the common case)
+        let scopes = if retried {
+            scope::ranges(&self.items, &self.scoped)
+        } else {
+            scope::Ranges::default()
+        };
         let (mut hops, mut kept) = (Vec::new(), Vec::new());
         for (i, item) in self.items.iter().enumerate() {
             let PlanItem::Hop(h) = item else { continue };
             let mut h = h.clone();
+            if !scopes.is_empty() {
+                // an attempt after the one that settled the call never ran; one that failed stops at its failure
+                if scopes.unreached.iter().any(|r| r.contains(&i)) {
+                    continue;
+                }
+                if let Some((_, stop)) = scopes.cut.iter().find(|(r, _)| r.contains(&i)) {
+                    if h.start >= *stop {
+                        continue;
+                    }
+                    h.dur = h.dur.min(stop.saturating_sub(h.start));
+                }
+            }
             // ponytail: linear scan of the cut ranges per hop; ranges are at most the branch count.
             if cut_all || cut.iter().any(|r| r.contains(&i)) {
                 if h.start >= at {
@@ -501,10 +576,16 @@ impl Plan {
 /// extends it with `(target name, occurrence, repetition)` (R1.34, D8). Own hops draw the
 /// chaos roll first and caches also their hit roll, always, so chaos never shifts a timing.
 pub fn execute(topo: &Topology, chaos: &EffectiveChaos, req: &ChainRequest) -> ChainOutcome {
-    let (plan, planned) = sample_plan(topo, chaos, req);
+    let (plan, planned, retried) = sample(topo, chaos, req);
     // zero load has no queues to look at: `least-conn` and `p2c` are settled by their tie rules
     let plan = plan.resolved();
-    let decided = deadline_failure(&plan, planned).or(planned);
+    let decided = scope::deadline_in(
+        &plan.items,
+        &plan.scoped,
+        0..plan.items.len(),
+        planned.map(|(_, t)| t),
+    )
+    .or(planned);
     let result = match decided.map(|(i, _)| &plan.items[i]) {
         Some(&PlanItem::Fail {
             node, status, kind, ..
@@ -522,9 +603,9 @@ pub fn execute(topo: &Topology, chaos: &EffectiveChaos, req: &ChainRequest) -> C
         },
         _ => ChainResult::Ok,
     };
-    // `deadline_failure` only returns a span, so a decision that differs from the planned one is one.
-    let cut_all = decided != planned;
-    let (hops, kept) = plan.visible(decided, cut_all);
+    // a deadline cuts every hop at its instant, not only the cancelled sibling branches
+    let cut_all = decided.is_some_and(|(i, _)| matches!(plan.items[i], PlanItem::Span { .. }));
+    let (hops, kept) = plan.visible(decided, cut_all, retried);
     ChainOutcome {
         hops,
         kept,
@@ -532,35 +613,6 @@ pub fn execute(topo: &Topology, chaos: &EffectiveChaos, req: &ChainRequest) -> C
         result,
         fail: decided.map(|(i, _)| i),
     }
-}
-
-/// **Private.** Zero-load deadline check (Z13): the earliest span whose body ends after its
-/// deadline, compared with the planned failure; a tie goes to the planned failure.
-fn deadline_failure(plan: &Plan, planned: Option<(usize, Duration)>) -> Option<(usize, Duration)> {
-    let mut best = planned.map(|(_, t)| t);
-    let mut out = None;
-    for (i, item) in plan.items.iter().enumerate() {
-        let PlanItem::Span {
-            timeout, at, size, ..
-        } = item
-        else {
-            continue;
-        };
-        let end = plan.items[i + 1..=i + size]
-            .iter()
-            .filter_map(|x| match x {
-                PlanItem::Hop(h) => Some(h.start + h.dur),
-                _ => None,
-            })
-            .max()
-            .unwrap_or(*at);
-        let due = *at + *timeout;
-        if end > due && best.is_none_or(|b| due < b) {
-            best = Some(due);
-            out = Some((i, due));
-        }
-    }
-    out
 }
 
 /// The sampling half of [`execute`]: the [`Plan`] and the *planned* failure (plan index,
@@ -571,6 +623,16 @@ pub fn sample_plan(
     chaos: &EffectiveChaos,
     req: &ChainRequest,
 ) -> (Plan, Option<(usize, Duration)>) {
+    let (plan, fail, _) = sample(topo, chaos, req);
+    (plan, fail)
+}
+
+/// **Private.** [`sample_plan`], also saying whether the plan has a retry scope.
+fn sample(
+    topo: &Topology,
+    chaos: &EffectiveChaos,
+    req: &ChainRequest,
+) -> (Plan, Option<(usize, Duration)>, bool) {
     let ep = req.endpoint;
     let root = stable_hash(&[
         &req.seed.to_le_bytes(),
@@ -588,6 +650,8 @@ pub fn sample_plan(
         bytes: (req.req_bytes, req.resp_bytes),
         items: Vec::new(),
         xfers: Vec::new(),
+        scoped: Vec::new(),
+        retried: false,
         tail: None,
     };
     let entry = ep.entry_node;
@@ -668,8 +732,8 @@ pub fn sample_plan(
         Flow::Fail { at, idx } => Some((idx, at)),
         Flow::Done(_) | Flow::Hit(_) => None,
     };
-    let (items, xfers) = (w.items, w.xfers);
-    (Plan { items, xfers }, fail)
+    let retried = w.retried;
+    (w.into_plan(), fail, retried)
 }
 
 /// **Private.** How a chaos error kind (with its configured status) looks to the caller;

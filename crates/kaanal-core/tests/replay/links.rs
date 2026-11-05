@@ -26,6 +26,7 @@ fn one((item, x): (PlanItem, Xfer)) -> Arc<Plan> {
     Arc::new(Plan {
         items: vec![item],
         xfers: vec![(0, x)],
+        ..Plan::default()
     })
 }
 

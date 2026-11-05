@@ -9,6 +9,10 @@ pub(super) const NOT_STARTED: u64 = u64::MAX;
 /// same instant (Z14) without changing the heap key or the simulator's `(time, seq)` merge.
 pub(super) const DEADLINE: u64 = 1 << 62;
 
+/// **Private.** Set on the seq of a retry timer (a backoff ending), so it sorts after the plain events of its
+/// instant and before a deadline's, and is told apart from both.
+pub(super) const RETRY: u64 = 1 << 61;
+
 /// Why the engine stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineError {
@@ -146,6 +150,33 @@ pub(super) struct SpanState {
     pub(super) open: bool,
 }
 
+/// **Private.** A retry scope a request has entered (RULES 82-84, see `retry.rs`).
+pub(super) struct RetryState {
+    /// Plan index just past the whole scope.
+    pub(super) end: usize,
+    /// Plan index of the `Attempt` marker of the attempt now running (or just cut, while waiting).
+    pub(super) cur_start: usize,
+    /// Plan index just past that attempt: the next `Attempt` marker, or `end` for the last one.
+    pub(super) cur_end: usize,
+    /// What the token that entered the scope looked like: the next attempt's token copies it.
+    pub(super) base: Token,
+    /// Not yet left: the scope can still end an attempt with a retry.
+    pub(super) open: bool,
+    /// The attempt was cut and the next one waits for its backoff to pass.
+    pub(super) waiting: bool,
+    /// The budget the call draws on, if any.
+    pub(super) budget: Option<crate::exec::RetryBudget>,
+    /// Seq of the pending backoff timer; identifies it, so a recycled request slot cannot match.
+    pub(super) timer: u64,
+}
+
+/// **Private.** An attempt that was cut short: plan indices `lo < at <= hi` of it stop at `at` (ns).
+pub(super) struct Cut {
+    pub(super) lo: usize,
+    pub(super) hi: usize,
+    pub(super) at: u64,
+}
+
 /// **Private.** One slot a request holds across a call (`hold: call`, see `hold.rs`).
 pub(super) struct HoldState {
     /// The enclosing hold on the same token when this one was taken.
@@ -192,6 +223,8 @@ pub(super) struct Req {
     pub(super) joins: Vec<Join>,
     pub(super) spans: Vec<SpanState>,
     pub(super) holds: Vec<HoldState>,
+    pub(super) retries: Vec<RetryState>,
+    pub(super) cuts: Vec<Cut>,
     /// Tokens holding a hop or waiting in a queue.
     pub(super) busy: usize,
     pub(super) fail: Option<Failure>,
@@ -210,6 +243,8 @@ pub(super) struct Scratch {
     pub(super) joins: Vec<Join>,
     pub(super) spans: Vec<SpanState>,
     pub(super) holds: Vec<HoldState>,
+    pub(super) retries: Vec<RetryState>,
+    pub(super) cuts: Vec<Cut>,
 }
 
 /// **Private.** Queueing state of one node.

@@ -169,6 +169,8 @@ pub struct Edge {
     pub compress_permille: u16,
     /// TLS and keep-alive of the connections this edge's calls ride (RULES 68).
     pub conn: crate::config::Conn,
+    /// What a failed call over this edge does about it (RULES 82-84); `None` = no retry.
+    pub retry: Option<crate::config::RetryConfig>,
 }
 
 /// A validated topology graph.
@@ -568,6 +570,7 @@ impl Topology {
                     tls: e.tls,
                     keepalive: e.keepalive,
                 },
+                retry: e.retry.clone(),
             });
         }
 

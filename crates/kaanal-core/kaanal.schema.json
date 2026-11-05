@@ -63,6 +63,29 @@
       ],
       "type": "object"
     },
+    "Budget": {
+      "additionalProperties": false,
+      "description": "gRPC A6 retry throttling: a token count that starts full, loses 1 for each failed call and gains\n`token_ratio` for each success; at or below half of `max_tokens` no retry is made.",
+      "properties": {
+        "max_tokens": {
+          "default": 10,
+          "description": "Size of the budget, 1 to 1000; default 10.",
+          "format": "uint32",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "token_ratio": {
+          "default": 0.1,
+          "description": "Tokens a success adds back, above 0 and at most 1; default 0.1.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "maximum": 1,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
     "CacheFlavor": {
       "description": "Cache flavors with a preset hit ratio and costs (estimates, see [`crate::presets`]).",
       "oneOf": [
@@ -360,6 +383,17 @@
             "null"
           ]
         },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Retry a failed call over this edge (RULES 82-84): tries, backoff and an optional budget. Absent =\nno retry. A `call:` step's own `retry` wins."
+        },
         "returns": {
           "anyOf": [
             {
@@ -646,6 +680,26 @@
         {
           "const": "call",
           "description": "The slot is held from the moment the request is admitted until everything the node calls\nhas answered. A server with a thread or worker per request (Tomcat, sync Gunicorn, Puma,\nPHP-FPM): a slow dependency fills the node's slots and its queue grows.",
+          "type": "string"
+        }
+      ]
+    },
+    "Jitter": {
+      "description": "How a wait is randomised.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "The exact backoff.",
+          "type": "string"
+        },
+        {
+          "const": "full",
+          "description": "`U(0, d)`.",
+          "type": "string"
+        },
+        {
+          "const": "equal",
+          "description": "`d/2 + U(0, d/2)`.",
           "type": "string"
         }
       ]
@@ -2177,6 +2231,67 @@
         "rps",
         "burst"
       ],
+      "type": "object"
+    },
+    "RetryConfig": {
+      "additionalProperties": false,
+      "description": "What a failed call does about it (`retry:` on an edge, or on a `call:` step, which wins).",
+      "properties": {
+        "backoff": {
+          "default": {
+            "nanos": 50000000,
+            "secs": 0
+          },
+          "description": "Wait before the first retry, above 0 and at most 1h; default 50ms (AWS SDK).",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Budget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A retry budget; absent = none (retries are limited only by `max_attempts`)."
+        },
+        "cap": {
+          "default": {
+            "nanos": 0,
+            "secs": 20
+          },
+          "description": "The longest a wait grows to, above 0 and at most 1h; default 20s (AWS SDK).",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        "jitter": {
+          "$ref": "#/$defs/Jitter",
+          "description": "How a wait is randomised: `full` (default, the whole wait is `U(0, wait)`), `equal` (half fixed,\nhalf random) or `none`."
+        },
+        "max_attempts": {
+          "default": 3,
+          "description": "Tries a call makes, the first included: 2 to 5, default 3 (gRPC `maxAttempts`, the AWS SDK's\n`max_attempts`). A failure that is not transient (a 4xx other than 429, a 501) is never retried.",
+          "format": "uint8",
+          "maximum": 5,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "multiplier": {
+          "default": 2,
+          "description": "Each wait is this many times the one before, 1 to 10; default 2.",
+          "format": "uint32",
+          "maximum": 10,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "writes": {
+          "default": false,
+          "description": "Retry a **write** to a database or service too (default false: a retry of a non-idempotent write\ncan apply it twice). A write to a `storage` node always retries, as S3 PUT and DELETE are\nidempotent (RFC 9110 section 9.2.2).",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "ScenarioConfig": {

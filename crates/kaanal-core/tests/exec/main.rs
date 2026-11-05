@@ -15,6 +15,7 @@ mod loss;
 mod prob;
 mod replica_chaos;
 mod replicas;
+mod retry;
 mod sizes;
 mod storage;
 mod stream;

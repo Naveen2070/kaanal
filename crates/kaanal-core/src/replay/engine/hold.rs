@@ -42,7 +42,7 @@ impl Engine {
                 .bucket
                 .as_ref()
                 .map_or(429, Bucket::status);
-            self.fail(
+            self.fail_or_retry(
                 r,
                 Failure {
                     at: now,
@@ -84,7 +84,7 @@ impl Engine {
                 if counted {
                     self.count(node, rep, |c| c.overflowed += 1);
                 }
-                self.fail(
+                self.fail_or_retry(
                     r,
                     Failure {
                         at: now,
@@ -253,7 +253,7 @@ impl Engine {
 
     /// **Private.** One slot of `(node, rep)` is free: the oldest waiter, if any, gets it at once (no
     /// barging, as in `hop_done`); otherwise it is idle.
-    fn free_unit(&mut self, node: NodeId, rep: u16) {
+    pub(super) fn free_unit(&mut self, node: NodeId, rep: u16) {
         let now = self.now;
         self.mark(node, now);
         let next = self

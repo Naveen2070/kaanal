@@ -544,7 +544,9 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
             | PlanItem::Fail { .. }
             | PlanItem::Span { .. }
             | PlanItem::Hold { .. }
-            | PlanItem::Pick { .. } => {}
+            | PlanItem::Pick { .. }
+            | PlanItem::Retry { .. }
+            | PlanItem::Attempt { .. } => {}
         }
     }
     (recs, truncated, delayed, faulted)

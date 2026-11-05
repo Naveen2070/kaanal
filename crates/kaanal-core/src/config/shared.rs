@@ -120,6 +120,10 @@ pub struct EdgeConfig {
     )]
     #[schemars(extend("minimum" = 1, "maximum" = 1_000_000))]
     pub keepalive: u32,
+    /// Retry a failed call over this edge (RULES 82-84): tries, backoff and an optional budget. Absent =
+    /// no retry. A `call:` step's own `retry` wins.
+    #[serde(default)]
+    pub retry: Option<super::RetryConfig>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

@@ -36,7 +36,7 @@ impl Engine {
         if counted {
             self.counters[node].timed_out += 1;
         }
-        self.fail(
+        self.fail_or_retry(
             r,
             Failure {
                 at: now,
@@ -147,6 +147,8 @@ impl Engine {
             joins: req.joins,
             spans: req.spans,
             holds: req.holds,
+            retries: req.retries,
+            cuts: req.cuts,
         });
     }
 }
@@ -175,6 +177,13 @@ fn record(req: &Req) -> Finished {
                 continue;
             }
             h.dur = h.dur.min(Duration::from_nanos(fail_at - s));
+        }
+        // an attempt that was cut stops at its failure, like a hop a failure cancelled
+        if let Some(c) = req.cuts.iter().find(|c| c.lo < i && i <= c.hi) {
+            if s >= c.at {
+                continue;
+            }
+            h.dur = h.dur.min(Duration::from_nanos(c.at - s));
         }
         hops.push(FinishedHop {
             idx: i,

@@ -111,11 +111,24 @@ pub(super) struct Walk<'a> {
     pub(super) items: Vec<PlanItem>,
     /// The side table of [`Plan::xfers`], filled as transfer hops are pushed.
     pub(super) xfers: Vec<(usize, super::Xfer)>,
+    /// The side table of [`Plan::scoped`], filled as retried calls decide their attempts.
+    pub(super) scoped: Vec<super::ScopedFail>,
+    /// A retry scope was emitted: the zero-load view has work to do (see `scope.rs`).
+    pub(super) retried: bool,
     /// The last own hop emitted: where a streamed response finds its first byte (RULES 71).
     pub(super) tail: Option<super::stream::Tail>,
 }
 
 impl Walk<'_> {
+    /// **Private.** The plan the walk built.
+    pub(super) fn into_plan(self) -> Plan {
+        Plan {
+            items: self.items,
+            xfers: self.xfers,
+            scoped: self.scoped,
+        }
+    }
+
     /// **Private.** The replica of `node` a request takes now: the pure [`pick_replica`] with the
     /// edge's `balance` over the node's own. A node with one replica is always 0 (no pick, no
     /// counter). Round-robin advances per pick, so two calls to one node in a request take

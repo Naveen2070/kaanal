@@ -24,10 +24,14 @@ mod flows;
 mod fluid;
 mod hold;
 mod replicas;
+mod retry;
 mod state;
 
 use replicas::Units;
-use state::{DEADLINE, Failure, Join, NOT_STARTED, Req, Scratch, SpanState, Token, live, nanos};
+use retry::Next;
+use state::{
+    DEADLINE, Failure, Join, NOT_STARTED, RETRY, Req, Scratch, SpanState, Token, live, nanos,
+};
 pub use state::{EngineError, FailCause, Finished, FinishedHold, FinishedHop, NodeCounters};
 
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
@@ -45,6 +49,8 @@ pub struct Engine {
     spare: Vec<Scratch>,
     /// Requests whose answer is decided but not emitted yet (Q3).
     answering: Vec<usize>,
+    /// gRPC A6 retry budgets, in thousandths of a token, by `(edge, caller replica)` (see `retry.rs`).
+    budgets: std::collections::HashMap<u32, u32>,
     finished: Vec<Finished>,
     order: u64,
     warmup: u64,
@@ -67,6 +73,7 @@ impl Engine {
             free: Vec::new(),
             spare: Vec::new(),
             answering: Vec::new(),
+            budgets: std::collections::HashMap::new(),
             finished: Vec::new(),
             order: 0,
             warmup: 0,
@@ -176,6 +183,8 @@ impl Engine {
         sc.joins.clear();
         sc.spans.clear();
         sc.holds.clear();
+        sc.retries.clear();
+        sc.cuts.clear();
         let req = Req {
             tag,
             order: self.order,
@@ -187,6 +196,8 @@ impl Engine {
             joins: sc.joins,
             spans: sc.spans,
             holds: sc.holds,
+            retries: sc.retries,
+            cuts: sc.cuts,
             busy: 0,
             fail: None,
             done: None,
@@ -219,6 +230,8 @@ impl Engine {
             self.flow_event(k);
         } else if seq & DEADLINE != 0 {
             self.deadline(r, k, seq);
+        } else if seq & RETRY != 0 {
+            self.retry_timer(r, k, seq);
         } else {
             self.hop_done(r, k);
         }
@@ -272,6 +285,14 @@ impl Engine {
             let now = self.now;
             // slots held across a call are let go as the token walks past the call
             self.close_holds(r, k);
+            let req = live(&mut self.reqs, r);
+            if !req.retries.is_empty() {
+                match self.retry_next(r, k) {
+                    Next::Stop => return,
+                    Next::Again => continue,
+                    Next::Go => {}
+                }
+            }
             let req = live(&mut self.reqs, r);
             let (at, end) = (req.tokens[k].at, req.tokens[k].end);
             // A span closes when its opener walks on past it. A fork parks the opener at the block
@@ -329,19 +350,7 @@ impl Engine {
                 PlanItem::Fail {
                     node, status, kind, ..
                 } => {
-                    self.fail(
-                        r,
-                        Failure {
-                            at: now,
-                            idx: at,
-                            node,
-                            status,
-                            kind,
-                            retry_after: None,
-                            refused: None,
-                            cause: FailCause::Chaos,
-                        },
-                    );
+                    self.planned_fail(r, at, (node, status, kind));
                     return;
                 }
                 PlanItem::Fork { branches, size } => {
@@ -364,9 +373,36 @@ impl Engine {
                     }
                 }
                 PlanItem::Pick { .. } => self.dispatch(r, k),
-                PlanItem::Branch { .. } => unreachable!("tokens start after their Branch marker"),
+                PlanItem::Retry { size, budget, .. } => self.open_retry(r, k, size, budget),
+                PlanItem::Branch { .. } | PlanItem::Attempt { .. } => {
+                    unreachable!("tokens start after their Branch marker and skip Attempt markers")
+                }
             }
         }
+    }
+
+    /// **Private.** A token reaches the planned `Fail` at plan index `idx`: the request fails here, or
+    /// the attempt it is in does, if it can be retried.
+    fn planned_fail(
+        &mut self,
+        r: usize,
+        idx: usize,
+        (node, status, kind): (NodeId, u16, FailKind),
+    ) {
+        let at = self.now;
+        self.fail_or_retry(
+            r,
+            Failure {
+                at,
+                idx,
+                node,
+                status,
+                kind,
+                retry_after: None,
+                refused: None,
+                cause: FailCause::Chaos,
+            },
+        );
     }
 
     /// **Private.** Token `k` reaches a `Fork`: park it at the block end, start one token per branch.
@@ -463,7 +499,7 @@ impl Engine {
                     .bucket
                     .as_ref()
                     .map_or(429, Bucket::status);
-                self.fail(
+                self.fail_or_retry(
                     r,
                     Failure {
                         at: now,
@@ -498,7 +534,7 @@ impl Engine {
                         if counted {
                             self.count(node, rep, |c| c.overflowed += 1);
                         }
-                        self.fail(
+                        self.fail_or_retry(
                             r,
                             Failure {
                                 at: now,
@@ -561,6 +597,8 @@ impl Engine {
         req.tokens[k].at += 1;
         if req.fail.is_some() {
             self.release_idle_holds(r);
+        } else if !req.cuts.is_empty() {
+            self.release_cut_holds(r);
         }
         self.advance(r, k);
         self.settle(r);

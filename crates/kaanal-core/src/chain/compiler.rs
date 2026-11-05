@@ -50,6 +50,7 @@ impl Compiler<'_> {
             sends: e.sends,
             returns: e.returns,
             stream: e.stream,
+            retry: e.retry.clone().map(std::sync::Arc::new),
             key: keys.next(e.to),
         }
     }

@@ -227,12 +227,13 @@ impl Compiler<'_> {
         let mut inner = Arc::clone(body);
         for w in (1..hops.len()).rev() {
             let (lb, to) = (hops[w - 1], hops[w]);
-            let (net, balance, sizes) = {
+            let (net, balance, sizes, retry) = {
                 let e = self.edge(lb, to, place)?;
                 (
                     e.net.clone(),
                     e.balance.clone(),
                     (e.sends, e.returns, e.stream),
+                    e.retry.clone().map(std::sync::Arc::new),
                 )
             };
             let mut steps = self.prefix(lb);
@@ -248,17 +249,19 @@ impl Compiler<'_> {
                 sends: sizes.0,
                 returns: sizes.1,
                 stream: sizes.2,
+                retry,
                 key,
             }));
             inner = Arc::new(Seq::new(steps));
         }
         let first = hops[0];
-        let (net, balance, sizes) = {
+        let (net, balance, sizes, retry) = {
             let e = self.edge(gw, first, place)?;
             (
                 e.net.clone(),
                 e.balance.clone(),
                 (e.sends, e.returns, e.stream),
+                e.retry.clone().map(std::sync::Arc::new),
             )
         };
         let mut steps = self.default[gw].steps.clone();
@@ -274,6 +277,7 @@ impl Compiler<'_> {
             sends: sizes.0,
             returns: sizes.1,
             stream: sizes.2,
+            retry,
             key,
         }));
         Ok(Arc::new(Seq::new(steps)))
