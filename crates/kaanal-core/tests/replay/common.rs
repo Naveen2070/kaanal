@@ -74,6 +74,7 @@ pub(crate) fn span(node: NodeId, ms: u64, size: usize) -> PlanItem {
         timeout: Duration::from_millis(ms),
         at: Duration::ZERO,
         size,
+        orphan: false,
     }
 }
 

@@ -171,6 +171,8 @@ pub struct Edge {
     pub conn: crate::config::Conn,
     /// What a failed call over this edge does about it (RULES 82-84); `None` = no retry.
     pub retry: Option<crate::config::RetryConfig>,
+    /// What happens to a call's work when its caller gives up on it (RULES 88).
+    pub abandon: crate::config::Abandon,
 }
 
 /// A validated topology graph.
@@ -571,6 +573,7 @@ impl Topology {
                     keepalive: e.keepalive,
                 },
                 retry: e.retry.clone(),
+                abandon: e.abandon,
             });
         }
 

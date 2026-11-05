@@ -391,3 +391,37 @@ fn attempts_that_never_ran_do_not_move_the_replica_picks_of_the_rest_of_the_requ
         assert_eq!(with.hops, plain.hops, "call {n}");
     }
 }
+
+#[test]
+fn abandon_continue_marks_the_spans_of_that_edges_calls() {
+    let spans = |edge: &str| {
+        let src = cfg("", "", READ)
+            .replace(
+                "db: { type: database,",
+                "db: { type: database, timeout: 50ms,",
+            )
+            .replace(
+                "{ from: app, to: db, net: 2ms }",
+                &format!("{{ from: app, to: db, net: 2ms{edge} }}"),
+            );
+        let (t, e) = build(&src);
+        out(&t, &e, &ChaosState::default(), 0)
+            .plan
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                PlanItem::Span { orphan, .. } => Some(*orphan),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(spans(""), [false], "default: cancel");
+    assert_eq!(spans(", abandon: cancel"), [false]);
+    assert_eq!(spans(", abandon: continue"), [true]);
+    let err = Config::from_yaml(&cfg("", "", READ).replace(
+        "net: 2ms }\n  - { from: app, to: files",
+        "net: 2ms, abandon: maybe }\n  - { from: app, to: files",
+    ))
+    .expect_err("a bad value");
+    assert!(err.to_string().contains("abandon"), "{err}");
+}

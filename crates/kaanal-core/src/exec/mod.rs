@@ -273,6 +273,8 @@ pub enum PlanItem {
         at: Duration,
         /// Items after this one that belong to the span.
         size: usize,
+        /// The caller's edge says `abandon: continue`: when the deadline passes, the work in the span goes on.
+        orphan: bool,
     },
     /// A call that may be tried again (RULES 82-84, pre-order): `attempts` [`PlanItem::Attempt`]s follow,
     /// `size` items in all. Every attempt is sampled up front, because whether one fails can depend on
@@ -673,7 +675,7 @@ fn sample(
             dur: base,
         }));
     }
-    let root_span = entry.and_then(|n| w.open_span(n, base));
+    let root_span = entry.and_then(|n| w.open_span(n, base, false));
     let mut start = base;
     let mut flow = None;
     if entry_pick.is_none() {

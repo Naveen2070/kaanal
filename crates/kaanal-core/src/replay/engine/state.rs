@@ -148,6 +148,8 @@ pub(super) struct SpanState {
     pub(super) due: u64,
     /// Not yet walked past by its opening token; only an open span can time the request out.
     pub(super) open: bool,
+    /// `abandon: continue`: when the deadline passes, the work inside the span goes on (see `retry.rs`).
+    pub(super) orphan: bool,
 }
 
 /// **Private.** A retry scope a request has entered (RULES 82-84, see `retry.rs`).
@@ -225,6 +227,8 @@ pub(super) struct Req {
     pub(super) holds: Vec<HoldState>,
     pub(super) retries: Vec<RetryState>,
     pub(super) cuts: Vec<Cut>,
+    /// Plan ranges `(span index, span end)` whose work goes on after a deadline passed (`abandon: continue`).
+    pub(super) orphans: Vec<(usize, usize)>,
     /// Tokens holding a hop or waiting in a queue.
     pub(super) busy: usize,
     pub(super) fail: Option<Failure>,
@@ -245,6 +249,15 @@ pub(super) struct Scratch {
     pub(super) holds: Vec<HoldState>,
     pub(super) retries: Vec<RetryState>,
     pub(super) cuts: Vec<Cut>,
+    pub(super) orphans: Vec<(usize, usize)>,
+}
+
+impl Req {
+    /// Whether plan index `at` lies inside the work of a call whose caller gave up but which goes on.
+    #[inline]
+    pub(super) fn orphan_at(&self, at: usize) -> bool {
+        !self.orphans.is_empty() && self.orphans.iter().any(|&(lo, hi)| lo < at && at < hi)
+    }
 }
 
 /// **Private.** Queueing state of one node.

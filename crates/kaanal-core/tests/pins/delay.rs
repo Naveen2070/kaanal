@@ -113,11 +113,13 @@ pub(crate) fn shifted(items: &[PlanItem], d: Duration) -> Vec<PlanItem> {
                 timeout,
                 at,
                 size,
+                orphan,
             } => PlanItem::Span {
                 node: *node,
                 timeout: *timeout,
                 at: *at + d,
                 size: *size,
+                orphan: *orphan,
             },
             other => other.clone(),
         })

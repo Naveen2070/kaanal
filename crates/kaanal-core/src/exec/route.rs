@@ -84,7 +84,7 @@ impl Walk<'_> {
         let Some(r) = self.pick(call.node, call.balance.as_ref(), rep_path) else {
             return Some(self.no_replica(call.node, *now));
         };
-        let span = self.open_span(call.node, *now);
+        let span = self.open_span(call.node, *now, call.orphan);
         let edge = topo.edge_id(run.0, call.node);
         let lc = edge.and_then(|e| chaos.link(e));
         let cap = lc.and_then(|l| l.bandwidth_cap);

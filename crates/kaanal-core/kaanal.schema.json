@@ -1,5 +1,20 @@
 {
   "$defs": {
+    "Abandon": {
+      "description": "What happens to the work of a call whose caller gave up on it (`abandon:` on an edge, RULES 88).",
+      "oneOf": [
+        {
+          "const": "cancel",
+          "description": "The work is dropped where it can be: hops not started do not start and queued ones leave their\nqueues (a running hop still finishes). The default, and what the simulator always did.",
+          "type": "string"
+        },
+        {
+          "const": "continue",
+          "description": "The callee does not know the caller left, as with most HTTP and gRPC servers that ignore a dropped\nconnection: the rest of the call's work runs to its end and loads the callee, while the caller has\nalready been answered or has retried. The realistic setting, and what feeds a retry storm.",
+          "type": "string"
+        }
+      ]
+    },
     "Balance": {
       "anyOf": [
         {
@@ -292,6 +307,10 @@
       "additionalProperties": false,
       "description": "One entry in `edges:` (caller → dependency).",
       "properties": {
+        "abandon": {
+          "$ref": "#/$defs/Abandon",
+          "description": "What happens to a call's work when its caller times out and gives up: `cancel` (default) drops what\nhas not started, `continue` lets the callee finish it, loading it for nothing (RULES 88)."
+        },
         "balance": {
           "anyOf": [
             {

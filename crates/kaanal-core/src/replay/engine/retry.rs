@@ -34,6 +34,10 @@ impl Engine {
     /// retried; failing that, the request fails.
     pub(super) fn fail_or_retry(&mut self, r: usize, f: Failure) {
         let req = live(&mut self.reqs, r);
+        // abandoned work that fails ends only itself: nobody is waiting for it
+        if req.orphan_at(f.idx) {
+            return;
+        }
         if !req.retries.is_empty() && req.fail.is_none() && req.done.is_none() {
             let transient = retryable(f.status, f.kind);
             // the scopes whose running attempt holds the failing item, innermost first (scopes are
@@ -201,7 +205,7 @@ impl Engine {
             .tokens
             .iter()
             .enumerate()
-            .filter(|(_, t)| lo < t.at && t.at <= hi)
+            .filter(|(_, t)| lo < t.at && t.at <= hi && !req.orphan_at(t.at))
             .filter_map(|(k, t)| t.queued_at.map(|(n, rep, _)| (k, n, rep)))
             .collect();
         for (k, node, rep) in queued {
@@ -271,13 +275,14 @@ impl Engine {
                     running.push(self.units.target(h));
                 }
             }
-            let cuts = &req.cuts;
+            let (cuts, orphans) = (&req.cuts, &req.orphans);
             req.holds
                 .iter_mut()
                 .filter(|x| {
                     x.open
                         && !running.contains(&(x.node, x.replica))
                         && cuts.iter().any(|c| c.lo < x.end && x.end <= c.hi)
+                        && !orphans.iter().any(|&(lo, hi)| lo < x.end && x.end <= hi)
                 })
                 .map(|x| {
                     x.open = false;

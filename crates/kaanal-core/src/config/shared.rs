@@ -124,6 +124,10 @@ pub struct EdgeConfig {
     /// no retry. A `call:` step's own `retry` wins.
     #[serde(default)]
     pub retry: Option<super::RetryConfig>,
+    /// What happens to a call's work when its caller times out and gives up: `cancel` (default) drops what
+    /// has not started, `continue` lets the callee finish it, loading it for nothing (RULES 88).
+    #[serde(default)]
+    pub abandon: super::Abandon,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

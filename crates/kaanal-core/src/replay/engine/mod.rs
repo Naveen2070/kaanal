@@ -185,6 +185,7 @@ impl Engine {
         sc.holds.clear();
         sc.retries.clear();
         sc.cuts.clear();
+        sc.orphans.clear();
         let req = Req {
             tag,
             order: self.order,
@@ -198,6 +199,7 @@ impl Engine {
             holds: sc.holds,
             retries: sc.retries,
             cuts: sc.cuts,
+            orphans: sc.orphans,
             busy: 0,
             fail: None,
             done: None,
@@ -286,7 +288,9 @@ impl Engine {
             // slots held across a call are let go as the token walks past the call
             self.close_holds(r, k);
             let req = live(&mut self.reqs, r);
-            if !req.retries.is_empty() {
+            // the work of a call its caller gave up on (`abandon: continue`) walks on as if nothing had failed
+            let orphan = req.orphan_at(req.tokens[k].at);
+            if !orphan && !req.retries.is_empty() {
                 match self.retry_next(r, k) {
                     Next::Stop => return,
                     Next::Again => continue,
@@ -312,17 +316,19 @@ impl Engine {
                     return;
                 };
                 req.joins[j].left -= 1;
-                if req.joins[j].left > 0 || req.fail.is_some() {
+                let parent = req.joins[j].parent;
+                if req.joins[j].left > 0
+                    || (req.fail.is_some() && !req.orphan_at(req.tokens[parent].at))
+                {
                     return;
                 }
-                let parent = req.joins[j].parent;
                 // The branches ran edge hops: the next own hop of the parent starts a new visit (Y6).
                 req.tokens[parent].last_own = None;
                 k = parent; // the last branch resumes the block's parent
                 continue;
             }
             let item = req.plan.items[at].clone();
-            if let Some(f) = &req.fail {
+            if let Some(f) = req.fail.as_ref().filter(|_| !orphan) {
                 let tie = f.at == now && at < f.idx;
                 // A sibling cancelled at this instant still reaches a lower-index `Fail` through
                 // zero-duration hops that need no slot or token, as `execute` does (D17); the
@@ -361,8 +367,9 @@ impl Engine {
                     node,
                     timeout,
                     size,
+                    orphan,
                     ..
-                } => self.open_span(r, k, node, nanos(timeout), size),
+                } => self.open_span(r, k, (node, orphan), nanos(timeout), size),
                 PlanItem::Hold {
                     node,
                     replica,
@@ -373,6 +380,8 @@ impl Engine {
                     }
                 }
                 PlanItem::Pick { .. } => self.dispatch(r, k),
+                // a retry inside abandoned work is not followed: its token stops here
+                PlanItem::Retry { .. } | PlanItem::Attempt { .. } if orphan => return,
                 PlanItem::Retry { size, budget, .. } => self.open_retry(r, k, size, budget),
                 PlanItem::Branch { .. } | PlanItem::Attempt { .. } => {
                     unreachable!("tokens start after their Branch marker and skip Attempt markers")
@@ -442,7 +451,14 @@ impl Engine {
     }
 
     /// **Private.** Token `k` enters the `Span` at its position: record it and schedule its deadline.
-    fn open_span(&mut self, r: usize, k: usize, node: NodeId, timeout: u64, size: usize) {
+    fn open_span(
+        &mut self,
+        r: usize,
+        k: usize,
+        (node, orphan): (NodeId, bool),
+        timeout: u64,
+        size: usize,
+    ) {
         let seq = self.stamp() | DEADLINE;
         let due = self.after(timeout);
         let req = live(&mut self.reqs, r);
@@ -456,6 +472,7 @@ impl Engine {
             seq,
             due,
             open: true,
+            orphan,
         });
         req.tokens[k].open_top = Some(si);
         req.tokens[k].at = at + 1;

@@ -23,6 +23,20 @@ const MAX_MULTIPLIER: u32 = 10;
 /// Largest budget (gRPC A6 allows up to 1000 tokens).
 const MAX_TOKENS: u32 = 1000;
 
+/// What happens to the work of a call whose caller gave up on it (`abandon:` on an edge, RULES 88).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Abandon {
+    /// The work is dropped where it can be: hops not started do not start and queued ones leave their
+    /// queues (a running hop still finishes). The default, and what the simulator always did.
+    #[default]
+    Cancel,
+    /// The callee does not know the caller left, as with most HTTP and gRPC servers that ignore a dropped
+    /// connection: the rest of the call's work runs to its end and loads the callee, while the caller has
+    /// already been answered or has retried. The realistic setting, and what feeds a retry storm.
+    Continue,
+}
+
 /// What a failed call does about it (`retry:` on an edge, or on a `call:` step, which wins).
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -27,14 +27,22 @@ impl Engine {
                 .iter()
                 .filter(|x| x.open && x.due == now)
                 .min_by_key(|x| x.idx)?;
-            Some((w.idx, w.node, q.arrival >= warmup))
+            Some((
+                w.idx,
+                w.node,
+                q.arrival >= warmup,
+                w.orphan.then_some(w.end),
+            ))
         });
-        let Some((idx, node, counted)) = ready else {
+        let Some((idx, node, counted, goes_on)) = ready else {
             self.flush();
             return;
         };
         if counted {
             self.counters[node].timed_out += 1;
+        }
+        if let Some(end) = goes_on {
+            live(&mut self.reqs, r).orphans.push((idx, end));
         }
         self.fail_or_retry(
             r,
@@ -81,6 +89,7 @@ impl Engine {
             .tokens
             .iter()
             .enumerate()
+            .filter(|(_, t)| !req.orphan_at(t.at))
             .filter_map(|(k, t)| t.queued_at.map(|(n, rep, _)| (k, n, rep)))
             .collect();
         for (k, node, rep) in queued {
@@ -149,6 +158,7 @@ impl Engine {
             holds: req.holds,
             retries: req.retries,
             cuts: req.cuts,
+            orphans: req.orphans,
         });
     }
 }

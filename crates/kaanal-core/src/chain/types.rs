@@ -113,6 +113,8 @@ pub struct Call {
     pub stream: Option<crate::config::StreamMode>,
     /// What a failure of this call does about it (the step's, else the edge's); `None` = no retry.
     pub retry: Option<std::sync::Arc<crate::config::RetryConfig>>,
+    /// Whether the work goes on after the caller's deadline passes (the edge's `abandon`).
+    pub orphan: bool,
     /// Which call this is, for seeding.
     pub key: StepKey,
 }

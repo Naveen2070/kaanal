@@ -216,9 +216,14 @@ impl Engine {
                     running.push(self.units.target(h));
                 }
             }
+            let orphans = &req.orphans;
             req.holds
                 .iter_mut()
-                .filter(|x| x.open && !running.contains(&(x.node, x.replica)))
+                .filter(|x| {
+                    x.open
+                        && !running.contains(&(x.node, x.replica))
+                        && !orphans.iter().any(|&(lo, hi)| lo < x.end && x.end <= hi)
+                })
                 .map(|x| {
                     x.open = false;
                     x.until = now;

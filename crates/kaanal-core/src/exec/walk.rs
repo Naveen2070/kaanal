@@ -383,13 +383,14 @@ impl Walk<'_> {
     }
 
     /// **Private.** Opens a span for a call to `node` when it has a `timeout`; returns its plan index.
-    pub(super) fn open_span(&mut self, node: NodeId, at: Duration) -> Option<usize> {
+    pub(super) fn open_span(&mut self, node: NodeId, at: Duration, orphan: bool) -> Option<usize> {
         let timeout = self.topo.nodes[node].timeout?;
         self.items.push(PlanItem::Span {
             node,
             timeout,
             at,
             size: 0,
+            orphan,
         });
         Some(self.items.len() - 1)
     }

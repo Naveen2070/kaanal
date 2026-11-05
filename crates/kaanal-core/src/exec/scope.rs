@@ -235,6 +235,7 @@ mod tests {
             timeout: Duration::from_millis(50),
             at: Duration::ZERO,
             size: 7,
+            orphan: false,
         }];
         items.extend(three());
         assert_eq!(deadline_in(&items, &[], 0..8, None), None);
