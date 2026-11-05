@@ -18,6 +18,7 @@ use super::gate::{Admit, Gate};
 use crate::chaos::FailKind;
 use crate::exec::{ChainResult, Hop, PickKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
+mod breaker;
 mod dispatch;
 mod finish;
 mod flows;
@@ -51,6 +52,10 @@ pub struct Engine {
     answering: Vec<usize>,
     /// gRPC A6 retry budgets, in thousandths of a token, by `(edge, caller replica)` (see `retry.rs`).
     budgets: std::collections::HashMap<u32, u32>,
+    /// Circuit breakers by `(edge, caller replica)`, made when first asked (step 7c, see `breaker.rs`).
+    breakers: std::collections::HashMap<u32, breaker::Breaker>,
+    /// Each edge's breaker settings and its callee, for the edges that have one.
+    breaker_cfg: Vec<Option<(crate::config::BreakerConfig, NodeId)>>,
     finished: Vec<Finished>,
     order: u64,
     warmup: u64,
@@ -74,6 +79,12 @@ impl Engine {
             spare: Vec::new(),
             answering: Vec::new(),
             budgets: std::collections::HashMap::new(),
+            breakers: std::collections::HashMap::new(),
+            breaker_cfg: topo
+                .edges
+                .iter()
+                .map(|e| e.breaker.map(|b| (b, e.to)))
+                .collect(),
             finished: Vec::new(),
             order: 0,
             warmup: 0,
@@ -382,7 +393,7 @@ impl Engine {
                 PlanItem::Pick { .. } => self.dispatch(r, k),
                 // a retry inside abandoned work is not followed: its token stops here
                 PlanItem::Retry { .. } | PlanItem::Attempt { .. } if orphan => return,
-                PlanItem::Retry { size, budget, .. } => self.open_retry(r, k, size, budget),
+                PlanItem::Retry { size, .. } => self.open_retry(r, k, size),
                 PlanItem::Branch { .. } | PlanItem::Attempt { .. } => {
                     unreachable!("tokens start after their Branch marker and skip Attempt markers")
                 }

@@ -378,6 +378,7 @@ pub fn build_entry(f: Facts, a: &Answer, run: &Run, trace: String) -> LogEntry {
         Some(FailCause::RateLimit) => flags.push("RL"),
         Some(FailCause::Overflow) => flags.push("UO"),
         Some(FailCause::Deadline) => flags.push("DT"),
+        Some(FailCause::Breaker) => flags.push("CB"),
         Some(FailCause::Chaos) | None => {}
     }
     if a.pin.is_some() {
@@ -394,6 +395,7 @@ pub fn build_entry(f: Facts, a: &Answer, run: &Run, trace: String) -> LogEntry {
                 Some(FailCause::RateLimit) => "rate-limit",
                 Some(FailCause::Overflow) => "overflow",
                 Some(FailCause::Deadline) => "deadline",
+                Some(FailCause::Breaker) => "breaker",
                 Some(FailCause::Chaos) | None => "chaos",
             },
         }),

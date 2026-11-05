@@ -11,6 +11,13 @@ use std::time::Duration;
 
 /// The share of requests that failed over a run at `rate` a second, for the gateway-to-service edge `edge`.
 fn failed_share(edge: &str, rate: f64) -> f64 {
+    shares(edge, rate).0
+}
+
+/// `(failed, short-circuited)`: the shares of requests that failed, and that an open breaker refused
+/// without sending (a subset of the failed ones).
+#[allow(clippy::cast_precision_loss)]
+fn shares(edge: &str, rate: f64) -> (f64, f64) {
     let y = format!(
         "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, concurrency: {{ limit: 2, queue: 200 }}, timeout: 50ms, proc: {{ mean: 10ms }} }}\nedges:\n  - {{ from: gw, to: app{edge} }}\n"
     );
@@ -36,7 +43,12 @@ fn failed_share(edge: &str, rate: f64) -> f64 {
         .count();
     #[allow(clippy::cast_precision_loss)]
     let share = bad as f64 / rep.requests.len() as f64;
-    share
+    let rejected = rep
+        .requests
+        .iter()
+        .filter(|r| r.cause == Some(kaanal_sim::Cause::Breaker))
+        .count();
+    (share, rejected as f64 / rep.requests.len() as f64)
 }
 
 const RETRY: &str = ", retry: { max_attempts: 3 }";
@@ -68,4 +80,26 @@ fn near_capacity_the_collapse_is_total_and_the_budget_still_halves_the_damage() 
     let (continuing, budget) = (failed_share(CONTINUE, 150.0), failed_share(BUDGET, 150.0));
     assert!(continuing > 0.9, "retry with continue: {continuing}");
     assert!(budget < continuing / 2.0, "with a budget: {budget}");
+}
+
+const BREAKER: &str = ", retry: { max_attempts: 3 }, abandon: continue, breaker: { window: 50, min_calls: 50, open_for: 2s, half_open_calls: 10 }";
+
+#[test]
+fn a_breaker_lets_the_callee_recover_by_failing_fast_instead() {
+    // The same collapse as above, with a breaker on the edge: once half the last 50 calls fail it opens,
+    // the retries and their abandoned work stop reaching the callee, the queue drains, and the probes
+    // find it healthy. Most of what still fails is the breaker's own fast 503, not the callee timing out.
+    for (rate, collapsed) in [(120.0, 0.5), (150.0, 0.9)] {
+        let (failed, short) = shares(BREAKER, rate);
+        assert!(
+            failed < collapsed,
+            "rate {rate}: {failed} vs a collapse above {collapsed}"
+        );
+        let at_callee = failed - short;
+        assert!(
+            at_callee < 0.06,
+            "rate {rate}: {at_callee} of requests failed at the callee"
+        );
+        assert!(short > 0.0, "rate {rate}: the breaker never opened");
+    }
 }

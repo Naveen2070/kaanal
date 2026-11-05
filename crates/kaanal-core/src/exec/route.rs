@@ -7,7 +7,7 @@ use rand::Rng;
 
 use super::retry::{backoff, jitter, retryable};
 use super::walk::{Flow, Walk, draw_rng, step_path, takes_branch};
-use super::{Op, PlanItem, RetryBudget, ScopedFail, scope};
+use super::{BreakerRef, Op, PlanItem, RetryBudget, ScopedFail, scope};
 use crate::balance::pick_replica;
 use crate::chain::{Call, Route};
 use crate::chaos::FailKind;
@@ -59,6 +59,14 @@ impl Walk<'_> {
             let rep_path = step_path(path, target, call.key.occ, rep);
             let flow = match self.retry_of(call, op) {
                 Some(rc) => self.attempts(call, rc, rep_path, op, now, run),
+                // a breaker with no retry: a scope of one attempt, which draws what the call draws
+                None if call.breaker.is_some() => {
+                    let once = RetryConfig {
+                        max_attempts: 1,
+                        ..RetryConfig::default()
+                    };
+                    self.attempts(call, &once, rep_path, op, now, run)
+                }
                 None => self.try_once(call, rep_path, op, now, run),
             };
             if flow.is_some() {
@@ -144,6 +152,35 @@ impl Walk<'_> {
             .then_some(rc)
     }
 
+    /// **Private.** The retry budget and the circuit breaker a call's scope draws on, both kept by the
+    /// engine per `(edge, caller replica)`.
+    fn scope_refs(
+        &self,
+        call: &Call,
+        rc: &RetryConfig,
+        run: (NodeId, u16),
+    ) -> (Option<RetryBudget>, Option<BreakerRef>) {
+        let edge = self
+            .topo
+            .edge_id(run.0, call.node)
+            .and_then(|e| u16::try_from(e).ok());
+        let budget = rc.budget.and_then(|b| {
+            Some(RetryBudget {
+                edge: edge?,
+                replica: run.1,
+                max_milli: b.max_tokens * 1000,
+                ratio_milli: milli(b.token_ratio),
+            })
+        });
+        let breaker = call.breaker.and_then(|_| {
+            Some(BreakerRef {
+                edge: edge?,
+                replica: run.1,
+            })
+        });
+        (budget, breaker)
+    }
+
     /// **Private.** One `repeat` of a call that may be retried (RULES 82-84): a [`PlanItem::Retry`] holding
     /// up to `rc.max_attempts` [`PlanItem::Attempt`]s, each its own try with its own draws (the first
     /// attempt draws exactly what the call would without `retry`, so a call that succeeds first time
@@ -171,18 +208,12 @@ impl Walk<'_> {
         // one stream of jitter draws, a draw per retry whether or not it is reached
         let mut jitter_rng = draw_rng(rep_path, name, b"retry");
         let retry = self.items.len();
-        let budget = rc.budget.and_then(|b| {
-            Some(RetryBudget {
-                edge: u16::try_from(self.topo.edge_id(run.0, call.node)?).ok()?,
-                replica: run.1,
-                max_milli: b.max_tokens * 1000,
-                ratio_milli: milli(b.token_ratio),
-            })
-        });
+        let (budget, breaker) = self.scope_refs(call, rc, run);
         self.items.push(PlanItem::Retry {
             attempts: rc.max_attempts,
             size: 0,
             budget,
+            breaker,
         });
         let (mut ready, mut emitted) = (*now, 0u8);
         // the first success (its end), else the failure that ended the call
@@ -261,6 +292,7 @@ impl Walk<'_> {
             attempts: emitted,
             size: self.items.len() - retry - 1,
             budget,
+            breaker,
         };
         self.tail = tail;
         if let Some(c) = counters {

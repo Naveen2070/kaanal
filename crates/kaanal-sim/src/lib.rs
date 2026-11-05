@@ -145,10 +145,12 @@ pub enum Cause {
     Overflow,
     /// A `timeout:` deadline fired.
     Deadline,
+    /// The caller's circuit breaker was open and rejected the call.
+    Breaker,
 }
 
 impl Cause {
-    /// `chaos|rate_limit|overflow|deadline`.
+    /// `chaos|rate_limit|overflow|deadline|breaker`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -156,6 +158,7 @@ impl Cause {
             Cause::RateLimit => "rate_limit",
             Cause::Overflow => "overflow",
             Cause::Deadline => "deadline",
+            Cause::Breaker => "breaker",
         }
     }
 }

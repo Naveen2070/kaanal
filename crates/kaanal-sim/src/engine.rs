@@ -135,6 +135,7 @@ pub(crate) fn simulate(
                         FailCause::RateLimit => Cause::RateLimit,
                         FailCause::Overflow => Cause::Overflow,
                         FailCause::Deadline => Cause::Deadline,
+                        FailCause::Breaker => Cause::Breaker,
                     }),
                     hops: f.hops.into_iter().map(|h| (h.hop, h.wait)).collect(),
                     holds: f.holds,

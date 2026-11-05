@@ -3,6 +3,7 @@
 mod balance;
 mod balancer;
 mod basic;
+mod breaker;
 mod common;
 mod conn;
 mod deadlines;

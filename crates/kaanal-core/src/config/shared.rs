@@ -128,6 +128,10 @@ pub struct EdgeConfig {
     /// has not started, `continue` lets the callee finish it, loading it for nothing (RULES 88).
     #[serde(default)]
     pub abandon: super::Abandon,
+    /// A circuit breaker on this edge (step 7c): after enough failed calls the caller stops calling for a
+    /// while. Absent = none; `{}` takes resilience4j's defaults.
+    #[serde(default)]
+    pub breaker: Option<super::BreakerConfig>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

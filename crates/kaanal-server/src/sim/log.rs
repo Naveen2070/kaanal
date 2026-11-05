@@ -126,6 +126,7 @@ fn lines_of(r: &RequestRecord, topo: &Topology, cfg: &SimConfig, out: &mut Vec<L
             Some(Cause::RateLimit) => ("limited", "rate limit"),
             Some(Cause::Overflow) => ("overflowed", "queue full"),
             Some(Cause::Deadline) => ("timeout", "deadline passed"),
+            Some(Cause::Breaker) => ("short-circuited", "circuit breaker open"),
             Some(Cause::Chaos) | None => ("failed", kind.as_str()),
         };
         out.push(LogLine {

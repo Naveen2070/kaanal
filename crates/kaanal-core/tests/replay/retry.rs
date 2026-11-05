@@ -24,6 +24,7 @@ fn scope_with(budget: Option<RetryBudget>, attempts: Vec<(u64, Vec<PlanItem>)>) 
         attempts: u8::try_from(attempts.len()).unwrap(),
         size: body,
         budget,
+        breaker: None,
     }];
     for (wait, items) in attempts {
         out.push(PlanItem::Attempt {

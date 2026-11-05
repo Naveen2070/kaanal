@@ -39,6 +39,8 @@ pub enum FailCause {
     Overflow,
     /// A `timeout:` span's deadline fired.
     Deadline,
+    /// The caller's circuit breaker was open and rejected the call (step 7c).
+    Breaker,
 }
 
 /// What a finished request experienced.
@@ -105,6 +107,8 @@ pub struct NodeCounters {
     pub overflowed: u64,
     /// Requests failed by this node's deadline, counted at the span's node.
     pub timed_out: u64,
+    /// Calls the caller's circuit breaker rejected without sending (step 7c), counted at the callee.
+    pub short_circuited: u64,
 }
 
 /// **Private.** A walker over one plan range: the whole plan, or one `parallel` branch.
@@ -168,6 +172,8 @@ pub(super) struct RetryState {
     pub(super) waiting: bool,
     /// The budget the call draws on, if any.
     pub(super) budget: Option<crate::exec::RetryBudget>,
+    /// The circuit breaker every attempt asks, if the edge has one.
+    pub(super) breaker: Option<crate::exec::BreakerRef>,
     /// Seq of the pending backoff timer; identifies it, so a recycled request slot cannot match.
     pub(super) timer: u64,
 }

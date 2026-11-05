@@ -52,6 +52,7 @@ impl Compiler<'_> {
             stream: e.stream,
             retry: e.retry.clone().map(std::sync::Arc::new),
             orphan: e.abandon == crate::config::Abandon::Continue,
+            breaker: e.breaker,
             key: keys.next(e.to),
         }
     }

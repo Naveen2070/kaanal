@@ -127,6 +127,7 @@ fn an_abandoned_attempt_goes_on_while_the_retry_runs() {
                 attempts: 2,
                 size: 0,
                 budget: None,
+                breaker: None,
             },
             PlanItem::Attempt {
                 backoff: Duration::ZERO,
@@ -146,6 +147,7 @@ fn an_abandoned_attempt_goes_on_while_the_retry_runs() {
             attempts: 2,
             size: items.len() - 1,
             budget: None,
+            breaker: None,
         };
         let mut e = Engine::new(&t);
         e.submit(0, plan(items), 0).unwrap();

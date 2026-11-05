@@ -227,7 +227,7 @@ impl Compiler<'_> {
         let mut inner = Arc::clone(body);
         for w in (1..hops.len()).rev() {
             let (lb, to) = (hops[w - 1], hops[w]);
-            let (net, balance, sizes, (retry, orphan)) = {
+            let (net, balance, sizes, (retry, orphan, breaker)) = {
                 let e = self.edge(lb, to, place)?;
                 (
                     e.net.clone(),
@@ -236,6 +236,7 @@ impl Compiler<'_> {
                     (
                         e.retry.clone().map(std::sync::Arc::new),
                         e.abandon == crate::config::Abandon::Continue,
+                        e.breaker,
                     ),
                 )
             };
@@ -254,12 +255,13 @@ impl Compiler<'_> {
                 stream: sizes.2,
                 retry,
                 orphan,
+                breaker,
                 key,
             }));
             inner = Arc::new(Seq::new(steps));
         }
         let first = hops[0];
-        let (net, balance, sizes, (retry, orphan)) = {
+        let (net, balance, sizes, (retry, orphan, breaker)) = {
             let e = self.edge(gw, first, place)?;
             (
                 e.net.clone(),
@@ -268,6 +270,7 @@ impl Compiler<'_> {
                 (
                     e.retry.clone().map(std::sync::Arc::new),
                     e.abandon == crate::config::Abandon::Continue,
+                    e.breaker,
                 ),
             )
         };
@@ -286,6 +289,7 @@ impl Compiler<'_> {
             stream: sizes.2,
             retry,
             orphan,
+            breaker,
             key,
         }));
         Ok(Arc::new(Seq::new(steps)))

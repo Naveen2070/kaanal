@@ -173,6 +173,8 @@ pub struct Edge {
     pub retry: Option<crate::config::RetryConfig>,
     /// What happens to a call's work when its caller gives up on it (RULES 88).
     pub abandon: crate::config::Abandon,
+    /// The circuit breaker on this edge (step 7c); `None` = none.
+    pub breaker: Option<crate::config::BreakerConfig>,
 }
 
 /// A validated topology graph.
@@ -574,6 +576,7 @@ impl Topology {
                 },
                 retry: e.retry.clone(),
                 abandon: e.abandon,
+                breaker: e.breaker,
             });
         }
 

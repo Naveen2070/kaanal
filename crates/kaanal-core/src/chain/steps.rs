@@ -137,6 +137,7 @@ impl Compiler<'_> {
         );
         let edge_retry = edge.retry.clone();
         let orphan = edge.abandon == crate::config::Abandon::Continue;
+        let edge_breaker = edge.breaker;
         let bodies = usize::from(c.chain.is_some())
             + usize::from(c.with.is_some())
             + usize::from(c.via.is_some());
@@ -223,6 +224,7 @@ impl Compiler<'_> {
             returns: c.returns.or(edge_sizes.1),
             stream: c.stream.or(edge_sizes.2),
             retry: c.retry.clone().or(edge_retry).map(std::sync::Arc::new),
+            breaker: edge_breaker,
             orphan,
             key: keys.next(to),
         })

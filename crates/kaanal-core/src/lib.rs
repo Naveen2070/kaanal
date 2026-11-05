@@ -44,15 +44,15 @@ pub use chaos::{
     MAX_FAULTS, MAX_LATENCY_ADD, NodeChaos, Resolved, compile_layers,
 };
 pub use config::{
-    Budget, ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointConfig, EndpointsConfig,
-    Hold, JourneyConfig, NodeKind, RetryConfig, ScenarioConfig, SeedSource, TrafficConfig,
-    check_profile, parse_scenario, preprocess, strip_bom, valid_locale_tag,
+    BreakerConfig, Budget, ChaosEntry, Config, ConfigError, Determinism, EdgeRef, EndpointConfig,
+    EndpointsConfig, Hold, JourneyConfig, NodeKind, RetryConfig, ScenarioConfig, SeedSource,
+    TrafficConfig, check_profile, parse_scenario, preprocess, strip_bom, valid_locale_tag,
 };
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
 pub use exec::{
-    ChainOutcome, ChainRequest, ChainResult, DYN_BASE, Hop, HopKind, Op, PickKind, Pipe, Plan,
-    PlanItem, RetryBudget, ScopedFail, Xfer, execute, sample_plan,
+    BreakerRef, ChainOutcome, ChainRequest, ChainResult, DYN_BASE, Hop, HopKind, Op, PickKind,
+    Pipe, Plan, PlanItem, RetryBudget, ScopedFail, Xfer, execute, sample_plan,
 };
 pub use pin::{
     EffectivePins, EmptyOk, Outcome, PinEntry, PinEntryConfig, PinLayer, PinSource, PinState,

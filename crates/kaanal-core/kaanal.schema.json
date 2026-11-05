@@ -78,6 +78,54 @@
       ],
       "type": "object"
     },
+    "BreakerConfig": {
+      "additionalProperties": false,
+      "description": "When a caller stops calling an edge, and when it tries again (`breaker:` on an edge).",
+      "properties": {
+        "failure_rate": {
+          "default": 0.5,
+          "description": "Failure rate at or above which the breaker opens, above 0 and at most 1; default 0.5.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "maximum": 1,
+          "type": "number"
+        },
+        "half_open_calls": {
+          "default": 10,
+          "description": "Calls a half-open breaker lets through to decide, 1 to 100; default 10.",
+          "format": "uint16",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_calls": {
+          "default": 100,
+          "description": "Calls that must be in the window before the failure rate is looked at, at least 1; default 100.\nAbove `window` it counts as `window` (as resilience4j does for a count-based window).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "open_for": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "How long it stays open before the next call is let through, above 0 and at most 1h; default 60s.",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
+        },
+        "window": {
+          "default": 100,
+          "description": "Calls the sliding window remembers, 1 to 1000; default 100.",
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "Budget": {
       "additionalProperties": false,
       "description": "gRPC A6 retry throttling: a token count that starts full, loses 1 for each failed call and gains\n`token_ratio` for each success; at or below half of `max_tokens` no retry is made.",
@@ -338,6 +386,17 @@
           ],
           "default": null,
           "description": "Link capacity: bytes per second (at least 1) as a whole number, or text with a unit like\n`250KB` or `1MB/s` (KB = 1024 bytes). With a payload size, a transfer takes\n`bytes / bandwidth` when alone on the link, and more while other transfers share its rate\nfairly. Absent = no limit,\nand no link hop."
+        },
+        "breaker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BreakerConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A circuit breaker on this edge (step 7c): after enough failed calls the caller stops calling for a\nwhile. Absent = none; `{}` takes resilience4j's defaults."
         },
         "calls": {
           "default": 1,

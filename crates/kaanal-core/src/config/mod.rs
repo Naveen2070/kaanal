@@ -23,6 +23,7 @@ use crate::exec::Op;
 use crate::pin::{PinEntryConfig, StateOverrideConfig};
 mod aliases;
 mod balancer;
+mod breaker;
 mod checks;
 mod conn;
 mod endpoints;
@@ -38,6 +39,7 @@ mod values;
 
 use crate::balance::{Balance, MAX_REPLICAS};
 pub use balancer::LoadBalancerConfig;
+pub use breaker::BreakerConfig;
 pub(crate) use checks::prob_ok;
 pub use checks::valid_locale_tag;
 use checks::{

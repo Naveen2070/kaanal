@@ -287,6 +287,8 @@ pub enum PlanItem {
         size: usize,
         /// The retry budget this call draws on, when it has one.
         budget: Option<RetryBudget>,
+        /// The circuit breaker every attempt asks first (step 7c), when the edge has one.
+        breaker: Option<BreakerRef>,
     },
     /// One try of the enclosing [`PlanItem::Retry`]: its `size` items follow. A failure inside it, that
     /// is transient, starts the next attempt after `backoff` instead of failing the request. Walking
@@ -312,6 +314,16 @@ pub struct RetryBudget {
     pub max_milli: u32,
     /// `tokenRatio` in thousandths: what a success adds back (a failure costs 1000).
     pub ratio_milli: u16,
+}
+
+/// Which circuit breaker a scope's attempts ask (step 7c): the engine keeps one per `(edge, caller
+/// replica)`, as a client process keeps one per dependency; its settings are the edge's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreakerRef {
+    /// The edge the call goes over.
+    pub edge: u16,
+    /// The caller replica holding the breaker (a [`DYN_BASE`] code until its pick is bound).
+    pub replica: u16,
 }
 
 /// First `replica` value that is a [`PlanItem::Pick`] code, not a copy (a node has at most 64).
@@ -454,6 +466,9 @@ impl Plan {
                 PlanItem::Hold { replica, .. } if *replica == code => *replica = copy,
                 PlanItem::Retry {
                     budget: Some(b), ..
+                } if b.replica == code => b.replica = copy,
+                PlanItem::Retry {
+                    breaker: Some(b), ..
                 } if b.replica == code => b.replica = copy,
                 _ => {}
             }
