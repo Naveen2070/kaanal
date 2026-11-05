@@ -98,6 +98,8 @@ pub(super) struct Walk<'a> {
     pub(super) chaos: &'a EffectiveChaos,
     /// Key of the endpoint being walked, for endpoint-scoped chaos.
     pub(super) ep_key: &'a str,
+    /// The request's arrival instant (see [`super::ChainRequest::at`]).
+    pub(super) at: Duration,
     /// The request counter, for round-robin.
     pub(super) n: u64,
     /// Picks so far per node in this request (round-robin advances per pick).
@@ -129,11 +131,39 @@ impl Walk<'_> {
         }
     }
 
+    /// **Private.** Whether a balancer with health delay `detect` has noticed that `replica` of `node` is
+    /// down, at the instant this request arrives (step 7d, RULES 91): the copy went down at its onset
+    /// (none = before the run, noticed from the start) and is noticed `detect` later. Until then the
+    /// balancer still sends to it and the call fails at the copy, as a refused connection does.
+    #[inline(never)]
+    pub(super) fn seen_down(&self, node: NodeId, replica: u16, detect: Duration) -> bool {
+        self.chaos
+            .replica_down_from(node, self.ep_key, replica)
+            .is_some_and(|from| from.is_none_or(|f| self.at >= f.saturating_add(detect)))
+    }
+
+    /// **Private.** The health delay of the balancer in front of `to` when `from` calls it: the edge's own
+    /// `detect`, else the calling balancer's, else none. Only read when chaos is on.
+    #[inline(never)]
+    pub(super) fn detect_of(&self, from: NodeId, to: NodeId) -> Duration {
+        self.topo
+            .edge_id(from, to)
+            .and_then(|e| self.topo.edges[e].detect)
+            .unwrap_or(self.topo.nodes[from].detect)
+    }
+
     /// **Private.** The replica of `node` a request takes now: the pure [`pick_replica`] with the
     /// edge's `balance` over the node's own. A node with one replica is always 0 (no pick, no
     /// counter). Round-robin advances per pick, so two calls to one node in a request take
-    /// consecutive replicas. `None` when every replica is down.
-    pub(super) fn pick(&mut self, node: NodeId, edge: Option<&Balance>, path: u64) -> Option<u16> {
+    /// consecutive replicas. `caller` is the node the call comes from (the node itself when there is
+    /// none), for the health delay `detect` of the balancer in front of it. `None` when every replica is down.
+    pub(super) fn pick(
+        &mut self,
+        node: NodeId,
+        edge: Option<&Balance>,
+        caller: NodeId,
+        path: u64,
+    ) -> Option<u16> {
         let nd = &self.topo.nodes[node];
         if nd.replicas <= 1 {
             return Some(0);
@@ -142,12 +172,13 @@ impl Walk<'_> {
         self.picks[node] += 1;
         let offset = stable_hash(&[self.ep_key.as_bytes(), nd.name.as_bytes()]).wrapping_add(k);
         let balance = edge.unwrap_or(&nd.balance);
-        // a down replica is skipped from the request's arrival on (decided here, in the plan)
+        // a down replica is skipped once the balancer has noticed (decided here, in the plan)
         let up: Vec<bool> = if self.chaos.is_empty() {
             Vec::new()
         } else {
+            let detect = self.detect_of(caller, node);
             (0..nd.replicas)
-                .map(|r| !self.chaos.replica_down(node, self.ep_key, r))
+                .map(|r| !self.seen_down(node, r, detect))
                 .collect()
         };
         if balance.is_dynamic() {
@@ -255,7 +286,7 @@ impl Walk<'_> {
         {
             return Some(r);
         }
-        let r = self.pick(node, None, path)?;
+        let r = self.pick(node, None, node, path)?;
         *inline = Some((node, r));
         Some(r)
     }
@@ -321,7 +352,7 @@ impl Walk<'_> {
                         // A cache never fails the request (Z17): with no live replica the lookup
                         // goes to replica 0, whose chaos is down, so it is a miss like a down cache.
                         let r = self
-                            .pick(cache.node, cache.balance.as_ref(), rep_path)
+                            .pick(cache.node, cache.balance.as_ref(), run.0, rep_path)
                             .unwrap_or(0);
                         let edge = topo.edge_id(run.0, cache.node);
                         let lc = edge.and_then(|e| chaos.link(e));
@@ -459,7 +490,7 @@ impl Walk<'_> {
         let c = (!self.chaos.is_empty())
             .then(|| self.chaos.visit_replica(node, self.ep_key, replica))
             .flatten();
-        let hit = c.and_then(|c| c.hit(roll));
+        let hit = c.and_then(|c| c.hit_at(roll, self.at + start));
         if let Some((k, s)) = hit {
             let (fk, status) = fail_of(k, s);
             let mut at = start;
@@ -536,7 +567,7 @@ impl Walk<'_> {
         let c = (!self.chaos.is_empty())
             .then(|| self.chaos.visit_replica(node, self.ep_key, replica))
             .flatten();
-        let fault = c.and_then(|c| c.hit(roll));
+        let fault = c.and_then(|c| c.hit_at(roll, self.at + start));
         let failing = fault.is_some();
         let model = n.cache.as_ref();
         // A hanging cache is a miss charged its cap; a cache never fails the request (Z17).

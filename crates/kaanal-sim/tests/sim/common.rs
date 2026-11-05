@@ -147,6 +147,7 @@ pub(crate) fn compare_with_execute(
             t,
             chaos,
             &ChainRequest {
+                at: std::time::Duration::ZERO,
                 endpoint: e.get(key).unwrap(),
                 n: r.n,
                 seed,

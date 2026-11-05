@@ -76,6 +76,7 @@ fn login_without_the_auth_edge_runs_auth_inline() {
         &t,
         &ChaosState::default().compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: jwks,
             n: 0,
             seed: 1,

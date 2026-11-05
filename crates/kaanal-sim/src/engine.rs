@@ -107,6 +107,7 @@ pub(crate) fn simulate(
                 topo,
                 chaos,
                 &ChainRequest {
+                    at: Duration::from_nanos(at),
                     endpoint: &endpoints[s],
                     n,
                     seed: cfg.seed,

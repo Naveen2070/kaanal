@@ -287,6 +287,7 @@ fn plan_of(
     };
     let pin = pin.map(|p| resolve(&p.entry, &ep.states));
     let req = ChainRequest {
+        at: std::time::Duration::ZERO,
         endpoint: ep,
         n,
         seed: g.chain_seed,

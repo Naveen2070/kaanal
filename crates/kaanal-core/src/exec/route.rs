@@ -89,7 +89,7 @@ impl Walk<'_> {
     ) -> Option<Flow> {
         let topo = self.topo;
         let chaos = self.chaos;
-        let Some(r) = self.pick(call.node, call.balance.as_ref(), rep_path) else {
+        let Some(r) = self.pick(call.node, call.balance.as_ref(), run.0, rep_path) else {
             return Some(self.no_replica(call.node, *now));
         };
         let span = self.open_span(call.node, *now, call.orphan);
@@ -320,9 +320,11 @@ impl Walk<'_> {
             .calls
             .iter()
             .map(|c| {
-                self.chaos.is_empty()
-                    || (0..self.topo.nodes[c.node].replicas)
-                        .any(|rep| !self.chaos.replica_down(c.node, self.ep_key, rep))
+                self.chaos.is_empty() || {
+                    let detect = self.detect_of(r.node, c.node);
+                    (0..self.topo.nodes[c.node].replicas)
+                        .any(|rep| !self.seen_down(c.node, rep, detect))
+                }
             })
             .collect();
         let count = u16::try_from(r.calls.len()).unwrap_or(u16::MAX);

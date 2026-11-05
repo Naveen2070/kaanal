@@ -7,6 +7,7 @@ mod breaker;
 mod common;
 mod conn;
 mod deadlines;
+mod detect;
 mod dynamic;
 mod endpoint;
 mod layers;

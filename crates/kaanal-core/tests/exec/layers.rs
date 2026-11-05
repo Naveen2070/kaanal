@@ -50,6 +50,7 @@ fn a_banded_mix_fails_with_each_kind_at_its_share() {
             &t,
             &eff,
             &ChainRequest {
+                at: std::time::Duration::ZERO,
                 endpoint: e.get("GET /users/{id}").unwrap(),
                 n,
                 seed: 42,
@@ -79,6 +80,7 @@ fn a_stack_is_deterministic_and_a_single_layer_ignores_the_stack() {
             &t,
             eff,
             &ChainRequest {
+                at: std::time::Duration::ZERO,
                 endpoint: ep,
                 n,
                 seed: 42,

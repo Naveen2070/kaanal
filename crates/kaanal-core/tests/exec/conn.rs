@@ -18,6 +18,7 @@ fn hops(t: &Topology, e: &kaanal_core::Endpoints, n: u64, (req, resp): (u64, u64
         t,
         &ChaosState::default().compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get("GET /users/{id}").unwrap(),
             n,
             seed: 42,

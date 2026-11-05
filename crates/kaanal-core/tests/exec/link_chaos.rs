@@ -31,6 +31,7 @@ fn plan(
         t,
         &c.compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get("GET /users/{id}").unwrap(),
             n,
             seed: 42,

@@ -39,6 +39,7 @@ fn zero_cost_failure_ties_go_to_the_first_branch() {
             &t,
             &chaos.compile(),
             &ChainRequest {
+                at: std::time::Duration::ZERO,
                 endpoint: e.get("GET /x").unwrap(),
                 n: r.n,
                 seed: cfg.seed,
@@ -234,6 +235,7 @@ fn failure_ties_go_to_the_lowest_branch_like_live() {
             &t,
             &chaos.compile(),
             &ChainRequest {
+                at: std::time::Duration::ZERO,
                 endpoint: e.get("GET /x").unwrap(),
                 n: r.n,
                 seed: cfg.seed,

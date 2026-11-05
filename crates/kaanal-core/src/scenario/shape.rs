@@ -28,6 +28,15 @@ pub(super) struct Shaped {
     pub(super) layer: ChaosLayer,
 }
 
+/// **Private.** Why `from_ms` does not fit this entry, if it does not: it is the start of a node or
+/// replica outage (step 7d), so it needs `down: true` and a node and takes no endpoint.
+fn from_ms_error(e: &ChaosEntry) -> Option<&'static str> {
+    (e.from_ms.is_some() && (e.down != Some(true) || e.node.is_none() || e.endpoint.is_some()))
+        .then_some(
+            "from_ms is the start of a node or replica outage: it needs `down: true` and a node, and takes no endpoint",
+        )
+}
+
 /// **Private.** The checks of one entry that need no topology: something to point at, a
 /// well-formed endpoint, a known kind, something set, every value in range.
 fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
@@ -75,12 +84,16 @@ fn shape_entry(i: usize, e: &ChaosEntry) -> Result<Shaped, ScenarioError> {
             )
         })?),
     };
+    if let Some(m) = from_ms_error(e) {
+        return Err(err(field("from_ms"), true, m.into()));
+    }
     let layer = ChaosLayer {
         latency_add: e.latency_ms.map(Duration::from_millis),
         error_rate: e.error_rate,
         error_kind: kind,
         error_status: e.error_status,
         down: e.down,
+        down_from: e.from_ms.map(Duration::from_millis),
         jitter: e.jitter_ms.map(Duration::from_millis),
         bandwidth_cap: e.bandwidth_cap,
         replace: None,

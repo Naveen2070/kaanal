@@ -62,6 +62,7 @@ pub(crate) fn run_key(
         t,
         &chaos.compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get(key).unwrap(),
             n,
             seed: 42,

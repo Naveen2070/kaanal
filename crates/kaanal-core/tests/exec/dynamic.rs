@@ -32,6 +32,7 @@ fn least_conn_and_p2c_leave_the_choice_to_the_engine_but_settle_it_for_zero_load
         let db = t.id("db").unwrap();
         let ep = e.get(KEY).unwrap();
         let req = kaanal_core::ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: ep,
             n: 5,
             seed: 42,
@@ -80,6 +81,7 @@ fn a_down_copy_is_not_a_candidate_and_one_live_copy_needs_no_pick() {
     let db = t.id("db").unwrap();
     let ep = e.get(KEY).unwrap();
     let req = kaanal_core::ChainRequest {
+        at: std::time::Duration::ZERO,
         endpoint: ep,
         n: 0,
         seed: 42,

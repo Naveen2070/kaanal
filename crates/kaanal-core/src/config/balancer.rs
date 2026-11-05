@@ -3,7 +3,7 @@
 
 use super::{
     ConcurrencyConfig, Deserialize, DistConfig, Duration, Hold, JsonSchema, LOCALE_PATTERN,
-    NodeBandwidth, RateLimitConfig, call_timeout,
+    NodeBandwidth, RateLimitConfig, call_timeout, detect_window,
 };
 use crate::balance::Balance;
 
@@ -39,6 +39,12 @@ pub struct LoadBalancerConfig {
     /// component with no live copy is skipped; with none left the call fails with 503.
     #[serde(default)]
     pub spread: Option<Balance>,
+    /// How long this balancer keeps sending to a component copy that has gone down before it notices
+    /// (health-check interval times unhealthy threshold); default 0 = at once. A copy that is down from
+    /// the start of the run is already noticed. An edge's own `detect` wins for its calls.
+    #[serde(default, deserialize_with = "detect_window")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub detect: Option<Duration>,
     /// What a slot of this node covers (default `own`); with `call` it is held until the chosen
     /// component has answered, as a connection-limited proxy does.
     #[serde(default)]

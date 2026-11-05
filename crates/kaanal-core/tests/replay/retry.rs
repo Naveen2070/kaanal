@@ -387,6 +387,7 @@ fn offered_load_follows_the_geometric_series() {
                 &t,
                 &chaos,
                 &ChainRequest {
+                    at: std::time::Duration::ZERO,
                     endpoint: ep.get("GET /users/{id}").unwrap(),
                     n,
                     seed: 7,

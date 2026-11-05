@@ -92,6 +92,7 @@ fn zero_load_matches_live_distribution() {
                     &t,
                     &chaos.compile(),
                     &ChainRequest {
+                        at: std::time::Duration::ZERO,
                         endpoint: e.get(key).unwrap(),
                         n,
                         seed,

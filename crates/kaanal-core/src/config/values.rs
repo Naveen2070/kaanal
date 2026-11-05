@@ -64,6 +64,20 @@ pub(super) fn http_url<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>
 /// **Private.** Longest `timeout:` (the chaos latency cap).
 pub(super) const MAX_CALL_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// **Private.** Longest `detect:` (a health-check interval times its unhealthy threshold).
+pub(super) const MAX_DETECT: Duration = Duration::from_secs(3600);
+
+/// **Private.** `detect`: 0 (notice at once, the default) to 1 h, with a unit like `10s`.
+pub(super) fn detect_window<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+    let v: Duration = humantime_serde::deserialize(d)
+        .map_err(|_| D::Error::custom("detect: use a duration with a unit, like `10s` or `0s`"))?;
+    if v > MAX_DETECT {
+        Err(D::Error::custom("detect must be at most 1h"))
+    } else {
+        Ok(Some(v))
+    }
+}
+
 /// **Private.** `timeout`: above 0 and at most 5 min. A node-level field, so `diagnostics`
 /// places the error at the value.
 pub(super) fn call_timeout<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {

@@ -105,6 +105,7 @@ fn login_and_jwks_equal_live_at_zero_load() {
                     &t,
                     &chaos.compile(),
                     &ChainRequest {
+                        at: std::time::Duration::ZERO,
                         endpoint: e.get(key).unwrap(),
                         n: r.n,
                         seed,

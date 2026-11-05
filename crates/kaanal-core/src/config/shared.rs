@@ -132,6 +132,12 @@ pub struct EdgeConfig {
     /// while. Absent = none; `{}` takes resilience4j's defaults.
     #[serde(default)]
     pub breaker: Option<super::BreakerConfig>,
+    /// How long the caller keeps sending to a copy of the callee that has gone down before it notices
+    /// (health-check interval times unhealthy threshold, step 7d). Absent = the calling balancer's own
+    /// `detect`, else 0 (at once). A copy down from the start of the run is already noticed.
+    #[serde(default, deserialize_with = "detect_window")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub detect: Option<Duration>,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

@@ -294,6 +294,15 @@ impl NodeConfig {
         }
     }
 
+    /// How long a load balancer keeps sending to a downed copy before it notices (`detect:`); zero for
+    /// every other kind and for a balancer that sets none.
+    pub fn detect(&self) -> Duration {
+        match self {
+            NodeConfig::LoadBalancer(n) => n.detect.unwrap_or_default(),
+            _ => Duration::ZERO,
+        }
+    }
+
     /// What a slot of this node covers (`hold:`); only a node that calls others has the field.
     pub fn hold(&self) -> Hold {
         match self {

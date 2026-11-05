@@ -66,8 +66,8 @@ pub use shared::{
 pub use storage::{StorageConfig, StorageFlavor};
 pub use traffic::{JourneyConfig, MAX_DURATION, TrafficConfig, check_profile};
 use values::{
-    MAX_BURST_WINDOW_S, NOT_TEXT, call_timeout, http_url, password_text, positive_rps, ratio,
-    status_5xx, token_ttl, unique_nodes, unique_users,
+    MAX_BURST_WINDOW_S, NOT_TEXT, call_timeout, detect_window, http_url, password_text,
+    positive_rps, ratio, status_5xx, token_ttl, unique_nodes, unique_users,
 };
 
 /// The parsed `kaanal.yaml` file.

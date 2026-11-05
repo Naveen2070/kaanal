@@ -148,6 +148,7 @@ mod tests {
                         &t,
                         &EffectiveChaos::default(),
                         &ChainRequest {
+                            at: std::time::Duration::ZERO,
                             endpoint: ep,
                             n: i,
                             seed: 1,

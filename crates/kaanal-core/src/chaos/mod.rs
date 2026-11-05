@@ -155,6 +155,9 @@ pub struct ChaosLayer {
     pub error_status: Option<u16>,
     /// Hard outage; any layer setting `true` wins.
     pub down: Option<bool>,
+    /// With `down`: the instant of the run (from its start) the outage begins; absent = before the
+    /// run. The earliest across layers (step 7d: a balancer's `detect` counts from it).
+    pub down_from: Option<Duration>,
     /// `true` drops every lower layer's contribution to this key (an override).
     pub replace: Option<bool>,
     /// Link only: random extra latency of up to this much either way on the edge's `net` hop;
@@ -173,6 +176,7 @@ impl From<NodeChaos> for ChaosLayer {
             error_kind: Some(c.error_kind),
             error_status: Some(c.error_status),
             down: Some(c.down),
+            down_from: None,
             replace: None,
             jitter: None,
             bandwidth_cap: None,
@@ -253,6 +257,7 @@ impl ChaosLayer {
             error_kind,
             error_status,
             down,
+            down_from,
             replace,
             jitter,
             bandwidth_cap

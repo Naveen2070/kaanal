@@ -83,6 +83,7 @@ fn run(t: &Topology, e: &Endpoints, key: &str, chaos: &ChaosState) -> ChainOutco
         t,
         &chaos.compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get(key).unwrap(),
             n: 0,
             seed: 1,
@@ -639,6 +640,7 @@ fn draws_follow_the_r1_34_formula() {
         &t,
         &ChaosState::default().compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get("GET /x/{id}").unwrap(),
             n: 3,
             seed: 7,
@@ -687,6 +689,7 @@ fn error_rate_holds_across_seeds() {
                 &t,
                 &c.compile(),
                 &ChainRequest {
+                    at: std::time::Duration::ZERO,
                     endpoint: ep,
                     n: 0,
                     seed,

@@ -25,6 +25,7 @@ fn plan(t: &Topology, e: &kaanal_core::Endpoints, chaos: &ChaosState, resp: u64)
         t,
         &chaos.compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get("GET /users/{id}").unwrap(),
             n: 0,
             seed: 42,
@@ -238,6 +239,7 @@ fn put_plan(
         t,
         &chaos.compile(),
         &ChainRequest {
+            at: std::time::Duration::ZERO,
             endpoint: e.get("GET /users/{id}").unwrap(),
             n: 0,
             seed: 42,

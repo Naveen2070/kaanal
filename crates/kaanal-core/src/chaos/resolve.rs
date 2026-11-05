@@ -28,6 +28,8 @@ pub struct Resolved {
     pub latency_add: Duration,
     /// Hard outage: every visit fails with 503.
     pub down: bool,
+    /// When the outage begins, from the run's start; `None` = before the run (step 7d).
+    pub down_from: Option<Duration>,
     /// Link only: up to this much random extra latency either way on the `net` hop.
     pub jitter: Duration,
     /// Link only: caps the edge's bandwidth (bytes per second).
@@ -41,6 +43,7 @@ impl Resolved {
         Resolved {
             latency_add: Duration::ZERO,
             down: false,
+            down_from: None,
             jitter: Duration::ZERO,
             bandwidth_cap: None,
             faults: [Fault {
@@ -64,10 +67,17 @@ impl Resolved {
         self.faults().last().map_or(0.0, |f| f.upto)
     }
 
-    /// The failure a roll in 0..1 lands on; `down` always fails with 503.
+    /// The failure a roll in 0..1 lands on; `down` always fails with 503. Ignores when the outage
+    /// begins: for callers with no clock (see [`Resolved::hit_at`]).
     #[must_use]
     pub fn hit(&self, roll: f64) -> Option<(ErrorKind, u16)> {
-        if self.down {
+        self.hit_at(roll, Duration::MAX)
+    }
+
+    /// [`Resolved::hit`] at instant `at` of the run: an outage that begins later has not started yet.
+    #[must_use]
+    pub fn hit_at(&self, roll: f64, at: Duration) -> Option<(ErrorKind, u16)> {
+        if self.down && self.down_from.is_none_or(|f| at >= f) {
             return Some((ErrorKind::Status, 503));
         }
         self.faults()
@@ -111,6 +121,12 @@ fn resolve_entries(mut entries: Vec<Entry<'_>>, link: bool) -> Resolved {
             out.bandwidth_cap = Some(out.bandwidth_cap.map_or(c, |o| o.min(c)));
         }
         if l.down == Some(true) {
+            // a `down` is an OR, so the outage begins at the earliest onset (none = before the run)
+            out.down_from = if out.down {
+                out.down_from.zip(l.down_from).map(|(a, b)| a.min(b))
+            } else {
+                l.down_from
+            };
             out.down = true;
         }
         if let Some(r) = l.error_rate
@@ -202,6 +218,20 @@ impl EffectiveChaos {
     pub fn replica_down(&self, node: NodeId, endpoint: &str, replica: u16) -> bool {
         self.visit_replica(node, endpoint, replica)
             .is_some_and(|r| r.down)
+    }
+
+    /// When `replica` of `node` goes down for a visit through `endpoint`: `None` = it is not down,
+    /// `Some(None)` = down before the run, `Some(Some(t))` = down from instant `t` (step 7d).
+    #[must_use]
+    pub fn replica_down_from(
+        &self,
+        node: NodeId,
+        endpoint: &str,
+        replica: u16,
+    ) -> Option<Option<Duration>> {
+        self.visit_replica(node, endpoint, replica)
+            .filter(|r| r.down)
+            .map(|r| r.down_from)
     }
 
     /// The chaos on the link `edge`, if any.

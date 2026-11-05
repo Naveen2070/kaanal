@@ -415,6 +415,10 @@ impl ChainOutcome {
 pub struct ChainRequest<'a> {
     /// The compiled endpoint: key (seed material), op and chain.
     pub endpoint: &'a Endpoint,
+    /// The instant the request arrives, from the start of the run: when a chaos outage that begins mid-run
+    /// (`from_ms`) and a balancer's `detect` are compared with it (step 7d). Zero where there is no clock
+    /// (the live mocks, `execute` tests), which plans exactly as before.
+    pub at: Duration,
     /// This endpoint's request counter: part of the seed, so sequential requests vary.
     pub n: u64,
     /// The chain seed: `seed:` (controlled, and the simulator always) or the startup draw
@@ -660,6 +664,7 @@ fn sample(
         topo,
         chaos,
         ep_key: ep.key.as_str(),
+        at: req.at,
         n: req.n,
         picks: vec![0; topo.nodes.len()],
         routes: vec![0; topo.nodes.len()],
@@ -673,7 +678,7 @@ fn sample(
     };
     let entry = ep.entry_node;
     // The entry node has no calling edge, so its own balance picks its replica.
-    let entry_pick = entry.map_or(Some(0), |e| w.pick(e, None, root));
+    let entry_pick = entry.map_or(Some(0), |e| w.pick(e, None, e, root));
     let er = entry_pick.unwrap_or(0);
     // A pin's delay runs before the root span opens, so no `timeout:` counts it.
     let base = req.pin_delay;

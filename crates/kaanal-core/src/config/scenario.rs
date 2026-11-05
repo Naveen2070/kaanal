@@ -98,6 +98,11 @@ pub struct ChaosEntry {
     /// Hard outage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub down: Option<bool>,
+    /// With `down` on a node or replica: when the outage begins, in milliseconds from the start of the
+    /// run. Absent = down before the run, which a balancer's `detect` has already noticed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minimum" = 0))]
+    pub from_ms: Option<u64>,
 }
 
 /// Parses one `scenarios/NAME.yaml` file (a BOM is stripped).

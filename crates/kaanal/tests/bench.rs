@@ -104,6 +104,7 @@ fn core(rows: &mut Vec<Row>) {
     let endpoint = eps.get("GET /users/{id}").unwrap();
     let chaos = ChaosState::default().compile();
     let req = |n| ChainRequest {
+        at: Duration::ZERO,
         endpoint,
         n,
         seed: 1,
@@ -131,6 +132,7 @@ fn core(rows: &mut Vec<Row>) {
     let eps = compile(&tw, &[spec], EndpointsInput::default()).unwrap();
     let endpoint = eps.get("GET /users/{id}").unwrap();
     let wire_req = |n| ChainRequest {
+        at: Duration::ZERO,
         endpoint,
         n,
         seed: 1,

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub(crate) fn req(ep: &kaanal_core::Endpoint, n: u64, seed: u64, d: Duration) -> ChainRequest<'_> {
     ChainRequest {
+        at: std::time::Duration::ZERO,
         endpoint: ep,
         n,
         seed,

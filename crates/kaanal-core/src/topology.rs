@@ -57,6 +57,9 @@ pub struct Node {
     pub hold: Hold,
     /// How a load balancer picks the component a call goes to; the default for every other kind.
     pub spread: Balance,
+    /// How long a load balancer keeps sending to a downed copy before it notices (step 7d); zero for
+    /// every other kind.
+    pub detect: Duration,
     /// Network card in bytes per second as `(send, receive)`; `None` = unlimited that way. Each
     /// replica has its own pair of pipes.
     pub bandwidth: (Option<u64>, Option<u64>),
@@ -175,6 +178,9 @@ pub struct Edge {
     pub abandon: crate::config::Abandon,
     /// The circuit breaker on this edge (step 7c); `None` = none.
     pub breaker: Option<crate::config::BreakerConfig>,
+    /// How long the caller keeps sending to a downed copy of the callee before it notices (step 7d);
+    /// `None` = the calling balancer's own, else zero.
+    pub detect: Option<Duration>,
 }
 
 /// A validated topology graph.
@@ -505,6 +511,7 @@ impl Topology {
                 balance: n.balance().cloned().unwrap_or_default(),
                 hold: n.hold(),
                 spread: n.spread().cloned().unwrap_or_default(),
+                detect: n.detect(),
                 bandwidth: n.bandwidth(),
                 per_kb: match n {
                     // storage: the size term is 1024 / throughput seconds per KB (RULES 61)
@@ -577,6 +584,7 @@ impl Topology {
                 retry: e.retry.clone(),
                 abandon: e.abandon,
                 breaker: e.breaker,
+                detect: e.detect,
             });
         }
 

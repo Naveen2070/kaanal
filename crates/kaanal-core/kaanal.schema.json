@@ -234,6 +234,15 @@
             "null"
           ]
         },
+        "from_ms": {
+          "description": "With `down` on a node or replica: when the outage begins, in milliseconds from the start of the\nrun. Absent = down before the run, which a balancer's `detect` has already noticed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "jitter_ms": {
           "description": "Edge only: random extra latency of up to this many milliseconds either way.",
           "format": "uint64",
@@ -415,6 +424,12 @@
             "number",
             "null"
           ]
+        },
+        "detect": {
+          "default": null,
+          "description": "How long the caller keeps sending to a copy of the callee that has gone down before it notices\n(health-check interval times unhealthy threshold, step 7d). Absent = the calling balancer's own\n`detect`, else 0 (at once). A copy down from the start of the run is already noticed.",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
         },
         "from": {
           "description": "Name of the calling node.",
@@ -1902,6 +1917,12 @@
                 }
               ],
               "description": "Most calls this node passes at once, as a number (the rest wait without limit) or a map\n`{ limit, queue, overflow_status }`. Absent = unlimited."
+            },
+            "detect": {
+              "default": null,
+              "description": "How long this balancer keeps sending to a component copy that has gone down before it notices\n(health-check interval times unhealthy threshold); default 0 = at once. A copy that is down from\nthe start of the run is already noticed. An edge's own `detect` wins for its calls.",
+              "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+              "type": "string"
             },
             "hold": {
               "anyOf": [

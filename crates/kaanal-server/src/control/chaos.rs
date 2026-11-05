@@ -114,6 +114,7 @@ impl ChaosPatch {
             error_kind,
             error_status: self.error_status,
             down: self.down,
+            down_from: None,
             jitter: self.jitter_ms.map(Duration::from_millis),
             bandwidth_cap: self.bandwidth_cap,
             replace: parse_mode(self.mode.as_deref())?,
