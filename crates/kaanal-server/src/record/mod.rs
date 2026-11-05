@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use kaanal_core::{
     ChainResult, EffectiveChaos, ErrorKind, FailCause, FailKind, Finished, FinishedHop, HANG_CAP,
-    HopKind, Plan, PlanItem, Topology,
+    HopKind, Plan, PlanItem, Resolved, Topology,
 };
 
 use crate::log::{ChainErrorRec, HopRec, LogEntry, MAX_HOPS, MAX_TRACE};
@@ -95,6 +95,7 @@ pub fn trace_parts(
                 let d = fmt_ms(h.dur);
                 pieces.push(Piece::Hop(match h.kind {
                     HopKind::Net => format!("net={d}"),
+                    HopKind::Connect { resp } => format!("{}={d}", connect_name(resp)),
                     HopKind::Proc => format!("{}.proc={d}", at(h.node, h.replica)),
                     HopKind::Op(op) => format!("{}.{}={d}", at(h.node, h.replica), op.name()),
                     HopKind::CacheHit => format!("{}.hit={d}", at(h.node, h.replica)),
@@ -285,6 +286,12 @@ fn link_name(resp: bool) -> &'static str {
     if resp { "link-resp" } else { "link" }
 }
 
+/// **Private.** The trace and log name of a connection set-up hop: the handshake and the request's
+/// slow start, or the response's slow start.
+fn connect_name(resp: bool) -> &'static str {
+    if resp { "connect-resp" } else { "connect" }
+}
+
 fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
@@ -404,6 +411,23 @@ pub fn build_entry(f: Facts, a: &Answer, run: &Run, trace: String) -> LogEntry {
     }
 }
 
+/// **Private.** The chaos that applies to a hop of `kind` at `(node, replica)`: a fault delay takes
+/// the endpoint's, a node's own hop the node's, and a wire, card or connection hop none.
+fn hop_chaos<'a>(
+    run: &'a Run,
+    key: &str,
+    kind: HopKind,
+    (node, replica): (usize, u16),
+) -> Option<&'a Resolved> {
+    match kind {
+        HopKind::Delay => run.chaos.endpoint(key),
+        HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss => {
+            run.chaos.visit_replica(node, key, replica)
+        }
+        HopKind::Net | HopKind::Connect { .. } | HopKind::Link { .. } | HopKind::Nic { .. } => None,
+    }
+}
+
 /// **Private.** The structured hops (at most [`MAX_HOPS`]), whether more existed, and whether any
 /// hop carried injected delay or a hanging cache lookup (a fault the request survived).
 fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
@@ -445,13 +469,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                     why.push("pin delay".into());
                     delayed = true;
                 } else if !hang && !run.chaos.is_empty() {
-                    let c = match h.kind {
-                        HopKind::Delay => run.chaos.endpoint(key),
-                        HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss => {
-                            run.chaos.visit_replica(h.node, key, h.replica)
-                        }
-                        HopKind::Net | HopKind::Link { .. } | HopKind::Nic { .. } => None,
-                    };
+                    let c = hop_chaos(run, key, h.kind, (h.node, h.replica));
                     // A cache lookup never emits a `Fail`: a hang is a hop charged the node's
                     // `timeout` (else HANG_CAP) with no latency, and a slow lookup is cut to the
                     // `timeout`. The request still succeeds (Z17) but a fault was injected (FI);
@@ -543,6 +561,7 @@ mod link;
 fn kind_str(kind: HopKind) -> &'static str {
     match kind {
         HopKind::Net => "net",
+        HopKind::Connect { resp } => connect_name(resp),
         HopKind::Proc => "proc",
         HopKind::Op(_) => "op",
         HopKind::CacheHit => "hit",

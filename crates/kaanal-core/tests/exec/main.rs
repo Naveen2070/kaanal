@@ -4,6 +4,7 @@ mod balance;
 mod balancer;
 mod basic;
 mod common;
+mod conn;
 mod deadlines;
 mod dynamic;
 mod endpoint;

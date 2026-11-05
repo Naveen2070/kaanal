@@ -9,6 +9,7 @@
 //! (R1.34), so editing one step never changes another step's draws. Pure: no sleeping, no
 //! IO; live mode sleeps [`ChainOutcome::total`], the simulator advances virtual time (R2.5).
 
+mod conn;
 mod link;
 mod route;
 mod walk;
@@ -78,6 +79,13 @@ pub enum HopKind {
     CacheMiss,
     /// A fault-injection delay before the entry node: holds no slot and no rate-limit token.
     Delay,
+    /// A new connection's set-up (RULES 68): the TCP and TLS round trips and the slow-start stalls
+    /// of the request body (`resp` false, before the callee), or of the response body (`resp`
+    /// true, after it). A pure delay like `Net`; it belongs to the edge's target.
+    Connect {
+        /// False for the handshake and the request's stalls, true for the response's stalls.
+        resp: bool,
+    },
     /// A payload crossing a bandwidth-limited edge (`resp`: the response direction). It belongs
     /// to the edge's target and shares the edge's rate with other transfers on it.
     Link {
@@ -95,6 +103,17 @@ pub enum HopKind {
         /// False for the request body, true for the response body.
         resp: bool,
     },
+}
+
+impl HopKind {
+    /// Whether the hop is only time passing (a wire delay, a fault delay, a connection set-up): it
+    /// holds no slot, no pipe and no token.
+    pub fn is_wait(self) -> bool {
+        matches!(
+            self,
+            HopKind::Net | HopKind::Delay | HopKind::Connect { .. }
+        )
+    }
 }
 
 /// A pipe a transfer crosses (RULES 62): the edge's wire, or the send or receive pipe of one copy

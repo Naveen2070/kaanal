@@ -101,3 +101,35 @@ export const setHeaderBytes = (
   path: ["header_bytes"],
   value: { ...headerBytesOf(doc), [side]: Math.round(bytes) },
 });
+
+/** The TLS a new connection over the wire negotiates (RULES 68): none, 1.3 (one extra round trip) or 1.2 (two). */
+export type TlsChoice = "off" | "1.3" | "1.2";
+export const TLS_CHOICES: readonly { value: TlsChoice; label: string }[] = [
+  { value: "off", label: "None (plain TCP)" },
+  { value: "1.3", label: "TLS 1.3" },
+  { value: "1.2", label: "TLS 1.2" },
+];
+
+/** What the file's `tls` means: `true` and 1.3 are 1.3; anything the loader would refuse reads as none. */
+export function tlsOf(e: EdgeDoc): TlsChoice {
+  const v = e.tls;
+  if (v === true || v === 1.3 || v === "1.3") return "1.3";
+  if (v === 1.2 || v === "1.2") return "1.2";
+  return "off";
+}
+/** Off removes the key (the default); a version writes the number. */
+export const setTls = (i: number, e: EdgeDoc, c: TlsChoice): Op[] =>
+  c === "off"
+    ? "tls" in e
+      ? [{ op: "remove", path: ["edges", i, "tls"] }]
+      : []
+    : [put(i, "tls", e, c === "1.3" ? 1.3 : 1.2)];
+
+/** Calls a keep-alive connection serves before it closes: the loader's range and its default. */
+export const KEEPALIVE = { min: 1, max: 1_000_000, default: 1000 } as const;
+/** The file's `keepalive`, or null when it is not written (the default of 1000 applies). */
+export const keepaliveOf = (e: EdgeDoc): number | null =>
+  typeof e.keepalive === "number" && Number.isInteger(e.keepalive) ? e.keepalive : null;
+export const setKeepalive = (i: number, e: EdgeDoc, n: number): Op => put(i, "keepalive", e, n);
+export const clearKeepalive = (i: number, e: EdgeDoc): Op[] =>
+  "keepalive" in e ? [{ op: "remove", path: ["edges", i, "keepalive"] }] : [];

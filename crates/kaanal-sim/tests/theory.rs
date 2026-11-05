@@ -410,3 +410,46 @@ fn round_robin_waits_less_than_random_at_the_same_load() {
     eprintln!("random {random:.6} s, round-robin {round_robin:.6} s");
     assert!(round_robin < random * 0.85, "{round_robin} vs {random}");
 }
+
+#[test]
+fn a_new_connection_costs_the_published_round_trips_and_keepalive_makes_it_rare() {
+    // RULES 68. At 5 req/s nothing queues, so each request's latency is its hops added up. `net` is
+    // 5 ms, a round trip: a new TLS 1.3 connection pays TCP's one and TLS's one (RFC 9293, RFC 8446)
+    // before the 5 ms of the call itself, 15 ms in all, every time with `keepalive: 1`.
+    let yaml = |edge: &str| {
+        topo(&format!(
+            "version: 1\nheader_bytes: 0\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service }}\nedges:\n  - {{ from: gw, to: app, net: 5ms{edge} }}\n"
+        ))
+    };
+    let t = yaml(", keepalive: 1, tls: 1.3");
+    let rep = sim(&t, 5.0, 2000.0);
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| r.latency == Duration::from_millis(15)),
+        "every call on a new connection takes 15 ms"
+    );
+    // with the default keepalive (1000) one call in 1000 opens a connection: the mean latency
+    // exceeds the bare 5 ms by 5 ms x (1/1000) for plain TCP (a few sigma of the binomial)
+    let t = yaml("");
+    let rep = sim(&t, 1000.0, 400_000.0);
+    let count = |n: usize| f64::from(u32::try_from(n).unwrap());
+    let opened = count(
+        rep.requests
+            .iter()
+            .filter(|r| r.latency > Duration::from_millis(5))
+            .count(),
+    );
+    let n = count(rep.requests.len());
+    let (p, sigma) = (1.0 / 1000.0, (n * 0.001 * 0.999).sqrt());
+    assert!(
+        (opened - n * p).abs() < 5.0 * sigma,
+        "{opened} of {n} opened a connection; theory {} +- {sigma:.1}",
+        n * p
+    );
+    assert!(
+        rep.requests
+            .iter()
+            .all(|r| r.latency <= Duration::from_millis(10))
+    );
+}

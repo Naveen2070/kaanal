@@ -4,6 +4,7 @@
 // patch of the draft; the auto re-run follows.
 
 import { ArrowRight } from "lucide-react";
+import { useId } from "react";
 import { useFeed } from "../../canvas/feed";
 import { whyWireRed } from "../../canvas/insights";
 import { removeWires } from "../../canvas/wires";
@@ -18,15 +19,23 @@ import {
   callsOf,
   clearBandwidth,
   clearBody,
+  clearKeepalive,
   EDGE_LIMITS,
+  KEEPALIVE,
+  keepaliveOf,
   netMsOf,
   setBandwidth,
   setBody,
   setCalls,
+  setKeepalive,
   setNet,
   setShare,
+  setTls,
   shareApplies,
   shareOf,
+  TLS_CHOICES,
+  tlsOf,
+  type TlsChoice,
 } from "./edgeFields";
 import { BYTE_SIZE_UNITS, RATE_UNITS, rateText, TIME_UNITS } from "./units";
 
@@ -36,6 +45,7 @@ const callee = (doc: Doc | null | undefined, e: EdgeDoc): NodeDoc | undefined =>
 export function EdgeControls({ index }: { index: number }) {
   const doc = useDraft((s) => s.view?.doc);
   const patch = useDraft((s) => s.patch);
+  const tlsId = useId();
   const feed = useFeed();
   const e = doc?.edges?.[index];
   if (!e) return null;
@@ -136,6 +146,50 @@ export function EdgeControls({ index }: { index: number }) {
             ) : null}
           </div>
         ))}
+      </Section>
+
+      <Section title="Connection">
+        <div className="mb-2">
+          <label htmlFor={tlsId} className="block text-sm font-medium">
+            Secure connection
+          </label>
+          <select
+            id={tlsId}
+            value={tlsOf(e)}
+            aria-describedby={`${tlsId}-hint`}
+            onChange={(ev) => void patch(setTls(index, e, ev.currentTarget.value as TlsChoice))}
+            className="h-7 rounded border border-control bg-sheet px-1 text-text"
+          >
+            {TLS_CHOICES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <p id={`${tlsId}-hint`} className="text-xs text-muted">
+            A new connection pays one round trip for TCP, one more for TLS 1.3 or two for TLS 1.2. A
+            round trip is this wire's latency, so a wire with no latency adds nothing.
+          </p>
+        </div>
+        <NumberField
+          label="Calls per connection"
+          hint="How many calls one connection serves before it closes. One call in this many opens a new connection (handshake and slow start); 1 opens one every call."
+          value={keepaliveOf(e)}
+          placeholder={`${KEEPALIVE.default} (default)`}
+          min={KEEPALIVE.min}
+          max={KEEPALIVE.max}
+          integer
+          onCommit={(n) => patch([setKeepalive(index, e, n)])}
+        />
+        {"keepalive" in e ? (
+          <button
+            type="button"
+            onClick={() => void patch(clearKeepalive(index, e))}
+            className="mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            Back to the default
+          </button>
+        ) : null}
       </Section>
 
       <Section title="How often it is used">

@@ -65,13 +65,21 @@ impl Walk<'_> {
                 self.close_span(span);
                 return Some(fail);
             }
+            let net = self.net_sample(call.node, &call.net, rep_path, lc);
+            let fresh = self.opens_connection(edge, net, call.node, rep_path);
+            if let Some(conn) = fresh {
+                *now += self.connect_request(conn, net, edge, (run.0, (call.node, r)), *now, cap);
+            }
             *now += self.link(edge, (run, (call.node, r)), false, *now, cap);
-            *now += self.net(call.node, &call.net, rep_path, (*now, r), lc);
+            *now += self.net_hop(call.node, net, (*now, r));
             let hold = self.open_hold(call.node, r);
             let flow = self.seq(&call.body, rep_path, op, *now, (call.node, r));
             self.close_hold(hold);
             if let Flow::Done(end) | Flow::Hit(end) = flow {
                 *now = end + self.link(edge, ((call.node, r), run), true, end, cap);
+                if fresh.is_some() {
+                    *now += self.connect_response(net, edge, (run.0, (call.node, r)), *now, cap);
+                }
             }
             self.close_span(span);
             match flow {

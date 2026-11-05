@@ -78,8 +78,13 @@ fn error_rate_one_always_fails_at_that_node() {
                 retry_after: None
             }
         );
+        // a set-up hop (1 call in 1000 opens a connection, RULES 68) is not a chain hop
+        let chain_hops = out
+            .hops
+            .iter()
+            .filter(|h| !matches!(h.kind, HopKind::Connect { .. }));
         assert_eq!(
-            out.hops.len(),
+            chain_hops.count(),
             4,
             "time spent before the failing node still counts"
         );

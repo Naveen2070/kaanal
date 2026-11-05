@@ -64,6 +64,8 @@ fn ms(d: std::time::Duration) -> f64 {
 fn hop_label(k: HopKind) -> &'static str {
     match k {
         HopKind::Net => "net",
+        HopKind::Connect { resp: false } => "connect",
+        HopKind::Connect { resp: true } => "connect response",
         HopKind::Proc => "proc",
         HopKind::Op(_) => "op",
         HopKind::CacheHit => "cache hit",

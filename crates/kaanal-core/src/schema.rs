@@ -96,6 +96,17 @@ pub(crate) fn size_value(_: &mut SchemaGenerator) -> Schema {
     )
 }
 
+/// **Private.** Schema of an edge's `tls`: `false`, `true`, or the version `1.3` or `1.2`.
+pub(crate) fn tls(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "TLS a new connection negotiates after TCP: `false` (default), `true` or `1.3` (one extra round trip), `1.2` (two).",
+        "anyOf": [
+            { "type": "boolean" },
+            { "type": "number", "enum": [1.2, 1.3] },
+        ]
+    })
+}
+
 /// **Private.** Schema of a `claims` map: names to strings, numbers or booleans (at most 32),
 /// for `#[schemars(schema_with = "crate::schema::claims")]`. The load rules are in `config`.
 pub(crate) fn claims(_: &mut SchemaGenerator) -> Schema {

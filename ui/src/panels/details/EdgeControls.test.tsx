@@ -236,3 +236,54 @@ test("a_size_that_is_set_can_be_removed_to_go_back_to_passed_on", async () => {
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "returns"] }] });
 });
+
+test("secure_connection_writes_a_tls_version_and_none_removes_the_key", async () => {
+  await show(1);
+  const select = screen.getByLabelText("Secure connection") as HTMLSelectElement;
+  expect(select.value).toBe("off");
+  expect([...select.options].map((o) => o.value)).toEqual(["off", "1.3", "1.2"]);
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(select, { target: { value: "1.2" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["edges", 1, "tls"], value: 1.2 }],
+  });
+});
+
+test("tls_true_and_1_3_both_read_as_tls_1_3_and_none_removes_the_key", async () => {
+  await show(0, view({ edges: [{ from: "app", to: "db", tls: true }] }));
+  const select = screen.getByLabelText("Secure connection") as HTMLSelectElement;
+  expect(select.value).toBe("1.3");
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(select, { target: { value: "off" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "tls"] }] });
+});
+
+test("calls_per_connection_shows_the_default_as_a_placeholder_and_is_a_whole_number", async () => {
+  await show(1);
+  const box = screen.getByLabelText("Calls per connection") as HTMLInputElement;
+  expect(box.value).toBe("");
+  expect(box.placeholder).toBe("1000 (default)");
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.change(box, { target: { value: "1.5" } });
+  fireEvent.blur(box);
+  fireEvent.change(box, { target: { value: "0" } });
+  fireEvent.blur(box);
+  expect(sent).toHaveLength(0); // not whole, then below 1: never sent
+  fireEvent.change(box, { target: { value: "50" } });
+  fireEvent.blur(box);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["edges", 1, "keepalive"], value: 50 }],
+  });
+});
+
+test("a_keepalive_that_is_set_can_go_back_to_the_default", async () => {
+  await show(0, view({ edges: [{ from: "app", to: "db", keepalive: 1 }] }));
+  expect((screen.getByLabelText("Calls per connection") as HTMLInputElement).value).toBe("1");
+  const sent = mockFetch([{ json: view() }]);
+  fireEvent.click(screen.getByText("Back to the default"));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "keepalive"] }] });
+});

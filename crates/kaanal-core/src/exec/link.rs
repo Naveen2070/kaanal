@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use rand::Rng;
 
+use super::conn;
 use super::walk::{Walk, draw_rng};
 use super::{Hop, HopKind, Pipe, PlanItem, Xfer, hang_cap};
 use crate::chaos::{ErrorKind, FailKind, Resolved};
+use crate::config::Conn;
 use crate::topology::{EdgeId, NodeId};
 
 /// **Private.** Longest single payload cost (a transfer or a `per_kb` surcharge): 10 h, like a
@@ -100,6 +102,107 @@ impl Walk<'_> {
             node,
             replica,
             kind,
+            start,
+            dur,
+        }));
+        dur
+    }
+
+    /// **Private.** Whether this call opens a new connection (RULES 68): one call in the edge's
+    /// `keepalive` does, drawn uniformly from the call's own stream (tag `conn`, none when every
+    /// call does). A call with no round trip (`net` zero, or no edge) pays no set-up, so it makes no
+    /// draw either. Returns the edge's [`Conn`] when it does.
+    pub(super) fn opens_connection(
+        &self,
+        edge: Option<EdgeId>,
+        net: Duration,
+        to: NodeId,
+        path: u64,
+    ) -> Option<Conn> {
+        if net.is_zero() {
+            return None;
+        }
+        let conn = self.topo.edges[edge?].conn;
+        let new = conn.keepalive == 1
+            || draw_rng(path, &self.topo.nodes[to].name, b"conn").random_range(0..conn.keepalive)
+                == 0;
+        new.then_some(conn)
+    }
+
+    /// **Private.** The rate of the narrowest pipe a body takes from `from` to `to` over `edge`
+    /// (the wire with any chaos cap, the sender's send pipe, the receiver's receive pipe); `None`
+    /// when no pipe has a rate.
+    fn path_rate(
+        &self,
+        edge: Option<EdgeId>,
+        (from, to): (NodeId, NodeId),
+        cap: Option<u64>,
+    ) -> Option<u64> {
+        let wire = edge
+            .and_then(|e| self.topo.edges[e].bandwidth)
+            .map(|bw| cap.map_or(bw, |c| c.min(bw)).max(1));
+        [
+            wire,
+            self.topo.nodes[from].bandwidth.0,
+            self.topo.nodes[to].bandwidth.1,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    /// **Private.** The set-up of a new connection before the callee `(node, replica)` runs, as one
+    /// `Connect` hop: the handshake round trips (TCP, then TLS) plus the slow-start stalls of the
+    /// request body, each one `net` (the call's round trip). Returns its length (zero pushes
+    /// nothing).
+    pub(super) fn connect_request(
+        &mut self,
+        conn: Conn,
+        net: Duration,
+        edge: Option<EdgeId>,
+        (run, (node, replica)): (NodeId, (NodeId, u16)),
+        start: Duration,
+        cap: Option<u64>,
+    ) -> Duration {
+        let bytes = self.bytes.0.saturating_add(self.topo.header_bytes.0);
+        let rate = self.path_rate(edge, (run, node), cap);
+        let rtts = conn::handshake_rtts(conn.tls) + conn::stalls(bytes, rate, net);
+        self.push_connect(false, net, rtts, (node, replica), start)
+    }
+
+    /// **Private.** The slow-start stalls of the response body on a new connection, as a `Connect`
+    /// hop after the callee; zero (and no hop) when the response fits the first window.
+    pub(super) fn connect_response(
+        &mut self,
+        net: Duration,
+        edge: Option<EdgeId>,
+        (run, (node, replica)): (NodeId, (NodeId, u16)),
+        start: Duration,
+        cap: Option<u64>,
+    ) -> Duration {
+        let bytes = self.bytes.1.saturating_add(self.topo.header_bytes.1);
+        let rate = self.path_rate(edge, (node, run), cap);
+        let rtts = conn::stalls(bytes, rate, net);
+        self.push_connect(true, net, rtts, (node, replica), start)
+    }
+
+    /// **Private.** `rtts` round trips of `net` as a `Connect` hop, capped like a transfer.
+    fn push_connect(
+        &mut self,
+        resp: bool,
+        net: Duration,
+        rtts: u32,
+        (node, replica): (NodeId, u16),
+        start: Duration,
+    ) -> Duration {
+        let dur = net.saturating_mul(rtts).min(MAX_HOP);
+        if dur.is_zero() {
+            return dur;
+        }
+        self.items.push(PlanItem::Hop(Hop {
+            node,
+            replica,
+            kind: HopKind::Connect { resp },
             start,
             dur,
         }));

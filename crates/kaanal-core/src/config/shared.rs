@@ -83,6 +83,21 @@ pub struct EdgeConfig {
     #[serde(default, deserialize_with = "crate::units::returns")]
     #[schemars(schema_with = "crate::schema::size")]
     pub returns: Option<u64>,
+    /// TLS a new connection over this edge negotiates after TCP: `false` (default), `true` or
+    /// `1.3` (one extra round trip) or `1.2` (two). Costs nothing on a reused connection, and
+    /// nothing when the edge has no `net` (the round trip is its latency).
+    #[serde(default)]
+    #[schemars(schema_with = "crate::schema::tls")]
+    pub tls: super::Tls,
+    /// Calls a connection serves before it closes (keep-alive), 1 to 1000000, default 1000 (nginx's
+    /// `keepalive_requests`). One call in `keepalive` opens a new connection and pays the TCP (and
+    /// TLS) handshake and slow start; `1` is a new connection every call.
+    #[serde(
+        default = "super::conn::default_keepalive",
+        deserialize_with = "super::conn::keepalive"
+    )]
+    #[schemars(extend("minimum" = 1, "maximum" = 1_000_000))]
+    pub keepalive: u32,
 }
 
 /// A duration in YAML: `5ms` (fixed), `{ p50: 4ms, p99: 20ms }` (lognormal fitted to both) or `{ mean: 5ms }` (exponential).

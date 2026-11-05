@@ -5,9 +5,7 @@
 )]
 
 use crate::common::*;
-use kaanal_core::{
-    ChainResult, ChaosKey, ChaosLayer, ChaosState, FailKind, Hop, HopKind, PlanItem,
-};
+use kaanal_core::{ChainResult, ChaosKey, ChaosLayer, ChaosState, FailKind, Hop, PlanItem};
 use std::time::Duration;
 
 const KEY: &str = "GET /users/{id}";
@@ -44,7 +42,7 @@ fn db_hops(
         .items
         .into_iter()
         .filter_map(|i| match i {
-            PlanItem::Hop(h) if h.node == db && h.kind != HopKind::Net => Some(h),
+            PlanItem::Hop(h) if h.node == db && !h.kind.is_wait() => Some(h),
             _ => None,
         })
         .collect()

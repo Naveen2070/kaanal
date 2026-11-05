@@ -161,6 +161,8 @@ pub struct Edge {
     pub sends: Option<u64>,
     /// Response body size a call over this edge brings back; `None` = pass the incoming size on.
     pub returns: Option<u64>,
+    /// TLS and keep-alive of the connections this edge's calls ride (RULES 68).
+    pub conn: crate::config::Conn,
 }
 
 /// A validated topology graph.
@@ -553,6 +555,10 @@ impl Topology {
                 bandwidth: e.bandwidth,
                 sends: e.sends,
                 returns: e.returns,
+                conn: crate::config::Conn {
+                    tls: e.tls,
+                    keepalive: e.keepalive,
+                },
             });
         }
 

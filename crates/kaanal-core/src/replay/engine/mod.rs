@@ -16,7 +16,7 @@ use std::time::Duration;
 use super::bucket::Bucket;
 use super::gate::{Admit, Gate};
 use crate::chaos::FailKind;
-use crate::exec::{ChainResult, Hop, HopKind, PickKind, Plan, PlanItem};
+use crate::exec::{ChainResult, Hop, PickKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
 mod dispatch;
 mod finish;
@@ -309,10 +309,7 @@ impl Engine {
                 let skip = match &item {
                     PlanItem::Span { .. } | PlanItem::Hold { .. } | PlanItem::Pick { .. } => true,
                     PlanItem::Hop(h) => {
-                        h.dur.is_zero()
-                            && (h.kind == HopKind::Net
-                                || h.kind == HopKind::Delay
-                                || self.units.unconstrained(h))
+                        h.dur.is_zero() && (h.kind.is_wait() || self.units.unconstrained(h))
                     }
                     _ => false,
                 };
@@ -440,7 +437,7 @@ impl Engine {
             let req = live(&mut self.reqs, r);
             (req.tokens[k].at, req.arrival >= self.warmup)
         };
-        if h.kind == HopKind::Net || h.kind == HopKind::Delay {
+        if h.kind.is_wait() {
             let req = live(&mut self.reqs, r);
             req.tokens[k].last_own = None;
             req.busy += 1;
@@ -544,13 +541,8 @@ impl Engine {
             };
             (self.units.target(h), h.kind)
         };
-        let held =
-            kind != HopKind::Net && kind != HopKind::Delay && self.holds_unit(r, k, node, rep);
-        if kind != HopKind::Net
-            && kind != HopKind::Delay
-            && !held
-            && self.units.state(node, rep).gate.is_some()
-        {
+        let held = !kind.is_wait() && self.holds_unit(r, k, node, rep);
+        if !kind.is_wait() && !held && self.units.state(node, rep).gate.is_some() {
             self.mark(node, now);
             // FIFO hand-over at this instant: the slot never looks free to a later arrival.
             let next = self

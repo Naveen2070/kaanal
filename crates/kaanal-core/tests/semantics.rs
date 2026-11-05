@@ -105,6 +105,7 @@ fn timeline(t: &Topology, o: &ChainOutcome) -> Vec<String> {
                 HopKind::CacheHit => "hit",
                 HopKind::CacheMiss => "miss",
                 HopKind::Delay => "delay",
+                HopKind::Connect { .. } => "connect",
                 HopKind::Link { .. } => "link",
                 HopKind::Nic { .. } => "nic",
             };

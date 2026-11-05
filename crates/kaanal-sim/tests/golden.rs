@@ -84,13 +84,15 @@ const FORKED: &str = "version: 1\nnodes:\n  app: { type: service }\n  a: { type:
 const TIES: &str = "version: 1\nnodes:\n  app: { type: service }\n  p: { type: external-api, proc: 1ms }\n  q: { type: external-api, proc: 2ms }\n  s: { type: external-api }\n  a: { type: external-api }\nedges:\n  - { from: app, to: p }\n  - { from: app, to: q }\n  - { from: app, to: s }\n  - { from: app, to: a }\nendpoints:\n  \"GET /x\": { chain: [ { parallel: [ [ p, p, s ], [ q, a ] ] } ] }\n";
 const LOGIN: &str = "version: 1\nnodes:\n  gw: { type: gateway }\n  login: { type: auth, concurrency: 1, proc: { mean: 10ms } }\n  users: { type: database, flavor: postgres }\nedges:\n  - { from: gw, to: login }\n  - { from: login, to: users }\n";
 
-/// (name, hash recorded from the pre-move simulator).
+/// (name, hash recorded from the pre-move simulator). `tandem` and `chains` were re-recorded for
+/// step 6b (RULES 68): their edges have a `net`, so about 1 call in 1000 now opens a connection and
+/// pays its handshake. Checked: with the default keep-alive at 1,000,000 both hashes are the old ones.
 const GOLDEN: [(&str, u64); 6] = [
     ("queued", 10_122_474_828_312_530_245),
-    ("tandem", 5_877_994_622_758_661_944),
+    ("tandem", 187_513_312_029_472_560),
     ("forked", 11_009_132_828_405_713_776),
     ("ties", 12_536_427_626_783_952_910),
-    ("chains", 4_441_420_710_520_412_783),
+    ("chains", 1_402_007_245_853_917_768),
     ("login", 4_973_649_437_012_228_117),
 ];
 

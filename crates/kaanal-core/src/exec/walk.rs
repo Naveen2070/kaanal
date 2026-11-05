@@ -317,12 +317,22 @@ impl Walk<'_> {
                             now += self.cache_miss_on_drop(k, cache.node, (now, r));
                             continue;
                         }
+                        let net = self.net_sample(cache.node, &cache.net, rep_path, lc);
+                        let fresh = self.opens_connection(edge, net, cache.node, rep_path);
+                        if let Some(conn) = fresh {
+                            let at = (run.0, (cache.node, r));
+                            now += self.connect_request(conn, net, edge, at, now, cap);
+                        }
                         now += self.link(edge, (run, (cache.node, r)), false, now, cap);
-                        now += self.net(cache.node, &cache.net, rep_path, (now, r), lc);
+                        now += self.net_hop(cache.node, net, (now, r));
                         let (hit, dur) = self.lookup(cache.node, rep_path, now, r);
                         now += dur;
                         if hit {
                             now += self.link(edge, ((cache.node, r), run), true, now, cap);
+                            if fresh.is_some() {
+                                let at = (run.0, (cache.node, r));
+                                now += self.connect_response(net, edge, at, now, cap);
+                            }
                             return Flow::Hit(now);
                         }
                     }
@@ -385,17 +395,25 @@ impl Walk<'_> {
         }
     }
 
-    /// **Private.** An edge's latency as a `Net` hop, with the link's chaos (extra latency, jitter) on it.
-    pub(super) fn net(
-        &mut self,
+    /// **Private.** One draw of an edge's latency, with the link's chaos (extra latency, jitter) on it.
+    pub(super) fn net_sample(
+        &self,
         to: NodeId,
         d: &Dist,
         path: u64,
-        (start, replica): (Duration, u16),
         lc: Option<&Resolved>,
     ) -> Duration {
         let dur = d.sample(&mut draw_rng(path, &self.topo.nodes[to].name, b"net"));
-        let dur = self.shake(dur, lc, path, to);
+        self.shake(dur, lc, path, to)
+    }
+
+    /// **Private.** An edge's latency `dur` (from [`Walk::net_sample`]) as a `Net` hop.
+    pub(super) fn net_hop(
+        &mut self,
+        to: NodeId,
+        dur: Duration,
+        (start, replica): (Duration, u16),
+    ) -> Duration {
         self.items.push(PlanItem::Hop(Hop {
             node: to,
             replica,

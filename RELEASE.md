@@ -7,6 +7,13 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## How a new connection is costed
+
+An edge with a `net` (its round trip) opens a new connection for 1 call in `keepalive` (default 1000); that call
+pays the TCP handshake (1 round trip), TLS if `tls` is set (1 for 1.3, 2 for 1.2), and TCP slow start for a body
+that does not fit the first 14,600 B window. Reused connections pay nothing. An edge without `net` pays nothing.
+Existing files with a `net` therefore move by about 1 call in 1000; set `keepalive: 1000000` to leave it out.
+
 ## How body sizes are costed
 
 Sizes only matter when a topology has a `bandwidth` (on an edge or a node), a `per_kb`, or a storage `throughput`.
