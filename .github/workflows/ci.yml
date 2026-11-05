@@ -12,10 +12,11 @@ permissions:
   contents: read
 
 # One run per branch or pull request: a newer push cancels the older run, so only the latest commit is
-# tested. Pushes to main are never cancelled (the benchmark baseline comes from main's push runs).
+# tested. That includes main: the benchmark baseline is the newest of main's last ten push runs that
+# left one (see the bench job), so a cancelled run only means the next push becomes the baseline.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -89,6 +90,10 @@ jobs:
     name: Benchmarks (report only)
     needs: lint
     runs-on: ubuntu-latest
+    # the suite runs three times (the core, simulator, data, server and wire rows: every row of
+    # crates/kaanal/tests/bench.rs is reported, a new row needs no change here); a hang must not hold
+    # the runner for the default six hours
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: read

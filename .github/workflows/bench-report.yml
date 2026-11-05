@@ -16,14 +16,19 @@ on:
         required: false
         default: ""
 
+# The newest run wins: starting another cancels one still going. Nothing is lost, because the history
+# artifact is only written at the very end of a run that finished.
 concurrency:
   group: bench-report
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   bench:
     name: Benchmark history
     runs-on: ubuntu-latest
+    # every row of crates/kaanal/tests/bench.rs is run (5 suite runs by default); a hang must not hold
+    # the runner for the default six hours
+    timeout-minutes: 150
     permissions:
       contents: read
       actions: read

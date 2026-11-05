@@ -125,6 +125,26 @@ fn core(rows: &mut Vec<Row>) {
             black_box(sample_plan(&t, &chaos, &req(n)));
         }),
     ));
+    // the same sampler with every wire feature on and a body to carry (see SIM_WIRE_YAML)
+    let tw = Topology::build(&Config::from_yaml(SIM_WIRE_YAML).unwrap()).unwrap();
+    let spec = RouteSpec::inferred("GET /users/{id}", tw.id("app").unwrap());
+    let eps = compile(&tw, &[spec], EndpointsInput::default()).unwrap();
+    let endpoint = eps.get("GET /users/{id}").unwrap();
+    let wire_req = |n| ChainRequest {
+        endpoint,
+        n,
+        seed: 1,
+        pin_delay: Duration::ZERO,
+        req_bytes: 2_000,
+        resp_bytes: 10_000,
+    };
+    rows.push(row(
+        "core/sample_plan_wire",
+        "ns/op",
+        per_op(200_000, |n| {
+            black_box(sample_plan(&tw, &chaos, &wire_req(n)));
+        }),
+    ));
 }
 
 /// A rated variant of [`SIM_YAML`]: a 25 MB/s wire into `app`, a 25 MB/s card on `app` and 12 kB of
@@ -140,6 +160,20 @@ edges:
   - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }
 ";
 
+/// [`SIM_RATED_YAML`] with every wire feature on (steps 6b to 6d, RULES 68 to 76), so a regression in
+/// any of them shows in CI: new connections with TLS 1.3 (1 call in 20 opens one), packet loss, a
+/// compressed response, and a store read that streams over a rated wire. The rows it makes are the
+/// `_wire` ones; the default topologies above guard the path with all of it off.
+const SIM_WIRE_YAML: &str = "version: 1
+nodes:
+  gw: { type: gateway, proc: { p50: 1ms, p99: 3ms } }
+  app: { type: service, concurrency: 4, proc: { mean: 2ms }, bandwidth: 25000000 }
+  files: { type: storage, first_byte: 5ms, throughput: 100MB/s, concurrency: 8 }
+edges:
+  - { from: gw, to: app, net: 1ms, bandwidth: 25000000, tls: 1.3, keepalive: 20, loss: 0.001, compress: 0.5 }
+  - { from: app, to: files, net: 1ms, bandwidth: 25000000 }
+";
+
 /// NFR-05, unchanged from the old `kaanal-sim` bench: 1M simulated requests through `run`, then the
 /// same with rates and body sizes so the pipes are shared (`_rated` rows).
 fn sim(rows: &mut Vec<Row>) {
@@ -148,6 +182,8 @@ fn sim(rows: &mut Vec<Row>) {
     // the same wire at about nine tenths full (22 kB a request): many transfers in flight at once,
     // the case that shows whether the solver's cost grows with the number of flows (RULES 63)
     sim_case(rows, SIM_RATED_YAML, (4_000, 18_000), "_rated_high");
+    // every wire feature on: connections, loss, compression and a streamed store read
+    sim_case(rows, SIM_WIRE_YAML, (2_000, 10_000), "_wire");
 }
 
 fn sim_case(rows: &mut Vec<Row>, yaml: &str, (req_bytes, resp_bytes): (u64, u64), suffix: &str) {

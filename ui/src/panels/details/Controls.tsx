@@ -16,6 +16,7 @@ import { useDraft } from "../../data/store/draft";
 import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section, StyleField } from "./Field";
 import { callsOthers } from "../../canvas/rules";
+import { RateLimitFields } from "./RateLimitFields";
 import { StorageFields } from "./StorageFields";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { RATE_UNITS, TIME_UNITS } from "./units";
@@ -177,6 +178,7 @@ export function Controls({
             Remove the queue limit
           </button>
         ) : null}
+        <RateLimitFields name={name} config={config} />
       </Section>
 
       <Section title="When things go wrong">

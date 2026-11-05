@@ -1,28 +1,94 @@
 #!/bin/sh
-# Runs fmt check + clippy + tests + markdown check + the ui check (format, lint, types) before every
-# commit. Enable: git config core.hooksPath .githooks
+# Pre-commit: checks only what the staged files can affect, so a small change commits quickly.
+#   Rust changed  -> cargo fmt --check, clippy and tests for the changed crates and the crates that depend
+#                    on them (one integration-test binary when only that test's files changed)
+#   UI changed    -> vp check, then the tests related to the changed files (all of them when a config, the
+#                    lockfile or anything outside ui/src changed)
+#   Markdown      -> dprint check
+#   Both          -> both, each limited the same way
+# The CI always runs everything. To run the whole thing here too: KAANAL_HOOK_FULL=1 git commit ...
+# The plan comes from scripts/hook-plan.mjs (needs node); if it fails, the hook falls back to everything.
+# Enable: git config core.hooksPath .githooks
 [ -f Cargo.toml ] || exit 0
-echo "pre-commit: cargo fmt --check"
-cargo fmt --all --check || { echo "fmt failed: run 'cargo fmt --all'"; exit 1; }
-echo "pre-commit: cargo clippy"
-cargo clippy --workspace --all-targets -- -D warnings || { echo "clippy failed"; exit 1; }
-echo "pre-commit: cargo test --workspace"
-cargo test --workspace --quiet || exit 1
-if command -v dprint >/dev/null 2>&1; then
-    echo "pre-commit: dprint check"
-    dprint check || { echo "dprint failed: run 'dprint fmt'"; exit 1; }
-else
-    echo "pre-commit: dprint not found, skipping markdown check (install: cargo install dprint)"
+
+say() { echo "pre-commit: $*"; }
+
+files=$(git diff --cached --name-only)
+if [ -z "$files" ] && [ "$KAANAL_HOOK_FULL" != 1 ]; then
+    say "nothing staged, nothing to check"
+    exit 0
 fi
-if [ -f ui/package.json ]; then
-    if command -v pnpm >/dev/null 2>&1; then
-        echo "pre-commit: ui check (vp check: format, lint, types)"
+
+if [ "$KAANAL_HOOK_FULL" = 1 ]; then
+    plan="rust yes
+clippy --workspace
+test --workspace
+ui all
+docs yes"
+    say "full run (KAANAL_HOOK_FULL=1)"
+elif command -v node >/dev/null 2>&1 && plan=$(printf '%s\n' "$files" | node scripts/hook-plan.mjs); then
+    :
+else
+    say "could not plan from the staged files (node missing or the plan failed): running everything"
+    plan="rust yes
+clippy --workspace
+test --workspace
+ui all
+docs yes"
+fi
+
+field() { printf '%s\n' "$plan" | sed -n "s/^$1 //p"; }
+
+printf '%s\n' "$plan" | sed -n 's/^note /pre-commit: /p'
+
+# ---- Rust
+if [ "$(field rust)" = yes ]; then
+    say "cargo fmt --check"
+    cargo fmt --all --check || { echo "fmt failed: run 'cargo fmt --all'"; exit 1; }
+    printf '%s\n' "$plan" | sed -n 's/^clippy //p' | while IFS= read -r args; do
+        say "cargo clippy $args"
+        # shellcheck disable=SC2086
+        cargo clippy $args --all-targets -- -D warnings || exit 1
+    done || { echo "clippy failed"; exit 1; }
+    printf '%s\n' "$plan" | sed -n 's/^test //p' | while IFS= read -r args; do
+        say "cargo test $args"
+        # shellcheck disable=SC2086
+        cargo test $args --quiet || exit 1
+    done || exit 1
+else
+    say "no Rust files staged: skipping fmt, clippy and cargo test"
+fi
+
+# ---- markdown
+if [ "$(field docs)" = yes ]; then
+    if command -v dprint >/dev/null 2>&1; then
+        say "dprint check"
+        dprint check || { echo "dprint failed: run 'dprint fmt'"; exit 1; }
+    else
+        say "dprint not found, skipping markdown check (install: cargo install dprint)"
+    fi
+fi
+
+# ---- UI
+ui=$(field ui)
+if [ "$ui" = changed ] || [ "$ui" = all ]; then
+    if [ -f ui/package.json ] && command -v pnpm >/dev/null 2>&1; then
+        say "ui check (vp check: format, lint, types)"
         (cd ui && pnpm run check) || {
             echo "ui check failed: 'cd ui && vp check --fix' fixes formatting, the rest is lint/types"
             exit 1
         }
+        if [ "$ui" = all ]; then
+            say "ui tests (all)"
+            (cd ui && pnpm exec vp test run) || exit 1
+        else
+            say "ui tests (related to the changed files)"
+            (cd ui && pnpm exec vp test run --changed --passWithNoTests) || exit 1
+        fi
     else
-        echo "pre-commit: pnpm not found, skipping the ui check"
+        say "pnpm not found, cannot check the ui"
         exit 1
     fi
+else
+    say "no UI files staged: skipping the ui check and tests"
 fi

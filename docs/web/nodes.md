@@ -191,7 +191,7 @@ assets:
 - Google Cloud Storage: about 5,000 object reads and 1,000 object writes per second per bucket to start, scaling as it goes; it exposes no latency metric (docs.cloud.google.com/storage/docs/request-rate).
 - Azure Blob: up to 3,000 requests per second for one block blob; throughput is bounded by the storage account (learn.microsoft.com/azure/storage/blobs/scalability-targets).
 
-**A storage node in Studio** starts as `{ type: storage, flavor: s3, first_byte: 25ms, throughput: 80MB/s }`. Those two numbers are **placeholders to edit, not published figures** (see above). It has no `concurrency` on purpose: the request-rate figures belong to `rate_limit`. Studio edits every field above in boxes (see the Storage entry of [Studio](studio.md)); its **Add a request limit** button writes `rate_limit: { rps: 5500, burst: 5500 }`, S3's published read rate per prefix, as a starting point to change.
+**A storage node in Studio** starts as `{ type: storage, flavor: s3, first_byte: 25ms, throughput: 80MB/s }`. Those two numbers are **placeholders to edit, not published figures** (see above). It has no `concurrency` on purpose: the request-rate figures belong to `rate_limit`. Studio edits every field above in boxes (see the Storage entry of [Studio](studio.md)); its **Add a request limit** button writes `rate_limit: { rps: 5500, burst: 5500 }`, S3's published read rate per prefix, as a starting point to change (every other kind's button starts at `{ rps: 1000, burst: 1000 }`, a placeholder, because no provider publishes a figure for a service or a database).
 
 ## Nodes added in Studio
 

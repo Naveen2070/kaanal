@@ -8,6 +8,7 @@ impl Drop for Demo {
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.dir);
         let _ = std::fs::remove_file(&self.err);
+        let _ = std::fs::remove_dir_all(demo_config(&self.dir));
     }
 }
 

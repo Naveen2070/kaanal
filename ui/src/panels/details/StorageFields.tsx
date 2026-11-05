@@ -13,13 +13,10 @@ import {
   firstByteMs,
   firstByteSpread,
   FLAVORS,
-  addRateLimit,
   LIMITS,
-  rateLimitOf,
   setDuration,
   setFirstByteMean,
   setFlavor,
-  setRateLimit,
   setSpread,
   setThroughput,
   throughputKb,
@@ -36,7 +33,6 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
   const throughput = throughputKb(config);
   const spread = firstByteSpread(config);
   const mean = firstByteMean(config);
-  const limit = rateLimitOf(config);
   return (
     <>
       <div className="mb-2">
@@ -128,53 +124,6 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
           Remove the throughput
         </button>
       ) : null}
-      {limit ? (
-        <>
-          <NumberField
-            label="Request limit"
-            hint="Requests a second this store accepts; the rest are turned away with a 503."
-            value={limit.rps}
-            min={LIMITS.rate.min}
-            max={LIMITS.rate.max}
-            step="any"
-            onCommit={(n) => patch(setRateLimit(name, config, "rps", n))}
-          />
-          <NumberField
-            label="Burst"
-            hint="The most requests let through at once after a quiet spell."
-            value={limit.burst}
-            min={1}
-            max={LIMITS.rate.max}
-            step={1}
-            onCommit={(n) => patch(setRateLimit(name, config, "burst", n))}
-          />
-          <button
-            type="button"
-            onClick={() => void patch(setRateLimit(name, config, null))}
-            className={REMOVE}
-          >
-            Remove the request limit
-          </button>
-        </>
-      ) : "rate_limit" in config ? (
-        <p className="mb-2 text-xs text-muted">
-          A request limit is set in a form the boxes cannot show. Edit it in kaanal.yaml.
-        </p>
-      ) : (
-        <>
-          <button
-            type="button"
-            onClick={() => void patch(addRateLimit(name, config))}
-            className={REMOVE}
-          >
-            Add a request limit
-          </button>
-          <p className="mb-2 text-xs text-muted">
-            Starts at 5,500 a second, the figure S3 publishes for reads on one prefix. Change it to
-            your store's.
-          </p>
-        </>
-      )}
       {carriesEstimates(config) ? (
         <p className="mb-2 text-xs text-muted">
           These numbers are placeholders, not published figures. Providers publish request limits

@@ -2,6 +2,7 @@
 
 use crate::demo;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use std::process::{Child, Command, Output, Stdio};
 
@@ -43,16 +44,58 @@ impl Drop for Up {
     }
 }
 
+/// One PKCS#8 signing key per test binary. A 2048-bit RSA key takes about a second to generate in a
+/// debug build, has a long random tail (up to ten seconds with several starts at once), and every
+/// test project is a new folder, so letting each `up` generate its own made starts slow and, on a
+/// busy machine, past the wait below (the flaky "kaanal up did not start").
+fn test_pem() -> &'static str {
+    static PEM: OnceLock<String> = OnceLock::new();
+    PEM.get_or_init(|| {
+        kaanal_server::AuthKey::generate()
+            .unwrap()
+            .to_pem()
+            .unwrap()
+    })
+}
+
+/// Where kaanal keeps the signing key of the project in `project` under `cfg` (the same formula as
+/// `keys.rs`: if it changes, the key is simply not found and `up` generates one, slowly but correctly).
+fn key_path(cfg: &Path, project: &Path) -> PathBuf {
+    use sha2::Digest as _;
+    let canon = std::fs::canonicalize(project).unwrap();
+    let text = canon.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let id = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+    cfg.join("kaanal")
+        .join("keys")
+        .join(format!("{}.pem", &id[..16]))
+}
+
+/// Starts `kaanal up` in `dir` on a free port with the shared test key already in place, in a private
+/// `config-home` inside the project (removed with it, and never the developer's own key folder).
 pub(crate) fn up(dir: &Path) -> (Up, u16) {
+    let cfg = dir.join("config-home");
+    let key = key_path(&cfg, dir);
+    std::fs::create_dir_all(key.parent().unwrap()).unwrap();
+    std::fs::write(&key, test_pem()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let child = bin()
         .args(["up", "--port", "0"])
+        .env("KAANAL_CONFIG_DIR", &cfg)
         .stdout(Stdio::null())
         .stderr(std::fs::File::create(dir.join("up.err")).unwrap())
         .current_dir(dir)
         .spawn()
         .unwrap();
     let mut guard = Up(child, dir.to_path_buf());
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let began = Instant::now();
+    // generous: with the key seeded a start takes well under a second, so this only matters on a
+    // machine so loaded that nothing else would pass either
+    let deadline = began + Duration::from_secs(60);
     loop {
         if let Some(p) = std::fs::read_to_string(dir.join(".kaanal/run.json"))
             .ok()
@@ -64,7 +107,8 @@ pub(crate) fn up(dir: &Path) -> (Up, u16) {
         let exited = guard.0.try_wait().unwrap();
         assert!(
             exited.is_none() && Instant::now() < deadline,
-            "kaanal up did not start ({exited:?}): {}",
+            "kaanal up did not start after {:.1}s (exit status {exited:?}): {}",
+            began.elapsed().as_secs_f64(),
             std::fs::read_to_string(dir.join("up.err")).unwrap_or_default()
         );
         std::thread::sleep(Duration::from_millis(50));
@@ -198,10 +242,17 @@ pub(crate) struct Demo {
 
 /// Starts `kaanal [pre...] demo [args...]` in `dir` and reads its banner. Its stderr goes to a
 /// file beside `dir`, not in it.
+/// Where a demo run in `dir` keeps its signing key: a sibling folder, removed with the demo.
+pub(crate) fn demo_config(dir: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.config", dir.display()))
+}
+
 pub(crate) fn demo_with(dir: &Path, pre: &[&str], args: &[&str]) -> Demo {
     use std::io::BufRead;
     let err = PathBuf::from(format!("{}.err", dir.display()));
     let mut child = bin()
+        // the key it generates goes beside the folder, not into the developer's own key folder
+        .env("KAANAL_CONFIG_DIR", demo_config(dir))
         .args(pre)
         .arg("demo")
         .args(args)

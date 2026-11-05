@@ -157,9 +157,20 @@ export function rateLimitOf(config: NodeDoc): { rps: number; burst: number } | n
 /** The limit "Add" starts with: S3's published 5,500 GET/HEAD requests a second per prefix (GCS and Azure publish similar orders of magnitude); the burst is the same figure. */
 export const DEFAULT_RATE_LIMIT = { rps: 5500, burst: 5500 } as const;
 
-/** Adds the default `rate_limit` when the node has none. */
+/** The limit "Add" starts with on any other kind: no provider publishes a figure for a service or a database, so it is a labelled placeholder, not an estimate of anything. */
+export const GENERIC_RATE_LIMIT = { rps: 1000, burst: 1000 } as const;
+
+/** Adds a starting `rate_limit` when the node has none: S3's figure for a store, a placeholder for the rest. */
 export const addRateLimit = (name: string, config: NodeDoc): Op[] =>
-  "rate_limit" in config ? [] : [put(["nodes", name, "rate_limit"], false, DEFAULT_RATE_LIMIT)];
+  "rate_limit" in config
+    ? []
+    : [
+        put(
+          ["nodes", name, "rate_limit"],
+          false,
+          config.type === "storage" ? DEFAULT_RATE_LIMIT : GENERIC_RATE_LIMIT,
+        ),
+      ];
 
 /** One field of the rate limit changed (the map is rewritten whole); null removes the limit. */
 export function setRateLimit(

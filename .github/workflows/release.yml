@@ -17,6 +17,9 @@ on:
         type: boolean
         default: false
 
+# Deliberately NOT cancelled by a newer run (unlike ci.yml and bench-report.yml): a release cancelled
+# between creating the tag and publishing the release would leave a tag with no release. A second run
+# waits in the queue instead.
 concurrency:
   group: release
   cancel-in-progress: false
