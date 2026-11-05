@@ -392,7 +392,7 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
                 HopKind::Nic { send, .. } => {
                     nic_acc[hop.node][usize::from(!send)].add(w, d, true);
                 }
-                HopKind::Net | HopKind::Delay | HopKind::Connect { .. } => {}
+                HopKind::Net | HopKind::Delay | HopKind::Connect { .. } | HopKind::FirstByte => {}
             }
         }
     }

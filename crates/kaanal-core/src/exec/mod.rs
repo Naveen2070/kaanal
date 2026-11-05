@@ -12,6 +12,7 @@
 mod conn;
 mod link;
 mod route;
+mod stream;
 mod walk;
 
 pub(crate) use walk::draw_rng;
@@ -86,6 +87,10 @@ pub enum HopKind {
         /// False for the handshake and the request's stalls, true for the response's stalls.
         resp: bool,
     },
+    /// The wait for the first byte of a streamed response (RULES 71): the callee is producing and
+    /// the transfer has not started. A pure delay in the transfer's branch of a fork; it belongs to
+    /// the callee.
+    FirstByte,
     /// A payload crossing a bandwidth-limited edge (`resp`: the response direction). It belongs
     /// to the edge's target and shares the edge's rate with other transfers on it.
     Link {
@@ -111,7 +116,7 @@ impl HopKind {
     pub fn is_wait(self) -> bool {
         matches!(
             self,
-            HopKind::Net | HopKind::Delay | HopKind::Connect { .. }
+            HopKind::Net | HopKind::Delay | HopKind::Connect { .. } | HopKind::FirstByte
         )
     }
 }
@@ -570,6 +575,7 @@ pub fn sample_plan(
         bytes: (req.req_bytes, req.resp_bytes),
         items: Vec::new(),
         xfers: Vec::new(),
+        tail: None,
     };
     let entry = ep.entry_node;
     // The entry node has no calling edge, so its own balance picks its replica.

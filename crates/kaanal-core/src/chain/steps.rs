@@ -133,7 +133,7 @@ impl Compiler<'_> {
             edge.calls.get(),
             edge.prob,
             edge.balance.clone(),
-            (edge.sends, edge.returns),
+            (edge.sends, edge.returns, edge.stream),
         );
         let bodies = usize::from(c.chain.is_some())
             + usize::from(c.with.is_some())
@@ -219,6 +219,7 @@ impl Compiler<'_> {
             balance,
             sends: c.sends.or(edge_sizes.0),
             returns: c.returns.or(edge_sizes.1),
+            stream: c.stream.or(edge_sizes.2),
             key: keys.next(to),
         })
     }

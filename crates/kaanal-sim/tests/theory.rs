@@ -453,3 +453,40 @@ fn a_new_connection_costs_the_published_round_trips_and_keepalive_makes_it_rare(
             .all(|r| r.latency <= Duration::from_millis(10))
     );
 }
+
+#[test]
+fn a_streamed_read_takes_the_pipeline_limit_and_shares_the_wire_as_processor_sharing() {
+    // RULES 71. A store (first byte 20 ms, 100 MB/s) behind a 1 MiB/s wire; every request reads
+    // 1 MiB. Streamed, the transfer starts at the first byte and the wire (1 s) is the slowest
+    // stage, so a lone request takes first byte + size / slowest stage = 20 ms + 1 s, not the 1.03 s
+    // of the stages added; and the wire is a fair-sharing (processor sharing) link, so at load rho
+    // the transfer takes S / (1 - rho) (RULES 62).
+    let t = topo(
+        "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\n  files: { type: storage, first_byte: 20ms, throughput: 100MB/s }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: files, bandwidth: 1MB }\n",
+    );
+    let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
+    let run_at = |lam: f64, requests: f64| {
+        let duration = requests / lam / 0.9;
+        let cfg = SimConfig {
+            streams: vec![Stream {
+                endpoint_key: "GET /x/{id}".into(),
+                rate_per_s: lam,
+                req_bytes: 0,
+                resp_bytes: 1 << 20,
+            }],
+            duration: Duration::from_secs_f64(duration),
+            warmup: Duration::from_secs_f64(duration * 0.1),
+            seed: 7,
+        };
+        run(&t, &e, &ChaosState::default(), &cfg).unwrap()
+    };
+    // almost never two at once: the fastest request is the pipeline limit, exactly
+    let lone = run_at(0.001, 300.0);
+    let fastest = lone.requests.iter().map(|r| r.latency).min().unwrap();
+    assert_eq!(fastest, Duration::from_millis(20) + Duration::from_secs(1));
+    // at rho = 0.4 the transfer is M/G/1-PS: 1 s / (1 - 0.4), after the first byte's 20 ms
+    let rep = run_at(0.4, 30_000.0);
+    let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+    assert_close(got, 0.020 + 1.0 / (1.0 - 0.4), "streamed read at rho = 0.4");
+}

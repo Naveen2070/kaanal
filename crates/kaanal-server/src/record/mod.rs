@@ -96,6 +96,7 @@ pub fn trace_parts(
                 pieces.push(Piece::Hop(match h.kind {
                     HopKind::Net => format!("net={d}"),
                     HopKind::Connect { resp } => format!("{}={d}", connect_name(resp)),
+                    HopKind::FirstByte => format!("{}.first-byte={d}", at(h.node, h.replica)),
                     HopKind::Proc => format!("{}.proc={d}", at(h.node, h.replica)),
                     HopKind::Op(op) => format!("{}.{}={d}", at(h.node, h.replica), op.name()),
                     HopKind::CacheHit => format!("{}.hit={d}", at(h.node, h.replica)),
@@ -424,7 +425,11 @@ fn hop_chaos<'a>(
         HopKind::Proc | HopKind::Op(_) | HopKind::CacheHit | HopKind::CacheMiss => {
             run.chaos.visit_replica(node, key, replica)
         }
-        HopKind::Net | HopKind::Connect { .. } | HopKind::Link { .. } | HopKind::Nic { .. } => None,
+        HopKind::Net
+        | HopKind::Connect { .. }
+        | HopKind::FirstByte
+        | HopKind::Link { .. }
+        | HopKind::Nic { .. } => None,
     }
 }
 
@@ -562,6 +567,7 @@ fn kind_str(kind: HopKind) -> &'static str {
     match kind {
         HopKind::Net => "net",
         HopKind::Connect { resp } => connect_name(resp),
+        HopKind::FirstByte => "first-byte",
         HopKind::Proc => "proc",
         HopKind::Op(_) => "op",
         HopKind::CacheHit => "hit",

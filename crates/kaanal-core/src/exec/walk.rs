@@ -111,6 +111,8 @@ pub(super) struct Walk<'a> {
     pub(super) items: Vec<PlanItem>,
     /// The side table of [`Plan::xfers`], filled as transfer hops are pushed.
     pub(super) xfers: Vec<(usize, super::Xfer)>,
+    /// The last own hop emitted: where a streamed response finds its first byte (RULES 71).
+    pub(super) tail: Option<super::stream::Tail>,
 }
 
 impl Walk<'_> {
@@ -478,6 +480,7 @@ impl Walk<'_> {
             _ => &n.proc,
         };
         let mut dur = dist.sample(&mut rng) + c.map_or(Duration::ZERO, |c| c.latency_add);
+        let fixed = dur;
         let mut body = counted(n.kind, kind, op).bytes(self.bytes);
         if kind == HopKind::Proc && n.per_kb != Dist::ZERO {
             body = body.saturating_add(counted(n.kind, kind, op).bytes(self.topo.header_bytes));
@@ -490,6 +493,11 @@ impl Walk<'_> {
             let secs = per_kb.as_secs_f64() * kb;
             dur += Duration::from_secs_f64(secs.min(MAX_HOP.as_secs_f64()));
         }
+        self.tail = Some(super::stream::Tail {
+            node,
+            end: start + dur,
+            size: dur.saturating_sub(fixed),
+        });
         self.items.push(PlanItem::Hop(Hop {
             node,
             replica,

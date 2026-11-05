@@ -7,6 +7,13 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## How a streamed response is costed
+
+A read of a storage node now streams: its bytes cross a wire or card with a `bandwidth` while the store is still
+reading, so the call takes the first byte plus the size over the slowest stage, not the stages added. This only moves
+figures with a `bandwidth`. `stream: false` on the edge or the `call:` step restores the old sum; `stream: true` turns
+it on for any callee.
+
 ## How a new connection is costed
 
 An edge with a `net` (its round trip) opens a new connection for 1 call in `keepalive` (default 1000); that call

@@ -372,6 +372,14 @@
           "default": null,
           "description": "Size of the request body a call over this edge carries: bytes as a whole number, or text\nwith a unit like `200KB` (KB = 1024 bytes; at most 1 GiB). A `call:` step may override it.\nAbsent = the size of the request that reached the caller (it is passed on)."
         },
+        "stream": {
+          "default": null,
+          "description": "Whether the response of a call over this edge streams: its bytes cross the wire while the\ncallee is still producing them, so the call takes `first byte + size / slowest stage` instead of\nthe production time plus the transfer time. Absent = a read of a `storage` node streams and\nevery other call is buffered; a `call:` step's own `stream` wins.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "tls": {
           "anyOf": [
             {

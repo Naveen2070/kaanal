@@ -133,3 +133,20 @@ export const keepaliveOf = (e: EdgeDoc): number | null =>
 export const setKeepalive = (i: number, e: EdgeDoc, n: number): Op => put(i, "keepalive", e, n);
 export const clearKeepalive = (i: number, e: EdgeDoc): Op[] =>
   "keepalive" in e ? [{ op: "remove", path: ["edges", i, "keepalive"] }] : [];
+
+/** Whether the response over the wire streams (RULES 71): the callee's default, always, or never. */
+export type StreamChoice = "default" | "yes" | "no";
+export const STREAM_CHOICES: readonly { value: StreamChoice; label: string }[] = [
+  { value: "default", label: "Default (a storage read streams)" },
+  { value: "yes", label: "Yes, stream it" },
+  { value: "no", label: "No, buffer it" },
+];
+export const streamOf = (e: EdgeDoc): StreamChoice =>
+  e.stream === true ? "yes" : e.stream === false ? "no" : "default";
+/** The default removes the key; yes and no write the boolean. */
+export const setStream = (i: number, e: EdgeDoc, c: StreamChoice): Op[] =>
+  c === "default"
+    ? "stream" in e
+      ? [{ op: "remove", path: ["edges", i, "stream"] }]
+      : []
+    : [put(i, "stream", e, c === "yes")];

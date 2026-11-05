@@ -106,6 +106,7 @@ fn timeline(t: &Topology, o: &ChainOutcome) -> Vec<String> {
                 HopKind::CacheMiss => "miss",
                 HopKind::Delay => "delay",
                 HopKind::Connect { .. } => "connect",
+                HopKind::FirstByte => "first-byte",
                 HopKind::Link { .. } => "link",
                 HopKind::Nic { .. } => "nic",
             };

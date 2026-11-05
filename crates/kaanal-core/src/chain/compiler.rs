@@ -49,6 +49,7 @@ impl Compiler<'_> {
             balance: e.balance.clone(),
             sends: e.sends,
             returns: e.returns,
+            stream: e.stream,
             key: keys.next(e.to),
         }
     }

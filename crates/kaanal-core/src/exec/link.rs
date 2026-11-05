@@ -132,7 +132,7 @@ impl Walk<'_> {
     /// **Private.** The rate of the narrowest pipe a body takes from `from` to `to` over `edge`
     /// (the wire with any chaos cap, the sender's send pipe, the receiver's receive pipe); `None`
     /// when no pipe has a rate.
-    fn path_rate(
+    pub(super) fn path_rate(
         &self,
         edge: Option<EdgeId>,
         (from, to): (NodeId, NodeId),

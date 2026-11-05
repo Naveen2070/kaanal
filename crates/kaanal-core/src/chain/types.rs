@@ -109,6 +109,8 @@ pub struct Call {
     pub sends: Option<u64>,
     /// Response body size this call brings back, likewise.
     pub returns: Option<u64>,
+    /// Whether the response streams (the step's, else the edge's); `None` = the callee's default.
+    pub stream: Option<bool>,
     /// Which call this is, for seeding.
     pub key: StepKey,
 }

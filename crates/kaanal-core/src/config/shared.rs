@@ -83,6 +83,12 @@ pub struct EdgeConfig {
     #[serde(default, deserialize_with = "crate::units::returns")]
     #[schemars(schema_with = "crate::schema::size")]
     pub returns: Option<u64>,
+    /// Whether the response of a call over this edge streams: its bytes cross the wire while the
+    /// callee is still producing them, so the call takes `first byte + size / slowest stage` instead of
+    /// the production time plus the transfer time. Absent = a read of a `storage` node streams and
+    /// every other call is buffered; a `call:` step's own `stream` wins.
+    #[serde(default)]
+    pub stream: Option<bool>,
     /// TLS a new connection over this edge negotiates after TCP: `false` (default), `true` or
     /// `1.3` (one extra round trip) or `1.2` (two). Costs nothing on a reused connection, and
     /// nothing when the edge has no `net` (the round trip is its latency).

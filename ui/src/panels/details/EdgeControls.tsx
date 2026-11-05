@@ -30,9 +30,13 @@ import {
   setKeepalive,
   setNet,
   setShare,
+  setStream,
   setTls,
   shareApplies,
   shareOf,
+  STREAM_CHOICES,
+  streamOf,
+  type StreamChoice,
   TLS_CHOICES,
   tlsOf,
   type TlsChoice,
@@ -46,6 +50,7 @@ export function EdgeControls({ index }: { index: number }) {
   const doc = useDraft((s) => s.view?.doc);
   const patch = useDraft((s) => s.patch);
   const tlsId = useId();
+  const streamId = useId();
   const feed = useFeed();
   const e = doc?.edges?.[index];
   if (!e) return null;
@@ -146,6 +151,31 @@ export function EdgeControls({ index }: { index: number }) {
             ) : null}
           </div>
         ))}
+        <div className="mb-2">
+          <label htmlFor={streamId} className="block text-sm font-medium">
+            Stream the response
+          </label>
+          <select
+            id={streamId}
+            value={streamOf(e)}
+            aria-describedby={`${streamId}-hint`}
+            onChange={(ev) =>
+              void patch(setStream(index, e, ev.currentTarget.value as StreamChoice))
+            }
+            className="h-7 rounded border border-control bg-sheet px-1 text-text"
+          >
+            {STREAM_CHOICES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <p id={`${streamId}-hint`} className="text-xs text-muted">
+            A streamed response crosses the wire while the callee is still producing it, so the call
+            takes the first byte plus the size over the slowest stage, not the stages added. It only
+            matters on a wire or component with a bandwidth.
+          </p>
+        </div>
       </Section>
 
       <Section title="Connection">

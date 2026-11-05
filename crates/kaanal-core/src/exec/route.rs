@@ -72,11 +72,22 @@ impl Walk<'_> {
             }
             *now += self.link(edge, (run, (call.node, r)), false, *now, cap);
             *now += self.net_hop(call.node, net, (*now, r));
+            let stream = self
+                .streams(call, op, edge, run.0, cap)
+                .then(|| self.begin_stream());
+            let t0 = *now;
             let hold = self.open_hold(call.node, r);
             let flow = self.seq(&call.body, rep_path, op, *now, (call.node, r));
             self.close_hold(hold);
-            if let Flow::Done(end) | Flow::Hit(end) = flow {
-                *now = end + self.link(edge, ((call.node, r), run), true, end, cap);
+            let done = if let Some(fork) = stream {
+                self.end_stream(fork, &flow, (call.node, r), run, edge, cap, t0)
+            } else if let Flow::Done(end) | Flow::Hit(end) = flow {
+                Some(end + self.link(edge, ((call.node, r), run), true, end, cap))
+            } else {
+                None
+            };
+            if let Some(end) = done {
+                *now = end;
                 if fresh.is_some() {
                     *now += self.connect_response(net, edge, (run.0, (call.node, r)), *now, cap);
                 }

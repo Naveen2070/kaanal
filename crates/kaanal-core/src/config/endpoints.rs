@@ -118,6 +118,8 @@ pub struct CallStep {
     pub sends: Option<u64>,
     /// Response body size this call brings back (overrides the edge's `returns`).
     pub returns: Option<u64>,
+    /// Whether the response streams while the callee produces it (overrides the edge's `stream`).
+    pub stream: Option<bool>,
     /// A key of the callee's `chains:`.
     pub with: Option<String>,
     /// One of the callee's own endpoints, `"METHOD /path"`.
@@ -155,7 +157,7 @@ pub struct Branch {
 
 /// **Private.** Field names a step may have, for messages.
 pub(super) const STEP_FIELDS: &str =
-    "call, op, repeat, prob, sends, returns, chain, with, via, cache, parallel";
+    "call, op, repeat, prob, sends, returns, stream, chain, with, via, cache, parallel";
 
 impl<'de> Deserialize<'de> for StepConfig {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -212,6 +214,7 @@ impl<'de> Visitor<'de> for StepVisitor {
                 "prob" => call.prob = Some(m.next_value()?),
                 "sends" => call.sends = m.next_value::<Sends>()?.0,
                 "returns" => call.returns = m.next_value::<Returns>()?.0,
+                "stream" => call.stream = Some(m.next_value()?),
                 "chain" => call.chain = Some(m.next_value()?),
                 "with" => call.with = Some(m.next_value()?),
                 "via" => call.via = Some(m.next_value()?),

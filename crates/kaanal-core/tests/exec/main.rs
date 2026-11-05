@@ -16,4 +16,5 @@ mod replica_chaos;
 mod replicas;
 mod sizes;
 mod storage;
+mod stream;
 mod timeouts;

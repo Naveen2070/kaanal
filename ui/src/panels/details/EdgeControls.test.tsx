@@ -287,3 +287,24 @@ test("a_keepalive_that_is_set_can_go_back_to_the_default", async () => {
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "keepalive"] }] });
 });
+
+test("stream_the_response_is_default_yes_or_no_and_default_removes_the_key", async () => {
+  await show(1);
+  const select = screen.getByLabelText("Stream the response") as HTMLSelectElement;
+  expect(select.value).toBe("default");
+  expect([...select.options].map((o) => o.value)).toEqual(["default", "yes", "no"]);
+  let sent = mockFetch([{ json: view() }]);
+  fireEvent.change(select, { target: { value: "no" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["edges", 1, "stream"], value: false }],
+  });
+  cleanup();
+  await show(0, view({ edges: [{ from: "app", to: "db", stream: true }] }));
+  const set = screen.getByLabelText("Stream the response") as HTMLSelectElement;
+  expect(set.value).toBe("yes");
+  sent = mockFetch([{ json: view() }]);
+  fireEvent.change(set, { target: { value: "default" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "stream"] }] });
+});

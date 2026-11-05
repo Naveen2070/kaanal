@@ -229,7 +229,11 @@ impl Compiler<'_> {
             let (lb, to) = (hops[w - 1], hops[w]);
             let (net, balance, sizes) = {
                 let e = self.edge(lb, to, place)?;
-                (e.net.clone(), e.balance.clone(), (e.sends, e.returns))
+                (
+                    e.net.clone(),
+                    e.balance.clone(),
+                    (e.sends, e.returns, e.stream),
+                )
             };
             let mut steps = self.prefix(lb);
             let key = Keys::after(&steps, n).next(to);
@@ -243,6 +247,7 @@ impl Compiler<'_> {
                 balance,
                 sends: sizes.0,
                 returns: sizes.1,
+                stream: sizes.2,
                 key,
             }));
             inner = Arc::new(Seq::new(steps));
@@ -250,7 +255,11 @@ impl Compiler<'_> {
         let first = hops[0];
         let (net, balance, sizes) = {
             let e = self.edge(gw, first, place)?;
-            (e.net.clone(), e.balance.clone(), (e.sends, e.returns))
+            (
+                e.net.clone(),
+                e.balance.clone(),
+                (e.sends, e.returns, e.stream),
+            )
         };
         let mut steps = self.default[gw].steps.clone();
         let key = Keys::after(&steps, n).next(first);
@@ -264,6 +273,7 @@ impl Compiler<'_> {
             balance,
             sends: sizes.0,
             returns: sizes.1,
+            stream: sizes.2,
             key,
         }));
         Ok(Arc::new(Seq::new(steps)))
