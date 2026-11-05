@@ -320,6 +320,9 @@ export function suggestedFix(node: NodeSummary | undefined): string | null {
   if (node.timed_out > 0) {
     return "Calls to this node ran past their deadline. Lower the service time, add instances or raise the timeout.";
   }
+  if (node.short_circuited > 0) {
+    return "A caller's circuit breaker opened on this node and refused calls. Find out why it was failing or slow before the breaker opened.";
+  }
   return null;
 }
 

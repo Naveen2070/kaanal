@@ -180,6 +180,7 @@ fn report(
             limited: c.limited,
             overflowed: c.overflowed,
             timed_out: c.timed_out,
+            short_circuited: c.short_circuited,
         })
         .collect();
     // measured utilization of each replica and link: busy slot-time inside the window over its

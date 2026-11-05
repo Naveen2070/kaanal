@@ -213,6 +213,9 @@ pub struct NodeStats {
     /// Deadlines (`timeout:` spans) that fired at this node, over reported requests. A `hang` that
     /// runs to its planned 504 is a timeout in [`SimReport::errors_by_kind`] but not counted here (no deadline fired).
     pub timed_out: u64,
+    /// Calls to this node that its caller's open circuit breaker refused without sending (step 7c),
+    /// over reported requests.
+    pub short_circuited: u64,
 }
 
 /// Simulates `cfg` on `topo` under fixed `chaos`. Deterministic: same inputs, same report.

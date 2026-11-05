@@ -11,6 +11,7 @@ import { removeWires } from "../../canvas/wires";
 import { useDraft } from "../../data/store/draft";
 import type { Doc, EdgeDoc, NodeDoc } from "../../data/api/types";
 import { BalanceField, NumberField, Section } from "./Field";
+import { BreakerFields, EdgeDetectField, RetryFields } from "./ResilienceFields";
 import { balanceOf, setBalance } from "./fields";
 import {
   bandwidthKbOf,
@@ -259,15 +260,23 @@ export function EdgeControls({ index }: { index: number }) {
         ) : null}
       </Section>
 
+      <RetryFields index={index} e={e} />
+      <BreakerFields index={index} e={e} />
+
       <Section title="How often it is used">
         {Number(callee(doc, e)?.replicas ?? 1) > 1 ? (
-          <BalanceField
-            hint="How calls over this wire pick a copy of the callee. It overrides the callee's own setting."
-            value={balanceOf(e.balance)}
-            defaultLabel="Same as the component (default)"
-            overrides
-            onChange={(c) => void patch(setBalance(["edges", index, "balance"], "balance" in e, c))}
-          />
+          <>
+            <BalanceField
+              hint="How calls over this wire pick a copy of the callee. It overrides the callee's own setting."
+              value={balanceOf(e.balance)}
+              defaultLabel="Same as the component (default)"
+              overrides
+              onChange={(c) =>
+                void patch(setBalance(["edges", index, "balance"], "balance" in e, c))
+              }
+            />
+            <EdgeDetectField index={index} e={e} />
+          </>
         ) : null}
         <NumberField
           label="Calls per request"

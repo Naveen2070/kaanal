@@ -183,6 +183,8 @@ export interface NodeSummary {
   limited: number;
   overflowed: number;
   timed_out: number;
+  /** Calls an open circuit breaker refused without sending (step 7c). */
+  short_circuited: number;
 }
 
 /** A wire over the run, in the same 60 windows as a node's `Series`: time on the wire (transfer plus time lost sharing it). */

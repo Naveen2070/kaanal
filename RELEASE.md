@@ -7,6 +7,15 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## How failure is costed: retries, abandon, breakers and detect
+
+All off unless written (`retry`, `abandon`, `breaker`, `detect` on an edge). A retry loads the callee again and waits a
+jittered, growing backoff; `retry.budget` is gRPC's retry throttling; `abandon: continue` lets a timed-out call's work
+run on, which with retries is the metastable retry storm; `breaker` is resilience4j's count-based breaker (a refused
+call is a 503 that never reaches the callee, counted as `short_circuited`); `detect` is the delay before a balancer
+notices a downed copy (`from_ms` on a scenario entry says when it went down). Circuit breakers and `from_ms` act in the
+simulator; the live mocks play every breaker closed and every copy as noticed at once.
+
 ## How loss and compression are costed
 
 Both are off unless an edge says `loss` (a probability, 0.01 is 1%) or `compress` (the share of a response kept on the

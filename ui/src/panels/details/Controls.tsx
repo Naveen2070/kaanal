@@ -17,6 +17,7 @@ import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section, StyleField } from "./Field";
 import { callsOthers } from "../../canvas/rules";
 import { RateLimitFields } from "./RateLimitFields";
+import { NodeDetectField } from "./ResilienceFields";
 import { StorageFields } from "./StorageFields";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { RATE_UNITS, TIME_UNITS } from "./units";
@@ -121,6 +122,7 @@ export function Controls({
             }
           />
         ) : null}
+        {config.type === "load-balancer" ? <NodeDetectField name={name} node={config} /> : null}
         {callsOthers(config.type) ? (
           <StyleField
             value={holdOf(config)}
@@ -298,6 +300,12 @@ export function Controls({
             <dd>{node.limited + node.overflowed}</dd>
             <dt>Timed out</dt>
             <dd>{node.timed_out}</dd>
+            {node.short_circuited > 0 ? (
+              <>
+                <dt>Refused by a breaker</dt>
+                <dd>{node.short_circuited}</dd>
+              </>
+            ) : null}
           </dl>
         </Section>
       ) : null}

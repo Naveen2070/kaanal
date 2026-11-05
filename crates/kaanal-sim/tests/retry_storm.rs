@@ -14,12 +14,24 @@ fn failed_share(edge: &str, rate: f64) -> f64 {
     shares(edge, rate).0
 }
 
-/// `(failed, short-circuited)`: the shares of requests that failed, and that an open breaker refused
-/// without sending (a subset of the failed ones).
-#[allow(clippy::cast_precision_loss)]
-fn shares(edge: &str, rate: f64) -> (f64, f64) {
+/// One 40 s run at `rate` a second over the gateway-to-service edge `edge`.
+fn simulate(
+    edge: &str,
+    rate: f64,
+) -> (
+    Topology,
+    kaanal_core::Endpoints,
+    SimConfig,
+    kaanal_sim::SimReport,
+) {
     let y = format!(
-        "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, concurrency: {{ limit: 2, queue: 200 }}, timeout: 50ms, proc: {{ mean: 10ms }} }}\nedges:\n  - {{ from: gw, to: app{edge} }}\n"
+        "version: 1
+nodes:
+  gw: {{ type: gateway }}
+  app: {{ type: service, concurrency: {{ limit: 2, queue: 200 }}, timeout: 50ms, proc: {{ mean: 10ms }} }}
+edges:
+  - {{ from: gw, to: app{edge} }}
+"
     );
     let t = Topology::build(&Config::from_yaml(&y).unwrap()).unwrap();
     let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
@@ -36,19 +48,26 @@ fn shares(edge: &str, rate: f64) -> (f64, f64) {
         seed: 7,
     };
     let rep = run(&t, &e, &ChaosState::default(), &cfg).unwrap();
+    (t, e, cfg, rep)
+}
+
+/// `(failed, short-circuited)`: the shares of requests that failed, and that an open breaker refused
+/// without sending (a subset of the failed ones).
+#[allow(clippy::cast_precision_loss)]
+fn shares(edge: &str, rate: f64) -> (f64, f64) {
+    let (_, _, _, rep) = simulate(edge, rate);
     let bad = rep
         .requests
         .iter()
         .filter(|r| !matches!(r.result, ChainResult::Ok))
         .count();
-    #[allow(clippy::cast_precision_loss)]
-    let share = bad as f64 / rep.requests.len() as f64;
     let rejected = rep
         .requests
         .iter()
         .filter(|r| r.cause == Some(kaanal_sim::Cause::Breaker))
         .count();
-    (share, rejected as f64 / rep.requests.len() as f64)
+    let n = rep.requests.len() as f64;
+    (bad as f64 / n, rejected as f64 / n)
 }
 
 const RETRY: &str = ", retry: { max_attempts: 3 }";
@@ -102,4 +121,31 @@ fn a_breaker_lets_the_callee_recover_by_failing_fast_instead() {
         );
         assert!(short > 0.0, "rate {rate}: the breaker never opened");
     }
+}
+
+#[test]
+fn the_summary_counts_what_the_breaker_refused_and_warns() {
+    let (t, e, cfg, rep) = simulate(BREAKER, 120.0);
+    let refused = rep
+        .requests
+        .iter()
+        .filter(|r| r.cause == Some(kaanal_sim::Cause::Breaker))
+        .count() as u64;
+    let sum = kaanal_sim::summarize(&t, &e, &cfg, &rep);
+    let app = sum.nodes.iter().find(|n| n.name == "app").unwrap();
+    // an attempt of a retried call can be refused too, so the counter is at least the refused requests
+    assert!(
+        refused > 0 && app.short_circuited >= refused,
+        "{} vs {refused}",
+        app.short_circuited
+    );
+    assert!(
+        sum.warnings.iter().any(|w| w.contains("circuit breaker")),
+        "{:?}",
+        sum.warnings
+    );
+    // no breaker, no counter
+    let (t, e, cfg, rep) = simulate("", 120.0);
+    let sum = kaanal_sim::summarize(&t, &e, &cfg, &rep);
+    assert!(sum.nodes.iter().all(|n| n.short_circuited == 0));
 }

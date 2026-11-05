@@ -22,6 +22,7 @@ export function nodeSummary(over: Partial<NodeSummary> = {}): NodeSummary {
     limited: 0,
     overflowed: 0,
     timed_out: 0,
+    short_circuited: 0,
     ...over,
   };
 }

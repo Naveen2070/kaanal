@@ -148,6 +148,8 @@ pub struct NodeSummary {
     pub overflowed: u64,
     /// Deadlines that fired here.
     pub timed_out: u64,
+    /// Calls to this node that an open circuit breaker refused without sending (step 7c).
+    pub short_circuited: u64,
 }
 
 /// One replica of a node.
@@ -454,6 +456,12 @@ fn warnings(
             n.timed_out, n.name
         ));
     }
+    for n in nodes.iter().filter(|n| n.short_circuited > 0) {
+        warnings.push(format!(
+            "{} calls to node {} were refused by an open circuit breaker (they failed at once with a 503 and never reached it)",
+            n.short_circuited, n.name
+        ));
+    }
     for l in links.iter().filter(|l| l.saturated) {
         warnings.push(format!("link {} -> {} is saturated", l.from, l.to));
     }
@@ -668,6 +676,7 @@ pub fn summarize(
                 limited: st.limited,
                 overflowed: st.overflowed,
                 timed_out: st.timed_out,
+                short_circuited: st.short_circuited,
             }
         })
         .collect();
