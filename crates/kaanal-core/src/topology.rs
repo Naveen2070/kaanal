@@ -162,7 +162,11 @@ pub struct Edge {
     /// Response body size a call over this edge brings back; `None` = pass the incoming size on.
     pub returns: Option<u64>,
     /// Whether a response over this edge streams (RULES 71); `None` = the default for the callee.
-    pub stream: Option<bool>,
+    pub stream: Option<crate::config::StreamMode>,
+    /// Probability a packet on this wire is lost (RULES 74); 0 = off.
+    pub loss: f64,
+    /// Permille of its size a compressed response keeps on the wire; 1000 = uncompressed.
+    pub compress_permille: u16,
     /// TLS and keep-alive of the connections this edge's calls ride (RULES 68).
     pub conn: crate::config::Conn,
 }
@@ -558,6 +562,8 @@ impl Topology {
                 sends: e.sends,
                 returns: e.returns,
                 stream: e.stream,
+                loss: e.loss.unwrap_or(0.0),
+                compress_permille: crate::config::compress_permille(e.compress),
                 conn: crate::config::Conn {
                     tls: e.tls,
                     keepalive: e.keepalive,

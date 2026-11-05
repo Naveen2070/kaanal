@@ -96,6 +96,17 @@ pub(crate) fn size_value(_: &mut SchemaGenerator) -> Schema {
     )
 }
 
+/// **Private.** Schema of `stream`: a boolean (both bodies, or neither) or one body.
+pub(crate) fn stream_mode(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Which bodies stream while the callee works: `true` (both) or `false` (neither), or `request`, `response`, `both`, `none`. Absent = a storage read streams its response and a storage write its request.",
+        "anyOf": [
+            { "type": "boolean" },
+            { "type": "string", "enum": ["request", "response", "both", "none"] },
+        ]
+    })
+}
+
 /// **Private.** Schema of an edge's `tls`: `false`, `true`, or the version `1.3` or `1.2`.
 pub(crate) fn tls(_: &mut SchemaGenerator) -> Schema {
     json_schema!({

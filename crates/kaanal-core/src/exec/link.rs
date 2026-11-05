@@ -41,13 +41,8 @@ impl Walk<'_> {
         if edge_rate.is_none() && send.is_none() && recv.is_none() {
             return Duration::ZERO;
         }
-        // the body and the headers of an HTTP call (RULES 65)
-        let (body, header) = if resp {
-            (self.bytes.1, self.topo.header_bytes.1)
-        } else {
-            (self.bytes.0, self.topo.header_bytes.0)
-        };
-        let bytes = body.saturating_add(header);
+        // the body (compressed if the edge says so) and the headers of an HTTP call (RULES 65, 74)
+        let bytes = self.wire_bytes(edge, resp);
         if bytes == 0 {
             return Duration::ZERO;
         }
@@ -151,23 +146,22 @@ impl Walk<'_> {
         .min()
     }
 
-    /// **Private.** The set-up of a new connection before the callee `(node, replica)` runs, as one
-    /// `Connect` hop: the handshake round trips (TCP, then TLS) plus the slow-start stalls of the
-    /// request body, each one `net` (the call's round trip). Returns its length (zero pushes
-    /// nothing).
-    pub(super) fn connect_request(
-        &mut self,
-        conn: Conn,
-        net: Duration,
-        edge: Option<EdgeId>,
-        (run, (node, replica)): (NodeId, (NodeId, u16)),
-        start: Duration,
-        cap: Option<u64>,
-    ) -> Duration {
-        let bytes = self.bytes.0.saturating_add(self.topo.header_bytes.0);
-        let rate = self.path_rate(edge, (run, node), cap);
-        let rtts = conn::handshake_rtts(conn.tls) + conn::stalls(bytes, rate, net);
-        self.push_connect(false, net, rtts, (node, replica), start)
+    /// **Private.** The bytes one direction of a call puts on the wire: the body, compressed when
+    /// the edge says so (a response only, RULES 74), plus the headers.
+    pub(super) fn wire_bytes(&self, edge: Option<EdgeId>, resp: bool) -> u64 {
+        let (body, header) = if resp {
+            (self.bytes.1, self.topo.header_bytes.1)
+        } else {
+            (self.bytes.0, self.topo.header_bytes.0)
+        };
+        let body = match edge.map(|e| self.topo.edges[e].compress_permille) {
+            Some(pm) if resp && pm < 1000 => {
+                u64::try_from((u128::from(body) * u128::from(pm)).div_ceil(1000))
+                    .unwrap_or(u64::MAX)
+            }
+            _ => body,
+        };
+        body.saturating_add(header)
     }
 
     /// **Private.** The slow-start stalls of the response body on a new connection, as a `Connect`
@@ -180,22 +174,21 @@ impl Walk<'_> {
         start: Duration,
         cap: Option<u64>,
     ) -> Duration {
-        let bytes = self.bytes.1.saturating_add(self.topo.header_bytes.1);
+        let bytes = self.wire_bytes(edge, true);
         let rate = self.path_rate(edge, (node, run), cap);
         let rtts = conn::stalls(bytes, rate, net);
-        self.push_connect(true, net, rtts, (node, replica), start)
+        self.push_connect(true, net.saturating_mul(rtts), (node, replica), start)
     }
 
-    /// **Private.** `rtts` round trips of `net` as a `Connect` hop, capped like a transfer.
-    fn push_connect(
+    /// **Private.** `dur` of set-up time as a `Connect` hop, capped like a transfer.
+    pub(super) fn push_connect(
         &mut self,
         resp: bool,
-        net: Duration,
-        rtts: u32,
+        dur: Duration,
         (node, replica): (NodeId, u16),
         start: Duration,
     ) -> Duration {
-        let dur = net.saturating_mul(rtts).min(MAX_HOP);
+        let dur = dur.min(MAX_HOP);
         if dur.is_zero() {
             return dur;
         }

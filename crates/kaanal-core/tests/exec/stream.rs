@@ -224,3 +224,146 @@ fn stream_is_checked_when_the_file_loads() {
     let err = load(", stream: 1").unwrap_err();
     assert!(err.contains("stream"), "{err}");
 }
+
+// ---- S4: streamed uploads (RULES 76) ----
+
+/// The plan of a write of `req` bytes (the route's op is a write, the store counts the request).
+fn put_plan(
+    t: &Topology,
+    e: &kaanal_core::Endpoints,
+    chaos: &ChaosState,
+    req: u64,
+) -> Vec<PlanItem> {
+    execute(
+        t,
+        &chaos.compile(),
+        &ChainRequest {
+            endpoint: e.get("GET /users/{id}").unwrap(),
+            n: 0,
+            seed: 42,
+            pin_delay: Duration::ZERO,
+            req_bytes: req,
+            resp_bytes: 0,
+        },
+    )
+    .plan
+    .items
+}
+
+fn put_cfg(edge: &str, step: &str) -> String {
+    cfg(edge, step).replace("op: read", "op: write")
+}
+
+/// The store's hop and the request link hop.
+fn put_parts(t: &Topology, items: &[PlanItem]) -> (Hop, Hop) {
+    let h = hops_of(items);
+    let files = t.id("files").unwrap();
+    (
+        h.iter()
+            .find(|x| x.node == files && x.kind == HopKind::Proc)
+            .cloned()
+            .expect("the store's hop"),
+        h.iter()
+            .find(|x| matches!(x.kind, HopKind::Link { resp: false, .. }))
+            .cloned()
+            .expect("the request link"),
+    )
+}
+
+#[test]
+fn a_streamed_upload_over_a_slow_wire_takes_the_wire_time() {
+    // a store write counts the request: 1 MiB at 100 MB/s is 10 ms after the 20 ms first byte, but
+    // the wire needs 1 s, so the upload is the slowest stage. Streamed, the store works while the
+    // bytes arrive: the call ends with the wire (max of the two), not 1 s + 30 ms.
+    let (t, e) = build(&put_cfg(", bandwidth: 1MB", ""));
+    let items = put_plan(&t, &e, &ChaosState::default(), MIB);
+    let (proc, link) = put_parts(&t, &items);
+    assert_eq!(proc.dur, ms(20) + STORE_SIZE_TERM);
+    assert_eq!(link.dur, Duration::from_secs(1));
+    assert_eq!(
+        proc.start, link.start,
+        "the store starts as the bytes start to arrive"
+    );
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, PlanItem::Fork { branches: 2, .. })),
+        "the overlap is an ordinary fork"
+    );
+}
+
+#[test]
+fn a_streamed_upload_over_a_fast_wire_is_limited_by_the_store() {
+    let (t, e) = build(&put_cfg(", bandwidth: 1GB", ""));
+    let (proc, link) = put_parts(&t, &put_plan(&t, &e, &ChaosState::default(), MIB));
+    assert_eq!(link.dur, Duration::from_nanos(976_562));
+    assert!(end(&proc) > end(&link), "the store ends last");
+}
+
+#[test]
+fn stream_false_restores_the_buffered_upload() {
+    let (t, e) = build(&put_cfg(", bandwidth: 1MB, stream: false", ""));
+    let items = put_plan(&t, &e, &ChaosState::default(), MIB);
+    let (proc, link) = put_parts(&t, &items);
+    assert!(!items.iter().any(|i| matches!(i, PlanItem::Fork { .. })));
+    assert_eq!(proc.start, end(&link), "the store works after the upload");
+}
+
+#[test]
+fn stream_request_streams_a_read_s_upload_and_response_does_not() {
+    // a read from the store has no request body to stream by default; `request` asks for it
+    let (t, e) = build(&cfg(", bandwidth: 1MB, stream: request", ""));
+    let items = put_plan(&t, &e, &ChaosState::default(), MIB);
+    assert!(items.iter().any(|i| matches!(i, PlanItem::Fork { .. })));
+    let (t, e) = build(&cfg(", bandwidth: 1MB, stream: response", ""));
+    let h = hops_of(&put_plan(&t, &e, &ChaosState::default(), MIB));
+    let link = h
+        .iter()
+        .find(|x| matches!(x.kind, HopKind::Link { resp: false, .. }))
+        .unwrap();
+    let files = t.id("files").unwrap();
+    let proc = h
+        .iter()
+        .find(|x| x.node == files && x.kind == HopKind::Proc)
+        .unwrap();
+    assert_eq!(
+        proc.start,
+        end(link),
+        "`response` leaves the upload buffered"
+    );
+}
+
+#[test]
+fn a_failing_store_takes_the_upload_down_with_it() {
+    let (t, e) = build(&put_cfg(", bandwidth: 1MB", ""));
+    let files = t.id("files").unwrap();
+    let down = ChaosState::from([(
+        files,
+        NodeChaos {
+            down: true,
+            ..NodeChaos::default()
+        },
+    )]);
+    let items = put_plan(&t, &e, &down, MIB);
+    assert!(items.iter().any(|i| matches!(i, PlanItem::Fail { .. })));
+}
+
+#[test]
+fn nothing_streams_up_without_request_bytes_or_a_pipe() {
+    let (t, e) = build(&put_cfg(", bandwidth: 1MB", ""));
+    let items = put_plan(&t, &e, &ChaosState::default(), 0);
+    assert!(!items.iter().any(|i| matches!(i, PlanItem::Fork { .. })));
+    let (t, e) = build(&put_cfg("", ""));
+    let items = put_plan(&t, &e, &ChaosState::default(), MIB);
+    assert!(!items.iter().any(|i| matches!(i, PlanItem::Fork { .. })));
+}
+
+#[test]
+fn the_stream_modes_are_checked_when_the_file_loads() {
+    let load = |edge: &str| Config::from_yaml(&cfg(edge, "")).map_err(|e| e.to_string());
+    for ok in ["true", "false", "request", "response", "both", "none"] {
+        assert!(load(&format!(", stream: {ok}")).is_ok(), "{ok}");
+    }
+    let err = load(", stream: up").unwrap_err();
+    assert!(err.contains("stream"), "{err}");
+}

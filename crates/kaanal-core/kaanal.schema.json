@@ -304,6 +304,17 @@
           "minimum": 1,
           "type": "integer"
         },
+        "compress": {
+          "default": null,
+          "description": "The share of its size a response keeps on the wire when it is compressed (gzip, brotli): above\n0 to 1, 0.3 sends 30% of the bytes; default none. The wire, slow start and loss see the smaller\nbody; the node still handles the whole one (compressing costs the node's `per_kb`). An\nestimate you supply: there is no universal ratio.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "maximum": 1,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "from": {
           "description": "Name of the calling node.",
           "type": "string"
@@ -315,6 +326,17 @@
           "maximum": 1000000,
           "minimum": 1,
           "type": "integer"
+        },
+        "loss": {
+          "default": null,
+          "description": "Probability that a packet on this wire is lost, 0 to 1 (0.01 is 1%); default 0, off. A lossy\ntransfer pays fast retransmits and retransmission timeouts (long flows run at the TCP rate of\nRFC 5348); a lossy handshake waits 1 s per lost SYN. The cost is in round trips, so an edge\nwith no `net` pays nothing.",
+          "format": "double",
+          "maximum": 1,
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "net": {
           "anyOf": [
@@ -373,12 +395,21 @@
           "description": "Size of the request body a call over this edge carries: bytes as a whole number, or text\nwith a unit like `200KB` (KB = 1024 bytes; at most 1 GiB). A `call:` step may override it.\nAbsent = the size of the request that reached the caller (it is passed on)."
         },
         "stream": {
-          "default": null,
-          "description": "Whether the response of a call over this edge streams: its bytes cross the wire while the\ncallee is still producing them, so the call takes `first byte + size / slowest stage` instead of\nthe production time plus the transfer time. Absent = a read of a `storage` node streams and\nevery other call is buffered; a `call:` step's own `stream` wins.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "request",
+                "response",
+                "both",
+                "none"
+              ],
+              "type": "string"
+            }
+          ],
+          "description": "Which bodies of a call over this edge stream: a response crosses the wire while the callee is\nstill producing it, and an upload is consumed by the callee as it arrives, so the call takes\n`first byte + size / slowest stage` instead of the stages added. `true` is both, `false`\nneither, or `request` / `response`. Absent = a read of a `storage` node streams its response, a\nwrite its request, and every other call is buffered; a `call:` step's own `stream` wins."
         },
         "tls": {
           "anyOf": [

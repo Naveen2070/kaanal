@@ -9,9 +9,10 @@
 use std::time::Duration;
 
 use super::walk::{Flow, Walk};
+use super::wire::Wire;
 use super::{Hop, HopKind, Op, PlanItem};
 use crate::chain::Call;
-use crate::config::NodeKind;
+use crate::config::{NodeKind, StreamMode};
 use crate::topology::{EdgeId, NodeId};
 
 /// **Private.** What the walk remembers of the last own hop it emitted: whose it was, when it ended
@@ -23,11 +24,31 @@ pub(super) struct Tail {
     pub(super) size: Duration,
 }
 
+/// **Private.** An upload in progress: its fork and branch B in the plan, and when the request
+/// finishes crossing the wire.
+pub(super) struct Upload {
+    fork: usize,
+    branch: usize,
+    pub(super) sent: Duration,
+}
+
 impl Walk<'_> {
-    /// **Private.** Whether the response of `call` streams: its own or its edge's `stream`, else the
-    /// default of the callee (a read of a storage node streams, as S3, GCS and Azure send a GET as
-    /// it is read). Nothing streams with no response bytes or no pipe with a rate (nothing to
-    /// overlap), so a topology without bandwidth makes the same plans as before.
+    /// **Private.** Which bodies of `call` stream: its own or its edge's `stream`, else the default
+    /// of the callee: a storage read streams its response and a storage write its request, as S3,
+    /// GCS and Azure send a GET as it is read and take a PUT as it arrives.
+    fn stream_mode(&self, call: &Call, op: Op) -> StreamMode {
+        call.stream.unwrap_or_else(|| {
+            match (self.topo.nodes[call.node].kind == NodeKind::Storage, op) {
+                (true, Op::Read) => StreamMode::Response,
+                (true, Op::Write) => StreamMode::Request,
+                _ => StreamMode::None,
+            }
+        })
+    }
+
+    /// **Private.** Whether the response of `call` streams. Nothing streams with no response bytes or
+    /// no pipe with a rate (nothing to overlap), so a topology without bandwidth makes the same
+    /// plans as before.
     pub(super) fn streams(
         &self,
         call: &Call,
@@ -36,11 +57,56 @@ impl Walk<'_> {
         run: NodeId,
         cap: Option<u64>,
     ) -> bool {
-        let on = call.stream.unwrap_or_else(|| {
-            self.topo.nodes[call.node].kind == NodeKind::Storage && op == Op::Read
-        });
-        on && self.bytes.1.saturating_add(self.topo.header_bytes.1) > 0
+        self.stream_mode(call, op).response()
+            && self.wire_bytes(edge, true) > 0
             && self.path_rate(edge, (call.node, run), cap).is_some()
+    }
+
+    /// **Private.** Whether the request of `call` streams (an upload): the same conditions, for the
+    /// request body and the pipes from the caller to the callee.
+    pub(super) fn streams_request(
+        &self,
+        call: &Call,
+        op: Op,
+        edge: Option<EdgeId>,
+        run: NodeId,
+        cap: Option<u64>,
+    ) -> bool {
+        self.stream_mode(call, op).request()
+            && self.wire_bytes(edge, false) > 0
+            && self.path_rate(edge, (run, call.node), cap).is_some()
+    }
+
+    /// **Private.** Opens an upload's fork and its branch A, the request crossing the wire (with
+    /// its retransmits), starting at `start`; branch B, the callee, is opened and left for the walk
+    /// to fill. The callee consumes the bytes as they arrive, so both start together (RULES 76).
+    pub(super) fn begin_upload(&mut self, wire: &mut Wire, start: Duration) -> Upload {
+        let fork = self.items.len();
+        self.items.push(PlanItem::Fork {
+            branches: 2,
+            size: 0,
+        });
+        let a = self.items.len();
+        self.items.push(PlanItem::Branch { size: 0 });
+        let sent = start + self.wire_send(wire, start);
+        self.items[a] = PlanItem::Branch {
+            size: self.items.len() - a - 1,
+        };
+        let branch = self.items.len();
+        self.items.push(PlanItem::Branch { size: 0 });
+        Upload { fork, branch, sent }
+    }
+
+    /// **Private.** Closes branch B and the upload's fork; the callee's call ends at the later of
+    /// its own end and `up.sent` (the caller of this, who knows the flow, takes the maximum).
+    pub(super) fn end_upload(&mut self, up: &Upload) {
+        self.items[up.branch] = PlanItem::Branch {
+            size: self.items.len() - up.branch - 1,
+        };
+        self.items[up.fork] = PlanItem::Fork {
+            branches: 2,
+            size: self.items.len() - up.fork - 1,
+        };
     }
 
     /// **Private.** Opens the fork and branch A (the callee's work); returns their plan indices.
@@ -62,20 +128,14 @@ impl Walk<'_> {
     /// something after) cannot send early, so the transfer starts at its end, as buffered. Returns
     /// when the fork ends, `None` for a failed callee (which has no response: the fork keeps only
     /// branch A and the failure goes up as usual).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one call's context; a struct would only rename them"
-    )]
     pub(super) fn end_stream(
         &mut self,
         (fi, bi): (usize, usize),
         flow: &Flow,
-        at: (NodeId, u16),
-        run: (NodeId, u16),
-        edge: Option<EdgeId>,
-        cap: Option<u64>,
+        wire: &mut Wire,
         t0: Duration,
     ) -> Option<Duration> {
+        let at = wire.at;
         self.items[bi] = PlanItem::Branch {
             size: self.items.len() - bi - 1,
         };
@@ -102,7 +162,7 @@ impl Walk<'_> {
                 dur: wait,
             }));
         }
-        let moved = self.link(edge, (at, run), true, first, cap);
+        let moved = self.wire_back(wire, first);
         self.items[b] = PlanItem::Branch {
             size: self.items.len() - b - 1,
         };

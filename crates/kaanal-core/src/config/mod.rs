@@ -42,7 +42,7 @@ pub use checks::valid_locale_tag;
 use checks::{
     LOCALE_PATTERN, check_auth, check_capacity, check_edges, check_locales, check_replicas,
 };
-pub use conn::{Conn, DEFAULT_KEEPALIVE, MAX_KEEPALIVE, Tls};
+pub use conn::{Conn, DEFAULT_KEEPALIVE, MAX_KEEPALIVE, StreamMode, Tls, compress_permille};
 use endpoints::default_calls;
 pub use endpoints::{
     Branch, CallStep, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig, parse_endpoints,

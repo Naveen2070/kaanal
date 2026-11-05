@@ -17,7 +17,7 @@ use crate::config::Tls;
 /// Initial congestion window in segments (RFC 6928).
 const IW_SEGMENTS: u64 = 10;
 /// Maximum segment size in bytes: a 1500 B Ethernet MTU less 20 B of IP and 20 B of TCP header.
-const MSS: u64 = 1460;
+pub(super) const MSS: u64 = 1460;
 /// Bytes of the first flight: the most a fresh connection sends before it hears an ACK.
 const IW_BYTES: u128 = (IW_SEGMENTS * MSS) as u128;
 

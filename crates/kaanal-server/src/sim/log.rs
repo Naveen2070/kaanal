@@ -67,6 +67,8 @@ fn hop_label(k: HopKind) -> &'static str {
         HopKind::Connect { resp: false } => "connect",
         HopKind::Connect { resp: true } => "connect response",
         HopKind::FirstByte => "first byte",
+        HopKind::Retransmit { resp: false } => "retransmit",
+        HopKind::Retransmit { resp: true } => "retransmit response",
         HopKind::Proc => "proc",
         HopKind::Op(_) => "op",
         HopKind::CacheHit => "cache hit",

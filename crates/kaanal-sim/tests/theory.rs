@@ -490,3 +490,106 @@ fn a_streamed_read_takes_the_pipeline_limit_and_shares_the_wire_as_processor_sha
     let got = mean_secs(rep.requests.iter().map(|r| r.latency));
     assert_close(got, 0.020 + 1.0 / (1.0 - 0.4), "streamed read at rho = 0.4");
 }
+
+/// A gateway and an app joined by an edge with `edge`'s fields; a request reads `resp` bytes.
+fn lossy_run(edge: &str, resp: u64, lam: f64, requests: f64) -> SimReport {
+    let t = topo(&format!(
+        "version: 1\nheader_bytes: 0\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service }}\nedges:\n  - {{ from: gw, to: app{edge} }}\n"
+    ));
+    let spec = RouteSpec::inferred("GET /x/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
+    let duration = requests / lam / 0.9;
+    let cfg = SimConfig {
+        streams: vec![Stream {
+            endpoint_key: "GET /x/{id}".into(),
+            rate_per_s: lam,
+            req_bytes: 0,
+            resp_bytes: resp,
+        }],
+        duration: Duration::from_secs_f64(duration),
+        warmup: Duration::from_secs_f64(duration * 0.1),
+        seed: 7,
+    };
+    run(&t, &e, &ChaosState::default(), &cfg).unwrap()
+}
+
+#[test]
+fn a_short_lossy_call_pays_the_loss_times_the_retransmission_timeout() {
+    // RULES 74. One segment has no duplicate ACKs, so a loss waits RTO = max(200 ms, 3 R) = 200 ms
+    // (RFC 6298). Mean latency = R + p x RTO = 10 ms + 0.05 x 200 ms = 20 ms, within five standard
+    // errors of a Bernoulli(p) cost of RTO per request.
+    let rep = lossy_run(
+        ", net: 10ms, loss: 0.05, keepalive: 1000000",
+        1,
+        5.0,
+        100_000.0,
+    );
+    let n = f64::from(u32::try_from(rep.requests.len()).unwrap());
+    let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+    let se = 0.2 * (0.05_f64 * 0.95).sqrt() / n.sqrt();
+    assert!(
+        (got - 0.020).abs() < 5.0 * se,
+        "mean {got:.6} s, theory 0.020000 s +- {se:.6}"
+    );
+}
+
+#[test]
+fn a_long_lossy_transfer_runs_at_the_rfc_5348_rate() {
+    // 100 MiB over a 100 ms round trip at 1 % loss: 71,862 segments, 719 expected losses, a long
+    // flow, so it takes bytes / X with X from RFC 5348 section 3.1 (computed here independently)
+    // after the round trip itself.
+    let bytes: u64 = 100 << 20;
+    let rep = lossy_run(
+        ", net: 100ms, loss: 0.01, keepalive: 1000000",
+        bytes,
+        0.001,
+        20.0,
+    );
+    let (s, r, p) = (1460.0_f64, 0.1_f64, 0.01_f64);
+    let t_rto = (4.0 * r).max(0.2);
+    let x = s
+        / (r * (2.0 * p / 3.0).powf(0.5)
+            + t_rto * 3.0 * (3.0 * p / 8.0).powf(0.5) * p * (1.0 + 32.0 * p.powi(2)));
+    let want = r + f64::from(u32::try_from(bytes).unwrap()) / x;
+    let got = mean_secs(rep.requests.iter().map(|q| q.latency));
+    let rel = (got - want).abs() / want;
+    assert!(
+        rel < 0.01,
+        "{got:.2} s against {want:.2} s ({:.3}% off)",
+        rel * 100.0
+    );
+}
+
+#[test]
+fn a_streamed_upload_takes_the_wire_time_and_shares_the_wire_as_processor_sharing() {
+    // RULES 76. A store (first byte 20 ms, 100 MB/s) behind a 1 MiB/s wire; every request writes
+    // 1 MiB. The store consumes the bytes as they arrive, so a lone PUT takes max(1 s on the wire,
+    // 20 ms + 10 ms in the store) = 1 s, not the 1.03 s of the stages added; and the wire is a
+    // fair-sharing link, so at load rho the upload takes S / (1 - rho).
+    let t = topo(
+        "version: 1\nheader_bytes: 0\nnodes:\n  gw: { type: gateway }\n  app: { type: service }\n  files: { type: storage, first_byte: 20ms, throughput: 100MB/s }\nedges:\n  - { from: gw, to: app }\n  - { from: app, to: files, bandwidth: 1MB }\n",
+    );
+    let spec = RouteSpec::inferred("PUT /x/{id}", t.id("app").unwrap());
+    let e = compile(&t, &[spec], EndpointsInput::default()).unwrap();
+    let run_at = |lam: f64, requests: f64| {
+        let duration = requests / lam / 0.9;
+        let cfg = SimConfig {
+            streams: vec![Stream {
+                endpoint_key: "PUT /x/{id}".into(),
+                rate_per_s: lam,
+                req_bytes: 1 << 20,
+                resp_bytes: 0,
+            }],
+            duration: Duration::from_secs_f64(duration),
+            warmup: Duration::from_secs_f64(duration * 0.1),
+            seed: 7,
+        };
+        run(&t, &e, &ChaosState::default(), &cfg).unwrap()
+    };
+    let lone = run_at(0.001, 300.0);
+    let fastest = lone.requests.iter().map(|r| r.latency).min().unwrap();
+    assert_eq!(fastest, Duration::from_secs(1));
+    let rep = run_at(0.4, 30_000.0);
+    let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+    assert_close(got, 1.0 / (1.0 - 0.4), "streamed upload at rho = 0.4");
+}

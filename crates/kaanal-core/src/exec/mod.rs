@@ -11,9 +11,11 @@
 
 mod conn;
 mod link;
+mod loss;
 mod route;
 mod stream;
 mod walk;
+mod wire;
 
 pub(crate) use walk::draw_rng;
 use walk::{Flow, Walk};
@@ -87,6 +89,13 @@ pub enum HopKind {
         /// False for the handshake and the request's stalls, true for the response's stalls.
         resp: bool,
     },
+    /// What loss adds to a transfer (RULES 74): fast retransmits, retransmission timeouts, or for a
+    /// long flow the time over the lossless one at the TCP rate. A pure delay after the transfer
+    /// (`resp` false: the request, true: the response); it belongs to the callee.
+    Retransmit {
+        /// False after the request body, true after the response body.
+        resp: bool,
+    },
     /// The wait for the first byte of a streamed response (RULES 71): the callee is producing and
     /// the transfer has not started. A pure delay in the transfer's branch of a fork; it belongs to
     /// the callee.
@@ -116,7 +125,11 @@ impl HopKind {
     pub fn is_wait(self) -> bool {
         matches!(
             self,
-            HopKind::Net | HopKind::Delay | HopKind::Connect { .. } | HopKind::FirstByte
+            HopKind::Net
+                | HopKind::Delay
+                | HopKind::Connect { .. }
+                | HopKind::FirstByte
+                | HopKind::Retransmit { .. }
         )
     }
 }

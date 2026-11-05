@@ -107,3 +107,106 @@ impl Default for Conn {
         }
     }
 }
+
+/// **Private.** `loss:` read as a probability, 0 (off) to 1.
+pub(super) fn loss<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let v = Option::<f64>::deserialize(d).map_err(|_| {
+        de::Error::custom("loss: use a probability from 0 to 1, such as 0.01 for 1%")
+    })?;
+    match v {
+        Some(p) if !(0.0..=1.0).contains(&p) => Err(de::Error::custom(format!(
+            "loss: {p} is out of range; use a probability from 0 (none) to 1"
+        ))),
+        v => Ok(v),
+    }
+}
+
+/// **Private.** `compress:` read as the share of its size a body keeps on the wire, above 0 and at
+/// most 1 (1 = not compressed).
+pub(super) fn compress<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let v = Option::<f64>::deserialize(d).map_err(|_| {
+        de::Error::custom(
+            "compress: use the share of its size a body keeps, above 0 to 1, such as 0.3",
+        )
+    })?;
+    match v {
+        Some(r) if !(r > 0.0 && r <= 1.0) => Err(de::Error::custom(format!(
+            "compress: {r} is out of range; use the share of its size a body keeps, above 0 to 1"
+        ))),
+        v => Ok(v),
+    }
+}
+
+/// The permille of its size a compressed body keeps on the wire (1000 = uncompressed): `r` rounded
+/// up to a thousandth, at least 1.
+pub fn compress_permille(r: Option<f64>) -> u16 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to 1..=1000"
+    )]
+    r.map_or(1000, |r| (r * 1000.0).ceil().clamp(1.0, 1000.0) as u16)
+}
+
+/// Which bodies of a call stream while the callee works (RULES 71, 76): the response (a download,
+/// pipeline limit `first byte + size / slowest stage`), the request (an upload the callee consumes as
+/// it arrives), both, or neither (buffered).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StreamMode {
+    /// Neither body streams.
+    #[default]
+    None,
+    /// The response streams.
+    Response,
+    /// The request streams.
+    Request,
+    /// Both stream.
+    Both,
+}
+
+impl StreamMode {
+    /// Whether the response streams.
+    pub fn response(self) -> bool {
+        matches!(self, StreamMode::Response | StreamMode::Both)
+    }
+
+    /// Whether the request streams.
+    pub fn request(self) -> bool {
+        matches!(self, StreamMode::Request | StreamMode::Both)
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamMode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        /// **Private.** `true` (both), `false` (neither), or `request`, `response`, `both`, `none`.
+        struct V;
+        impl de::Visitor<'_> for V {
+            type Value = StreamMode;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("stream: `true`, `false`, `request`, `response`, `both` or `none`")
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<StreamMode, E> {
+                Ok(if v {
+                    StreamMode::Both
+                } else {
+                    StreamMode::None
+                })
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<StreamMode, E> {
+                match v.trim() {
+                    "true" | "both" => Ok(StreamMode::Both),
+                    "false" | "none" => Ok(StreamMode::None),
+                    "request" => Ok(StreamMode::Request),
+                    "response" => Ok(StreamMode::Response),
+                    other => Err(E::custom(format!(
+                        "stream: `{other}` is not a mode; use true, false, request, response, both or none"
+                    ))),
+                }
+            }
+        }
+        d.deserialize_any(V)
+    }
+}

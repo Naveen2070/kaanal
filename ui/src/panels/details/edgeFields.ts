@@ -134,19 +134,50 @@ export const setKeepalive = (i: number, e: EdgeDoc, n: number): Op => put(i, "ke
 export const clearKeepalive = (i: number, e: EdgeDoc): Op[] =>
   "keepalive" in e ? [{ op: "remove", path: ["edges", i, "keepalive"] }] : [];
 
-/** Whether the response over the wire streams (RULES 71): the callee's default, always, or never. */
-export type StreamChoice = "default" | "yes" | "no";
+/** Which bodies of a call over the wire stream (RULES 71, 76): the callee's default, both, one, or neither. */
+export type StreamChoice = "default" | "both" | "response" | "request" | "none";
 export const STREAM_CHOICES: readonly { value: StreamChoice; label: string }[] = [
-  { value: "default", label: "Default (a storage read streams)" },
-  { value: "yes", label: "Yes, stream it" },
-  { value: "no", label: "No, buffer it" },
+  { value: "default", label: "Default (a storage read or write streams)" },
+  { value: "both", label: "Both, upload and download" },
+  { value: "response", label: "Download only (the response)" },
+  { value: "request", label: "Upload only (the request)" },
+  { value: "none", label: "Neither, buffer both" },
 ];
-export const streamOf = (e: EdgeDoc): StreamChoice =>
-  e.stream === true ? "yes" : e.stream === false ? "no" : "default";
-/** The default removes the key; yes and no write the boolean. */
+/** The file's `stream`: true is both, false is neither, or the word. */
+export function streamOf(e: EdgeDoc): StreamChoice {
+  const v = e.stream;
+  if (v === true || v === "both" || v === "true") return "both";
+  if (v === false || v === "none" || v === "false") return "none";
+  if (v === "response" || v === "request") return v;
+  return "default";
+}
+/** The default removes the key; both and none write the boolean, a direction writes the word. */
 export const setStream = (i: number, e: EdgeDoc, c: StreamChoice): Op[] =>
   c === "default"
     ? "stream" in e
       ? [{ op: "remove", path: ["edges", i, "stream"] }]
       : []
-    : [put(i, "stream", e, c === "yes")];
+    : [put(i, "stream", e, c === "both" ? true : c === "none" ? false : c)];
+
+/** Packet loss on the wire (RULES 74): the loader's 0 to 1, shown as a percent; 0 or absent is off. */
+export const LOSS_LIMITS = { min: 0, max: 100 } as const;
+export const lossPctOf = (e: EdgeDoc): number | null =>
+  typeof e.loss === "number" && e.loss > 0 ? Number((e.loss * 100).toFixed(4)) : null;
+/** Zero removes the key (off); anything else writes the probability. */
+export const setLoss = (i: number, e: EdgeDoc, pct: number): Op[] =>
+  pct <= 0
+    ? "loss" in e
+      ? [{ op: "remove", path: ["edges", i, "loss"] }]
+      : []
+    : [put(i, "loss", e, Number((pct / 100).toFixed(6)))];
+
+/** The share of its size a compressed response keeps on the wire, as a percent; null = not compressed. */
+export const COMPRESS_LIMITS = { min: 0.1, max: 100 } as const;
+export const compressPctOf = (e: EdgeDoc): number | null =>
+  typeof e.compress === "number" && e.compress > 0 && e.compress <= 1
+    ? Number((e.compress * 100).toFixed(4))
+    : null;
+export const setCompress = (i: number, e: EdgeDoc, pct: number): Op =>
+  put(i, "compress", e, Number((pct / 100).toFixed(6)));
+export const clearCompress = (i: number, e: EdgeDoc): Op[] =>
+  "compress" in e ? [{ op: "remove", path: ["edges", i, "compress"] }] : [];

@@ -288,13 +288,19 @@ test("a_keepalive_that_is_set_can_go_back_to_the_default", async () => {
   expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "keepalive"] }] });
 });
 
-test("stream_the_response_is_default_yes_or_no_and_default_removes_the_key", async () => {
+test("stream_the_response_has_five_choices_and_default_removes_the_key", async () => {
   await show(1);
   const select = screen.getByLabelText("Stream the response") as HTMLSelectElement;
   expect(select.value).toBe("default");
-  expect([...select.options].map((o) => o.value)).toEqual(["default", "yes", "no"]);
+  expect([...select.options].map((o) => o.value)).toEqual([
+    "default",
+    "both",
+    "response",
+    "request",
+    "none",
+  ]);
   let sent = mockFetch([{ json: view() }]);
-  fireEvent.change(select, { target: { value: "no" } });
+  fireEvent.change(select, { target: { value: "none" } });
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({
     patch: [{ op: "insert", path: ["edges", 1, "stream"], value: false }],
@@ -302,9 +308,69 @@ test("stream_the_response_is_default_yes_or_no_and_default_removes_the_key", asy
   cleanup();
   await show(0, view({ edges: [{ from: "app", to: "db", stream: true }] }));
   const set = screen.getByLabelText("Stream the response") as HTMLSelectElement;
-  expect(set.value).toBe("yes");
+  expect(set.value).toBe("both");
   sent = mockFetch([{ json: view() }]);
-  fireEvent.change(set, { target: { value: "default" } });
+  fireEvent.change(set, { target: { value: "request" } });
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "set", path: ["edges", 0, "stream"], value: "request" }],
+  });
+  cleanup();
+  await show(0, view({ edges: [{ from: "app", to: "db", stream: "response" }] }));
+  const word = screen.getByLabelText("Stream the response") as HTMLSelectElement;
+  expect(word.value).toBe("response");
+  sent = mockFetch([{ json: view() }]);
+  fireEvent.change(word, { target: { value: "default" } });
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "stream"] }] });
+});
+
+test("packet_loss_is_a_percent_written_as_a_probability_and_zero_removes_it", async () => {
+  await show(1);
+  const box = screen.getByLabelText("Packet loss (%)") as HTMLInputElement;
+  expect(box.value).toBe("");
+  let sent = mockFetch([{ json: view() }]);
+  fireEvent.change(box, { target: { value: "1.5" } });
+  fireEvent.blur(box);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["edges", 1, "loss"], value: 0.015 }],
+  });
+  cleanup();
+  await show(0, view({ edges: [{ from: "app", to: "db", loss: 0.02 }] }));
+  const set = screen.getByLabelText("Packet loss (%)") as HTMLInputElement;
+  expect(set.value).toBe("2");
+  sent = mockFetch([{ json: view() }]);
+  fireEvent.change(set, { target: { value: "0" } });
+  fireEvent.blur(set);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "loss"] }] });
+});
+
+test("a_loss_above_100_percent_is_never_sent", async () => {
+  await show(1);
+  const sent = mockFetch([{ json: view() }]);
+  const box = screen.getByLabelText("Packet loss (%)");
+  fireEvent.change(box, { target: { value: "150" } });
+  fireEvent.blur(box);
+  expect(sent).toHaveLength(0);
+});
+
+test("compress_is_a_percent_kept_and_can_be_stopped", async () => {
+  await show(1);
+  let sent = mockFetch([{ json: view() }]);
+  const box = screen.getByLabelText("Compress the response (%)");
+  fireEvent.change(box, { target: { value: "30" } });
+  fireEvent.blur(box);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({
+    patch: [{ op: "insert", path: ["edges", 1, "compress"], value: 0.3 }],
+  });
+  cleanup();
+  await show(0, view({ edges: [{ from: "app", to: "db", compress: 0.5 }] }));
+  expect((screen.getByLabelText("Compress the response (%)") as HTMLInputElement).value).toBe("50");
+  sent = mockFetch([{ json: view() }]);
+  fireEvent.click(screen.getByText("Stop compressing"));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ patch: [{ op: "remove", path: ["edges", 0, "compress"] }] });
 });

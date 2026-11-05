@@ -19,15 +19,22 @@ import {
   callsOf,
   clearBandwidth,
   clearBody,
+  clearCompress,
   clearKeepalive,
+  COMPRESS_LIMITS,
+  compressPctOf,
   EDGE_LIMITS,
   KEEPALIVE,
+  LOSS_LIMITS,
+  lossPctOf,
   keepaliveOf,
   netMsOf,
   setBandwidth,
   setBody,
   setCalls,
+  setCompress,
   setKeepalive,
+  setLoss,
   setNet,
   setShare,
   setStream,
@@ -151,6 +158,25 @@ export function EdgeControls({ index }: { index: number }) {
             ) : null}
           </div>
         ))}
+        <NumberField
+          label="Compress the response (%)"
+          hint="The share of its size a response keeps on the wire when it is compressed (30 sends 30% of the bytes). Empty means not compressed. The component still handles the whole body."
+          value={compressPctOf(e)}
+          placeholder="Not compressed"
+          min={COMPRESS_LIMITS.min}
+          max={COMPRESS_LIMITS.max}
+          step="any"
+          onCommit={(n) => patch([setCompress(index, e, n)])}
+        />
+        {compressPctOf(e) !== null ? (
+          <button
+            type="button"
+            onClick={() => void patch(clearCompress(index, e))}
+            className="mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            Stop compressing
+          </button>
+        ) : null}
         <div className="mb-2">
           <label htmlFor={streamId} className="block text-sm font-medium">
             Stream the response
@@ -171,9 +197,10 @@ export function EdgeControls({ index }: { index: number }) {
             ))}
           </select>
           <p id={`${streamId}-hint`} className="text-xs text-muted">
-            A streamed response crosses the wire while the callee is still producing it, so the call
-            takes the first byte plus the size over the slowest stage, not the stages added. It only
-            matters on a wire or component with a bandwidth.
+            A streamed body crosses the wire while the other end is still working on it (a download
+            as the callee produces it, an upload as it arrives), so the call takes the first byte
+            plus the size over the slowest stage, not the stages added. It only matters on a wire or
+            component with a bandwidth.
           </p>
         </div>
       </Section>
@@ -201,6 +228,16 @@ export function EdgeControls({ index }: { index: number }) {
             round trip is this wire's latency, so a wire with no latency adds nothing.
           </p>
         </div>
+        <NumberField
+          label="Packet loss (%)"
+          hint="The share of packets this wire drops. A lost packet costs a retransmit; a long transfer runs slower. Empty or 0 means no loss. It adds nothing on a wire with no latency."
+          value={lossPctOf(e)}
+          placeholder="No loss"
+          min={LOSS_LIMITS.min}
+          max={LOSS_LIMITS.max}
+          step="any"
+          onCommit={(n) => patch(setLoss(index, e, n))}
+        />
         <NumberField
           label="Calls per connection"
           hint="How many calls one connection serves before it closes. One call in this many opens a new connection (handshake and slow start); 1 opens one every call."

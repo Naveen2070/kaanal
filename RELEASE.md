@@ -7,12 +7,19 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## How loss and compression are costed
+
+Both are off unless an edge says `loss` (a probability, 0.01 is 1%) or `compress` (the share of a response kept on the
+wire, 0.3 sends 30%). A lossy transfer pays fast retransmits and retransmission timeouts, a long one runs at the TCP
+rate of RFC 5348, and a lost SYN waits 1 s; an edge with no `net` pays nothing. Compression only shrinks the bytes on
+the wire, so a store's own time is unchanged.
+
 ## How a streamed response is costed
 
-A read of a storage node now streams: its bytes cross a wire or card with a `bandwidth` while the store is still
+A write to a storage node streams its request the same way (the store works while the bytes arrive). A read of a storage node now streams: its bytes cross a wire or card with a `bandwidth` while the store is still
 reading, so the call takes the first byte plus the size over the slowest stage, not the stages added. This only moves
 figures with a `bandwidth`. `stream: false` on the edge or the `call:` step restores the old sum; `stream: true` turns
-it on for any callee.
+it on for both directions of any callee, or `stream: request` / `stream: response` for one.
 
 ## How a new connection is costed
 

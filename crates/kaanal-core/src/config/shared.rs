@@ -83,12 +83,28 @@ pub struct EdgeConfig {
     #[serde(default, deserialize_with = "crate::units::returns")]
     #[schemars(schema_with = "crate::schema::size")]
     pub returns: Option<u64>,
-    /// Whether the response of a call over this edge streams: its bytes cross the wire while the
-    /// callee is still producing them, so the call takes `first byte + size / slowest stage` instead of
-    /// the production time plus the transfer time. Absent = a read of a `storage` node streams and
-    /// every other call is buffered; a `call:` step's own `stream` wins.
+    /// Which bodies of a call over this edge stream: a response crosses the wire while the callee is
+    /// still producing it, and an upload is consumed by the callee as it arrives, so the call takes
+    /// `first byte + size / slowest stage` instead of the stages added. `true` is both, `false`
+    /// neither, or `request` / `response`. Absent = a read of a `storage` node streams its response, a
+    /// write its request, and every other call is buffered; a `call:` step's own `stream` wins.
     #[serde(default)]
-    pub stream: Option<bool>,
+    #[schemars(schema_with = "crate::schema::stream_mode")]
+    pub stream: Option<super::StreamMode>,
+    /// Probability that a packet on this wire is lost, 0 to 1 (0.01 is 1%); default 0, off. A lossy
+    /// transfer pays fast retransmits and retransmission timeouts (long flows run at the TCP rate of
+    /// RFC 5348); a lossy handshake waits 1 s per lost SYN. The cost is in round trips, so an edge
+    /// with no `net` pays nothing.
+    #[serde(default, deserialize_with = "super::conn::loss")]
+    #[schemars(extend("minimum" = 0, "maximum" = 1))]
+    pub loss: Option<f64>,
+    /// The share of its size a response keeps on the wire when it is compressed (gzip, brotli): above
+    /// 0 to 1, 0.3 sends 30% of the bytes; default none. The wire, slow start and loss see the smaller
+    /// body; the node still handles the whole one (compressing costs the node's `per_kb`). An
+    /// estimate you supply: there is no universal ratio.
+    #[serde(default, deserialize_with = "super::conn::compress")]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 1))]
+    pub compress: Option<f64>,
     /// TLS a new connection over this edge negotiates after TCP: `false` (default), `true` or
     /// `1.3` (one extra round trip) or `1.2` (two). Costs nothing on a reused connection, and
     /// nothing when the edge has no `net` (the round trip is its latency).

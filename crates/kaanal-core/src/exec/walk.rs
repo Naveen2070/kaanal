@@ -320,21 +320,16 @@ impl Walk<'_> {
                             continue;
                         }
                         let net = self.net_sample(cache.node, &cache.net, rep_path, lc);
-                        let fresh = self.opens_connection(edge, net, cache.node, rep_path);
-                        if let Some(conn) = fresh {
-                            let at = (run.0, (cache.node, r));
-                            now += self.connect_request(conn, net, edge, at, now, cap);
-                        }
-                        now += self.link(edge, (run, (cache.node, r)), false, now, cap);
+                        let mut wire =
+                            self.wire((edge, cap), net, ((cache.node, r), run), rep_path);
+                        now += self.wire_connect(&mut wire, now);
+                        now += self.wire_send(&mut wire, now);
                         now += self.net_hop(cache.node, net, (now, r));
                         let (hit, dur) = self.lookup(cache.node, rep_path, now, r);
                         now += dur;
                         if hit {
-                            now += self.link(edge, ((cache.node, r), run), true, now, cap);
-                            if fresh.is_some() {
-                                let at = (run.0, (cache.node, r));
-                                now += self.connect_response(net, edge, at, now, cap);
-                            }
+                            now += self.wire_back(&mut wire, now);
+                            now += self.wire_stalls(&mut wire, now);
                             return Flow::Hit(now);
                         }
                     }

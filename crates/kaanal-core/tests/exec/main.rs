@@ -11,6 +11,7 @@ mod endpoint;
 mod layers;
 mod link_chaos;
 mod links;
+mod loss;
 mod prob;
 mod replica_chaos;
 mod replicas;

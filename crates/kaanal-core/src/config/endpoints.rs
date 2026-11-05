@@ -119,7 +119,7 @@ pub struct CallStep {
     /// Response body size this call brings back (overrides the edge's `returns`).
     pub returns: Option<u64>,
     /// Whether the response streams while the callee produces it (overrides the edge's `stream`).
-    pub stream: Option<bool>,
+    pub stream: Option<StreamMode>,
     /// A key of the callee's `chains:`.
     pub with: Option<String>,
     /// One of the callee's own endpoints, `"METHOD /path"`.

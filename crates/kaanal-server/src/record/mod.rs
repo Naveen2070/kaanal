@@ -97,6 +97,7 @@ pub fn trace_parts(
                     HopKind::Net => format!("net={d}"),
                     HopKind::Connect { resp } => format!("{}={d}", connect_name(resp)),
                     HopKind::FirstByte => format!("{}.first-byte={d}", at(h.node, h.replica)),
+                    HopKind::Retransmit { resp } => format!("{}={d}", retransmit_name(resp)),
                     HopKind::Proc => format!("{}.proc={d}", at(h.node, h.replica)),
                     HopKind::Op(op) => format!("{}.{}={d}", at(h.node, h.replica), op.name()),
                     HopKind::CacheHit => format!("{}.hit={d}", at(h.node, h.replica)),
@@ -293,6 +294,15 @@ fn connect_name(resp: bool) -> &'static str {
     if resp { "connect-resp" } else { "connect" }
 }
 
+/// **Private.** The trace and log name of a retransmit hop: after the request or after the response.
+fn retransmit_name(resp: bool) -> &'static str {
+    if resp {
+        "retransmit-resp"
+    } else {
+        "retransmit"
+    }
+}
+
 fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
@@ -428,6 +438,7 @@ fn hop_chaos<'a>(
         HopKind::Net
         | HopKind::Connect { .. }
         | HopKind::FirstByte
+        | HopKind::Retransmit { .. }
         | HopKind::Link { .. }
         | HopKind::Nic { .. } => None,
     }
@@ -568,6 +579,7 @@ fn kind_str(kind: HopKind) -> &'static str {
         HopKind::Net => "net",
         HopKind::Connect { resp } => connect_name(resp),
         HopKind::FirstByte => "first-byte",
+        HopKind::Retransmit { resp } => retransmit_name(resp),
         HopKind::Proc => "proc",
         HopKind::Op(_) => "op",
         HopKind::CacheHit => "hit",

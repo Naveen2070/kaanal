@@ -66,12 +66,15 @@ impl Walk<'_> {
                 return Some(fail);
             }
             let net = self.net_sample(call.node, &call.net, rep_path, lc);
-            let fresh = self.opens_connection(edge, net, call.node, rep_path);
-            if let Some(conn) = fresh {
-                *now += self.connect_request(conn, net, edge, (run.0, (call.node, r)), *now, cap);
+            let mut wire = self.wire((edge, cap), net, ((call.node, r), run), rep_path);
+            *now += self.wire_connect(&mut wire, *now);
+            // an upload streams into the callee, so the request's transfer runs beside it (RULES 76)
+            let upload = self.streams_request(call, op, edge, run.0, cap);
+            if !upload {
+                *now += self.wire_send(&mut wire, *now);
             }
-            *now += self.link(edge, (run, (call.node, r)), false, *now, cap);
             *now += self.net_hop(call.node, net, (*now, r));
+            let up = upload.then(|| self.begin_upload(&mut wire, *now));
             let stream = self
                 .streams(call, op, edge, run.0, cap)
                 .then(|| self.begin_stream());
@@ -80,17 +83,19 @@ impl Walk<'_> {
             let flow = self.seq(&call.body, rep_path, op, *now, (call.node, r));
             self.close_hold(hold);
             let done = if let Some(fork) = stream {
-                self.end_stream(fork, &flow, (call.node, r), run, edge, cap, t0)
+                self.end_stream(fork, &flow, &mut wire, t0)
             } else if let Flow::Done(end) | Flow::Hit(end) = flow {
-                Some(end + self.link(edge, ((call.node, r), run), true, end, cap))
+                Some(end + self.wire_back(&mut wire, end))
             } else {
                 None
             };
+            let sent = up.as_ref().map(|u| u.sent);
+            if let Some(u) = &up {
+                self.end_upload(u);
+            }
             if let Some(end) = done {
-                *now = end;
-                if fresh.is_some() {
-                    *now += self.connect_response(net, edge, (run.0, (call.node, r)), *now, cap);
-                }
+                *now = end.max(sent.unwrap_or(Duration::ZERO));
+                *now += self.wire_stalls(&mut wire, *now);
             }
             self.close_span(span);
             match flow {
