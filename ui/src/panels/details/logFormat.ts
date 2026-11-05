@@ -16,6 +16,10 @@ export function whoOf(l: LogLine): string {
   return l.replica === null ? l.node : `${l.node}#${l.replica}`;
 }
 
+/** Whether a line is the failure that ended a request (a hop, or a retry starting, is not). */
+export const isFailure = (l: LogLine): boolean =>
+  l.event !== "served" && l.event !== "queued" && l.event !== "retry";
+
 export function formatLine(l: LogLine): string {
   const at = `t=${(l.t_ms / 1000).toFixed(2)}s`;
   const who = whoOf(l);
@@ -58,6 +62,7 @@ export function eventWords(l: LogLine): string {
       ? `${what} crossed in ${t((l.service_ms ?? 0) + (l.wait_ms ?? 0))}, ${t(l.wait_ms)} of it sharing the wire`
       : `${what} crossed in ${t(l.service_ms)}`;
   }
+  if (l.event === "retry") return l.note ? `Retry: ${l.note}` : "Retry";
   if (l.event === "served") return "Served, no wait";
   if (l.event === "queued") return `Waited ${t(l.wait_ms)}, then served in ${t(l.service_ms)}`;
   // "Failed with 503, queue full"; the chaos kind `status` only repeats the status, so it is dropped
@@ -87,7 +92,7 @@ export interface Waterfall {
  */
 export function waterfall(lines: LogLine[]): Waterfall {
   const hops = lines.filter((l) => l.wait_ms !== null || l.service_ms !== null);
-  const failure = lines.find((l) => l.wait_ms === null && l.service_ms === null) ?? null;
+  const failure = lines.find(isFailure) ?? null;
   const start = Math.min(...lines.map((l) => l.t_ms));
   const end = Math.max(...lines.map((l) => l.t_ms + (hopMs(l) ?? 0)));
   const span = Math.max(end - start, 0.001);
@@ -137,10 +142,12 @@ const FAILURE: Record<string, string> = {
   limited: "Rate limited",
   overflowed: "Queue full",
   timeout: "Timed out",
+  "short-circuited": "Breaker open",
 };
 
 /** The type badge of a line: the hop kind the server noted, or on a failure its cause in words. */
 export function hopType(l: LogLine): HopType {
+  if (l.event === "retry") return { label: "Retry", tone: "neutral" };
   if (l.event !== "served" && l.event !== "queued") {
     return { label: FAILURE[l.event] ?? "Failed", tone: "bad" };
   }

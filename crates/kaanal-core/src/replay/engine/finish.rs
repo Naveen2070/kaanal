@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use super::state::{Failure, NOT_STARTED, Req, Scratch, live};
+use super::state::{Failure, FinishedAttempt, NOT_STARTED, Req, RetryState, Scratch, live};
 use super::{
     ChainResult, Engine, FailCause, FailKind, Finished, FinishedHold, FinishedHop, NodeId, PlanItem,
 };
@@ -238,5 +238,56 @@ fn record(req: &Req) -> Finished {
         cause: req.fail.as_ref().map(|f| f.cause),
         hops,
         holds,
+        // most requests retry nothing: no call, no allocation
+        attempts: if req.retries.is_empty() {
+            Vec::new()
+        } else {
+            attempts_of(req)
+        },
     }
+}
+
+/// **Private.** The retries a request made, with the component each went to: the first hop, failure or
+/// span of the attempt names it (an attempt a breaker refused has none of its own, so the failure's node).
+#[inline(never)]
+fn attempts_of(req: &Req) -> Vec<FinishedAttempt> {
+    let mut out = Vec::new();
+    for s in &req.retries {
+        for (k, &at) in s.starts.iter().enumerate() {
+            // the attempt that started at the k-th retry is attempt k + 2; its marker is found by counting
+            let marker = attempt_marker(&req.plan, s, k + 1);
+            let node = req.plan.items[marker + 1..]
+                .iter()
+                .find_map(|i| match i {
+                    PlanItem::Hop(h) => Some(h.node),
+                    PlanItem::Fail { node, .. } | PlanItem::Span { node, .. } => Some(*node),
+                    _ => None,
+                })
+                .or_else(|| req.fail.as_ref().map(|f| f.node))
+                .unwrap_or_default();
+            out.push(FinishedAttempt {
+                at: Duration::from_nanos(at.saturating_sub(req.arrival)),
+                n: u8::try_from(k + 2).unwrap_or(u8::MAX),
+                of: s.attempts,
+                node,
+            });
+        }
+    }
+    out.sort_by_key(|a| a.at);
+    out
+}
+
+/// **Private.** Plan index of the marker of attempt `k` (0-based) of scope `s`: the scope's attempts
+/// follow its `Retry` item one after another, each `Attempt` marker saying how many items belong to it.
+fn attempt_marker(plan: &crate::exec::Plan, s: &RetryState, k: usize) -> usize {
+    // `end` is just past the scope and `cur_start` is the marker of its latest attempt; walk back from the
+    // scope's first attempt (the item after its `Retry`) by sizes
+    let mut at = s.first;
+    for _ in 0..k {
+        let PlanItem::Attempt { size, .. } = plan.items[at] else {
+            break;
+        };
+        at += 1 + size;
+    }
+    at
 }

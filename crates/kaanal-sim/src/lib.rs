@@ -117,7 +117,18 @@ pub struct SimReport {
     /// Measured utilization of each node's network pipes, by node id, `[send, receive]`: busy time
     /// in the window over the window and the node's replicas; `0.0` without a `bandwidth` that way.
     pub nic_utilization: Vec<[f64; 2]>,
+    /// The retries of the requests that made any, by `(stream, request counter)`, each in the order it
+    /// started: `(offset from arrival, attempt number counting the first as 1, attempts allowed, the
+    /// component called)`. Kept apart from [`RequestRecord`] so the many requests that retry nothing
+    /// pay nothing for it.
+    pub attempts: AttemptsByRequest,
 }
+
+/// The retries of each request that made any, see [`SimReport::attempts`].
+pub type AttemptsByRequest = BTreeMap<(usize, u64), Vec<Attempt>>;
+
+/// A retry that started: see [`SimReport::attempts`].
+pub type Attempt = (Duration, u8, u8, kaanal_core::NodeId);
 
 impl SimReport {
     /// Failed reported requests by kind: `status`, `reset`, `malformed` or `timeout`

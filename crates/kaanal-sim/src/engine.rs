@@ -91,6 +91,7 @@ pub(crate) fn simulate(
         schedule(&mut engine, &mut arrivals, &mut pending, s, 0, end)?;
     }
     let mut records: Vec<(u64, RequestRecord)> = Vec::new();
+    let mut attempts = crate::AttemptsByRequest::new();
     loop {
         let next_arrival = pending.peek().map(|Reverse((t, q, _))| (*t, *q));
         let arrival_first = match (next_arrival, engine.peek()) {
@@ -123,6 +124,18 @@ pub(crate) fn simulate(
             engine.step().map_err(overflow)?;
         }
         for f in engine.drain_finished_iter() {
+            if !f.attempts.is_empty() {
+                let key = (
+                    usize::try_from(f.tag >> TAG_BITS).expect("stream index fits"),
+                    f.tag & ((1 << TAG_BITS) - 1),
+                );
+                let list = f
+                    .attempts
+                    .iter()
+                    .map(|a| (a.at, a.n, a.of, a.node))
+                    .collect();
+                attempts.insert(key, list);
+            }
             records.push((
                 f.order,
                 RequestRecord {
@@ -145,7 +158,10 @@ pub(crate) fn simulate(
         }
     }
     let peak = engine.table_len();
-    Ok((report(topo, &engine, records, warmup, end), peak))
+    Ok((
+        report(topo, &engine, (records, attempts), warmup, end),
+        peak,
+    ))
 }
 
 /// **Private.** Builds the report from requests arriving at or after warmup.
@@ -156,7 +172,7 @@ pub(crate) fn simulate(
 fn report(
     topo: &Topology,
     engine: &Engine,
-    mut records: Vec<(u64, RequestRecord)>,
+    (mut records, attempts): (Vec<(u64, RequestRecord)>, crate::AttemptsByRequest),
     warmup: u64,
     end: u64,
 ) -> SimReport {
@@ -223,6 +239,7 @@ fn report(
         replica_utilization,
         link_utilization,
         nic_utilization,
+        attempts,
     }
 }
 

@@ -82,3 +82,21 @@ test("the one finding: failures first, then the worst wait, then that nothing wa
   expect(sampleFinding(mixed)).toBe("3 requests failed, most at db");
   expect(sampleFinding(groupRequests("s1", [fail()]))).toBe("1 request failed, all at api");
 });
+
+test("a request that retried and then succeeded has no failure, and its retry line stays in order", () => {
+  const g = groupRequests("run", [
+    line({ t_ms: 0, service_ms: 5 }),
+    line({
+      t_ms: 25,
+      event: "retry",
+      replica: null,
+      wait_ms: null,
+      service_ms: null,
+      note: "attempt 2 of 3",
+    }),
+    line({ t_ms: 26, service_ms: 5 }),
+  ]);
+  expect(g).toHaveLength(1);
+  expect(g[0]?.failure).toBeNull();
+  expect(g[0]?.lines.map((l) => l.event)).toEqual(["served", "retry", "served"]);
+});

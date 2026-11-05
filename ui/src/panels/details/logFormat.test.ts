@@ -1,6 +1,15 @@
 import { expect, test } from "vite-plus/test";
 import type { LogLine } from "../../data/api/types";
-import { callDepths, dur, eventWords, hopDepth, hopType } from "./logFormat";
+import {
+  callDepths,
+  dur,
+  eventWords,
+  formatLine,
+  hopDepth,
+  hopType,
+  isFailure,
+  waterfall,
+} from "./logFormat";
 
 function line(over: Partial<LogLine> = {}): LogLine {
   return {
@@ -100,4 +109,36 @@ test("a failure reads as a sentence: the status, then the cause when it adds som
   expect(f(503, "queue full")).toBe("Failed with 503, queue full");
   expect(f(null, "reset")).toBe("Failed, reset");
   expect(f(null, null)).toBe("Failed");
+});
+
+const retry = (over: Partial<LogLine> = {}) =>
+  line({
+    event: "retry",
+    replica: null,
+    wait_ms: null,
+    service_ms: null,
+    note: "attempt 2 of 3",
+    ...over,
+  });
+
+test("a retry is a neutral line with its own badge, never the failure of the request", () => {
+  expect(hopType(retry())).toEqual({ label: "Retry", tone: "neutral" });
+  expect(isFailure(retry())).toBe(false);
+  expect(eventWords(retry())).toBe("Retry: attempt 2 of 3");
+  expect(formatLine(retry())).toContain("retry attempt 2 of 3");
+  const w = waterfall([line({ t_ms: 0 }), retry({ t_ms: 5 }), line({ t_ms: 6 })]);
+  expect(w.failure).toBeNull();
+});
+
+test("a breaker refusal is a failure with its own badge", () => {
+  const l = line({
+    event: "short-circuited",
+    level: "error",
+    wait_ms: null,
+    service_ms: null,
+    status: 503,
+    note: "circuit breaker open",
+  });
+  expect(isFailure(l)).toBe(true);
+  expect(hopType(l)).toEqual({ label: "Breaker open", tone: "bad" });
 });

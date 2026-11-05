@@ -260,7 +260,16 @@ export interface LogLine {
   from?: string;
   /** Null on a failure line. */
   replica: number | null;
-  event: "served" | "queued" | "failed" | "limited" | "overflowed" | "timeout";
+  /** `retry` is a second or later attempt of a call starting: no time of its own, not a failure. */
+  event:
+    | "served"
+    | "queued"
+    | "failed"
+    | "limited"
+    | "overflowed"
+    | "timeout"
+    | "short-circuited"
+    | "retry";
   wait_ms: number | null;
   service_ms: number | null;
   status: number | null;

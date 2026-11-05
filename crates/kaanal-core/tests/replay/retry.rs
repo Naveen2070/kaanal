@@ -77,6 +77,54 @@ fn a_planned_failure_starts_the_next_attempt_after_its_backoff() {
 }
 
 #[test]
+fn a_retry_is_recorded_with_its_start_attempt_number_and_callee() {
+    let t = topo(APP);
+    let app = t.id("app").unwrap();
+    let mut e = Engine::new(&t);
+    let items = scope(vec![
+        (
+            0,
+            vec![
+                hop(app, HopKind::Proc, 5),
+                fail(app, 503, FailKind::Status, 5),
+            ],
+        ),
+        (
+            20,
+            vec![
+                hop(app, HopKind::Proc, 3),
+                fail(app, 503, FailKind::Status, 28),
+            ],
+        ),
+        (20, vec![hop(app, HopKind::Proc, 2)]),
+    ]);
+    e.submit(0, plan(items), 0).unwrap();
+    let f = run_all(&mut e);
+    let got: Vec<_> = f[0]
+        .attempts
+        .iter()
+        .map(|a| (a.at, a.n, a.of, a.node))
+        .collect();
+    // attempt 2 starts when the 5 ms of attempt 1 and its 20 ms wait are over, attempt 3 after 3 ms
+    // of attempt 2 and another 20 ms; the first attempt is not a retry
+    assert_eq!(got, [(MS_D(25), 2, 3, app), (MS_D(48), 3, 3, app)]);
+}
+
+#[test]
+fn a_request_with_no_retry_records_none() {
+    let t = topo(APP);
+    let app = t.id("app").unwrap();
+    let mut e = Engine::new(&t);
+    e.submit(
+        0,
+        plan(scope(vec![(0, vec![hop(app, HopKind::Proc, 5)])])),
+        0,
+    )
+    .unwrap();
+    assert_eq!(run_all(&mut e)[0].attempts, []);
+}
+
+#[test]
 fn the_last_attempt_failing_fails_the_request_with_its_status() {
     let t = topo(APP);
     let app = t.id("app").unwrap();

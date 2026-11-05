@@ -11,6 +11,7 @@ mod gate;
 
 pub use bucket::Bucket;
 pub use engine::{
-    Engine, EngineError, FailCause, Finished, FinishedHold, FinishedHop, NodeCounters,
+    Engine, EngineError, FailCause, Finished, FinishedAttempt, FinishedHold, FinishedHop,
+    NodeCounters,
 };
 pub use gate::{Admit, Gate, Waiter};

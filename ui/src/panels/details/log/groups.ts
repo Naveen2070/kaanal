@@ -5,7 +5,7 @@
 
 import type { LogLine } from "../../../data/api/types";
 import { fmtMs } from "../../../canvas/metrics";
-import { dur, hopMs, hopType, placeOf, waterfall, type Waterfall } from "../logFormat";
+import { dur, hopMs, hopType, isFailure, placeOf, waterfall, type Waterfall } from "../logFormat";
 
 export interface RequestGroup {
   /** Run, endpoint and request number: the number alone repeats across endpoints. */
@@ -35,7 +35,7 @@ export function groupRequests(runId: string, lines: readonly LogLine[]): Request
     // Array.sort is stable: lines at the same instant keep the server's order
     const hops = [...all].sort((a, b) => a.t_ms - b.t_ms);
     const axis = waterfall(hops);
-    const failed = hops.find((l) => l.event !== "served" && l.event !== "queued");
+    const failed = hops.find(isFailure);
     const timed = hops.filter((l) => hopMs(l) !== null);
     const end = Math.max(...timed.map((l) => l.t_ms + (hopMs(l) ?? 0)));
     const worst = hops.reduce<LogLine | null>(
@@ -69,7 +69,7 @@ export function sampleFinding(groups: readonly RequestGroup[]): string | null {
   if (failed.length > 0) {
     const at = new Map<string, number>();
     for (const g of failed) {
-      const l = g.lines.find((x) => x.event !== "served" && x.event !== "queued");
+      const l = g.lines.find(isFailure);
       if (l) at.set(placeOf(l), (at.get(placeOf(l)) ?? 0) + 1);
     }
     const [top = "", n = 0] = [...at].sort((a, b) => b[1] - a[1])[0] ?? [];

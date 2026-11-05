@@ -149,3 +149,32 @@ fn the_summary_counts_what_the_breaker_refused_and_warns() {
     let sum = kaanal_sim::summarize(&t, &e, &cfg, &rep);
     assert!(sum.nodes.iter().all(|n| n.short_circuited == 0));
 }
+
+#[test]
+fn the_record_lists_each_retry_with_its_number_and_start() {
+    let (t, _, _, rep) = simulate(CONTINUE, 150.0);
+    let app = t.id("app").unwrap();
+    assert!(
+        !rep.attempts.is_empty(),
+        "a loaded system with retries retries"
+    );
+    for (&(stream, n), list) in &rep.attempts {
+        let r = rep
+            .requests
+            .iter()
+            .find(|r| r.stream == stream && r.n == n)
+            .expect("a retried request is a reported one");
+        assert!(list.len() <= 2, "at most two retries of three tries");
+        for (i, &(at, num, of, node)) in list.iter().enumerate() {
+            assert_eq!((usize::from(num), of, node), (i + 2, 3, app));
+            assert!(
+                at <= r.latency,
+                "a retry starts before the request is answered"
+            );
+        }
+        assert!(list.windows(2).all(|w| w[0].0 <= w[1].0));
+    }
+    // no retry configured: none recorded
+    let (_, _, _, plain) = simulate("", 150.0);
+    assert!(plain.attempts.is_empty());
+}

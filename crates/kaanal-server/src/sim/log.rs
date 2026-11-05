@@ -36,7 +36,8 @@ pub struct LogLine {
     pub from: Option<String>,
     /// The replica that ran it; `None` on a failure line (the engine does not record it).
     pub replica: Option<u16>,
-    /// `served`, `queued`, `failed`, `limited`, `overflowed` or `timeout`.
+    /// `served`, `queued`, `failed`, `limited`, `overflowed`, `timeout`, `short-circuited` or `retry` (a
+    /// second or later attempt of a call starting; it takes no time of its own).
     pub event: &'static str,
     /// Queue wait before the hop, milliseconds; `None` on a failure line.
     pub wait_ms: Option<f64>,
@@ -85,13 +86,26 @@ fn failed(r: &RequestRecord) -> bool {
     matches!(r.result, ChainResult::Err { .. })
 }
 
+/// The retries a request made (none for most).
+fn retries<'a>(rep: &'a SimReport, r: &RequestRecord) -> &'a [kaanal_sim::Attempt] {
+    rep.attempts
+        .get(&(r.stream, r.n))
+        .map_or(&[], Vec::as_slice)
+}
+
 /// Lines a request yields: one per hop, and one for its failure.
-fn cost(r: &RequestRecord) -> usize {
-    r.hops.len() + usize::from(failed(r))
+fn cost(rep: &SimReport, r: &RequestRecord) -> usize {
+    r.hops.len() + retries(rep, r).len() + usize::from(failed(r))
 }
 
 /// The lines of one request: a line per hop, then one for the failure, if any.
-fn lines_of(r: &RequestRecord, topo: &Topology, cfg: &SimConfig, out: &mut Vec<LogLine>) {
+fn lines_of(
+    rep: &SimReport,
+    r: &RequestRecord,
+    topo: &Topology,
+    cfg: &SimConfig,
+    out: &mut Vec<LogLine>,
+) {
     let stream = cfg.streams[r.stream].endpoint_key.clone();
     let arrival = ms(r.arrival);
     for (h, wait) in &r.hops {
@@ -115,6 +129,22 @@ fn lines_of(r: &RequestRecord, topo: &Topology, cfg: &SimConfig, out: &mut Vec<L
             service_ms: Some(s),
             status: None,
             note: Some(hop_label(h.kind).to_string()),
+        });
+    }
+    for &(at, n, of, node) in retries(rep, r) {
+        out.push(LogLine {
+            t_ms: arrival + ms(at),
+            level: "info",
+            request: r.n,
+            stream: stream.clone(),
+            node: topo.nodes[node].name.clone(),
+            from: None,
+            replica: None,
+            event: "retry",
+            wait_ms: None,
+            service_ms: None,
+            status: None,
+            note: Some(format!("attempt {n} of {of}")),
         });
     }
     if let ChainResult::Err {
@@ -173,7 +203,7 @@ fn pick(report: &SimReport) -> (Vec<usize>, bool) {
     }
     // failures first (arrival order), then the slowest; the first that does not fit ends it
     for &i in fail_ids.iter().chain(&slow) {
-        let c = cost(&reqs[i]);
+        let c = cost(report, &reqs[i]);
         if used + c > MAX_LINES {
             return (keep, true);
         }
@@ -188,7 +218,7 @@ fn pick(report: &SimReport) -> (Vec<usize>, bool) {
     let mut n = want;
     loop {
         let picks = stride(n);
-        let sum: usize = picks.iter().map(|&i| cost(&reqs[i])).sum();
+        let sum: usize = picks.iter().map(|&i| cost(report, &reqs[i])).sum();
         if sum <= free {
             keep.extend(picks);
             return (keep, n < want);
@@ -210,7 +240,7 @@ pub(crate) fn sample(
     let (keep, truncated) = pick(report);
     let mut lines = Vec::new();
     for i in keep {
-        lines_of(&report.requests[i], topo, cfg, &mut lines);
+        lines_of(report, &report.requests[i], topo, cfg, &mut lines);
     }
     lines.sort_by(|a, b| a.t_ms.total_cmp(&b.t_ms));
     LogSample { lines, truncated }
@@ -337,7 +367,30 @@ pub(super) mod tests {
             replica_utilization: vec![],
             link_utilization: vec![],
             nic_utilization: vec![],
+            attempts: std::collections::BTreeMap::default(),
         }
+    }
+
+    #[test]
+    fn a_retry_is_a_line_of_its_own_between_the_hops() {
+        let t = topo();
+        let app = t.id("app").unwrap();
+        let mut rep = report(vec![rec(1, 10, false, &t)]);
+        rep.attempts
+            .insert((0, 1), vec![(Duration::from_millis(4), 2, 3, app)]);
+        let lines = lined(&rep, &t, &Endpoints::default(), &cfg());
+        let retry = lines
+            .iter()
+            .find(|l| l.event == "retry")
+            .expect("a retry line");
+        assert_eq!(retry.note.as_deref(), Some("attempt 2 of 3"));
+        assert_eq!((retry.node.as_str(), retry.level), ("app", "info"));
+        assert!(
+            (retry.t_ms - 5.0).abs() < 1e-9,
+            "arrival 1 ms plus the 4 ms offset: {}",
+            retry.t_ms
+        );
+        assert!(retry.wait_ms.is_none() && retry.service_ms.is_none() && retry.status.is_none());
     }
 
     #[test]

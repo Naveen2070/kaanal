@@ -125,7 +125,10 @@ impl Engine {
         let req = live(&mut self.reqs, r);
         let at = req.tokens[k].at;
         let PlanItem::Retry {
-            budget, breaker, ..
+            budget,
+            breaker,
+            attempts,
+            ..
         } = req.plan.items[at]
         else {
             unreachable!("open_retry is called at a Retry marker")
@@ -153,6 +156,9 @@ impl Engine {
             open: true,
             waiting: false,
             timer: 0,
+            attempts,
+            first: at + 1,
+            starts: Vec::new(),
         });
         req.tokens[k].at = at + 2;
         // the first attempt asks the breaker; a rejection fails it and leaves this token a zombie
@@ -268,6 +274,7 @@ impl Engine {
         s.cur_start = next;
         s.cur_end = next + 1 + size;
         s.waiting = false;
+        s.starts.push(self.now);
         // an open breaker fails this attempt at once; no token starts
         if !self.breaker_admits(r, si) {
             self.settle(r);

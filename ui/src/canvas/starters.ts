@@ -117,6 +117,26 @@ traffic:
       - { endpoint: "GET /files", weight: 1, resp_bytes: 5MB }
 `;
 
+const RETRY_STORM = `version: 1
+seed: 7
+nodes:
+  gateway: { type: gateway, concurrency: { limit: 256, queue: 100 }, proc: { p50: 1ms, p99: 3ms }, timeout: 30s }
+  app: { type: service, concurrency: { limit: 2, queue: 100 }, proc: { mean: 10ms }, timeout: 50ms }
+edges:
+  - { from: gateway, to: app, net: { p50: 1ms, p99: 3ms }, retry: { max_attempts: 3 }, abandon: continue }
+endpoints:
+  "GET /items":
+    op: read
+    override: { body: { items: [] } }
+    chain: [app]
+traffic:
+  peak:
+    rps: 120
+    duration: 40s
+    journeys:
+      - { endpoint: "GET /items", weight: 1 }
+`;
+
 export const STARTERS: Starter[] = [
   {
     id: "shop",
@@ -155,5 +175,13 @@ export const STARTERS: Starter[] = [
     tryThis:
       "Change the reply size of the journey, or the store's Throughput: the time of a call is the first byte plus the transfer. The store's numbers are estimates.",
     text: async () => FILE_STORE,
+  },
+  {
+    id: "retry-storm",
+    title: "A retry storm",
+    blurb: "An app that can take 200 requests a second, retried when it times out",
+    tryThis:
+      "Run it: at 120 a second, well under what the app can take, most requests still fail, because every timeout is retried and the app keeps working on calls nobody waits for. Then, on the wire, switch on Limit retries with a budget or the circuit breaker, and run again.",
+    text: async () => RETRY_STORM,
   },
 ];

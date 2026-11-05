@@ -63,6 +63,21 @@ pub struct Finished {
     pub hops: Vec<FinishedHop>,
     /// The slots it held across a call, in the order they were taken.
     pub holds: Vec<FinishedHold>,
+    /// The retries it made (attempt 2 and later of a call), in the order they started.
+    pub attempts: Vec<FinishedAttempt>,
+}
+
+/// A retry that started (step 7e): a second or later attempt of a call, as the Log shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinishedAttempt {
+    /// When it started, as an offset from arrival (after its backoff).
+    pub at: Duration,
+    /// Which attempt it is, counting the first as 1 (so a first retry is 2).
+    pub n: u8,
+    /// How many attempts the call may make.
+    pub of: u8,
+    /// The component the call goes to.
+    pub node: NodeId,
 }
 
 /// A slot a request held across a call (`hold: call`), as the client's record sees it.
@@ -176,6 +191,11 @@ pub(super) struct RetryState {
     pub(super) breaker: Option<crate::exec::BreakerRef>,
     /// Seq of the pending backoff timer; identifies it, so a recycled request slot cannot match.
     pub(super) timer: u64,
+    /// How many attempts the scope has, and the plan index of the marker of the first.
+    pub(super) attempts: u8,
+    pub(super) first: usize,
+    /// When each retry started (ns), in order: the Log shows them.
+    pub(super) starts: Vec<u64>,
 }
 
 /// **Private.** An attempt that was cut short: plan indices `lo < at <= hi` of it stop at `at` (ns).

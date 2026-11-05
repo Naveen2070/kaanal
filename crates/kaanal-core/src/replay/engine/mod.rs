@@ -33,7 +33,9 @@ use retry::Next;
 use state::{
     DEADLINE, Failure, Join, NOT_STARTED, RETRY, Req, Scratch, SpanState, Token, live, nanos,
 };
-pub use state::{EngineError, FailCause, Finished, FinishedHold, FinishedHop, NodeCounters};
+pub use state::{
+    EngineError, FailCause, Finished, FinishedAttempt, FinishedHold, FinishedHop, NodeCounters,
+};
 
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].
