@@ -490,8 +490,9 @@ impl Walk<'_> {
         }
         self.tail = Some(super::stream::Tail {
             node,
-            end: start + dur,
-            size: dur.saturating_sub(fixed),
+            start,
+            dur,
+            fixed,
         });
         self.items.push(PlanItem::Hop(Hop {
             node,

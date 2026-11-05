@@ -69,14 +69,14 @@ impl Walk<'_> {
             let mut wire = self.wire((edge, cap), net, ((call.node, r), run), rep_path);
             *now += self.wire_connect(&mut wire, *now);
             // an upload streams into the callee, so the request's transfer runs beside it (RULES 76)
-            let upload = self.streams_request(call, op, edge, run.0, cap);
+            let mode = self.stream_mode(call, op);
+            let upload = mode.request() && self.can_stream(edge, (run.0, call.node), false, cap);
             if !upload {
                 *now += self.wire_send(&mut wire, *now);
             }
             *now += self.net_hop(call.node, net, (*now, r));
             let up = upload.then(|| self.begin_upload(&mut wire, *now));
-            let stream = self
-                .streams(call, op, edge, run.0, cap)
+            let stream = (mode.response() && self.can_stream(edge, (call.node, run.0), true, cap))
                 .then(|| self.begin_stream());
             let t0 = *now;
             let hold = self.open_hold(call.node, r);

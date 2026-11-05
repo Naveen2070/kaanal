@@ -20,8 +20,11 @@ use crate::topology::{EdgeId, NodeId};
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Tail {
     pub(super) node: NodeId,
-    pub(super) end: Duration,
-    pub(super) size: Duration,
+    pub(super) start: Duration,
+    pub(super) dur: Duration,
+    /// The fixed part of `dur`; the rest is the size-dependent part. Kept raw: only a streamed call
+    /// reads it, so the hot path does no arithmetic on it.
+    pub(super) fixed: Duration,
 }
 
 /// **Private.** An upload in progress: its fork and branch B in the plan, and when the request
@@ -36,7 +39,8 @@ impl Walk<'_> {
     /// **Private.** Which bodies of `call` stream: its own or its edge's `stream`, else the default
     /// of the callee: a storage read streams its response and a storage write its request, as S3,
     /// GCS and Azure send a GET as it is read and take a PUT as it arrives.
-    fn stream_mode(&self, call: &Call, op: Op) -> StreamMode {
+    #[inline]
+    pub(super) fn stream_mode(&self, call: &Call, op: Op) -> StreamMode {
         call.stream.unwrap_or_else(|| {
             match (self.topo.nodes[call.node].kind == NodeKind::Storage, op) {
                 (true, Op::Read) => StreamMode::Response,
@@ -46,35 +50,18 @@ impl Walk<'_> {
         })
     }
 
-    /// **Private.** Whether the response of `call` streams. Nothing streams with no response bytes or
-    /// no pipe with a rate (nothing to overlap), so a topology without bandwidth makes the same
-    /// plans as before.
-    pub(super) fn streams(
+    /// **Private.** Whether a body that `mode` says streams has anything to overlap: it has bytes on
+    /// the wire and a pipe with a rate between `ends` (`resp` picks the direction). Nothing streams
+    /// without either, so a topology without bandwidth makes the same plans as before.
+    #[inline]
+    pub(super) fn can_stream(
         &self,
-        call: &Call,
-        op: Op,
         edge: Option<EdgeId>,
-        run: NodeId,
+        ends: (NodeId, NodeId),
+        resp: bool,
         cap: Option<u64>,
     ) -> bool {
-        self.stream_mode(call, op).response()
-            && self.wire_bytes(edge, true) > 0
-            && self.path_rate(edge, (call.node, run), cap).is_some()
-    }
-
-    /// **Private.** Whether the request of `call` streams (an upload): the same conditions, for the
-    /// request body and the pipes from the caller to the callee.
-    pub(super) fn streams_request(
-        &self,
-        call: &Call,
-        op: Op,
-        edge: Option<EdgeId>,
-        run: NodeId,
-        cap: Option<u64>,
-    ) -> bool {
-        self.stream_mode(call, op).request()
-            && self.wire_bytes(edge, false) > 0
-            && self.path_rate(edge, (run, call.node), cap).is_some()
+        self.wire_bytes(edge, resp) > 0 && self.path_rate(edge, ends, cap).is_some()
     }
 
     /// **Private.** Opens an upload's fork and its branch A, the request crossing the wire (with
@@ -147,7 +134,9 @@ impl Walk<'_> {
             return None;
         };
         let first = match self.tail {
-            Some(t) if t.node == at.0 && t.end == end => end.saturating_sub(t.size),
+            Some(t) if t.node == at.0 && t.start + t.dur == end => {
+                end.saturating_sub(t.dur.saturating_sub(t.fixed))
+            }
             _ => end,
         };
         let b = self.items.len();

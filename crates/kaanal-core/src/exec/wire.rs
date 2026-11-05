@@ -34,6 +34,7 @@ pub(super) struct Wire {
 impl Walk<'_> {
     /// **Private.** The wire of one call: its connection decision (one `conn` draw in `keepalive`)
     /// and its loss stream (tag `loss`), both skipped when there is no round trip to pay in.
+    #[inline]
     pub(super) fn wire(
         &self,
         (edge, cap): (Option<EdgeId>, Option<u64>),
@@ -61,10 +62,17 @@ impl Walk<'_> {
 
     /// **Private.** Before the request: the new connection's `Connect` hop (handshake round trips,
     /// lost SYNs, the request's slow-start stalls); zero for a call on a warm connection.
+    #[inline]
     pub(super) fn wire_connect(&mut self, w: &mut Wire, start: Duration) -> Duration {
-        let Some(conn) = w.fresh else {
-            return Duration::ZERO;
-        };
+        match w.fresh {
+            None => Duration::ZERO,
+            Some(conn) => self.wire_connect_new(conn, w, start),
+        }
+    }
+
+    /// **Private.** The set-up of a new connection (the rare call, so out of line).
+    #[inline(never)]
+    fn wire_connect_new(&mut self, conn: Conn, w: &mut Wire, start: Duration) -> Duration {
         // each handshake packet (two a round trip) is lost with p; a lost SYN waits 1 s
         let packets = u64::from(conn::handshake_rtts(conn.tls)) * 2;
         let lost = self.loss_p(w);
@@ -81,18 +89,21 @@ impl Walk<'_> {
     }
 
     /// **Private.** The request's body crossing the wire, then the retransmits a lossy link adds.
+    #[inline]
     pub(super) fn wire_send(&mut self, w: &mut Wire, start: Duration) -> Duration {
         let moved = self.link(w.edge, (w.run, w.at), false, start, w.cap);
         moved + self.retransmits(w, false, start + moved)
     }
 
     /// **Private.** The response's body crossing the wire back, then the retransmits.
+    #[inline]
     pub(super) fn wire_back(&mut self, w: &mut Wire, start: Duration) -> Duration {
         let moved = self.link(w.edge, (w.at, w.run), true, start, w.cap);
         moved + self.retransmits(w, true, start + moved)
     }
 
     /// **Private.** After the response: its slow-start stalls on a new connection.
+    #[inline]
     pub(super) fn wire_stalls(&mut self, w: &mut Wire, start: Duration) -> Duration {
         if w.fresh.is_none() {
             return Duration::ZERO;
@@ -105,11 +116,18 @@ impl Walk<'_> {
     /// (`Binomial(n, p)`): each costs one round trip (fast retransmit) or, with the chance a small
     /// flight gives it, the retransmission timeout. A long flow (over 32 expected losses) runs at the
     /// RFC 5348 rate instead, and the hop is its surplus over the lossless time (RULES 74).
+    #[inline]
     fn retransmits(&mut self, w: &mut Wire, resp: bool, start: Duration) -> Duration {
         // the common case, a lossless wire: nothing to compute (the hot path)
         if w.loss.is_none() {
             return Duration::ZERO;
         }
+        self.retransmits_lossy(w, resp, start)
+    }
+
+    /// **Private.** [`Walk::retransmits`] for a lossy wire (out of line).
+    #[inline(never)]
+    fn retransmits_lossy(&mut self, w: &mut Wire, resp: bool, start: Duration) -> Duration {
         let p = self.loss_p(w);
         let bytes = self.wire_bytes(w.edge, resp);
         let Some(rng) = w.loss.as_mut().filter(|_| bytes > 0) else {
