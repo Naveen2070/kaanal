@@ -73,7 +73,7 @@ pub fn parse(text: &str, rate: bool) -> Result<u64, String> {
     if v >= U64_END {
         return Err(too_big());
     }
-    // ponytail: f64 is exact enough for a fraction of a unit; whole numbers take the exact path above.
+    // f64 is exact enough for a fraction of a unit; whole numbers take the exact path above.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let bytes = v as u64;
     Ok(bytes)

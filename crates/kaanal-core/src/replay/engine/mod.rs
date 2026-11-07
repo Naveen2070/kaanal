@@ -509,8 +509,8 @@ impl Engine {
         });
         req.tokens[k].open_top = Some(si);
         req.tokens[k].at = at + 1;
-        // ponytail: a closed span's deadline stays in the heap until its time (at most
-        // `timeout`); drop it on close if heap size under heavy timeouts ever shows up.
+        // A closed span's deadline stays in the heap until its time, which is at most `timeout`
+        // away.
         self.heap.push(Reverse((due, seq, r, si)));
     }
 

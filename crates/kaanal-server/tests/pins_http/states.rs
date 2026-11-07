@@ -229,9 +229,6 @@ async fn trace_ends_with_pinned_and_event_carries_pin() {
     assert!(seen.contains("\"failed_node\":null"), "{seen}");
 }
 
-// ponytail: scoped_request_sees_scenario_pins_not_live_pins needs the live-pin API (Task 4);
-// the scoped tests above already prove a scoped request reads its own stack's pins.
-
 #[tokio::test]
 async fn states_empty_body_is_verbatim_not_param_substituted() {
     let s = start().await;

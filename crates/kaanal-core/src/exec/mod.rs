@@ -580,7 +580,7 @@ impl Plan {
                     h.dur = h.dur.min(stop.saturating_sub(h.start));
                 }
             }
-            // ponytail: linear scan of the cut ranges per hop; ranges are at most the branch count.
+            // A linear scan of the cut ranges per hop; there are at most as many ranges as branches.
             if cut_all || cut.iter().any(|r| r.contains(&i)) {
                 if h.start >= at {
                     continue;

@@ -225,8 +225,8 @@ fn resolve_spec(arg: &str, force: bool) -> Result<(String, Option<Saved>), Fail>
         }
     };
     let body = fetch::fetch_spec(&url)?;
-    // ponytail: exists-check then rename (rename replaces on every OS), a race only with
-    // another process creating the backup name in the same instant.
+    // Exists-check then rename (rename replaces on every OS): the only race is another process
+    // creating the backup name in the same instant.
     if let Some(b) = &backup {
         std::fs::rename(&name, b).map_err(|e| err(format!("{name}: {e}")))?;
     }

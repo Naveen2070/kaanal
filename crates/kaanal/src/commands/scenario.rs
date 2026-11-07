@@ -119,8 +119,8 @@ pub(crate) fn scenario(cmd: ScenarioCmd) -> Result<(), Fail> {
         }
         ScenarioCmd::Deactivate { name } => {
             let name = named(&name)?;
-            // ponytail: the answer is a bare 204, so "was it active" is read just before; a
-            // concurrent change in between can make this line wrong, never the state.
+            // The answer is a bare 204, so "was it active" is read just before; a concurrent change
+            // in between can make this line wrong, never the state.
             let was = call("GET", "/__kaanal/scenarios/active", None)?;
             let v = call("POST", &scenario_path(name, "/deactivate"), None)?;
             output::emit(&v, || {

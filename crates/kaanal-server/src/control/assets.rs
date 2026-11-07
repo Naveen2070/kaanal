@@ -76,7 +76,7 @@ const EMBEDDED: Option<Bundle> = None;
 
 /// The asset named exactly `name`: no decoding, no case folding, no path normalising.
 pub fn lookup(table: &'static [Asset], name: &str) -> Option<&'static Asset> {
-    // ponytail: linear scan over tens of files; sort the table and binary-search if it reaches thousands
+    // A linear scan over tens of files.
     table.iter().find(|a| a.name == name)
 }
 

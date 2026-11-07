@@ -9,7 +9,7 @@ use crate::dataset::Options;
 use crate::generate::{MAX_VALUES, child_seed, property, reconcile};
 
 /// **Private.** The fixed value for a pagination-style property name, matched
-/// case-insensitively and exactly. ponytail: a name table, not a model; extend it when a real API misses.
+/// case-insensitively and exactly. A name table, not a model.
 /// Number names apply only to `num` properties, bool names only to `boolean` ones, cursors to any scalar.
 fn rule(name: &str, num: bool, boolean: bool) -> Option<Value> {
     Some(match name.to_ascii_lowercase().as_str() {

@@ -52,8 +52,10 @@ pub fn node_rows(topo: &Value, active: &Value, live: &Value) -> Vec<Value> {
         .map(|n| {
             let name = n["name"].as_str().unwrap_or("");
             let c = &eff[name];
-            // ponytail: state (`active`) and countdown (`live`) are two calls, not one snapshot; a lease expiring between them can show down with no countdown, cosmetic and clears itself
-            // ponytail: soonest lease across units, so a short latency lease on a permanently-down node shows "reverts in"; show per-unit if that confuses
+            // State (`active`) and countdown (`live`) are two calls, not one snapshot: a lease expiring
+            // between them can show down with no countdown, which is cosmetic and clears itself.
+            // The soonest lease across units, so a short latency lease on a permanently-down node
+            // shows "reverts in".
             let expires = live["nodes"][name]["expires_in_ms"]
                 .as_object()
                 .and_then(|m| m.values().filter_map(Value::as_u64).min());

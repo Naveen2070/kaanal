@@ -206,8 +206,7 @@ pub async fn save_scenario(
         g.empty_ok_for(ep)
     })
     .map_err(|e| reject(StatusCode::BAD_REQUEST, &place(&e.path, &e.message)))?;
-    // ponytail: blocking file IO under the control mutex; a save is rare and tiny. Move the write
-    // out (stage, then publish) if a slow disk ever stalls the control plane.
+    // Blocking file IO under the control mutex: a save is rare and tiny.
     let path = scenarios::write(&g.scenarios_dir, &b.name, &yaml, force).map_err(|e| match e {
         WriteError::Exists => reject(
             StatusCode::CONFLICT,

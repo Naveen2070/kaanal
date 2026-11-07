@@ -234,7 +234,7 @@ pub(super) fn answer(
 /// A `HEAD`, a 204 and a 304 have no body to break: they get the plain success response, yet
 /// the trace header still ends in `node.error=reset|malformed` and the event still names the failed node.
 /// A `reset` promises at least one byte more than it sent, so the client always sees the abort.
-// ponytail: a bare-number body ("12") can cut to valid JSON ("1"); schema bodies are objects or arrays in practice.
+// A bare-number body ("12") can cut to valid JSON ("1"); schema bodies are objects or arrays in practice.
 pub(super) fn wire_failure(
     kind: FailKind,
     (status, body): (u16, Value),

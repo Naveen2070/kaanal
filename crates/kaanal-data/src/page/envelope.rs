@@ -188,7 +188,7 @@ fn fill_meta(
     let (total, offset, size) = (w.total, w.offset, w.size.max(1));
     let base = spec.page_base;
     let next = offset.checked_add(size).filter(|n| *n < total);
-    // ponytail: prev of a page past the end is still past the end; nobody walks backwards there.
+    // `prev` of a page past the end is still past the end; nobody walks backwards there.
     let prev = (offset > 0).then(|| offset.saturating_sub(size));
     // A next/prev field: a cursor (cursor style) or that page's URL when it is a string, a page
     // number when it is a number, `null` when there is no such page; `None` (left as generated)

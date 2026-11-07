@@ -182,7 +182,7 @@ pub fn existing_instance(
 
 /// **Private.** The last `lines` lines of the log, each cleaned (the log holds server text).
 pub fn tail_log(path: &Path, lines: usize) -> String {
-    // ponytail: reads the whole file; the log is fresh per `up -d`, so it is small on a failed start.
+    // Reads the whole file; the log is fresh per `up -d`, so it is small on a failed start.
     let text = std::fs::read(path)
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .unwrap_or_default();

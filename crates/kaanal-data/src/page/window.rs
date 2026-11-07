@@ -147,7 +147,7 @@ impl PageSpec {
                 if page < base {
                     return Err(invalid(name, format!("must be at least {base}")));
                 }
-                // ponytail: a product past u32 saturates; it is past any total anyway.
+                // A product past u32 saturates; it is past any total anyway.
                 (page - base).saturating_mul(size)
             }
             (Some(raw), Style::Cursor) => decode_cursor(raw)

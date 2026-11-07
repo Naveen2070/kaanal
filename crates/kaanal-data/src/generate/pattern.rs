@@ -35,7 +35,7 @@ type Entry = Arc<Result<Compiled, String>>;
 /// The compiled form of `p`, parsed once per distinct pattern for the life of the process (the
 /// mock path never recompiles). `Err` carries why the pattern is unsupported.
 pub(crate) fn cached(p: &str) -> Entry {
-    // ponytail: unbounded map keyed by pattern text; a spec has a few dozen patterns.
+    // An unbounded map keyed by pattern text; a spec has a few dozen patterns.
     static CACHE: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
     let mut map = CACHE
         .get_or_init(Mutex::default)

@@ -171,7 +171,8 @@ fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
 
 #[cfg(not(windows))]
 fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
-    // ponytail: no O_NOFOLLOW without libc; `same_file` catches a swap instead
+    // std has no portable `O_NOFOLLOW` (its value differs by OS and CPU); `same_file` catches a swap
+    // instead.
     std::fs::File::open(path)
 }
 

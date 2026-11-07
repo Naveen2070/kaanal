@@ -61,8 +61,8 @@ fn refuse_link(path: &Path) -> Result<(), Fail> {
 /// `locale`. Files that are not part of the template are left alone. `locale` must already be a
 /// known pack tag ([`check_locale`]), so it is safe to write into YAML. No folder on the way
 /// down, and no file, may be a symlink ([`refuse_link`]).
-// ponytail: check-then-write, so a process racing the same folder can still swap a link in;
-// closing that needs O_NOFOLLOW opens, which std does not offer portably.
+// Check-then-write: a process racing the same folder could still swap a link in between. Closing
+// that needs O_NOFOLLOW opens, which std does not offer portably, and the folder is the user's own.
 pub fn write_template(dir: &Path, locale: &str) -> Result<(), Fail> {
     refuse_link(dir)?;
     for (rel, text) in FILES {

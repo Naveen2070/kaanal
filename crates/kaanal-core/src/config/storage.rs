@@ -73,7 +73,7 @@ impl StorageConfig {
     /// duration (nanosecond resolution, so a size term is exact to about 1 part in 10^4 at
     /// 100 MB/s). `None` without a `throughput`.
     pub fn per_kb(&self) -> Option<DistConfig> {
-        // ponytail: f64 seconds are exact enough for a rate (a 1 B/s store is 1024 s per KB)
+        // f64 seconds are exact enough for a rate (a 1 B/s store is 1024 s per KB)
         #[allow(clippy::cast_precision_loss)]
         self.throughput
             .map(|t| DistConfig::Fixed(Duration::from_secs_f64(1024.0 / t.max(1) as f64)))

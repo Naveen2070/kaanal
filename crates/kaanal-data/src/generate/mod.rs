@@ -48,7 +48,7 @@ const MAX_RANDOM_ITEMS: u64 = 20;
 pub(crate) const MAX_VALUES: usize = 10_000;
 
 /// **Private.** Longest string a `minLength` can ask for; a larger value is capped here and
-/// warned at startup (R6.10d). ponytail: 10 000 is the default of an open question in RULES.md.
+/// warned at startup (R6.10d). 10 000 is the default of an open question in RULES.md.
 pub(crate) const MAX_MIN_LENGTH: u64 = 10_000;
 
 /// **Private.** Timestamps are "the last 365 days before 2026-01-01", fixed so output never changes between runs.

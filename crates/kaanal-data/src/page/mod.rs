@@ -97,7 +97,7 @@ impl PageSpec {
                 .iter()
                 .find(|p| (any_type || p.numeric) && names.contains(&normalise(&p.name).as_str()))
         };
-        // ponytail: priority cursor > offset > page when several are declared.
+        // Priority when several are declared: cursor, then offset, then page.
         let (style, idx) = find(CURSOR, true)
             .map(|p| (Style::Cursor, p))
             .or_else(|| find(OFFSET, false).map(|p| (Style::Offset, p)))

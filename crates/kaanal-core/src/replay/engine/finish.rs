@@ -93,8 +93,8 @@ impl Engine {
             .filter_map(|(k, t)| t.queued_at.map(|(n, rep, _)| (k, n, rep)))
             .collect();
         for (k, node, rep) in queued {
-            // ponytail: linear scan of that node's queue; keep a per-token handle if long
-            // queues of failing requests ever show up in a profile.
+            // A linear scan of that node's queue; it runs only for a request that failed while it
+            // was waiting there.
             self.units
                 .state(node, rep)
                 .gate
