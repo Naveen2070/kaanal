@@ -17,15 +17,6 @@ export function TopBar({ onRun }: { onRun: () => void }) {
   const view = useDraft((st) => st.view);
   const status = useRun((s) => s.status);
 
-  const line =
-    status === "running"
-      ? "Running..."
-      : status === "blocked"
-        ? "Not up to date"
-        : status === "done"
-          ? "Up to date"
-          : "Edits re-run on their own";
-
   return (
     <header className="flex w-76 flex-col gap-2 p-3 text-sm">
       <div className="flex items-center justify-between gap-2">
@@ -55,11 +46,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
             Run
           </button>
         }
-        note={
-          <output className={`text-xs ${status === "blocked" ? "text-warn" : "text-muted"}`}>
-            {line}
-          </output>
-        }
+        run={status}
       />
     </header>
   );

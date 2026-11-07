@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vite-plus/test";
 import { useDraft } from "../data/store/draft";
 import { NODE_KINDS } from "./nodeKinds";
 import { Palette } from "./Palette";
+import { useGuide } from "../overlays/guide/store";
 import { useNotes } from "./notes";
 
 afterEach(() => {
@@ -24,7 +25,8 @@ test("palette_collapses_to_an_icon_rail_with_names", () => {
   vi.stubGlobal("innerWidth", 1000);
   render(<Palette onAdd={() => {}} />);
   const buttons = screen.getAllByRole("button");
-  expect(buttons).toHaveLength(NODE_KINDS.length);
+  // every kind, then the note
+  expect(buttons).toHaveLength(NODE_KINDS.length + 1);
   for (const [i, { label }] of NODE_KINDS.entries()) {
     expect(buttons[i]!.getAttribute("aria-label")).toBe(label); // an icon alone has no name
     expect(buttons[i]!.textContent).toBe(""); // and no visible word
@@ -32,7 +34,7 @@ test("palette_collapses_to_an_icon_rail_with_names", () => {
 });
 
 test("clicking_a_kind_adds_it_in_both_layouts", () => {
-  for (const w of [1440, 1000]) {
+  for (const w of [1440, 1366, 1000]) {
     vi.stubGlobal("innerWidth", w);
     const onAdd = vi.fn();
     const { unmount } = render(<Palette onAdd={onAdd} />);
@@ -56,7 +58,33 @@ test("the_wide_palette_says_how_to_move_around_and_the_icon_rail_has_no_room_for
   expect(screen.queryByTestId("canvas-hint")).toBeNull();
 });
 
-test("add_a_note_pins_a_caption_on_the_wide_palette_only", () => {
+test("the_icon_rail_starts_below_1400_px_so_a_laptop_gets_it", () => {
+  for (const [w, rail] of [
+    [1399, true],
+    [1366, true],
+    [1400, false],
+  ] as const) {
+    vi.stubGlobal("innerWidth", w);
+    const { unmount } = render(<Palette onAdd={() => {}} />);
+    expect(screen.queryByTestId("canvas-hint") === null, `${w}`).toBe(rail);
+    unmount();
+  }
+});
+
+test("an_icon_has_a_card_with_the_description_and_a_glossary_link", () => {
+  vi.stubGlobal("innerWidth", 1366);
+  render(<Palette onAdd={() => {}} />);
+  const cache = screen.getByRole("button", { name: "Cache" });
+  // the card is the icon's description, so assistive technology reads it too
+  const card = document.getElementById(cache.getAttribute("aria-describedby") ?? "");
+  expect(card?.getAttribute("role")).toBe("tooltip");
+  expect(card?.textContent).toContain("Answers repeat reads fast");
+  fireEvent.click(screen.getAllByRole("link", { name: "Open in the glossary" })[4] as HTMLElement);
+  expect(useGuide.getState()).toMatchObject({ open: true, entry: "cache" });
+  useGuide.getState().hide();
+});
+
+test("add_a_note_pins_a_caption_in_both_layouts", () => {
   vi.stubGlobal("innerWidth", 1440);
   useNotes.setState({ project: null, notes: [] });
   const { unmount } = render(<Palette onAdd={() => {}} />);
@@ -64,8 +92,10 @@ test("add_a_note_pins_a_caption_on_the_wide_palette_only", () => {
   expect(useNotes.getState().notes).toHaveLength(1);
   unmount();
   vi.stubGlobal("innerWidth", 1000);
+  useNotes.setState({ project: null, notes: [] });
   render(<Palette onAdd={() => {}} />);
-  expect(screen.queryByRole("button", { name: /Add a note/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  expect(useNotes.getState().notes).toHaveLength(1);
 });
 
 test("storage_is_offered_with_its_one_line_description", () => {

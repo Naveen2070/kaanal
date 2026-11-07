@@ -6,6 +6,9 @@
 // the real icons, hues and meter (Samples.tsx); its figures are examples, and the dialog says so.
 
 /** One step of a chain sample: a component, and what happens at it. */
+import { RESULTS_CHAPTER } from "./contentResults";
+import { SETTINGS_CHAPTER } from "./contentSettings";
+
 export interface ChainStep {
   of: string;
   /** A few words under the tile ("asks", "then calls"). */
@@ -62,6 +65,12 @@ export interface Entry {
   text: string;
   /** What it stands for in a real system, when it stands for something. */
   real?: string;
+  /** A worked example, for the settings. */
+  example?: string;
+  /** When to change it, for the settings. */
+  hint?: string;
+  /** Where its control is on screen, for the settings that have one. */
+  where?: string;
   sample?: Sample;
 }
 
@@ -288,7 +297,7 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "draft",
         term: "Draft, Apply, Save",
-        text: "What you edit is a draft. Run only tries it. Apply makes the draft the running system, so the mocks switch to it. Save writes kaanal.yaml. 'Draft: applied · saved' means all three agree.",
+        text: "What you edit is a draft. Run only tries it. Apply makes the draft the running system, so the mocks switch to it. Save writes kaanal.yaml. 'Everything saved' means all three agree.",
         sample: { kind: "draft" },
       },
     ],
@@ -462,11 +471,13 @@ export const CHAPTERS: Chapter[] = [
       {
         id: "idle-wire",
         term: "No traffic in the last run",
-        text: "A wire shown dashed, or marked so in the Controls tab: its source had requests and its target got none. Nothing is wrong with the wire; the route that traffic took did not use it.",
+        text: "A wire shown dashed, or marked so in the Settings tab: its source had requests and its target got none. Nothing is wrong with the wire; the route that traffic took did not use it.",
         sample: { kind: "wire", from: "auth", to: "service", idle: true },
       },
     ],
   },
+  SETTINGS_CHAPTER,
+  RESULTS_CHAPTER,
 ];
 
 /** Entries whose term, text or real-world note holds every word typed, with their chapter. */

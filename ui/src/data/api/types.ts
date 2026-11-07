@@ -78,6 +78,8 @@ export type Op =
   /** Adds `value` as the last item of the list at `path`, in the list's own style. */
   | { op: "append"; path: (string | number)[]; value: unknown }
   | { op: "remove"; path: (string | number)[] }
+  /** Exchanges two items of one list; each keeps its own text and comments. */
+  | { op: "swap"; path: (string | number)[]; with: (string | number)[] }
   | { op: "add_node"; name: string; kind: string }
   | { op: "rename_node"; from: string; to: string };
 
@@ -233,6 +235,43 @@ export interface Summary {
   pipes?: PipeSummary[];
   /** Indexes into `nodes`. */
   bottlenecks: number[];
+  /** Per wire that carried a retry scope: how its calls ended; absent from an older server. */
+  retries?: RetrySummary[];
+  /** Per circuit breaker that changed state: its timeline; absent from an older server. */
+  breakers?: BreakerSummary[];
+}
+
+/** What the retry scopes of one wire did over the run. */
+export interface RetrySummary {
+  from: string;
+  to: string;
+  /** Calls that carried a retry scope (the first tries). */
+  calls: number;
+  /** Calls that made at least one retry. */
+  retried: number;
+  /** Retry attempts, all calls. */
+  retries: number;
+  /** Retried calls that ended well. */
+  recovered: number;
+  /** Retried calls that did not (`retried - recovered`). */
+  gave_up: number;
+  /** Calls whose last attempt failed, retried or not. */
+  failed: number;
+}
+
+export type BreakerPhase = "closed" | "half_open" | "open";
+
+/** One breaker (a wire and the caller replica holding it) over the run. */
+export interface BreakerSummary {
+  from: string;
+  to: string;
+  replica: number;
+  /** The state when the reporting window began. */
+  state_at_start: BreakerPhase;
+  /** State changes inside the window, `t_ms` after it began. */
+  changes: { t_ms: number; state: BreakerPhase }[];
+  /** Milliseconds spent open inside the window. */
+  open_ms: number;
 }
 
 export interface RunRecord {
@@ -274,6 +313,8 @@ export interface LogLine {
   service_ms: number | null;
   status: number | null;
   note: string | null;
+  /** On a hop that ran in a retry: which try (2 or more); absent in a first attempt. */
+  attempt?: number;
 }
 
 export interface LogQuery {

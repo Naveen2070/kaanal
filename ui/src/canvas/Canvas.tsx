@@ -2,6 +2,7 @@
 // through the draft store as a patch (R2.6: the server owns the file); positions are written when
 // a drag ends, never during it.
 
+import { Plus } from "lucide-react";
 import {
   Background,
   BackgroundVariant,
@@ -20,7 +21,7 @@ import type { Layout } from "../data/api/types";
 import { useDraft } from "../data/store/draft";
 import { useSelected } from "../data/store/view";
 import { usePrefersReducedMotion } from "../overlays/first-run/motion";
-import { useLayout } from "../shell/layout/useLayout";
+import { useCompactPalette, useLayout } from "../shell/layout/useLayout";
 import { useRail } from "../shell/layout/rail";
 import { usePickedWire } from "./picked";
 import { StarterList } from "./StarterList";
@@ -68,8 +69,9 @@ function Flow() {
   const mode = useLayout();
   const railOpen = useRail((s) => s.open);
   const railW = useRail((s) => s.width);
-  const pads = padsFor(mode, railOpen, railW);
-  const fitOptions = { padding: fitPadding(mode, railOpen, railW), maxZoom: MAX_FIT_ZOOM };
+  const compact = useCompactPalette();
+  const pads = padsFor(mode, railOpen, railW, compact);
+  const fitOptions = { padding: fitPadding(mode, railOpen, railW, compact), maxZoom: MAX_FIT_ZOOM };
   /** Names given a first layout already, so a refused save cannot loop. */
   const placed = useRef(new Set<string>());
 
@@ -173,7 +175,7 @@ function Flow() {
     };
     // `pads` and `fitOptions` follow the layout mode, which is what `mode` carries
     // eslint-disable-next-line react/exhaustive-deps
-  }, [screenToFlowPosition, fitView, zoomIn, zoomOut, still, mode, railOpen]);
+  }, [screenToFlowPosition, fitView, zoomIn, zoomOut, still, mode, railOpen, compact]);
 
   // arrow keys move the selected node (8 px, Shift 40 px); the node moves on screen at once and the
   // position is saved once the keys pause, not per press. Captured so React Flow's own key move,
@@ -397,19 +399,31 @@ function Flow() {
           />
         </ReactFlow>
         {doc && Object.keys(doc.nodes ?? {}).length === 0 ? (
-          // an empty draft: a ghost card pointing at the first step (review C12)
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <button
-              type="button"
-              onClick={() => {
-                const r = canvasBridge.region();
-                void addNode("gateway", (r && freeSlotIn(r, [])) || [0, 0]);
-              }}
-              className="pointer-events-auto rounded-2xl border border-dashed border-control px-6 py-4 text-sm text-muted hover:bg-raised"
-            >
-              Start with a gateway
-            </button>
-            <StarterList />
+          // an empty draft: the starters, in the room between the top bar, the panels and the toolbar
+          // (the same room a fit uses), with the first step as a button in their header (review C12)
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            style={{
+              paddingTop: pads.top,
+              paddingRight: pads.right,
+              paddingBottom: pads.bottom,
+              paddingLeft: pads.left,
+            }}
+          >
+            <StarterList
+              action={
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = canvasBridge.region();
+                    void addNode("gateway", (r && freeSlotIn(r, [])) || [0, 0]);
+                  }}
+                  className="flex min-h-7 items-center gap-1 rounded-lg border border-dashed border-control px-3 text-xs text-muted hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  or start with a gateway <Plus size={13} aria-hidden />
+                </button>
+              }
+            />
           </div>
         ) : null}
       </div>

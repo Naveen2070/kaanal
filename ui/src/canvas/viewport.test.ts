@@ -62,3 +62,13 @@ test("free_slot_in_fills_the_visible_area_left_to_right_then_down_and_says_when_
   ];
   expect(freeSlotIn(region, all)).toBeNull();
 });
+
+test("a_compact_palette_leaves_the_room_of_a_rail_even_on_a_full_layout", () => {
+  // a 1366 px window is a full layout (1280 and up) with a 56 px rail (under 1400 px)
+  expect(padsFor("full", true, 360, true).left).toBe(92);
+  expect(padsFor("full", true, 360, false).left).toBe(328);
+  expect(fitPadding("full", true, 360, true).left).toBe("92px");
+  // not stated: the rail layouts are compact, the full one is not (as before)
+  expect(padsFor("rail").left).toBe(92);
+  expect(padsFor("full").left).toBe(328);
+});

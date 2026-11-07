@@ -6,6 +6,8 @@ import { useDraft } from "../../data/store/draft";
 import { mockFetch } from "../../test/fetch";
 import { nodeSummary } from "../../test/summary";
 import { Controls } from "./Controls";
+import { ALL_NODE_GROUPS } from "./groups/ids";
+import { useGroups } from "./groups/store";
 
 export const app: NodeDoc = { type: "service", concurrency: 12, proc: "98ms", replicas: 2 };
 export const edges: EdgeDoc[] = [
@@ -54,6 +56,8 @@ export async function show(
   opts: { applied?: boolean; name?: string } = {},
 ) {
   const name = opts.name ?? "app";
+  // the groups start folded; the older tests reach into every one
+  useGroups.setState({ open: Object.fromEntries(ALL_NODE_GROUPS.map((id) => [id, true])) });
   // the draft, then (when the panel asks) the running system
   mockFetch([
     { json: view({ doc: { nodes: { [name]: cfg }, edges } }) },

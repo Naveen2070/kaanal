@@ -334,16 +334,39 @@ export type ChaosTarget =
   | { edge: { from: string; to: string } };
 
 export type ChaosAction =
-  | { kind: "down"; down: boolean }
+  /** `fromMs`: milliseconds into the run the outage begins (a node or instance only); absent = from the start. */
+  | { kind: "down"; down: boolean; fromMs?: number }
   | { kind: "slow"; ms: number }
   | { kind: "drop"; rate: number }
   | { kind: "clear" };
+
+/** The longest start the box takes: a day into the run. */
+const MAX_START_S = 86_400;
+
+/**
+ * The "Starting at" box, in seconds, as the milliseconds the file holds: `undefined` when it is empty
+ * (the outage begins with the run), `null` when it is not a value the loader would take (nothing is
+ * sent then).
+ */
+export function startMsOf(text: string): number | undefined | null {
+  const t = text.trim();
+  if (t === "") return undefined;
+  const s = Number(t);
+  return Number.isFinite(s) && s >= 0 && s <= MAX_START_S ? Math.round(s * 1000) : null;
+}
 
 /** The body of `PUT /__kaanal/chaos` for an action on a target. */
 export function chaosBody(target: ChaosTarget, action: ChaosAction): Record<string, unknown> {
   switch (action.kind) {
     case "down":
-      return { ...target, down: action.down };
+      return {
+        ...target,
+        down: action.down,
+        // the start of an outage (RULES 91): only taking a node or instance down has one
+        ...(action.down && action.fromMs !== undefined && "node" in target
+          ? { from_ms: action.fromMs }
+          : {}),
+      };
     case "slow":
       return { ...target, latency_ms: action.ms };
     case "drop":

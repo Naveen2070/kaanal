@@ -55,3 +55,24 @@ it("after_the_loader_has_been_seen_the_hold_drops_unless_a_setting_says_otherwis
   setMinLoadMs(4000);
   expect(getMinLoadMs()).toBe(4000);
 });
+
+describe("controls groups left open", () => {
+  it("starts_empty_and_round_trips", async () => {
+    const { getGroupsOpen, setGroupsOpen } = await import("./settings");
+    expect(getGroupsOpen()).toEqual({});
+    setGroupsOpen({ "wire.retry": true, "wire.loss": false });
+    expect(getGroupsOpen()).toEqual({ "wire.retry": true, "wire.loss": false });
+  });
+
+  it("junk_and_blocked_storage_give_the_defaults", async () => {
+    const { getGroupsOpen, setGroupsOpen } = await import("./settings");
+    localStorage.setItem("kaanal-groups-open", "[1,2]");
+    expect(getGroupsOpen()).toEqual({});
+    localStorage.setItem("kaanal-groups-open", '{"a":true,"b":"yes"}');
+    expect(getGroupsOpen()).toEqual({ a: true });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    expect(() => setGroupsOpen({ a: true })).not.toThrow();
+  });
+});

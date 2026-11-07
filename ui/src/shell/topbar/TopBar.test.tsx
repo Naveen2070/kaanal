@@ -52,7 +52,7 @@ test("the_run_button_runs", async () => {
 test("a_blocked_run_says_so_in_the_status_line_and_the_reason_is_a_notice", async () => {
   await show(300);
   useRun.setState({ status: "blocked", lastError: "no entry node", dimmed: true });
-  expect((await screen.findByRole("status")).textContent).toBe("Not up to date");
+  expect((await screen.findByRole("status")).textContent).toBe("Results out of date");
   expect(screen.queryByText("no entry node")).toBeNull(); // the reason is a toast (toast/bind.ts)
 });
 
@@ -63,14 +63,10 @@ test("topbar_has_one_h1_with_the_product_name_and_the_project_as_its_scope", asy
   expect(h1[0]?.textContent?.trim()).toBe("Kaanal");
 });
 
-test("freshness_stamp_and_draft_state_are_separate_texts", async () => {
+test("there_is_one_status_line_for_results_and_draft", async () => {
   await show(300);
-  const draft = screen.getByText(/^Draft: /);
-  const stamp = screen.getByRole("status");
-  expect(draft).not.toBe(stamp);
-  expect(draft.contains(stamp) || stamp.contains(draft)).toBe(false);
-  expect(stamp.textContent).not.toMatch(/Draft/);
-  expect(draft.textContent).toBe("Draft: applied · saved");
+  expect(screen.getAllByRole("status")).toHaveLength(1);
+  expect(screen.queryByText(/^Draft: /)).toBeNull();
 });
 
 test("the_h1_names_the_project_folder_when_there_is_one", async () => {

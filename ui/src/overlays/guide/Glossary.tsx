@@ -19,12 +19,23 @@ const KEYS: Chapter = {
 };
 const ALL = [...CHAPTERS, KEYS];
 
-function EntryRow({ entry, chapter }: { entry: Entry; chapter?: string }) {
+function EntryRow({
+  entry,
+  chapter,
+  marked = false,
+}: {
+  entry: Entry;
+  chapter?: string;
+  /** A help link asked for this entry: it is outlined so the eye finds it. */
+  marked?: boolean;
+}) {
   return (
     <div
+      id={`glossary-${entry.id}`}
+      data-marked={marked || undefined}
       className={`border-b border-rule py-3 last:border-b-0 ${
         entry.sample ? "sm:grid sm:grid-cols-[minmax(0,1fr)_15rem] sm:gap-5" : ""
-      }`}
+      } ${marked ? "rounded-md outline-2 -outline-offset-2 outline-accent" : ""}`}
     >
       <div className="min-w-0">
         <dt className="text-sm font-semibold text-text">
@@ -32,6 +43,21 @@ function EntryRow({ entry, chapter }: { entry: Entry; chapter?: string }) {
           {chapter ? <span className="ml-2 text-xs font-normal text-muted">{chapter}</span> : null}
         </dt>
         <dd className="m-0 mt-1 text-sm text-text">{entry.text}</dd>
+        {entry.example ? (
+          <dd className="m-0 mt-1 text-xs text-muted">
+            <span className="font-medium text-text">Example:</span> {entry.example}
+          </dd>
+        ) : null}
+        {entry.hint ? (
+          <dd className="m-0 mt-1 text-xs text-muted">
+            <span className="font-medium text-text">Hint:</span> {entry.hint}
+          </dd>
+        ) : null}
+        {entry.where ? (
+          <p className="mt-1 mb-0 text-xs text-muted">
+            <span className="font-medium text-text">Where to find it:</span> {entry.where}
+          </p>
+        ) : null}
         {entry.real ? (
           <dd className="m-0 mt-1 text-xs text-muted">In a real system: {entry.real}</dd>
         ) : null}
@@ -47,8 +73,13 @@ function EntryRow({ entry, chapter }: { entry: Entry; chapter?: string }) {
 
 export function Glossary() {
   const box = useRef<HTMLDialogElement>(null);
-  const chapter = useGuide((s) => s.chapter);
+  const asked = useGuide((s) => s.chapter);
+  const entry = useGuide((s) => s.entry);
   const setChapter = useGuide((s) => s.setChapter);
+  // an entry asked for by a help link decides the chapter; one that does not exist is ignored
+  const entryAt = entry ? ALL.find((c) => c.entries.some((e) => e.id === entry)) : undefined;
+  const chapter = entryAt?.id ?? asked;
+  const markedId = entryAt ? entry : null;
   const hide = useGuide((s) => s.hide);
   const [text, setText] = useState("");
   const found = searchEntries(text, ALL);
@@ -63,6 +94,13 @@ export function Glossary() {
     }
     return () => opener?.focus();
   }, []);
+
+  // bring the asked-for entry into view once its chapter is showing
+  useLayoutEffect(() => {
+    if (markedId) {
+      document.getElementById(`glossary-${markedId}`)?.scrollIntoView?.({ block: "center" });
+    }
+  }, [markedId]);
 
   return (
     <dialog
@@ -138,8 +176,8 @@ export function Glossary() {
               <h3 className="m-0 text-base font-semibold">{c.title}</h3>
               <p className="m-0 mt-1 max-w-prose text-sm text-muted">{c.intro}</p>
               <dl className="m-0 mt-2">
-                {c.entries.map((entry) => (
-                  <EntryRow key={entry.id} entry={entry} />
+                {c.entries.map((e) => (
+                  <EntryRow key={e.id} entry={e} marked={e.id === markedId} />
                 ))}
               </dl>
             </TabsPrimitive.Content>

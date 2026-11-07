@@ -9,10 +9,10 @@ import { RAIL_FOLDED_W, RAIL_MAX_W, RAIL_MIN_W, useRail } from "../../shell/layo
 import { TABS, useTab, type Tab } from "../../data/store/view";
 
 const LABEL: Record<Tab, string> = {
-  controls: "Controls",
-  log: "Log",
+  controls: "Settings",
+  log: "Trace",
   results: "Results",
-  live: "Live",
+  live: "Try live",
 };
 
 export function Rail({

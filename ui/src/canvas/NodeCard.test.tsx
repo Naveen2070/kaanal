@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { NodeProps } from "@xyflow/react";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { expectNoViolations } from "../test/axe";
@@ -155,4 +155,39 @@ test("a_storage_card_names_the_kind_and_reads_its_first_byte_without_nan", () =>
   cleanup();
   card(feedOf(undefined), { type: "storage", first_byte: { mean: "30ms" } });
   expect(screen.getByTitle("Storage · 1 copy · no slot limit · first byte varies")).toBeTruthy();
+});
+
+test("the_figures_have_help_buttons_that_cannot_start_a_drag_or_select_the_card", () => {
+  card(feedOf(nodeSummary({ utilization: 0.9, overflowed: 40, visits_per_s: 100, p99_ms: 20 })));
+  for (const name of ["Arriving", "Turned away", "Slowest work under"]) {
+    const button = screen.getByRole("button", { name: `About ${name}` });
+    // React Flow's classes: no drag and no pan starts from a press on it
+    expect(button.classList.contains("nodrag") && button.classList.contains("nopan"), name).toBe(
+      true,
+    );
+  }
+});
+
+test("a_help_card_opens_on_the_page_not_inside_the_card_that_would_clip_and_scale_it", async () => {
+  // React Flow selects a card from a React click on its wrapper: stand one in
+  const selected = vi.fn();
+  const props = { data: { name: "app", kind: "service", config }, selected: false };
+  render(
+    <FeedContext.Provider
+      value={feedOf(nodeSummary({ utilization: 0.5, visits_per_s: 100, p99_ms: 20 }))}
+    >
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+      <div onClick={selected}>
+        <NodeCard {...(props as unknown as NodeProps)} />
+      </div>
+    </FeedContext.Provider>,
+  );
+  const group = screen.getByRole("group", { name: /app, Service/ });
+  fireEvent.click(screen.getByRole("button", { name: "About Arriving" }));
+  const dialog = await screen.findByRole("dialog", { name: "Arriving" });
+  expect(group.contains(dialog)).toBe(false);
+  expect(dialog.parentElement).toBe(document.body);
+  expect(dialog.textContent).toContain("Requests a second that got in");
+  // the press did not reach the wrapper's click (which selects the component)
+  expect(selected).not.toHaveBeenCalled();
 });

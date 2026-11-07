@@ -183,6 +183,28 @@ test("chaos_is_blocked_with_a_reason_for_a_component_that_is_only_in_the_draft",
   );
 });
 
+test("taking_a_node_down_can_start_part_way_into_the_run", async () => {
+  await show();
+  await chaosReady();
+  const sent = mockFetch([{ json: {} }]);
+  const box = screen.getByLabelText("Starting at (seconds)") as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "4" } });
+  fireEvent.click(screen.getByRole("button", { name: "Take down" }));
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.body).toEqual({ node: "app", down: true, from_ms: 4000 });
+  // empty: from the start, no key; a bad value sends nothing
+  fireEvent.change(box, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Take down" }));
+  await vi.waitFor(() => expect(sent).toHaveLength(2));
+  expect(sent[1]?.body).toEqual({ node: "app", down: true });
+  fireEvent.change(box, { target: { value: "-3" } });
+  fireEvent.click(screen.getByRole("button", { name: "Take down" }));
+  expect(sent).toHaveLength(2);
+  // a link has no start: the box goes away
+  fireEvent.change(screen.getByLabelText("Break"), { target: { value: "link:db" } });
+  expect(screen.queryByLabelText("Starting at (seconds)")).toBeNull();
+});
+
 test("chaos_starts_a_run_and_an_empty_or_bad_box_sends_nothing", async () => {
   const calls = await show();
   await chaosReady();
@@ -306,7 +328,9 @@ test("slots_and_copies_are_set_in_the_dock_only_and_the_name_is_last", async () 
   expect(screen.queryByLabelText("Slots")).toBeNull();
   expect(screen.queryByLabelText("Copies")).toBeNull();
   const order = [...document.querySelectorAll("h3")].map((h) => h.textContent);
-  expect(order[0]).toBe("Capacity");
+  // the quick setups first (an untouched component), then Capacity
+  expect(order[0]).toBe("Quick setups");
+  expect(order[1]).toBe("Capacity");
   expect(order.at(-1)).toBe("This component");
 });
 

@@ -15,7 +15,7 @@
     "@radix-ui/react-slider": "1.6.1",
     "@radix-ui/react-tabs": "1.2.1",
     "@xyflow/react": "^12.12.1",
-    "lucide-react": "^1.66.0",
+    "lucide-react": "^1.68.0",
     "nuqs": "^2.10.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -24,7 +24,7 @@
   "devDependencies": {
     "@babel/core": "^8.1.0",
     "@rolldown/plugin-babel": "^0.2.4",
-    "@tailwindcss/vite": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.4",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
     "@types/node": "^26.6.6",
@@ -35,14 +35,14 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "jsdom": "^30.1.3",
     "opentype.js": "2.0.0",
-    "tailwindcss": "^4.3.3",
+    "tailwindcss": "^4.3.4",
     "typescript": "~6.0.3",
     "vite-plus": "~1.4.0"
   },
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "12.16.1",
+      "version": "12.18.0",
       "onFail": "error"
     },
     "runtime": [
@@ -53,10 +53,10 @@
       },
       {
         "name": "node",
-        "version": ">=26.0.0",
+        "version": "26.13.0",
         "onFail": "error"
       }
     ]
   },
-  "packageManager": "pnpm@12.16.1"
+  "packageManager": "pnpm@12.18.0"
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import type { DraftView, RunRecord, Series, Summary } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
+import { useGroups } from "./groups/store";
 import { mockFetch } from "../../test/fetch";
 import { nodeSummary } from "../../test/summary";
 import { bucketLabel, heatmapData, intensity } from "./heatmapData";
@@ -76,6 +77,7 @@ function mount() {
 }
 
 beforeEach(() => {
+  useGroups.setState({ open: {} });
   useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null });
   useDraft.setState({ view: null });
 });
@@ -136,12 +138,100 @@ test("the_heatmap_draws_the_busiest_component_first_with_a_table_fallback", () =
   expect(screen.getByText("Hops of db by latency")).toBeTruthy();
 });
 
-test("the_warning_text_is_visible_above_the_heatmap", () => {
+test("the_engine_warnings_fold_under_engine_notes_below_the_charts", () => {
   setRun(summary({ warnings: ["fewer than 1000 samples: p99 is noise"] }));
   mount();
+  expect(screen.queryByText("fewer than 1000 samples: p99 is noise")).toBeNull();
+  const head = screen.getByRole("button", { name: /^Engine notes/ });
+  expect(head.textContent).toContain("1 note");
+  fireEvent.click(head);
   const warning = screen.getByText("fewer than 1000 samples: p99 is noise");
   const svg = document.querySelector("svg") as SVGElement;
-  expect(warning.compareDocumentPosition(svg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(svg.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("the_verdict_opens_the_tab_before_what_breaks_first", () => {
+  setRun(summary());
+  mount();
+  const verdict = screen.getByText(/5% of requests failed, mostly overflow/);
+  const first = screen.getByRole("heading", { name: "What breaks first" });
+  expect(verdict.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("a_run_with_retries_and_a_breaker_draws_the_funnel_and_the_timeline", () => {
+  setRun(
+    summary({
+      retries: [
+        {
+          from: "gw",
+          to: "app",
+          calls: 100,
+          retried: 40,
+          retries: 70,
+          recovered: 25,
+          gave_up: 15,
+          failed: 20,
+        },
+      ],
+      breakers: [
+        {
+          from: "gw",
+          to: "app",
+          replica: 0,
+          state_at_start: "closed",
+          changes: [
+            { t_ms: 3000, state: "open" },
+            { t_ms: 13000, state: "half_open" },
+          ],
+          open_ms: 10000,
+        },
+      ],
+    }),
+  );
+  mount();
+  const funnel = screen.getByRole("figure", {
+    name: /gw to app: 55 went through first time, 25 recovered/,
+  });
+  expect(funnel).toBeTruthy();
+  expect(screen.getByText("Retried, then gave up").parentElement?.textContent).toContain(
+    "15 · 15%",
+  );
+  expect(
+    screen.getByRole("figure", {
+      name: /gw → app: closed from 0 ms to 3 s, open from 3 s to 13 s/,
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText(/open 10 s of 30 s · 33%/)).toBeTruthy();
+});
+
+test("a_run_without_retries_or_breakers_shows_neither_section", () => {
+  setRun(summary());
+  mount();
+  expect(screen.queryByRole("heading", { name: "How calls ended" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Circuit breakers" })).toBeNull();
+});
+
+test("every_chart_title_has_a_help_button", () => {
+  setRun(
+    summary({
+      nodes: [nodeSummary({ name: "db", series: { ...series(), busy: [0.4, 0.95] } })],
+      bottlenecks: [0],
+    }),
+  );
+  mount();
+  for (const title of ["What breaks first", "Latency over the run", "Errors by kind"]) {
+    expect(screen.getByRole("button", { name: `About ${title}` }), title).toBeTruthy();
+  }
+  expect(screen.getByRole("button", { name: "About Busy over the run" })).toBeTruthy();
+});
+
+test("goals_and_sharing_are_folded_groups_at_the_foot", () => {
+  setRun(summary());
+  mount();
+  expect(screen.queryByText("Copy as Markdown")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Share this run/ }));
+  expect(screen.getByText("Copy as Markdown")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Goals/ }).textContent).toContain("no p99 target");
 });
 
 test("breaks_first_list_ranks_by_peak_with_saturates_at", () => {
@@ -271,7 +361,7 @@ test("loading_skeleton_has_the_final_layout_size", () => {
   cleanup();
   setRun(summary());
   mount();
-  expect(document.querySelector("svg")?.getAttribute("class")).toContain(HEAT_ASPECT);
+  expect(document.querySelector(`svg[class*="${HEAT_ASPECT}"]`)).toBeTruthy();
   expect(document.querySelector("section ol li")?.className).toContain(RANK_ROW);
 });
 

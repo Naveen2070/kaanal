@@ -16,6 +16,10 @@ const set = (path: (string | number)[], present: boolean, value: unknown): Op =>
   value,
 });
 
+/** Where a thing with a `retry:` sits: an edge by index, or any path (a `call:` step of a route's chain). */
+export type At = number | (string | number)[];
+const base = (i: At): (string | number)[] => (typeof i === "number" ? ["edges", i] : i);
+
 // ---- retry (RULES 82-84) ----
 
 /** The loader's limits and defaults for `retry` (`config/retry.rs`). */
@@ -50,10 +54,10 @@ export const setRetryOn = (i: number, e: EdgeDoc, on: boolean): Op[] =>
       : [];
 
 /** Sets one key of `retry` (the box must only exist while `retry` does). */
-export const setRetry = (i: number, r: Obj, key: string, value: unknown): Op =>
-  set(["edges", i, "retry", key], key in r, value);
-export const clearRetry = (i: number, r: Obj, key: string): Op[] =>
-  key in r ? [{ op: "remove", path: ["edges", i, "retry", key] }] : [];
+export const setRetry = (i: At, r: Obj, key: string, value: unknown): Op =>
+  set([...base(i), "retry", key], key in r, value);
+export const clearRetry = (i: At, r: Obj, key: string): Op[] =>
+  key in r ? [{ op: "remove", path: [...base(i), "retry", key] }] : [];
 
 export const attemptsOf = (r: Obj): number =>
   typeof r.max_attempts === "number" ? r.max_attempts : RETRY.attempts.default;
@@ -61,28 +65,28 @@ export const multiplierOf = (r: Obj): number =>
   typeof r.multiplier === "number" ? r.multiplier : RETRY.multiplier.default;
 export const backoffMsOf = (r: Obj): number | null => durationMs(r.backoff);
 export const capMsOf = (r: Obj): number | null => durationMs(r.cap);
-export const setRetryMs = (i: number, r: Obj, key: "backoff" | "cap", ms: number): Op =>
+export const setRetryMs = (i: At, r: Obj, key: "backoff" | "cap", ms: number): Op =>
   setRetry(i, r, key, formatMs(ms));
 export const jitterOf = (r: Obj): Jitter =>
   r.jitter === "equal" || r.jitter === "none" ? r.jitter : "full";
 /** The default (`full`) removes the key. */
-export const setJitter = (i: number, r: Obj, j: Jitter): Op[] =>
+export const setJitter = (i: At, r: Obj, j: Jitter): Op[] =>
   j === "full" ? clearRetry(i, r, "jitter") : [setRetry(i, r, "jitter", j)];
 export const writesOf = (r: Obj): boolean => r.writes === true;
 /** Off (the default) removes the key. */
-export const setWrites = (i: number, r: Obj, on: boolean): Op[] =>
+export const setWrites = (i: At, r: Obj, on: boolean): Op[] =>
   on ? [setRetry(i, r, "writes", true)] : clearRetry(i, r, "writes");
 
 /** The retry budget (gRPC A6) when written; `{}` is 10 tokens refilling 0.1 a success. */
 export const budgetOf = (r: Obj): Obj | null => (isObject(r.budget) ? r.budget : null);
-export const setBudgetOn = (i: number, r: Obj, on: boolean): Op[] =>
+export const setBudgetOn = (i: At, r: Obj, on: boolean): Op[] =>
   on ? ("budget" in r ? [] : [setRetry(i, r, "budget", {})]) : clearRetry(i, r, "budget");
 export const budgetTokensOf = (b: Obj): number =>
   typeof b.max_tokens === "number" ? b.max_tokens : RETRY.budgetTokens.default;
 export const budgetRatioOf = (b: Obj): number =>
   typeof b.token_ratio === "number" ? b.token_ratio : RETRY.budgetRatio.default;
-export const setBudget = (i: number, b: Obj, key: "max_tokens" | "token_ratio", v: number): Op =>
-  set(["edges", i, "retry", "budget", key], key in b, v);
+export const setBudget = (i: At, b: Obj, key: "max_tokens" | "token_ratio", v: number): Op =>
+  set([...base(i), "retry", "budget", key], key in b, v);
 
 // ---- abandon (RULES 88) ----
 

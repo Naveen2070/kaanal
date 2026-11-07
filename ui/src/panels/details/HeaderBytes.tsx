@@ -3,6 +3,9 @@
 
 import { useDraft } from "../../data/store/draft";
 import { NumberField } from "./Field";
+import { Group } from "./groups/Group";
+import { DOC_GROUP } from "./groups/ids";
+import { headersSummary } from "./groups/summaries";
 import { headerBytesOf, setHeaderBytes } from "./edgeFields";
 import { BYTE_SIZE_UNITS } from "./units";
 
@@ -12,10 +15,17 @@ export function HeaderBytes() {
   if (!doc) return null;
   const h = headerBytesOf(doc);
   return (
-    <section className="mt-4 border-t border-rule pt-3" aria-label="Headers">
-      <h3 className="m-0 mb-1 text-xs font-medium text-muted">Headers on every call</h3>
+    <Group
+      id={DOC_GROUP.headers}
+      title="Headers on every call"
+      summary={headersSummary(doc)}
+      changed={"header_bytes" in doc}
+      onReset={() => void patch([{ op: "remove", path: ["header_bytes"] }])}
+    >
       <NumberField
         label="Request headers"
+        help="header-bytes"
+        quietHint
         hint="An estimate of what a client sends besides the body (cookies and a token included). 0 on both turns headers off."
         value={h.request}
         units={BYTE_SIZE_UNITS}
@@ -25,6 +35,8 @@ export function HeaderBytes() {
       />
       <NumberField
         label="Response headers"
+        help="header-bytes"
+        quietHint
         hint="An estimate of what a server answers besides the body."
         value={h.response}
         units={BYTE_SIZE_UNITS}
@@ -32,6 +44,6 @@ export function HeaderBytes() {
         step="any"
         onCommit={(n) => patch([setHeaderBytes(doc, "response", n)])}
       />
-    </section>
+    </Group>
   );
 }

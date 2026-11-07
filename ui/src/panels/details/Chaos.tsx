@@ -9,7 +9,7 @@ import { useChaosHints } from "../../data/store/chaosHints";
 import { useDraft } from "../../data/store/draft";
 import { notify } from "../../shell/toast/toasts";
 import { UnitInput } from "./Field";
-import { chaosBody, type ChaosAction, type ChaosTarget } from "./fields";
+import { chaosBody, startMsOf, type ChaosAction, type ChaosTarget } from "./fields";
 import { TIME_UNITS } from "./units";
 
 export function Chaos({
@@ -48,6 +48,8 @@ export function Chaos({
   const [target, setTarget] = useState("node");
   const [ms, setMs] = useState("100");
   const [percent, setPercent] = useState("10");
+  /** Seconds into the run an outage begins; empty = from the start. */
+  const [start, setStart] = useState("");
 
   const resolve = (): ChaosTarget => {
     if (target.startsWith("replica:")) return { node: name, replica: Number(target.slice(8)) };
@@ -125,7 +127,11 @@ export function Chaos({
           className="min-h-7 rounded border border-control bg-sheet text-text px-2 disabled:opacity-40"
           disabled={!nodeKnown}
           aria-describedby={nodeKnown ? undefined : `${id}-why`}
-          onClick={() => void run({ kind: "down", down: true })}
+          onClick={() => {
+            const fromMs = target.startsWith("link:") ? undefined : startMsOf(start);
+            // null: not a value, so nothing is sent
+            if (fromMs !== null) void run({ kind: "down", down: true, fromMs });
+          }}
         >
           Take down
         </button>
@@ -148,6 +154,30 @@ export function Chaos({
           Clear
         </button>
       </div>
+      {target.startsWith("link:") ? null : (
+        <div className="mt-1 flex items-center gap-1 text-sm">
+          <label htmlFor={`${id}-start`}>Starting at (seconds)</label>
+          <input
+            name="down-start"
+            id={`${id}-start`}
+            type="number"
+            min={0}
+            max={86400}
+            step="any"
+            placeholder="from the start"
+            value={start}
+            onChange={(e) => setStart(e.currentTarget.value)}
+            aria-describedby={`${id}-start-why`}
+            className="h-7 w-32 rounded border border-control bg-sheet text-text px-1"
+          />
+        </div>
+      )}
+      {target.startsWith("link:") ? null : (
+        <p id={`${id}-start-why`} className="mt-0.5 text-xs text-muted">
+          For Take down: when in a run it begins. A run honours it; the live mocks take it down at
+          once until live mode has a clock.
+        </p>
+      )}
       <div className="mt-1 flex items-center gap-1 text-sm">
         <label htmlFor={`${id}-ms`}>Slow by</label>
         <UnitInput

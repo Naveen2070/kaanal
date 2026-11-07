@@ -18,6 +18,7 @@ export function RateLimitFields({ name, config }: { name: string; config: NodeDo
     <>
       <NumberField
         label="Request limit"
+        help="rate-limit"
         hint={
           store
             ? "Requests a second this store accepts; the rest are turned away with a 503."
@@ -31,6 +32,8 @@ export function RateLimitFields({ name, config }: { name: string; config: NodeDo
       />
       <NumberField
         label="Burst"
+        help="burst"
+        quietHint
         hint="The most requests let through at once after a quiet spell."
         value={limit.burst}
         min={1}

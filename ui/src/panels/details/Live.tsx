@@ -12,6 +12,7 @@ import { Section, UnitInput } from "./Field";
 import { Sample } from "./Sample";
 import { TIME_UNITS } from "./units";
 import {
+  applyAndStart,
   describePin,
   leaseLeft,
   LEASES,
@@ -63,6 +64,7 @@ const say = (e: unknown) => (e instanceof ApiError ? e.message : String(e));
 export function Live() {
   const { data, load } = useLive();
   const [lease, setLease] = useState(0);
+  const [starting, setStarting] = useState(false);
   const act = async (f: () => Promise<unknown>, rerun: boolean) => {
     try {
       await f();
@@ -77,9 +79,37 @@ export function Live() {
   if (data === undefined) return <p className="p-3 text-sm text-muted">Loading...</p>;
   if (data === null) {
     return (
-      <p className="p-3 text-sm text-muted">
-        Scenarios and pins act on the running system, and there is none yet. Apply the draft first.
-      </p>
+      <div className="p-3 text-sm">
+        <p className="m-0 text-muted">
+          Live is where you switch things on in the running system without touching the file:
+          scenarios (sets of failures for a while) and pins (an endpoint forced to answer one way).
+          There is no running system yet. Apply the draft to start one.
+        </p>
+        <button
+          type="button"
+          disabled={starting}
+          onClick={() => {
+            setStarting(true);
+            void applyAndStart({
+              // the top bar's own Apply: one code path, its dialog says what was kept
+              press: () => document.querySelector<HTMLElement>('[data-command="apply"]')?.click(),
+              ready: () =>
+                api
+                  .getTopology()
+                  .then(() => true)
+                  .catch(() => false),
+              run: () => {
+                load();
+                runNow();
+              },
+              sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+            }).finally(() => setStarting(false));
+          }}
+          className="mt-2 min-h-8 rounded-lg border border-control bg-sheet px-3 font-medium hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+        >
+          Apply and start
+        </button>
+      </div>
     );
   }
   const anyOn = data.scenarios.some((s) => s.active);

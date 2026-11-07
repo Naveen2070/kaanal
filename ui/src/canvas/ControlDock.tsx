@@ -28,7 +28,7 @@ export function ControlDock() {
   return (
     <section
       aria-label={`Settings for ${selected}`}
-      className="pointer-events-auto max-w-full rounded-2xl border border-border bg-sheet px-4 py-3 shadow-float"
+      className="pointer-events-auto @container w-[min(100%,52rem)] rounded-2xl border border-border bg-sheet px-4 py-3 shadow-float"
     >
       <header className="mb-2 flex items-center gap-2">
         {Icon ? (

@@ -30,6 +30,14 @@ import { capacityLine, replicasOf } from "./metrics";
 
 type Id = Row["id"];
 
+/**
+ * The dock's rows by the dock's own width (a container query on the dock): one column when narrow,
+ * two from 30 rem, three from 46 rem. A lone last row takes the whole line in the two-column layout,
+ * so no row is left beside an empty half.
+ */
+const DOCK_ROWS =
+  "grid grid-cols-1 items-start gap-x-8 gap-y-3 @min-[30rem]:grid-cols-2 @min-[46rem]:grid-cols-3 @min-[30rem]:[&>:last-child:nth-child(odd)]:col-span-2 @min-[46rem]:[&>:last-child:nth-child(odd)]:col-span-1";
+
 /** Arrow and page keys step the thumb (Radix does Home and End); +1 or -1, and how many steps. */
 const STEP_KEYS: Record<string, [number, number]> = {
   ArrowRight: [1, 1],
@@ -235,12 +243,12 @@ export function ControlBar({
       }}
     >
       {line === null ? null : <p className="m-0 text-text tabular-nums">{line}</p>}
-      <div className={dock ? "flex flex-wrap items-start gap-x-8 gap-y-3" : "contents"}>
+      <div className={dock ? DOCK_ROWS : "contents"}>
         {rows.map((row) => {
           const s = specs[row.id];
           const v = shown(row.id);
           return (
-            <div key={row.id} className={`flex flex-col gap-1 ${dock ? "w-64" : ""}`}>
+            <div key={row.id} className={`flex min-w-0 flex-col gap-1`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-1 font-medium text-text">
                   {s.label}

@@ -111,11 +111,42 @@ function problemsOf(v: ValidateResult): string[] {
   ];
 }
 
+export type RunWord = "idle" | "running" | "blocked" | "done";
+
+/** The words of the one status line: the results, then what the draft still lacks. */
+export function statusText(run: RunWord, dirty: boolean, saved: boolean): string {
+  if (run === "done" && !dirty && saved) return "Everything saved";
+  const parts = [
+    run === "running"
+      ? "Running..."
+      : run === "blocked"
+        ? "Results out of date"
+        : run === "done"
+          ? "Results up to date"
+          : "Edits re-run on their own",
+  ];
+  if (dirty) parts.push("changes not applied");
+  if (!saved) parts.push("not saved");
+  return parts.join(" · ");
+}
+
+function StatusLine({ run, dirty, saved }: { run: RunWord; dirty: boolean; saved: boolean }) {
+  const warn = run === "blocked" || dirty || !saved;
+  return (
+    <output className={`flex items-start gap-1.5 text-xs ${warn ? "text-warn" : "text-muted"}`}>
+      <span
+        aria-hidden
+        className={`mt-1 size-1.5 shrink-0 rounded-full ${warn ? "bg-warn-fill" : "bg-ok-fill"}`}
+      />
+      {statusText(run, dirty, saved)}
+    </output>
+  );
+}
+
 /**
- * Apply and Save, with `lead` (Run) before them on one row; below it, `note` (what the loop is
- * doing) over the draft's state.
+ * Apply and Save, with `lead` (Run) before them on one row; below it, the one status line.
  */
-export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode }) {
+export function SaveFlow({ lead, run }: { lead?: ReactNode; run: RunWord }) {
   const view = useDraft((s) => s.view);
   const load = useDraft((s) => s.load);
   const settled = useDraft((s) => s.settled);
@@ -243,20 +274,7 @@ export function SaveFlow({ lead, note }: { lead?: ReactNode; note?: ReactNode })
           Save
         </button>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-nowrap items-center gap-x-3 whitespace-nowrap">
-          {note}
-          <span
-            className={`flex items-start gap-1.5 text-xs ${dirty ? "text-warn" : "text-muted"}`}
-          >
-            <span
-              aria-hidden
-              className={`mt-1 size-1.5 shrink-0 rounded-full ${dirty ? "bg-warn-fill" : "bg-ok-fill"}`}
-            />
-            {`Draft: ${dirty ? "not applied" : "applied"} · ${view?.saved === false ? "not saved" : "saved"}`}
-          </span>
-        </div>
-      </div>
+      <StatusLine run={run} dirty={dirty} saved={view?.saved !== false} />
 
       {dialog?.kind === "applied" ? (
         <Modal title="Applied" onClose={close}>

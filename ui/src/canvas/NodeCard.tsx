@@ -8,6 +8,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect } from "react";
 import type { NodeDoc } from "../data/api/types";
+import { HelpPopover } from "../overlays/help/HelpPopover";
 import { useFeed } from "./feed";
 import { configLine, fmtMs, nodeFigures, stateWords } from "./metrics";
 import { Meter } from "./Meter";
@@ -81,15 +82,16 @@ export function NodeCard({ data, selected }: NodeProps) {
         <div className={feed.dimmed ? "opacity-60" : ""}>
           <Meter ratio={f.busy} label={f.sentence} stale={feed.dimmed || (pending && f.hasRun)} />
           <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-2 gap-y-0.5 text-xs">
-            <dt className="text-muted">Arriving</dt>
+            <dt className="flex items-center gap-0.5 text-muted">
+              Arriving
+              <HelpPopover id="arriving" className="-my-1" />
+            </dt>
             <dd className="m-0 text-right font-mono tabular-nums">{perSecond(f.arrivingPerS)}</dd>
             {f.turnedAway > 0 ? (
               <>
-                <dt
-                  className="text-muted"
-                  title="Requests refused because every slot and queue place was taken"
-                >
+                <dt className="flex items-center gap-0.5 text-muted">
                   Turned away
+                  <HelpPopover id="turned-away" className="-my-1" />
                 </dt>
                 <dd className="m-0 text-right font-mono tabular-nums">
                   {f.turnedAwayPerS === null
@@ -98,8 +100,9 @@ export function NodeCard({ data, selected }: NodeProps) {
                 </dd>
               </>
             ) : null}
-            <dt className="text-muted" title="Time spent working here, not waiting in line">
+            <dt className="flex items-center gap-0.5 text-muted">
               Slowest work under
+              <HelpPopover id="slowest" className="-my-1" />
             </dt>
             <dd className="m-0 text-right font-mono tabular-nums">
               {f.slowestUnderMs === null ? "–" : fmtMs(f.slowestUnderMs)}

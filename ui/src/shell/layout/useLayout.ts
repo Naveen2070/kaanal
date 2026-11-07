@@ -25,6 +25,21 @@ export function useLayout(): LayoutMode {
   );
 }
 
+/** Narrower than this the node palette is a 56 px icon rail (a laptop at 1366 px gets the rail). */
+export const COMPACT_PALETTE_BELOW_PX = 1400;
+
+export function compactPaletteFor(width: number): boolean {
+  return width < COMPACT_PALETTE_BELOW_PX;
+}
+
+export function useCompactPalette(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => compactPaletteFor(window.innerWidth),
+    () => false,
+  );
+}
+
 /** From this width the rail can stand in its own column from the top of the page. */
 export const WIDE_PX = 1600;
 

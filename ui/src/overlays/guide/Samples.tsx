@@ -161,11 +161,11 @@ function Draft() {
     <div className="flex flex-col gap-1.5">
       <span className="flex items-start gap-1.5 text-xs text-warn">
         {dot("bg-warn-fill")}
-        Draft: not applied · not saved
+        Changes not applied · not saved
       </span>
       <span className="flex items-start gap-1.5 text-xs text-muted">
         {dot("bg-ok-fill")}
-        Draft: applied · saved
+        Everything saved
       </span>
     </div>
   );

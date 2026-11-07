@@ -6,6 +6,7 @@ import {
   carriesEstimates,
   cardOf,
   chaosBody,
+  startMsOf,
   controlRows,
   deleteOps,
   durationMs,
@@ -107,6 +108,44 @@ test("deleting_a_node_removes_its_edges_highest_index_first", () => {
     { op: "remove", path: ["edges", 1] },
     { op: "remove", path: ["edges", 0] },
   ]);
+});
+
+test("the_starting_at_box_is_seconds_in_and_milliseconds_out", () => {
+  expect(startMsOf("")).toBeUndefined(); // empty: from the start
+  expect(startMsOf("  ")).toBeUndefined();
+  expect(startMsOf("4")).toBe(4000);
+  expect(startMsOf("0.25")).toBe(250);
+  expect(startMsOf("0")).toBe(0);
+});
+
+test("a_starting_at_value_the_loader_would_refuse_is_not_a_value", () => {
+  for (const bad of ["-1", "abc", "1e400", "86401", "NaN"]) expect(startMsOf(bad), bad).toBeNull();
+});
+
+test("a_start_is_sent_only_with_taking_a_node_or_instance_down", () => {
+  expect(chaosBody({ node: "db" }, { kind: "down", down: true, fromMs: 4000 })).toEqual({
+    node: "db",
+    down: true,
+    from_ms: 4000,
+  });
+  expect(chaosBody({ node: "db", replica: 1 }, { kind: "down", down: true, fromMs: 250 })).toEqual({
+    node: "db",
+    replica: 1,
+    down: true,
+    from_ms: 250,
+  });
+  // a link outage has no start, bringing a node back has none, and no start is no key
+  expect(
+    chaosBody({ edge: { from: "a", to: "b" } }, { kind: "down", down: true, fromMs: 1 }),
+  ).toEqual({ edge: { from: "a", to: "b" }, down: true });
+  expect(chaosBody({ node: "db" }, { kind: "down", down: false, fromMs: 1 })).toEqual({
+    node: "db",
+    down: false,
+  });
+  expect(chaosBody({ node: "db" }, { kind: "down", down: true })).toEqual({
+    node: "db",
+    down: true,
+  });
 });
 
 test("chaos_targets_are_structured_objects_never_strings", () => {

@@ -4,7 +4,14 @@
 
 import { Download } from "lucide-react";
 import { useState } from "react";
-import { compareRuns, planFor, reportMarkdown, sloVerdict } from "../../canvas/insights";
+import {
+  compareRuns,
+  fixFirstLimit,
+  planFor,
+  reportMarkdown,
+  sloVerdict,
+} from "../../canvas/insights";
+import { verdictOf } from "../../canvas/verdict";
 import { rankedByPeak } from "../../canvas/metrics";
 import type { LinkSummary, Summary } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
@@ -34,6 +41,24 @@ export function CompareLine({ runId, s }: { runId: string | undefined; s: Summar
       <span className="text-muted">Compared with run {prev.id.replace(/^s/, "")}: </span>
       {lines.join(" · ")}
     </p>
+  );
+}
+
+/** The run in one plain sentence, and the step that would fix the first limit when one is known. */
+export function Verdict({ s }: { s: Summary }) {
+  const bandwidthOf = useBandwidthOf();
+  const text = verdictOf(s);
+  if (text === null) return null;
+  const fix = fixFirstLimit(s, bandwidthOf);
+  return (
+    <div className="mb-3 rounded-lg border border-border p-2">
+      <p className="m-0 text-sm font-medium">{text}</p>
+      {fix ? (
+        <p className="m-0 mt-1 text-xs text-muted">
+          <span className="font-medium text-text">Suggested fix · {fix.name}:</span> {fix.text}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

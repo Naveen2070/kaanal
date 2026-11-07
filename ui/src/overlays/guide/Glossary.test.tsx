@@ -10,7 +10,15 @@ afterEach(cleanup);
 test("opens_on_the_components_chapter_with_every_chapter_as_a_tab", () => {
   render(<Glossary />);
   const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
-  expect(tabs).toEqual(["Components", "Reading the screen", "Terms", "Wires and routes", "Keys"]);
+  expect(tabs).toEqual([
+    "Components",
+    "Reading the screen",
+    "Terms",
+    "Wires and routes",
+    "Wire settings",
+    "Reading Results",
+    "Keys",
+  ]);
   expect(screen.getByRole("tab", { name: "Components" }).getAttribute("aria-selected")).toBe(
     "true",
   );
@@ -66,4 +74,31 @@ test("reading_the_screen_shows_a_card_and_meters_drawn_with_the_real_meter", () 
   const meters = screen.getByRole("figure", { name: /45% busy.*83% busy.*95% busy/ });
   expect(meters).toBeTruthy();
   expect(document.querySelectorAll("meter").length).toBeGreaterThan(3);
+});
+
+test("an_entry_asked_for_opens_its_chapter_and_is_marked", () => {
+  useGuide.setState({ open: true, chapter: "components", entry: "p99" });
+  render(<Glossary />);
+  expect(
+    screen.getByRole("tab", { name: "Reading the screen" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  const row = document.getElementById("glossary-p99");
+  expect(row?.getAttribute("data-marked")).toBe("true");
+});
+
+test("an_entry_that_does_not_exist_leaves_the_chapter_alone", () => {
+  useGuide.setState({ open: true, chapter: "components", entry: "no-such-entry" });
+  render(<Glossary />);
+  expect(screen.getByRole("tab", { name: "Components" }).getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(document.querySelector("[data-marked]")).toBeNull();
+});
+
+test("choosing_a_chapter_clears_the_mark", () => {
+  useGuide.setState({ open: true, chapter: "components", entry: "p99" });
+  render(<Glossary />);
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Components" }), { button: 0 });
+  expect(useGuide.getState().entry).toBeNull();
+  expect(document.querySelector("[data-marked]")).toBeNull();
 });

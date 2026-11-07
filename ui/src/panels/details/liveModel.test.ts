@@ -1,5 +1,12 @@
 import { expect, test } from "vite-plus/test";
-import { describePin, leaseLeft, pinBody, statusRange, takesDelay } from "./liveModel";
+import {
+  applyAndStart,
+  describePin,
+  leaseLeft,
+  pinBody,
+  statusRange,
+  takesDelay,
+} from "./liveModel";
 
 test("only_error_and_empty_take_a_status_and_only_success_takes_no_delay", () => {
   expect(statusRange("error")).toEqual({ min: 400, max: 599 });
@@ -58,4 +65,49 @@ test("pins_and_leases_read_as_short_sentences", () => {
   expect(leaseLeft(29_100)).toBe("30 s left");
   expect(leaseLeft(119_000)).toBe("119 s left");
   expect(leaseLeft(240_000)).toBe("4 min left");
+});
+
+// ---- Apply and start ----
+
+const noWait = () => Promise.resolve();
+
+test("apply_and_start_presses_apply_waits_for_the_system_then_runs", async () => {
+  const log: string[] = [];
+  let probes = 0;
+  const ok = await applyAndStart({
+    press: () => log.push("apply"),
+    ready: () => {
+      probes += 1;
+      return Promise.resolve(probes >= 3);
+    },
+    run: () => log.push("run"),
+    sleep: noWait,
+  });
+  expect(ok).toBe(true);
+  expect(log).toEqual(["apply", "run"]);
+  expect(probes).toBe(3);
+});
+
+test("apply_and_start_gives_up_without_running_when_the_system_never_comes", async () => {
+  const log: string[] = [];
+  const ok = await applyAndStart({
+    press: () => log.push("apply"),
+    ready: () => Promise.resolve(false),
+    run: () => log.push("run"),
+    sleep: noWait,
+    tries: 5,
+  });
+  expect(ok).toBe(false);
+  expect(log).toEqual(["apply"]);
+});
+
+test("a_probe_that_throws_counts_as_not_ready", async () => {
+  let n = 0;
+  const ok = await applyAndStart({
+    press: () => undefined,
+    ready: () => (++n < 2 ? Promise.reject(new Error("409")) : Promise.resolve(true)),
+    run: () => undefined,
+    sleep: noWait,
+  });
+  expect(ok).toBe(true);
 });

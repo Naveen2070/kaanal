@@ -456,3 +456,34 @@ test("the_log_has_no_axe_violations_open_closed_and_empty", async () => {
   fireEvent.click(header(1));
   await expectNoViolations(document.body);
 });
+
+test("the_log_names_its_colours_and_puts_a_unit_on_every_hop_time", async () => {
+  await show();
+  expect(await screen.findByLabelText("What the bar colours mean")).toBeTruthy();
+  expect(screen.getByText("Waiting in line")).toBeTruthy();
+  expect(screen.getByText("Working or on the wire")).toBeTruthy();
+  expect(screen.getByText("Failed here")).toBeTruthy();
+});
+
+test("a_retry_is_a_separator_between_attempts_not_a_hop_with_a_bar_and_a_time", async () => {
+  const retry = line({
+    t_ms: 12320,
+    level: "info",
+    event: "retry",
+    wait_ms: null,
+    service_ms: null,
+    note: "attempt 2 of 3",
+  });
+  await show(page([line(), retry, line({ t_ms: 12330 })]));
+  const sep = (await screen.findByText(/Attempt 2 of 3/)).closest("li") as HTMLElement;
+  expect(sep).toBeTruthy();
+  // no bar and no time column in it
+  expect(sep.querySelector("span[aria-hidden].bg-rule")).toBeNull();
+  expect(sep.textContent).not.toMatch(/\bms\b/);
+});
+
+test("a_hop_that_ran_in_a_retry_says_which_try_it_was", async () => {
+  await show(page([line(), line({ t_ms: 12330, attempt: 2 })]));
+  expect(await screen.findByText("try 2")).toBeTruthy();
+  expect(screen.queryByText("try 1")).toBeNull();
+});

@@ -74,3 +74,28 @@ export const SOURCE: Record<"inline" | "file" | "runtime", string> = {
   file: "in scenarios/",
   runtime: "made here",
 };
+
+/**
+ * "Apply and start": press the top bar's own Apply (one code path for Apply), wait until the applied
+ * system answers, then start a run. `false` when it never came within `tries` looks, `gapMs` apart
+ * (Apply refused, or the dialog it opens is still waiting for an answer); nothing runs then.
+ */
+export async function applyAndStart(deps: {
+  press: () => void;
+  ready: () => Promise<boolean>;
+  run: () => void;
+  sleep: (ms: number) => Promise<void>;
+  tries?: number;
+  gapMs?: number;
+}): Promise<boolean> {
+  const { press, ready, run, sleep, tries = 40, gapMs = 250 } = deps;
+  press();
+  for (let i = 0; i < tries; i++) {
+    await sleep(gapMs);
+    if (await ready().catch(() => false)) {
+      run();
+      return true;
+    }
+  }
+  return false;
+}

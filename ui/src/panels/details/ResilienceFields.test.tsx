@@ -4,6 +4,8 @@ import type { DraftView } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { mockFetch } from "../../test/fetch";
 import { EdgeControls } from "./EdgeControls";
+import { ALL_WIRE_GROUPS } from "./groups/ids";
+import { useGroups } from "./groups/store";
 import { NodeDetectField } from "./ResilienceFields";
 
 function view(edge1: Record<string, unknown> = {}): DraftView {
@@ -50,7 +52,11 @@ async function edit(act: () => void) {
   return sent[0]?.body;
 }
 
-beforeEach(() => useDraft.setState({ view: null, error: null }));
+beforeEach(() => {
+  useDraft.setState({ view: null, error: null });
+  // the groups start folded; these tests reach into every one of them
+  useGroups.setState({ open: Object.fromEntries(ALL_WIRE_GROUPS.map((id) => [id, true])) });
+});
 afterEach(cleanup);
 
 test("a_wire_starts_with_retries_and_the_breaker_off_and_their_boxes_hidden", async () => {
@@ -197,4 +203,34 @@ test("a_balancers_detect_shows_its_unit_and_is_written_on_the_node", async () =>
   });
   const reset = await edit(() => fireEvent.click(screen.getByText("Back to the default")));
   expect(reset).toEqual({ patch: [{ op: "remove", path: ["nodes", "lb", "detect"] }] });
+});
+
+test("the_resilience_switches_and_boxes_carry_their_help_buttons", async () => {
+  await show(1, view({ retry: {}, breaker: {} }));
+  for (const name of [
+    "About Retry a failed call",
+    "About Tries (the first counts)",
+    "About First wait",
+    "About Growth of the wait",
+    "About Longest wait",
+    "About Randomise the wait",
+    "About Retry writes too",
+    "About Limit retries with a budget",
+    "About When the caller gives up",
+    "About Stop calling after repeated failures",
+    "About Calls remembered",
+    "About Stays open for",
+  ]) {
+    expect(screen.getByRole("button", { name }), name).toBeTruthy();
+  }
+});
+
+test("a_help_button_beside_a_switch_does_not_flip_the_switch", async () => {
+  await show(1);
+  const before = mockFetch([{ json: view() }]);
+  fireEvent.click(screen.getByRole("button", { name: "About Retry a failed call" }));
+  expect(before).toHaveLength(0);
+  expect(
+    (screen.getByRole("checkbox", { name: "Retry a failed call" }) as HTMLInputElement).checked,
+  ).toBe(false);
 });

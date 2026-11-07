@@ -29,7 +29,7 @@ function view(over: Partial<DraftView> = {}): DraftView {
 async function show(v: DraftView = view()) {
   mockFetch([{ json: v }]);
   await useDraft.getState().load();
-  render(<SaveFlow />);
+  render(<SaveFlow run="done" />);
 }
 
 const saved = {
@@ -49,11 +49,11 @@ afterEach(() => {
 
 test("the_applied_and_dirty_indicators_follow_the_draft_view", async () => {
   await show(view({ dirty: false }));
-  expect(screen.getByText("Draft: applied · saved")).toBeTruthy();
+  expect(screen.getByText("Everything saved")).toBeTruthy();
   act(() => useDraft.setState({ view: view({ dirty: true, saved: false }) }));
-  expect(screen.getByText("Draft: not applied · not saved")).toBeTruthy();
+  expect(screen.getByText("Results up to date · changes not applied · not saved")).toBeTruthy();
   act(() => useDraft.setState({ view: view({ dirty: false, saved: false }) }));
-  expect(screen.getByText("Draft: applied · not saved")).toBeTruthy();
+  expect(screen.getByText("Results up to date · not saved")).toBeTruthy();
 });
 
 test("save_checks_the_draft_then_writes_the_file_and_says_what_was_written", async () => {

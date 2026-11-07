@@ -9,11 +9,16 @@ import { p99WarningFor } from "../../canvas/p99Warning";
 import { strictnessNote } from "../../canvas/strictness";
 import { useChaosHints } from "../../data/store/chaosHints";
 import { useSelected } from "../../data/store/view";
+import { BusyChart } from "./BusyChart";
 import { Heatmap } from "./Heatmap";
+import { BreakerTimeline, RetryFunnel } from "./ResilienceCharts";
 import { Section } from "./Field";
 import { fmtMs, rankedByPeak, twoSignificant } from "../../canvas/metrics";
 import { ResultsSkeleton, RANK_ROW } from "./Skeletons";
-import { CompareLine, PlanSection, ReportButtons, SloSection } from "./ResultsExtras";
+import { CompareLine, PlanSection, ReportButtons, SloSection, Verdict } from "./ResultsExtras";
+import { Group } from "./groups/Group";
+import { RESULTS_GROUP } from "./groups/ids";
+import { useSlo } from "./slo";
 
 /** Starts the value of a wire in the picker, so it cannot be a component's name. */
 const WIRE = String.fromCharCode(31);
@@ -32,6 +37,7 @@ export function Results() {
   const doc = useDraft((st) => st.view?.doc);
   const hints = useChaosHints();
   const s = run?.summary;
+  const target = useSlo((x) => x.targetMs);
 
   if (!s && status === "running") return <ResultsSkeleton />;
   if (!s) {
@@ -70,6 +76,7 @@ export function Results() {
       <p className="mb-2 text-xs font-medium">
         {run ? `Run ${run.id.replace(/^s/, "")} · ` : ""}A what-if, not a prediction
       </p>
+      <Verdict s={s} />
       <CompareLine runId={run?.id} s={s} />
       {slow !== null ? <p className="mb-2 text-xs text-warn">{slow}</p> : null}
       {hints.map((h) => (
@@ -78,15 +85,7 @@ export function Results() {
         </p>
       ))}
       {strict !== null ? <p className="mb-2 text-xs text-muted">{strict}</p> : null}
-      {s.warnings.length > 0 ? (
-        <ul className="mb-3 space-y-1 rounded-lg border border-warn p-2 text-xs text-warn">
-          {s.warnings.map((w, i) => (
-            <li key={i}>{w}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      <Section title="What breaks first">
+      <Section title="What breaks first" help="saturation">
         {ranked.length === 0 ? (
           <p className="text-xs text-muted">No traffic reached any component or wire.</p>
         ) : (
@@ -121,10 +120,7 @@ export function Results() {
         )}
       </Section>
 
-      <SloSection s={s} />
-      <PlanSection s={s} />
-
-      <Section title="Latency over the run">
+      <Section title="Latency over the run" help="latency-map">
         {node || link ? (
           <>
             <label htmlFor={pickId} className="mb-1 block text-xs">
@@ -162,7 +158,14 @@ export function Results() {
                 buckets={s.latency.buckets}
               />
             ) : node ? (
-              <Heatmap name={node.name} series={node.series} buckets={s.latency.buckets} />
+              <>
+                <Heatmap name={node.name} series={node.series} buckets={s.latency.buckets} />
+                <BusyChart
+                  name={node.name}
+                  busy={node.series.busy}
+                  windowS={node.series.window_s}
+                />
+              </>
             ) : null}
           </>
         ) : (
@@ -211,11 +214,10 @@ export function Results() {
         </Section>
       ) : null}
 
-      <Section title="Share this run">
-        <ReportButtons runId={run?.id} s={s} />
-      </Section>
+      <RetryFunnel retries={s.retries ?? []} />
+      <BreakerTimeline breakers={s.breakers ?? []} windowS={s.window_s} />
 
-      <Section title="Errors by kind">
+      <Section title="Errors by kind" help="errors-kind">
         {Object.keys(s.errors).length === 0 ? (
           <p className="text-xs tabular-nums">0</p>
         ) : (
@@ -228,6 +230,33 @@ export function Results() {
           </ul>
         )}
       </Section>
+
+      <Group
+        id={RESULTS_GROUP.goals}
+        title="Goals"
+        summary={target === null ? "no p99 target" : `p99 target ${fmtMs(target)}`}
+      >
+        <SloSection s={s} />
+        <PlanSection s={s} />
+      </Group>
+
+      <Group id={RESULTS_GROUP.share} title="Share this run">
+        <ReportButtons runId={run?.id} s={s} />
+      </Group>
+
+      {s.warnings.length > 0 ? (
+        <Group
+          id={RESULTS_GROUP.notes}
+          title="Engine notes"
+          summary={`${s.warnings.length} ${s.warnings.length === 1 ? "note" : "notes"}`}
+        >
+          <ul className="mb-2 space-y-1 rounded-lg border border-warn p-2 text-xs text-warn">
+            {s.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </Group>
+      ) : null}
     </div>
   );
 }

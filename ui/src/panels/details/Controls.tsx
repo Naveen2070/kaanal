@@ -15,6 +15,19 @@ import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
 import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section, StyleField } from "./Field";
+import { Group } from "./groups/Group";
+import { NODE_GROUP } from "./groups/ids";
+import { nodeGroupDiff } from "./groups/nodeSetups";
+import { NodeHeader, NodeSetups, NodeStrip } from "./NodePanelParts";
+import { DiffTable } from "./groups/RetryPictures";
+import {
+  balanceSummary,
+  limitSummary,
+  nodeCardSummary,
+  nodeGroupChanged,
+  nodeResetOps,
+  styleSummary,
+} from "./groups/summaries";
 import { callsOthers } from "../../canvas/rules";
 import { RateLimitFields } from "./RateLimitFields";
 import { NodeDetectField } from "./ResilienceFields";
@@ -99,36 +112,27 @@ export function Controls({
 
   return (
     <div className="p-3 text-sm">
+      <NodeHeader name={name} config={config} />
+
+      <NodeStrip node={node} config={config} />
+
+      {why || behindFull ? (
+        <Section title={why ? "Why is it red?" : "Why does it look idle?"}>
+          {why ? <p>{why}</p> : null}
+          {why && copyFix ? <p className="mt-1 text-xs text-muted">{copyFix}</p> : null}
+          {!why && behindFull ? <p>{behindFull}</p> : null}
+        </Section>
+      ) : null}
+
+      {fix ? (
+        <Section title="Suggested fix">
+          <p>{fix}</p>
+        </Section>
+      ) : null}
+
+      <NodeSetups name={name} config={config} />
+
       <Section title="Capacity">
-        {replicas > 1 ? (
-          <BalanceField
-            hint="How calls into this component pick a copy. A wire into it can say its own."
-            value={balanceOf(config.balance)}
-            defaultLabel="Round robin (default)"
-            onChange={(c) =>
-              void patch(setBalance(["nodes", name, "balance"], "balance" in config, c))
-            }
-          />
-        ) : null}
-        {config.type === "load-balancer" ? (
-          <BalanceField
-            label="Spread"
-            dynamic={false}
-            hint="How it picks which component a call goes to. A weighted spread (one weight per wire out of it) is set in kaanal.yaml."
-            value={balanceOf(config.spread)}
-            defaultLabel="Round robin (default)"
-            onChange={(c) =>
-              void patch(setBalance(["nodes", name, "spread"], "spread" in config, c))
-            }
-          />
-        ) : null}
-        {config.type === "load-balancer" ? <NodeDetectField name={name} node={config} /> : null}
-        {callsOthers(config.type) ? (
-          <StyleField
-            value={holdOf(config)}
-            onChange={(c) => void patch(setStyle(name, config, c))}
-          />
-        ) : null}
         {config.type === "storage" ? (
           <StorageFields name={name} config={config} />
         ) : !hasProc(config.type) ? (
@@ -180,8 +184,71 @@ export function Controls({
             Remove the queue limit
           </button>
         ) : null}
-        <RateLimitFields name={name} config={config} />
       </Section>
+
+      {replicas > 1 || config.type === "load-balancer" ? (
+        <Group
+          id={NODE_GROUP.balance}
+          title="Picking a copy"
+          summary={balanceSummary(config)}
+          changed={nodeGroupChanged("balance", config)}
+          onReset={() => void patch(nodeResetOps("balance", name, config))}
+        >
+          {replicas > 1 ? (
+            <BalanceField
+              help="balance"
+              quietHint
+              hint="How calls into this component pick a copy. A wire into it can say its own."
+              value={balanceOf(config.balance)}
+              defaultLabel="Round robin (default)"
+              onChange={(c) =>
+                void patch(setBalance(["nodes", name, "balance"], "balance" in config, c))
+              }
+            />
+          ) : null}
+          {config.type === "load-balancer" ? (
+            <BalanceField
+              label="Spread"
+              dynamic={false}
+              hint="How it picks which component a call goes to. A weighted spread (one weight per wire out of it) is set in kaanal.yaml."
+              value={balanceOf(config.spread)}
+              defaultLabel="Round robin (default)"
+              onChange={(c) =>
+                void patch(setBalance(["nodes", name, "spread"], "spread" in config, c))
+              }
+            />
+          ) : null}
+          {config.type === "load-balancer" ? <NodeDetectField name={name} node={config} /> : null}
+          <DiffTable rows={nodeGroupDiff("balance", config)} />
+        </Group>
+      ) : null}
+
+      {callsOthers(config.type) ? (
+        <Group
+          id={NODE_GROUP.style}
+          title="Server style"
+          summary={styleSummary(config)}
+          changed={nodeGroupChanged("style", config)}
+          onReset={() => void patch(nodeResetOps("style", name, config))}
+        >
+          <StyleField
+            value={holdOf(config)}
+            onChange={(c) => void patch(setStyle(name, config, c))}
+          />
+          <DiffTable rows={nodeGroupDiff("style", config)} />
+        </Group>
+      ) : null}
+
+      <Group
+        id={NODE_GROUP.limit}
+        title="Request limit"
+        summary={limitSummary(config)}
+        changed={nodeGroupChanged("limit", config)}
+        onReset={() => void patch(nodeResetOps("limit", name, config))}
+      >
+        <RateLimitFields name={name} config={config} />
+        <DiffTable rows={nodeGroupDiff("limit", config)} />
+      </Group>
 
       <Section title="When things go wrong">
         <NumberField
@@ -229,7 +296,13 @@ export function Controls({
       ) : null}
 
       {config.type !== "cache" ? (
-        <Section title="Network card">
+        <Group
+          id={NODE_GROUP.network}
+          title="Network card"
+          summary={nodeCardSummary(config)}
+          changed={"bandwidth" in config}
+          onReset={() => void patch([{ op: "remove", path: ["nodes", name, "bandwidth"] }])}
+        >
           <NumberField
             label="Sends up to"
             units={RATE_UNITS}
@@ -270,21 +343,8 @@ export function Controls({
               Remove the receive limit
             </button>
           ) : null}
-        </Section>
-      ) : null}
-
-      {why || behindFull ? (
-        <Section title={why ? "Why is it red?" : "Why does it look idle?"}>
-          {why ? <p>{why}</p> : null}
-          {why && copyFix ? <p className="mt-1 text-xs text-muted">{copyFix}</p> : null}
-          {!why && behindFull ? <p>{behindFull}</p> : null}
-        </Section>
-      ) : null}
-
-      {fix ? (
-        <Section title="Suggested fix">
-          <p>{fix}</p>
-        </Section>
+          <DiffTable rows={nodeGroupDiff("network", config)} />
+        </Group>
       ) : null}
 
       {node ? (

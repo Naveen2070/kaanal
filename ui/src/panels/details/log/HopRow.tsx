@@ -4,7 +4,7 @@
 // drawer and the rail each answer to their own width).
 
 import type { LogLine } from "../../../data/api/types";
-import { clock, eventWords, formatLine, hopDepth, hopMs, hopType, whoOf } from "../logFormat";
+import { clock, dur, eventWords, formatLine, hopDepth, hopMs, hopType, whoOf } from "../logFormat";
 import type { RequestGroup } from "./groups";
 
 /** 12px per level; a deep chain stops at five so a narrow rail still has room for the name. */
@@ -20,6 +20,7 @@ export function HopRow({
   at: RequestGroup["axis"]["rows"][number];
   depths: Map<string, number>;
 }) {
+  if (l.event === "retry") return <AttemptBreak line={l} />;
   const type = hopType(l);
   const t = hopMs(l);
   const indent = Math.min(hopDepth(l, depths), MAX_DEPTH) * STEP;
@@ -33,6 +34,11 @@ export function HopRow({
       </span>
       <span className="min-w-0 flex-1 truncate font-mono text-text" style={{ paddingLeft: indent }}>
         {whoOf(l)}
+        {l.attempt ? (
+          <span className="ml-1.5 rounded bg-active px-1 font-sans text-[11px] text-muted">
+            try {l.attempt}
+          </span>
+        ) : null}
       </span>
       <span
         className={`flex-none whitespace-nowrap rounded border px-1.5 text-[11px] leading-4 ${
@@ -46,15 +52,11 @@ export function HopRow({
         {eventWords(l)}
       </span>
       <Bar at={at} line={l} />
-      <span className="w-14 flex-none text-right text-text tabular-nums">
-        {t === null ? <span className="text-faint">–</span> : ms(t)}
+      <span className="w-16 flex-none whitespace-nowrap text-right text-text tabular-nums">
+        {t === null ? <span className="text-faint">–</span> : dur(t)}
       </span>
     </li>
   );
-}
-
-function ms(t: number): string {
-  return Number(t.toFixed(t < 10 ? 2 : 1)).toLocaleString("en-US");
 }
 
 /** Wait (warn fill) then work (ok fill) at the hop's place on the request's axis; a failure is a bad tick. */
@@ -86,5 +88,22 @@ function Bar({ at, line: l }: { at: RequestGroup["axis"]["rows"][number]; line: 
         </>
       )}
     </span>
+  );
+}
+
+/** Where one attempt of a call ends and the next begins: a rule with the attempt's words, no bar and no time of its own. */
+function AttemptBreak({ line: l }: { line: LogLine }) {
+  const words = l.note ? l.note.charAt(0).toUpperCase() + l.note.slice(1) : "Retry";
+  return (
+    <li
+      title={formatLine(l)}
+      className="flex min-h-[26px] items-center gap-2 px-3 text-[11px] text-muted"
+    >
+      <span aria-hidden className="h-px flex-1 bg-border" />
+      <span className="flex-none whitespace-nowrap">
+        ↻ {words} <span className="font-mono">{l.node}</span>
+      </span>
+      <span aria-hidden className="h-px flex-1 bg-border" />
+    </li>
   );
 }

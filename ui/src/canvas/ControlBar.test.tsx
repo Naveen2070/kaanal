@@ -405,12 +405,19 @@ test("the_card_keeps_its_handles_in_one_part_whatever_is_selected", () => {
   expect(parts).toEqual(["card", "card"]);
 });
 
-test("the_dock_lays_the_rows_side_by_side_and_the_drawer_stacks_them", () => {
+test("the_dock_lays_the_rows_in_columns_by_its_own_width_and_the_drawer_stacks_them", () => {
   const r = bar();
-  expect(settings()?.querySelector(".flex-wrap")).toBeNull();
+  expect(settings()?.querySelector(".grid")).toBeNull();
   r.unmount();
   render(<ControlBar dock name="app" config={config} />);
-  expect(settings()?.querySelector(".flex-wrap")).not.toBeNull();
+  const grid = settings()?.querySelector(".grid");
+  expect(grid).not.toBeNull();
+  // one column when narrow, two from 30 rem, three from 46 rem; a lone last row takes the line (two columns)
+  expect(grid?.className).toContain("grid-cols-1");
+  expect(grid?.className).toContain("@min-[30rem]:grid-cols-2");
+  expect(grid?.className).toContain("@min-[46rem]:grid-cols-3");
+  expect(grid?.className).toContain("@min-[30rem]:[&>:last-child:nth-child(odd)]:col-span-2");
+  expect(grid?.className).toContain("@min-[46rem]:[&>:last-child:nth-child(odd)]:col-span-1");
   expect(settings()?.classList.contains("nodrag") && settings()?.classList.contains("nopan")).toBe(
     true,
   );

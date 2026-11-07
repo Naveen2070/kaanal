@@ -5,6 +5,8 @@ import { useDraft } from "../../data/store/draft";
 import { mockFetch } from "../../test/fetch";
 import { EMPTY_FEED, FeedContext } from "../../canvas/feed";
 import { EdgeControls } from "./EdgeControls";
+import { ALL_WIRE_GROUPS } from "./groups/ids";
+import { useGroups } from "./groups/store";
 
 function view(over: Partial<DraftView["doc"]> = {}): DraftView {
   return {
@@ -43,7 +45,11 @@ async function show(index: number, v = view()) {
   render(<EdgeControls index={index} />);
 }
 
-beforeEach(() => useDraft.setState({ view: null, error: null }));
+beforeEach(() => {
+  useDraft.setState({ view: null, error: null });
+  // the groups start folded; these tests reach into every one of them
+  useGroups.setState({ open: Object.fromEntries(ALL_WIRE_GROUPS.map((id) => [id, true])) });
+});
 afterEach(cleanup);
 
 test("a_wire_shows_its_ends_and_its_current_figures", async () => {

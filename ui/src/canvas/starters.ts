@@ -4,6 +4,7 @@
 // the numbers do.
 
 import { api } from "../data/api/client";
+import type { StarterGraph } from "./sketch";
 
 export interface Starter {
   id: string;
@@ -11,6 +12,8 @@ export interface Starter {
   blurb: string;
   /** What to try once it is on screen. */
   tryThis: string;
+  /** The components and wires of the system, for the picture on its card (see `sketch.ts`). */
+  graph: StarterGraph;
   text: () => Promise<string>;
 }
 
@@ -141,8 +144,24 @@ export const STARTERS: Starter[] = [
   {
     id: "shop",
     title: "A shop",
-    blurb: "A gateway, two services, a cache and a database",
+    blurb: "A gateway, a shop service, a cache, a database and a payments API",
     tryThis: "Raise the offered load and watch which part breaks first.",
+    // the server's demo (crates/kaanal/demo/kaanal.yaml): its text is fetched, so this is written by hand
+    graph: {
+      nodes: [
+        { id: "nginx", kind: "gateway" },
+        { id: "shop", kind: "service" },
+        { id: "db", kind: "database" },
+        { id: "cache", kind: "cache" },
+        { id: "payments", kind: "external-api" },
+      ],
+      wires: [
+        ["nginx", "shop"],
+        ["shop", "db"],
+        ["shop", "cache"],
+        ["shop", "payments"],
+      ],
+    },
     text: async () => (await api.demo()).text,
   },
   {
@@ -151,6 +170,17 @@ export const STARTERS: Starter[] = [
     blurb: "The smallest useful system",
     tryThis:
       "Lower the app's slots to 1: the queue builds up to 100, then requests are turned away.",
+    graph: {
+      nodes: [
+        { id: "gateway", kind: "gateway" },
+        { id: "app", kind: "monolith" },
+        { id: "db", kind: "database" },
+      ],
+      wires: [
+        ["gateway", "app"],
+        ["app", "db"],
+      ],
+    },
     text: async () => SIMPLE,
   },
   {
@@ -158,6 +188,25 @@ export const STARTERS: Starter[] = [
     title: "A fan-out",
     blurb: "One request calls three services that share a database",
     tryThis: "Cut the database pool to 2: everything slows together.",
+    graph: {
+      nodes: [
+        { id: "gateway", kind: "gateway" },
+        { id: "web", kind: "service" },
+        { id: "users", kind: "service" },
+        { id: "orders", kind: "service" },
+        { id: "catalog", kind: "service" },
+        { id: "db", kind: "database" },
+      ],
+      wires: [
+        ["gateway", "web"],
+        ["web", "users"],
+        ["web", "orders"],
+        ["web", "catalog"],
+        ["users", "db"],
+        ["orders", "db"],
+        ["catalog", "db"],
+      ],
+    },
     text: async () => FAN_OUT,
   },
   {
@@ -165,7 +214,20 @@ export const STARTERS: Starter[] = [
     title: "A balanced tier",
     blurb: "A gateway, a load balancer, three copies of an API and a database",
     tryThis:
-      "Change the API's Balance from power of two choices to round robin, and slow one copy on the Live tab: compare the p99.",
+      "Change the API's Balance from power of two choices to round robin, and slow one copy on the Try live tab: compare the p99.",
+    graph: {
+      nodes: [
+        { id: "gateway", kind: "gateway" },
+        { id: "balancer", kind: "load-balancer" },
+        { id: "api", kind: "service", copies: 3 },
+        { id: "db", kind: "database" },
+      ],
+      wires: [
+        ["gateway", "balancer"],
+        ["balancer", "api"],
+        ["api", "db"],
+      ],
+    },
     text: async () => BALANCED,
   },
   {
@@ -174,6 +236,17 @@ export const STARTERS: Starter[] = [
     blurb: "A gateway, an app and an object store (S3-like) that serves 5 MB files",
     tryThis:
       "Change the reply size of the journey, or the store's Throughput: the time of a call is the first byte plus the transfer. The store's numbers are estimates.",
+    graph: {
+      nodes: [
+        { id: "gateway", kind: "gateway" },
+        { id: "app", kind: "service" },
+        { id: "files", kind: "storage" },
+      ],
+      wires: [
+        ["gateway", "app"],
+        ["app", "files"],
+      ],
+    },
     text: async () => FILE_STORE,
   },
   {
@@ -182,6 +255,14 @@ export const STARTERS: Starter[] = [
     blurb: "An app that can take 200 requests a second, retried when it times out",
     tryThis:
       "Run it: at 120 a second, well under what the app can take, most requests still fail, because every timeout is retried and the app keeps working on calls nobody waits for. Then, on the wire, switch on Limit retries with a budget or the circuit breaker, and run again.",
+    graph: {
+      nodes: [
+        { id: "gateway", kind: "gateway" },
+        { id: "app", kind: "service" },
+      ],
+      wires: [["gateway", "app"]],
+      failing: [["gateway", "app"]],
+    },
     text: async () => RETRY_STORM,
   },
 ];

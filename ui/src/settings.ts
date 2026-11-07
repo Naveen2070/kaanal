@@ -43,3 +43,26 @@ export function setMinLoadMs(ms: number): void {
     // blocked storage: this page keeps the old value
   }
 }
+
+const GROUPS_KEY = "kaanal-groups-open";
+
+/** Which Controls groups the person left open or closed, by group id (a missing id = its default). */
+export function getGroupsOpen(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(GROUPS_KEY);
+    if (raw === null) return {};
+    const v: unknown = JSON.parse(raw);
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return {};
+    return Object.fromEntries(Object.entries(v).filter(([, o]) => typeof o === "boolean"));
+  } catch {
+    return {}; // blocked storage or junk: every group at its default
+  }
+}
+
+export function setGroupsOpen(open: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(GROUPS_KEY, JSON.stringify(open));
+  } catch {
+    // blocked storage: this page keeps them, a reload forgets
+  }
+}

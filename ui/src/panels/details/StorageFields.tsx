@@ -62,6 +62,8 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
       {firstByteEditable(config) ? (
         <NumberField
           label="First byte"
+          help="first-byte"
+          quietHint
           units={TIME_UNITS}
           hint="How long a call waits before the first byte arrives, whatever the size."
           value={firstByteMs(config)}
@@ -75,6 +77,7 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
           <NumberField
             key={end}
             label={`First byte ${end}`}
+            help="first-byte"
             units={TIME_UNITS}
             hint={
               end === "p50"
@@ -91,6 +94,7 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
       ) : mean !== null ? (
         <NumberField
           label="First byte mean"
+          help="first-byte"
           units={TIME_UNITS}
           hint="The average wait before the first byte; most calls are quicker, a few are much slower (an exponential spread)."
           value={mean}
@@ -106,6 +110,8 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
       )}
       <NumberField
         label="Throughput"
+        help="throughput"
+        quietHint
         units={RATE_UNITS}
         hint="How fast the body moves once it starts: request and reply bytes over this rate, added to the first byte. Empty means no size cost."
         value={throughput}

@@ -4,6 +4,7 @@
 // "Load more", and filters on the server (errors only, instance, endpoint, component, wire). Every
 // time here is virtual and every line a simulated trace event, and the tab says so.
 
+import { ColumnHeads, Legend } from "./log/Legend";
 import { PanelBottomOpen } from "lucide-react";
 import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { ApiError, api } from "../../data/api/client";
@@ -256,6 +257,7 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
         </p>
       ) : null}
 
+      {page && !page.problem && groups.length > 0 ? <Legend /> : null}
       {/* every state stays inside this frame, so the tab does not jump */}
       <div className="@container min-h-40 overflow-hidden rounded-lg border border-border">
         {runId === null ? (
@@ -291,6 +293,7 @@ export function LogTab({ drawer = false }: { drawer?: boolean } = {}) {
         ) : page ? (
           <>
             <p className="sr-only">{page.note}</p>
+            <ColumnHeads />
             <ol className="m-0 list-none p-0">
               {groups.map((g, i) => (
                 <RequestBlock

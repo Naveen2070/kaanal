@@ -73,11 +73,31 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("with_no_system_applied_it_says_so_and_offers_nothing", async () => {
+test("with_no_system_applied_it_says_what_live_is_and_offers_apply_and_start", async () => {
   serve({ "GET /scenarios": { status: 409, json: { error: "no system applied yet" } } });
   render(<Live />);
-  expect(await screen.findByText(/there is none yet. Apply the draft first/)).toBeTruthy();
+  expect(await screen.findByText(/There is no running system yet/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Turn on/ })).toBeNull();
+  expect(screen.getByRole("button", { name: "Apply and start" })).toBeTruthy();
+});
+
+test("apply_and_start_presses_the_top_bars_apply", async () => {
+  serve({ "GET /scenarios": { status: 409, json: { error: "no system applied yet" } } });
+  const pressed = vi.fn();
+  render(
+    <>
+      <button type="button" data-command="apply" onClick={pressed}>
+        Apply
+      </button>
+      <Live />
+    </>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Apply and start" }));
+  expect(pressed).toHaveBeenCalledTimes(1);
+  // while it waits, a second click cannot press Apply again
+  expect(
+    (screen.getByRole("button", { name: "Apply and start" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
 });
 
 test("scenarios_and_pins_are_listed_with_where_they_come_from", async () => {

@@ -7,9 +7,30 @@ import { HelpPopover } from "../../overlays/help/HelpPopover";
 import type { BalanceChoice } from "./fields";
 import { display, fromUnit, pickUnit, toUnit, type Unit } from "./units";
 
+/** A field's label with its help button beside it (outside the label, so pressing it never reaches the control). */
+export function FieldLabel({
+  htmlFor,
+  label,
+  help,
+}: {
+  htmlFor: string;
+  label: string;
+  help?: HelpId;
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {label}
+      </label>
+      {help ? <HelpPopover id={help} label={label} /> : null}
+    </div>
+  );
+}
+
 export function NumberField({
   label,
   help,
+  quietHint = false,
   hint,
   value,
   onCommit,
@@ -23,6 +44,11 @@ export function NumberField({
   label: string;
   /** The jargon behind the label, as a help popover. */
   help?: HelpId;
+  /**
+   * The help button says what the hint says, so the sentence is kept for screen readers only (it is
+   * still what the box is described by). Only with `help`; a hint with a caveat of its own stays.
+   */
+  quietHint?: boolean;
   hint: string;
   /** In the base unit (the first of `units`, when there are any): what the file holds. */
   value: number | null;
@@ -68,12 +94,7 @@ export function NumberField({
   };
   return (
     <div className="mb-2">
-      <div className="flex items-center gap-0.5">
-        <label htmlFor={id} className="text-sm font-medium">
-          {label}
-        </label>
-        {help ? <HelpPopover id={help} label={label} /> : null}
-      </div>
+      <FieldLabel htmlFor={id} label={label} help={help} />
       <div className="flex items-center gap-1">
         <input
           id={id}
@@ -109,7 +130,7 @@ export function NumberField({
           </select>
         ) : null}
       </div>
-      <p id={`${id}-hint`} className="text-xs text-muted">
+      <p id={`${id}-hint`} className={help && quietHint ? "sr-only" : "text-xs text-muted"}>
         {hint}
       </p>
     </div>
@@ -196,6 +217,8 @@ export function UnitInput({
 /** The balance choice: the default, round robin, random, least connections or power of two choices; a weighted one is shown but edited in the file. */
 export function BalanceField({
   hint,
+  help,
+  quietHint = false,
   value,
   defaultLabel,
   label = "Balance",
@@ -204,6 +227,9 @@ export function BalanceField({
   onChange,
 }: {
   hint: string;
+  help?: HelpId;
+  /** As on `NumberField`: the help button says the hint; the caveat about the choice stays shown. */
+  quietHint?: boolean;
   /** The field's name (default "Balance"). */
   label?: string;
   value: BalanceChoice | "weighted" | null;
@@ -219,11 +245,11 @@ export function BalanceField({
   onChange: (choice: "" | BalanceChoice) => void;
 }) {
   const id = useId();
+  const dynamicChoice = value === "least-conn" || value === "p2c";
+  const caveat = " Runs choose by the real queues; the live mock plays this as round robin.";
   return (
     <div className="mb-2">
-      <label htmlFor={id} className="block text-sm font-medium">
-        {label}
-      </label>
+      <FieldLabel htmlFor={id} label={label} help={help} />
       <select
         id={id}
         value={!overrides && value === "round-robin" ? "" : (value ?? "")}
@@ -242,12 +268,11 @@ export function BalanceField({
           </option>
         ) : null}
       </select>
-      <p id={`${id}-hint`} className="text-xs text-muted">
+      <p id={`${id}-hint`} className={help && quietHint ? "sr-only" : "text-xs text-muted"}>
         {hint}
-        {value === "least-conn" || value === "p2c"
-          ? " Runs choose by the real queues; the live mock plays this as round robin."
-          : ""}
+        {!(help && quietHint) && dynamicChoice ? caveat : ""}
       </p>
+      {help && quietHint && dynamicChoice ? <p className="text-xs text-muted">{caveat}</p> : null}
     </div>
   );
 }
@@ -284,10 +309,22 @@ export function StyleField({
   );
 }
 
-export function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({
+  title,
+  help,
+  children,
+}: {
+  title: string;
+  /** A help button beside the title (chart titles on Results). */
+  help?: HelpId;
+  children: React.ReactNode;
+}) {
   return (
     <section className="mb-4 border-b pb-3">
-      <h3 className="mb-2 text-[13px] font-semibold text-text">{title}</h3>
+      <h3 className="mb-2 flex items-center gap-0.5 text-[13px] font-semibold text-text">
+        {title}
+        {help ? <HelpPopover id={help} label={title} /> : null}
+      </h3>
       {children}
     </section>
   );

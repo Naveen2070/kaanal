@@ -6,7 +6,7 @@
 // canvas to edit: the top bar and a read-only list.
 
 import type { CSSProperties, ReactNode } from "react";
-import { useLayout, useWide } from "./useLayout";
+import { useCompactPalette, useLayout, useWide } from "./useLayout";
 
 export function Shell({
   top,
@@ -42,6 +42,7 @@ export function Shell({
   readonly: ReactNode;
 }) {
   const mode = useLayout();
+  const compactPalette = useCompactPalette();
   const editing = mode !== "readonly";
   // on a wide screen the rail stands in its own column from the top, under the theme box, so the
   // room beside the title card is not left empty; narrower, the figures card needs that width
@@ -52,7 +53,7 @@ export function Shell({
   return (
     <main
       className="relative h-full overflow-hidden bg-ground text-text"
-      style={{ "--palette-w": mode === "full" ? "304px" : "48px" } as CSSProperties}
+      style={{ "--palette-w": compactPalette ? "56px" : "304px" } as CSSProperties}
     >
       {/* the canvas comes first in the page, so a keyboard gets a way past its wires and cards */}
       {editing ? (
