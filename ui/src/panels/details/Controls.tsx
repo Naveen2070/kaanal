@@ -33,6 +33,8 @@ import { RateLimitFields } from "./RateLimitFields";
 import { NodeDetectField } from "./ResilienceFields";
 import { StorageFields } from "./StorageFields";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
+import { StepsGroup } from "../steps/StepsGroup.lazy";
+import { anyChain, cacheNodes, callableNodes } from "../steps/describe";
 import { RATE_UNITS, TIME_UNITS } from "./units";
 import {
   balanceOf,
@@ -112,7 +114,11 @@ export function Controls({
 
   return (
     <div className="p-3 text-sm">
-      <NodeHeader name={name} config={config} />
+      <NodeHeader
+        name={name}
+        config={config}
+        more={config.type === "gateway" && anyChain(doc) ? ["Steps"] : []}
+      />
 
       <NodeStrip node={node} config={config} />
 
@@ -373,6 +379,7 @@ export function Controls({
       {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
         <LazyBoundary fallback={<p className="mb-3 text-xs text-muted">Loading the routes...</p>}>
           <TrafficRoutes gateway={name} doc={doc} edges={edges} />
+          <StepsGroup doc={doc} callable={callableNodes(doc, name)} caches={cacheNodes(doc)} />
         </LazyBoundary>
       ) : null}
 

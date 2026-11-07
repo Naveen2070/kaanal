@@ -16,6 +16,15 @@ call is a 503 that never reaches the callee, counted as `short_circuited`); `det
 notices a downed copy (`from_ms` on a scenario entry says when it went down). Circuit breakers and `from_ms` act in the
 simulator; the live mocks play every breaker closed and every copy as noticed at once.
 
+## Studio: easier controls
+
+Settings, Trace, Results and Try live are the four tabs. Controls come in three layers (quick setups, a few basics,
+folded groups that show their value when closed, with a jump box), every term has a help button that opens its
+glossary entry, Results opens with a plain verdict and shows the retry funnel and breaker timeline, Try live starts
+from an Apply button, and a gateway has a **Steps** group that edits each route's chain: calls, cache lookups and
+parallel blocks, with a retry of their own on a call. The server's trace marks each retry (`retry=2/3`) and the
+draft API has a `swap` operation that exchanges two list items without losing their comments.
+
 ## How loss and compression are costed
 
 Both are off unless an edge says `loss` (a probability, 0.01 is 1%) or `compress` (the share of a response kept on the
