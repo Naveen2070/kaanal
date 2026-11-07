@@ -11,6 +11,7 @@
 //! (a probe cancelled with its request) hands them out again after `open_for`, as resilience4j's
 //! `maxWaitDurationInHalfOpenState` does, so a lost probe cannot wedge it.
 
+use super::BreakerState;
 use crate::config::BreakerConfig;
 
 /// What a breaker says to a call about to start.
@@ -158,6 +159,15 @@ impl Breaker {
         self.state = State::Open {
             until: now.saturating_add(wait),
         };
+    }
+
+    /// What the breaker is doing now.
+    pub(super) fn phase(&self) -> BreakerState {
+        match self.state {
+            State::Closed => BreakerState::Closed,
+            State::Open { .. } => BreakerState::Open,
+            State::HalfOpen { .. } => BreakerState::HalfOpen,
+        }
     }
 
     /// Whether the breaker is open (rejecting), for tests.

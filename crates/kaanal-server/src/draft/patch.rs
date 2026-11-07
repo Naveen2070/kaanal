@@ -12,7 +12,8 @@ use serde_yaml_ng::Value as Yaml;
 use std::fmt::Write as _;
 
 /// One patch operation, as the API takes it. Which fields it needs depends on `op`:
-/// `set`/`insert`/`append`/`remove` take `path` (and `value`), `add_node` takes `name` and `kind`,
+/// `set`/`insert`/`append`/`remove` take `path` (and `value`), `swap` takes `path` and `with` (two items of
+/// one list), `add_node` takes `name` and `kind`,
 /// `rename_node` takes `from` and `to`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +24,9 @@ pub struct Op {
     /// key and the rest is the mapping it goes into.
     #[serde(default)]
     path: Vec<Value>,
+    /// `swap`: the path of the second item (the same list as `path`).
+    #[serde(default, rename = "with")]
+    with_path: Vec<Value>,
     /// The new value (`set` and `insert`); `null` is a value, a missing `value` is not.
     #[serde(default, deserialize_with = "present")]
     value: Option<Yaml>,
@@ -48,6 +52,7 @@ enum Kind {
     Insert,
     Append,
     Remove,
+    Swap,
     AddNode,
     RenameNode,
 }
@@ -115,6 +120,21 @@ pub fn apply(text: &str, ops: &[Op]) -> Result<Applied, String> {
     Ok(out)
 }
 
+/// **Private.** A path of keys (text) and list indexes (integers) as edit segments.
+fn segments(path: &[Value]) -> Result<Vec<PathSeg>, String> {
+    path.iter()
+        .map(|s| match s {
+            Value::String(k) => Ok(PathSeg::Key(k.clone())),
+            Value::Number(n) => n
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+                .map(PathSeg::Index)
+                .ok_or_else(|| format!("path step {n} is not a list index")),
+            _ => Err("a path is made of keys (text) and list indexes (numbers)".to_string()),
+        })
+        .collect()
+}
+
 /// **Private.** A field an operation needs.
 fn need<'a>(v: Option<&'a String>, name: &str) -> Result<&'a str, String> {
     v.map(String::as_str)
@@ -138,19 +158,7 @@ fn edit(o: &Op) -> Result<Edit, String> {
             value: starter(kind).to_string(),
         });
     }
-    let mut path = o
-        .path
-        .iter()
-        .map(|s| match s {
-            Value::String(k) => Ok(PathSeg::Key(k.clone())),
-            Value::Number(n) => n
-                .as_u64()
-                .and_then(|i| usize::try_from(i).ok())
-                .map(PathSeg::Index)
-                .ok_or_else(|| format!("path step {n} is not a list index")),
-            _ => Err("a path is made of keys (text) and list indexes (numbers)".to_string()),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut path = segments(&o.path)?;
     let value = || {
         o.value
             .as_ref()
@@ -167,6 +175,10 @@ fn edit(o: &Op) -> Result<Edit, String> {
             value: value()?,
         },
         Kind::Remove => Edit::Remove { path },
+        Kind::Swap => Edit::Swap {
+            a: path,
+            b: segments(&o.with_path)?,
+        },
         Kind::Insert => {
             let Some(PathSeg::Key(key)) = path.pop() else {
                 return Err("insert ends in the new key (text)".into());

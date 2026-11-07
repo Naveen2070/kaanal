@@ -11,8 +11,8 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 use kaanal_core::{
-    ChainResult, EffectiveChaos, ErrorKind, FailCause, FailKind, Finished, FinishedHop, HANG_CAP,
-    HopKind, Plan, PlanItem, Resolved, Topology,
+    ChainResult, EffectiveChaos, ErrorKind, FailCause, FailKind, Finished, FinishedAttempt,
+    HANG_CAP, HopKind, Plan, PlanItem, Resolved, Topology,
 };
 
 use crate::log::{ChainErrorRec, HopRec, LogEntry, MAX_HOPS, MAX_TRACE};
@@ -33,6 +33,8 @@ pub struct TraceParts {
 /// **Private.** One piece of the trace: a hop, or the bracket structure of a `parallel`.
 enum Piece {
     Hop(String),
+    /// A marker between hops (`retry=2/3`): in the text, but not a hop to count, cut or keep a block for.
+    Mark(String),
     Open,
     Bar,
     Close,
@@ -45,13 +47,8 @@ enum Piece {
 /// for those kinds (they have no status); a pinned request ends with `pinned=STATE`. A text over
 /// its cap ([`TRACE_CAP`] for the header, [`MAX_TRACE`] for the log copy) stops before a
 /// hop, closes open brackets and adds `,...+N hops` (ASCII, D13), N being the pieces left out.
-pub fn trace_parts(
-    plan: &Plan,
-    hops: &[FinishedHop],
-    result: &ChainResult,
-    topo: &Topology,
-    pin: Option<&str>,
-) -> TraceParts {
+pub fn trace_parts(plan: &Plan, fin: &Finished, topo: &Topology, pin: Option<&str>) -> TraceParts {
+    let (hops, result, attempts) = (&fin.hops[..], &fin.result, &fin.attempts[..]);
     let name = |id: usize| topo.nodes[id].name.as_str();
     // `db#2` for a hop on one copy of a replicated node (human text only; the API keeps `replica` apart)
     let at = |id: usize, replica: u16| {
@@ -66,6 +63,7 @@ pub fn trace_parts(
     // (end of the fork's items, index of its first branch marker) per open fork.
     let mut forks: Vec<(usize, usize)> = Vec::new();
     let mut next = 0; // index into `hops`
+    let mut marks = Marks::new(attempts);
     for (i, item) in plan.items.iter().enumerate() {
         while forks.last().is_some_and(|&(end, _)| end == i) {
             forks.pop();
@@ -79,6 +77,12 @@ pub fn trace_parts(
             PlanItem::Branch { .. } => {
                 if forks.last().is_some_and(|&(_, first)| first != i) {
                     pieces.push(Piece::Bar);
+                }
+            }
+            PlanItem::Retry { attempts, size, .. } => marks.open(i + 1 + size, *attempts),
+            PlanItem::Attempt { .. } => {
+                if let Some((n, of)) = marks.start(i) {
+                    pieces.push(Piece::Mark(format!("retry={n}/{of}")));
                 }
             }
             PlanItem::Hop(_) if hops.get(next).is_some_and(|h| h.idx == i) => {
@@ -117,17 +121,7 @@ pub fn trace_parts(
     }
     pieces.extend(forks.iter().map(|_| Piece::Close));
     let pieces = without_empty_blocks(pieces);
-    let error = match result {
-        ChainResult::Err {
-            node, status, kind, ..
-        } => match kind {
-            FailKind::Reset | FailKind::Malformed => {
-                format!("{}.error={}", name(*node), kind.as_str())
-            }
-            _ => format!("{}.error={status}", name(*node)),
-        },
-        ChainResult::Ok => String::new(),
-    };
+    let error = error_part(result, name);
     // The error and the pin are always kept, so they are reserved before the hops are cut.
     let pinned = pin.map_or_else(String::new, |p| format!("pinned={p}"));
     let tails: Vec<&String> = [&error, &pinned]
@@ -158,6 +152,62 @@ pub fn trace_parts(
     TraceParts { full, header }
 }
 
+/// **Private.** The trace's `node.error=...` tail, empty when the request succeeded.
+fn error_part<'a>(result: &ChainResult, name: impl Fn(usize) -> &'a str) -> String {
+    match result {
+        ChainResult::Err {
+            node, status, kind, ..
+        } => match kind {
+            FailKind::Reset | FailKind::Malformed => {
+                format!("{}.error={}", name(*node), kind.as_str())
+            }
+            _ => format!("{}.error={status}", name(*node)),
+        },
+        ChainResult::Ok => String::new(),
+    }
+}
+
+/// **Private.** Which retry of a call the plan walk is in. A call's attempts follow its `Retry` item;
+/// every attempt after the first has a marker in the trace, but only when it really started, which
+/// `Finished::attempts` says (the engine lists each retry it began, by number and call size).
+struct Marks<'a> {
+    started: &'a [FinishedAttempt],
+    used: Vec<bool>,
+    /// Per open call: where its items end, how many tries it may make, how many markers were met.
+    calls: Vec<(usize, u8, u8)>,
+}
+
+impl<'a> Marks<'a> {
+    fn new(started: &'a [FinishedAttempt]) -> Self {
+        Self {
+            started,
+            used: vec![false; started.len()],
+            calls: Vec::new(),
+        }
+    }
+
+    fn open(&mut self, end: usize, attempts: u8) {
+        self.calls.push((end, attempts, 0));
+    }
+
+    /// Walking onto the attempt marker at `i` (`size` items follow): the `(n, of)` to print when this is a
+    /// retry that started.
+    fn start(&mut self, i: usize) -> Option<(u8, u8)> {
+        self.calls.retain(|c| c.0 > i);
+        let call = self.calls.last_mut()?;
+        let n = call.2 + 1;
+        call.2 = n;
+        let of = call.1;
+        if n == 1 {
+            return None;
+        }
+        let at = (0..self.started.len())
+            .find(|&k| !self.used[k] && self.started[k].n == n && self.started[k].of == of)?;
+        self.used[at] = true;
+        Some((n, of))
+    }
+}
+
 /// **Private.** Drops every `[...]` block with no hop inside (a `parallel` that a sibling's
 /// failure cancelled before it started would otherwise print as `[|]`).
 fn without_empty_blocks(pieces: Vec<Piece>) -> Vec<Piece> {
@@ -181,7 +231,7 @@ fn without_empty_blocks(pieces: Vec<Piece>) -> Vec<Piece> {
                     }
                 }
             }
-            Piece::Bar => {}
+            Piece::Bar | Piece::Mark(_) => {}
         }
     }
     pieces
@@ -216,6 +266,22 @@ fn render(pieces: &[Piece], cap: usize, tail: usize) -> String {
                 }
                 out.push_str(h);
                 (first, shown) = (false, shown + 1);
+            }
+            Piece::Mark(m) => {
+                let sep = usize::from(!first);
+                if out.len() + sep + m.len() + depth + suffix + tail > cap {
+                    out.extend(std::iter::repeat_n(']', depth));
+                    if !out.is_empty() {
+                        out.push(',');
+                    }
+                    let _ = write!(out, "...+{} hops", total - shown);
+                    return out;
+                }
+                if !first {
+                    out.push(',');
+                }
+                out.push_str(m);
+                first = false;
             }
             Piece::Open => {
                 if !first {
@@ -539,6 +605,7 @@ fn hop_recs(key: &str, run: &Run) -> (Vec<HopRec>, bool, bool, bool) {
                     lane: top.map_or(0, |f| f.2),
                     fork: top.map(|f| f.1),
                     cut: h.dur < planned.dur,
+                    attempt: (fh.attempt > 1).then_some(fh.attempt),
                     why: (!why.is_empty()).then(|| why.join(", ")),
                 });
             }

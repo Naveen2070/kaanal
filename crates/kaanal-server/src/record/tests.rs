@@ -5,7 +5,7 @@
 )]
 
 use super::*;
-use kaanal_core::{ChaosState, Config, Hop, NodeChaos, Op, compile_layers};
+use kaanal_core::{ChaosState, Config, FinishedHop, Hop, NodeChaos, Op, compile_layers};
 
 const YAML: &str = "version: 1\nnodes:\n  nginx: { type: gateway, proc: 1ms }\n  app: { type: service, proc: 1ms }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\n  c: { type: cache, hit_ratio: 1.0, hit: 1ms, miss: 2ms }\n  ct: { type: cache, hit_ratio: 1.0, hit: 1ms, miss: 2ms, timeout: 150ms }\nedges:\n  - { from: nginx, to: app }\n  - { from: app, to: db }\n  - { from: app, to: c }\n  - { from: app, to: ct }\n";
 
@@ -37,6 +37,7 @@ fn straight(hops: Vec<Hop>) -> (Plan, Finished) {
             idx,
             hop,
             wait: Duration::ZERO,
+            attempt: 1,
         })
         .collect();
     (
@@ -115,7 +116,7 @@ fn header_equals_cap_of_full_trace_for_every_existing_trace_case() {
         kind: FailKind::Status,
         retry_after: None,
     };
-    let p = trace_parts(&plan, &fin.hops, &fin.result, &t, Some("error"));
+    let p = trace_parts(&plan, &fin, &t, Some("error"));
     assert_eq!(
         p.header,
         "net=1.0ms,app.proc=2.0ms,db.read=4.0ms,db.error=503,pinned=error"
@@ -123,7 +124,7 @@ fn header_equals_cap_of_full_trace_for_every_existing_trace_case() {
     assert_eq!(p.full, p.header);
     // Over the header cap, under the log cap: the header is cut, the log copy is whole.
     let (plan, fin) = many(&t, 400);
-    let p = trace_parts(&plan, &fin.hops, &fin.result, &t, Some("slow"));
+    let p = trace_parts(&plan, &fin, &t, Some("slow"));
     assert!(p.header.len() <= TRACE_CAP, "{}", p.header.len());
     assert!(p.header.ends_with("hops,pinned=slow"), "{}", p.header);
     assert!(p.full.len() > TRACE_CAP && p.full.len() <= MAX_TRACE);
@@ -135,7 +136,7 @@ fn header_equals_cap_of_full_trace_for_every_existing_trace_case() {
     );
     // Over the log cap as well: it is cut by the same rule.
     let (plan, fin) = many(&t, 2000);
-    let p = trace_parts(&plan, &fin.hops, &fin.result, &t, None);
+    let p = trace_parts(&plan, &fin, &t, None);
     assert!(
         p.full.len() <= MAX_TRACE && p.full.ends_with(" hops"),
         "{}",
@@ -222,6 +223,7 @@ fn structured_hops_rerender_to_the_trace_text_while_not_truncated() {
             idx,
             hop: h.clone(),
             wait: Duration::from_millis(wait),
+            attempt: 1,
         }
     };
     let fin = finished(
@@ -234,7 +236,7 @@ fn structured_hops_rerender_to_the_trace_text_while_not_truncated() {
         xfers: Vec::new(),
         scoped: Vec::new(),
     };
-    let p = trace_parts(&plan, &fin.hops, &fin.result, &t, None);
+    let p = trace_parts(&plan, &fin, &t, None);
     let e = entry_of(&t, &plan, &fin, None);
     assert!(!e.truncated);
     assert_eq!(rerender(&e.hops), p.full, "{:?}", e.hops);
@@ -314,6 +316,7 @@ fn flags_per_cause() {
         idx: 0,
         hop: hop(a, HopKind::Delay, 0, 50),
         wait: Duration::ZERO,
+        attempt: 1,
     };
     let mut fin = finished(vec![ran], err(a), Some(FailCause::Chaos));
     fin.result = ChainResult::Err {
@@ -383,6 +386,7 @@ fn a_cache_hang_is_a_fault_not_injected_delay() {
             dur,
         },
         wait: Duration::ZERO,
+        attempt: 1,
     };
     let case = |node: usize, dur: Duration| {
         let h = hung(node, dur);
@@ -516,6 +520,7 @@ fn lanes_for_a_parallel_block() {
                     idx,
                     hop: x.clone(),
                     wait: Duration::ZERO,
+                    attempt: 1,
                 }
             })
             .collect(),
@@ -545,4 +550,92 @@ fn a_hop_shorter_than_planned_is_cut() {
     let e = entry_of(&t, &plan, &fin, None);
     assert!(e.hops[0].cut);
     assert_eq!(e.hops[0].dur_ms, 4.0);
+}
+
+/// A call tried `of` times, one proc hop per attempt: the plan, and a `Finished` that ran the first
+/// `ran` attempts (`ran - 1` retries started, 10 ms apart).
+fn retried(t: &Topology, of: u8, ran: u8) -> (Plan, Finished) {
+    let a = node(t, "app");
+    let mut items = vec![PlanItem::Retry {
+        attempts: of,
+        size: usize::from(of) * 2,
+        budget: None,
+        breaker: None,
+        edge: kaanal_core::NO_EDGE,
+    }];
+    let mut hops = Vec::new();
+    let mut attempts = Vec::new();
+    for k in 0..of {
+        items.push(PlanItem::Attempt {
+            backoff: Duration::from_millis(if k == 0 { 0 } else { 10 }),
+            size: 1,
+        });
+        if k < ran {
+            hops.push(FinishedHop {
+                idx: items.len(),
+                hop: hop(a, HopKind::Proc, u64::from(k) * 11, 1),
+                wait: Duration::ZERO,
+                attempt: k + 1,
+            });
+            if k > 0 {
+                attempts.push(kaanal_core::FinishedAttempt {
+                    at: Duration::from_millis(u64::from(k) * 11),
+                    n: k + 1,
+                    of,
+                    node: a,
+                });
+            }
+        }
+        items.push(PlanItem::Hop(hop(a, HopKind::Proc, u64::from(k) * 11, 1)));
+    }
+    let mut fin = finished(hops, ChainResult::Ok, None);
+    fin.attempts = attempts;
+    (
+        Plan {
+            items,
+            xfers: Vec::new(),
+            scoped: Vec::new(),
+        },
+        fin,
+    )
+}
+
+#[test]
+fn a_retry_is_marked_in_the_trace_before_the_hops_of_its_attempt() {
+    let t = topo();
+    let (plan, fin) = retried(&t, 3, 2);
+    let parts = trace_parts(&plan, &fin, &t, None);
+    // the third attempt never started, so it has no marker
+    assert_eq!(parts.full, "app.proc=1.0ms,retry=2/3,app.proc=1.0ms");
+    assert_eq!(parts.header, parts.full);
+}
+
+#[test]
+fn a_call_that_succeeded_first_time_has_no_marker() {
+    let t = topo();
+    let (plan, fin) = retried(&t, 3, 1);
+    let parts = trace_parts(&plan, &fin, &t, None);
+    assert_eq!(parts.full, "app.proc=1.0ms");
+}
+
+#[test]
+fn a_marker_is_not_a_hop_for_the_cut_count() {
+    let pieces = [
+        Piece::Hop("a".into()),
+        Piece::Mark("retry=2/2".into()),
+        Piece::Hop("b".into()),
+    ];
+    assert_eq!(render(&pieces, usize::MAX, 0), "a,retry=2/2,b");
+    // room for the first hop and the marker only: one hop is left out, and the marker is not counted
+    let cut = render(&pieces, "a,retry=2/2".len() + ",...+1 hops".len(), 0);
+    assert_eq!(cut, "a,retry=2/2,...+1 hops");
+}
+
+#[test]
+fn hops_inside_a_retry_say_which_attempt_they_belong_to() {
+    let t = topo();
+    let (plan, fin) = retried(&t, 3, 2);
+    let e = entry_of(&t, &plan, &fin, None);
+    let attempts: Vec<Option<u8>> = e.hops.iter().map(|h| h.attempt).collect();
+    assert_eq!(attempts, vec![None, Some(2)]);
 }

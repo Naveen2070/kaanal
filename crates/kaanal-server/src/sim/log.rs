@@ -47,6 +47,9 @@ pub struct LogLine {
     pub status: Option<u16>,
     /// What the hop was (`proc`, `net`, ...), or why a request failed.
     pub note: Option<String>,
+    /// The retry (2 or more) a hop ran in; absent in a first attempt and on every other line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u8>,
 }
 
 /// The stored log of a run.
@@ -108,7 +111,8 @@ fn lines_of(
 ) {
     let stream = cfg.streams[r.stream].endpoint_key.clone();
     let arrival = ms(r.arrival);
-    for (h, wait) in &r.hops {
+    let tries = rep.hop_attempts.get(&(r.stream, r.n));
+    for (k, (h, wait)) in r.hops.iter().enumerate() {
         let (w, s) = (ms(*wait), ms(h.dur));
         let queued = w > s;
         out.push(LogLine {
@@ -129,6 +133,7 @@ fn lines_of(
             service_ms: Some(s),
             status: None,
             note: Some(hop_label(h.kind).to_string()),
+            attempt: tries.and_then(|t| t.get(k)).copied().filter(|&n| n > 1),
         });
     }
     for &(at, n, of, node) in retries(rep, r) {
@@ -145,6 +150,7 @@ fn lines_of(
             service_ms: None,
             status: None,
             note: Some(format!("attempt {n} of {of}")),
+            attempt: None,
         });
     }
     if let ChainResult::Err {
@@ -172,6 +178,7 @@ fn lines_of(
             service_ms: None,
             status: Some(*status),
             note: Some(note.to_string()),
+            attempt: None,
         });
     }
 }
@@ -368,6 +375,9 @@ pub(super) mod tests {
             link_utilization: vec![],
             nic_utilization: vec![],
             attempts: std::collections::BTreeMap::default(),
+            hop_attempts: std::collections::BTreeMap::default(),
+            wires: vec![],
+            breaker_changes: vec![],
         }
     }
 
@@ -391,6 +401,26 @@ pub(super) mod tests {
             retry.t_ms
         );
         assert!(retry.wait_ms.is_none() && retry.service_ms.is_none() && retry.status.is_none());
+    }
+
+    #[test]
+    fn a_hop_line_says_which_retry_ran_it() {
+        let t = topo();
+        let app = t.id("app").unwrap();
+        let mut r = rec(1, 10, false, &t);
+        let first = r.hops[0].clone();
+        r.hops.push(first);
+        let mut rep = report(vec![r]);
+        rep.attempts
+            .insert((0, 1), vec![(Duration::from_millis(4), 2, 3, app)]);
+        rep.hop_attempts.insert((0, 1), vec![1, 2]);
+        let lines = lined(&rep, &t, &Endpoints::default(), &cfg());
+        let tries: Vec<Option<u8>> = lines
+            .iter()
+            .filter(|l| l.event != "retry")
+            .map(|l| l.attempt)
+            .collect();
+        assert_eq!(tries, vec![None, Some(2)]);
     }
 
     #[test]

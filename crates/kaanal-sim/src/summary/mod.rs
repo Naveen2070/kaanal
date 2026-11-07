@@ -9,8 +9,10 @@ use std::sync::Arc;
 use kaanal_core::{ChainResult, Endpoint, Endpoints, HopKind, NodeKind, Topology, visits_per_s};
 use serde::Serialize;
 
+mod resilience;
 mod series;
 
+pub use resilience::{BreakerChangeSummary, BreakerSummary, RetrySummary};
 pub use series::{LinkSeries, Series, SystemSeries};
 
 use crate::{SimConfig, SimReport};
@@ -57,6 +59,10 @@ pub struct Summary {
     /// Node ids with visits, the most loaded first: offered load, then mean wait; nodes without
     /// slots last.
     pub bottlenecks: Vec<usize>,
+    /// Per wire that carried a retry scope: how its calls ended (step 7f).
+    pub retries: Vec<RetrySummary>,
+    /// Per circuit breaker that changed state during the run: its timeline (step 7f).
+    pub breakers: Vec<BreakerSummary>,
 }
 
 /// Latency percentiles and a histogram, in milliseconds.
@@ -685,8 +691,6 @@ pub fn summarize(
     let pipes = pipe_summaries(topo, report, &nic_acc, window_s, mix_rate);
     let warnings = warnings(requests, &nodes, &links, &pipes);
     let bottlenecks = bottlenecks(&nodes);
-    let sys_series = series::system_series(cfg, report);
-    let streams = stream_summaries(cfg, &lat_by, &failed_by);
     Summary {
         label: LABEL,
         window_s,
@@ -695,11 +699,13 @@ pub fn summarize(
         errors,
         warnings,
         latency: latency(&lat_all),
-        series: sys_series,
-        streams,
+        series: series::system_series(cfg, report),
+        streams: stream_summaries(cfg, &lat_by, &failed_by),
         nodes,
         links,
         pipes,
         bottlenecks,
+        retries: resilience::retry_summaries(topo, report),
+        breakers: resilience::breaker_summaries(topo, report, cfg.warmup, cfg.duration),
     }
 }

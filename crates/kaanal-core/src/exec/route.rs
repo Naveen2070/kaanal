@@ -159,7 +159,7 @@ impl Walk<'_> {
         call: &Call,
         rc: &RetryConfig,
         run: (NodeId, u16),
-    ) -> (Option<RetryBudget>, Option<BreakerRef>) {
+    ) -> (Option<RetryBudget>, Option<BreakerRef>, u16) {
         let edge = self
             .topo
             .edge_id(run.0, call.node)
@@ -178,7 +178,7 @@ impl Walk<'_> {
                 replica: run.1,
             })
         });
-        (budget, breaker)
+        (budget, breaker, edge.unwrap_or(super::NO_EDGE))
     }
 
     /// **Private.** One `repeat` of a call that may be retried (RULES 82-84): a [`PlanItem::Retry`] holding
@@ -208,12 +208,13 @@ impl Walk<'_> {
         // one stream of jitter draws, a draw per retry whether or not it is reached
         let mut jitter_rng = draw_rng(rep_path, name, b"retry");
         let retry = self.items.len();
-        let (budget, breaker) = self.scope_refs(call, rc, run);
+        let (budget, breaker, edge) = self.scope_refs(call, rc, run);
         self.items.push(PlanItem::Retry {
             attempts: rc.max_attempts,
             size: 0,
             budget,
             breaker,
+            edge,
         });
         let (mut ready, mut emitted) = (*now, 0u8);
         // the first success (its end), else the failure that ended the call
@@ -293,6 +294,7 @@ impl Walk<'_> {
             size: self.items.len() - retry - 1,
             budget,
             breaker,
+            edge,
         };
         self.tail = tail;
         if let Some(c) = counters {

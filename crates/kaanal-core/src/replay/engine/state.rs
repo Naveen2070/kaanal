@@ -102,6 +102,8 @@ pub struct FinishedHop {
     pub hop: Hop,
     /// Time spent in the node's queue before it started.
     pub wait: Duration,
+    /// The try of its call this hop ran in, counting the first as 1; also 1 outside any retried call.
+    pub attempt: u8,
 }
 
 /// Per-node totals. `completed`, `wait`, `limited` and `overflowed` count requests
@@ -171,6 +173,47 @@ pub(super) struct SpanState {
     pub(super) orphan: bool,
 }
 
+/// What a retry scope did on one wire over the reporting window (step 7f), counted for requests
+/// arriving at or after the window's `warmup`. A *call* is one entry into a scope, so a call that
+/// succeeds first time is only a call.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WireCounters {
+    /// Calls over the wire that carried a retry scope.
+    pub calls: u64,
+    /// Calls that made at least one retry.
+    pub retried: u64,
+    /// Retry attempts, all calls (a call retried twice adds 2).
+    pub retries: u64,
+    /// Retried calls that ended well.
+    pub recovered: u64,
+    /// Calls whose last attempt failed, retried or not (retried and not recovered gave up).
+    pub failed: u64,
+}
+
+/// What a circuit breaker is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakerState {
+    /// Calls go through; outcomes are counted.
+    Closed,
+    /// A few probe calls decide whether to close or reopen.
+    HalfOpen,
+    /// Every call is refused until the open time has passed.
+    Open,
+}
+
+/// A breaker moved to `state` at `at` ns on the virtual clock (step 7f).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreakerChange {
+    /// The edge the breaker is on.
+    pub edge: u16,
+    /// The caller replica holding the breaker.
+    pub replica: u16,
+    /// When it changed, ns on the virtual clock.
+    pub at: u64,
+    /// What it changed to.
+    pub state: BreakerState,
+}
+
 /// **Private.** A retry scope a request has entered (RULES 82-84, see `retry.rs`).
 pub(super) struct RetryState {
     /// Plan index just past the whole scope.
@@ -194,6 +237,9 @@ pub(super) struct RetryState {
     /// How many attempts the scope has, and the plan index of the marker of the first.
     pub(super) attempts: u8,
     pub(super) first: usize,
+    /// The edge the call goes over ([`crate::exec::NO_EDGE`] when unknown) and whether it has retried.
+    pub(super) edge: u16,
+    pub(super) retried: bool,
     /// When each retry started (ns), in order: the Log shows them.
     pub(super) starts: Vec<u64>,
 }

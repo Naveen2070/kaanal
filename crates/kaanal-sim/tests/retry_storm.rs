@@ -178,3 +178,64 @@ fn the_record_lists_each_retry_with_its_number_and_start() {
     let (_, _, _, plain) = simulate("", 150.0);
     assert!(plain.attempts.is_empty());
 }
+
+#[test]
+fn the_summary_counts_calls_retries_and_how_they_ended_per_wire() {
+    let (t, e, cfg, rep) = simulate(CONTINUE, 150.0);
+    let sum = kaanal_sim::summarize(&t, &e, &cfg, &rep);
+    assert_eq!(sum.retries.len(), 1, "one wire carries a retry scope");
+    let w = &sum.retries[0];
+    assert_eq!((w.from.as_str(), w.to.as_str()), ("gw", "app"));
+    // the funnel narrows: every call is a first try, some retried, some of those recovered
+    assert!(w.calls > 0 && w.retried > 0, "{w:?}");
+    assert!(w.recovered <= w.retried && w.retried <= w.calls, "{w:?}");
+    assert_eq!(w.gave_up, w.retried - w.recovered);
+    assert!(w.failed <= w.calls, "{w:?}");
+    // two retries at most per call (three tries), and every retry the record lists was counted
+    let listed: u64 = rep.attempts.values().map(|l| l.len() as u64).sum();
+    assert!(
+        w.retries >= listed && w.retries <= 2 * w.retried,
+        "{w:?} vs {listed}"
+    );
+    // at 75% load with abandoned work left running the collapse is near total (see above)
+    assert!(w.failed * 10 > w.calls * 9, "{w:?}");
+    // no retry configured: nothing to report
+    let (t, e, cfg, rep) = simulate("", 150.0);
+    assert_eq!(kaanal_sim::summarize(&t, &e, &cfg, &rep).retries.len(), 0);
+}
+
+#[test]
+fn the_summary_gives_each_breaker_a_timeline_inside_the_window() {
+    let (t, e, cfg, rep) = simulate(BREAKER, 120.0);
+    let sum = kaanal_sim::summarize(&t, &e, &cfg, &rep);
+    assert_eq!(sum.breakers.len(), 1);
+    let b = &sum.breakers[0];
+    assert_eq!(
+        (b.from.as_str(), b.to.as_str(), b.replica),
+        ("gw", "app", 0)
+    );
+    assert!(!b.changes.is_empty(), "the breaker opened during the run");
+    let window_ms = sum.window_s * 1000.0;
+    assert!(
+        b.changes
+            .iter()
+            .all(|c| c.t_ms > 0.0 && c.t_ms <= window_ms)
+    );
+    assert!(b.changes.windows(2).all(|w| w[0].t_ms <= w[1].t_ms));
+    // only legal moves: closed -> open, open -> half open, half open -> open or closed
+    let mut state = b.state_at_start;
+    for c in &b.changes {
+        let ok = matches!(
+            (state, c.state),
+            ("closed", "open") | ("open", "half_open") | ("half_open", "open" | "closed")
+        );
+        assert!(ok, "{state} -> {}", c.state);
+        state = c.state;
+    }
+    assert!(b.open_ms > 0.0 && b.open_ms <= window_ms, "{}", b.open_ms);
+    // it was open for at least one full open_for (2 s) of the window unless the window cut it
+    assert!(b.open_ms >= 1900.0, "{}", b.open_ms);
+    // no breaker configured: none reported
+    let (t, e, cfg, rep) = simulate(CONTINUE, 120.0);
+    assert_eq!(kaanal_sim::summarize(&t, &e, &cfg, &rep).breakers.len(), 0);
+}

@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use summary::{
-    Bucket, Latency, LinkSeries, LinkSummary, NodeSummary, ReplicaSummary, Series, StreamSummary,
-    Summary, summarize,
+    BreakerChangeSummary, BreakerSummary, Bucket, Latency, LinkSeries, LinkSummary, NodeSummary,
+    ReplicaSummary, RetrySummary, Series, StreamSummary, Summary, summarize,
 };
 
 use kaanal_core::{
@@ -122,10 +122,21 @@ pub struct SimReport {
     /// component called)`. Kept apart from [`RequestRecord`] so the many requests that retry nothing
     /// pay nothing for it.
     pub attempts: AttemptsByRequest,
+    /// For the requests that made a retry: the try each of their hops ran in, in the order of
+    /// [`RequestRecord::hops`], counting the first as 1. A request that retried nothing is absent.
+    pub hop_attempts: HopAttemptsByRequest,
+    /// What the retry scopes did on each wire, by edge index (step 7f); all zero for a wire without
+    /// retries. Counted by the engine for requests arriving in the reporting window.
+    pub wires: Vec<kaanal_core::replay::WireCounters>,
+    /// Every circuit breaker state change of the run, in order (step 7f), on the virtual clock.
+    pub breaker_changes: Vec<kaanal_core::replay::BreakerChange>,
 }
 
 /// The retries of each request that made any, see [`SimReport::attempts`].
 pub type AttemptsByRequest = BTreeMap<(usize, u64), Vec<Attempt>>;
+
+/// The try of each hop of each request that retried, see [`SimReport::hop_attempts`].
+pub type HopAttemptsByRequest = BTreeMap<(usize, u64), Vec<u8>>;
 
 /// A retry that started: see [`SimReport::attempts`].
 pub type Attempt = (Duration, u8, u8, kaanal_core::NodeId);

@@ -289,6 +289,8 @@ pub enum PlanItem {
         budget: Option<RetryBudget>,
         /// The circuit breaker every attempt asks first (step 7c), when the edge has one.
         breaker: Option<BreakerRef>,
+        /// The edge the call goes over, for the per-wire counts (step 7f); [`NO_EDGE`] when unknown.
+        edge: u16,
     },
     /// One try of the enclosing [`PlanItem::Retry`]: its `size` items follow. A failure inside it, that
     /// is transient, starts the next attempt after `backoff` instead of failing the request. Walking
@@ -325,6 +327,9 @@ pub struct BreakerRef {
     /// The caller replica holding the breaker (a [`DYN_BASE`] code until its pick is bound).
     pub replica: u16,
 }
+
+/// A [`PlanItem::Retry`] whose edge is not known: no per-wire counts are kept for it.
+pub const NO_EDGE: u16 = u16::MAX;
 
 /// First `replica` value that is a [`PlanItem::Pick`] code, not a copy (a node has at most 64).
 pub const DYN_BASE: u16 = 0x8000;

@@ -51,15 +51,16 @@ pub use config::{
 pub use diagnostics::{Located, PathSeg};
 pub use dist::Dist;
 pub use exec::{
-    BreakerRef, ChainOutcome, ChainRequest, ChainResult, DYN_BASE, Hop, HopKind, Op, PickKind,
-    Pipe, Plan, PlanItem, RetryBudget, ScopedFail, Xfer, execute, sample_plan,
+    BreakerRef, ChainOutcome, ChainRequest, ChainResult, DYN_BASE, Hop, HopKind, NO_EDGE, Op,
+    PickKind, Pipe, Plan, PlanItem, RetryBudget, ScopedFail, Xfer, execute, sample_plan,
 };
 pub use pin::{
     EffectivePins, EmptyOk, Outcome, PinEntry, PinEntryConfig, PinLayer, PinSource, PinState,
     ResolvedPin, StateOverride, StateOverrideConfig, StateOverrides, resolve, validate_entry,
 };
 pub use replay::{
-    Engine, EngineError, FailCause, Finished, FinishedHold, FinishedHop, NodeCounters,
+    Engine, EngineError, FailCause, Finished, FinishedAttempt, FinishedHold, FinishedHop,
+    NodeCounters,
 };
 pub use rng::HopRng;
 pub use scenario::{

@@ -12,6 +12,9 @@ pub(super) struct ChaosView {
     pub(super) error_kind: &'static str,
     pub(super) error_status: u16,
     pub(super) down: bool,
+    /// With `down`: when in the run the outage begins; shown only when set (step 7d, RULES 91).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) from_ms: Option<u64>,
     #[serde(skip_serializing_if = "is_zero")]
     pub(super) jitter_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,6 +33,9 @@ impl From<&ChaosLayer> for ChaosView {
             error_kind: c.error_kind.as_str(),
             error_status: c.error_status,
             down: c.down,
+            from_ms: l
+                .down_from
+                .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             jitter_ms: l
                 .jitter
                 .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
@@ -88,6 +94,10 @@ pub struct ChaosPatch {
     pub(super) error_kind: Option<String>,
     pub(super) error_status: Option<u16>,
     pub(super) down: Option<bool>,
+    /// With `down: true` on a node or one of its instances: when the outage begins, in milliseconds
+    /// from the start of the run (a simulator run; the live mocks have no clock yet, so they take the
+    /// node down at once). A PUT that sets `down` without it means down from the start.
+    pub(super) from_ms: Option<u64>,
     pub(super) jitter_ms: Option<u64>,
     /// Bytes per second as a number, or text with a unit (`"500KB/s"`).
     #[serde(default, deserialize_with = "kaanal_core::units::bandwidth_cap")]
@@ -114,7 +124,7 @@ impl ChaosPatch {
             error_kind,
             error_status: self.error_status,
             down: self.down,
-            down_from: None,
+            down_from: self.from_ms.map(Duration::from_millis),
             jitter: self.jitter_ms.map(Duration::from_millis),
             bandwidth_cap: self.bandwidth_cap,
             replace: parse_mode(self.mode.as_deref())?,
@@ -141,6 +151,10 @@ pub struct KeyedPatch {
     pub(super) error_kind: Option<String>,
     pub(super) error_status: Option<u16>,
     pub(super) down: Option<bool>,
+    /// With `down: true` on a node or one of its instances: when the outage begins, in milliseconds
+    /// from the start of the run (a simulator run; the live mocks have no clock yet, so they take the
+    /// node down at once). A PUT that sets `down` without it means down from the start.
+    pub(super) from_ms: Option<u64>,
     pub(super) jitter_ms: Option<u64>,
     /// Bytes per second as a number, or text with a unit (`"500KB/s"`).
     #[serde(default, deserialize_with = "kaanal_core::units::bandwidth_cap")]
@@ -200,6 +214,17 @@ pub(super) fn apply_patch(
     patch: &ChaosPatch,
 ) -> Result<Json<Value>, Reject> {
     let ttl = patch.ttl.as_deref().map(parse_ttl).transpose()?;
+    // the start of an outage (RULES 91): only for `down: true` on a node or one of its instances
+    if patch.from_ms.is_some()
+        && (patch.down != Some(true) || !matches!(key, ChaosKey::Node(_) | ChaosKey::Replica(..)))
+    {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            "from_ms is the start of a node or instance outage: it needs `down: true` and a node (or one of its instances), and takes no endpoint or link",
+        ));
+    }
+    let sets_down = patch.down.is_some();
+    let sets_start = patch.from_ms.is_some();
     let patch = patch.layer()?;
     let units = chaos_lease::units_set(&patch);
     // `mode: merge` counts as a unit but has nothing worth leasing (its expiry is a no-op).
@@ -217,6 +242,10 @@ pub(super) fn apply_patch(
         chaos_lease::apply(&mut c.chaos_leases, key, &units, ttl, Instant::now());
         let mut cur = c.stack.live().layer(key).cloned().unwrap_or_default();
         cur.apply(&patch);
+        // a PUT that sets `down` without a start means down from the beginning: drop an older start
+        if sets_down && !sets_start {
+            cur.down_from = None;
+        }
         cur.validate()
             .map_err(|e| reject(StatusCode::BAD_REQUEST, &e))?;
         // link chaos belongs to an edge key, and an edge key has the link rules
@@ -230,6 +259,7 @@ pub(super) fn apply_patch(
         // `down: false` in the live layer means "unset": drop it, and drop an entry it leaves empty.
         if cur.down == Some(false) {
             cur.down = None;
+            cur.down_from = None;
         }
         if cur == ChaosLayer::default() {
             c.stack.live_mut().remove(key);
@@ -452,6 +482,7 @@ pub async fn set_chaos_keyed(
         error_kind: p.error_kind,
         error_status: p.error_status,
         down: p.down,
+        from_ms: p.from_ms,
         jitter_ms: p.jitter_ms,
         bandwidth_cap: p.bandwidth_cap,
         mode: p.mode,

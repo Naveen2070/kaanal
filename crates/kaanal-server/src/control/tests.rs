@@ -513,3 +513,115 @@ fn guard_keeps_a_cache_header_the_handler_set() {
     assert_eq!(none[header::CACHE_CONTROL], "no-store");
     assert_eq!(none[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
 }
+
+/// What `PUT /chaos/{node}` answers for `body`: the status.
+async fn put_status(st: &Arc<AppState>, node: &str, body: serde_json::Value) -> StatusCode {
+    let p: ChaosPatch = serde_json::from_value(body).unwrap();
+    match set_chaos(
+        State(Arc::clone(st)),
+        Gen(st.generation().unwrap()),
+        Path(node.into()),
+        Ok(Json(p)),
+    )
+    .await
+    {
+        Ok(_) => StatusCode::OK,
+        Err((code, _)) => code,
+    }
+}
+
+#[tokio::test]
+async fn an_outage_can_start_later_in_the_run() {
+    let st = state();
+    put(&st, "db", json!({ "down": true, "from_ms": 4000 })).await;
+    let l = db_live(&st).unwrap();
+    assert_eq!(
+        (l.down, l.down_from),
+        (Some(true), Some(Duration::from_secs(4)))
+    );
+    // down again with no start: down from the beginning, the old start is gone
+    put(&st, "db", json!({ "down": true })).await;
+    assert_eq!(db_live(&st).unwrap().down_from, None);
+    // and a start comes back with its own PUT; clearing the outage clears the entry
+    put(&st, "db", json!({ "down": true, "from_ms": 250 })).await;
+    assert_eq!(
+        db_live(&st).unwrap().down_from,
+        Some(Duration::from_millis(250))
+    );
+    put(&st, "db", json!({ "down": false })).await;
+    assert_eq!(db_live(&st), None);
+}
+
+#[tokio::test]
+async fn from_ms_needs_down_true() {
+    let st = state();
+    assert_eq!(
+        put_status(&st, "db", json!({ "from_ms": 1000 })).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put_status(&st, "db", json!({ "down": false, "from_ms": 1000 })).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(db_live(&st), None, "a refused patch changes nothing");
+}
+
+#[tokio::test]
+async fn the_entry_shows_its_start_in_the_view() {
+    let st = state();
+    put(&st, "db", json!({ "down": true, "from_ms": 4000 })).await;
+    let snap = st.snapshot();
+    let k = node(&st, "db");
+    let v = super::chaos::live_entry_json(
+        snap.stack.live().layer(&k).unwrap(),
+        &snap.chaos_leases,
+        &k,
+        tokio::time::Instant::now(),
+    );
+    assert_eq!(v["from_ms"], 4000);
+    put(&st, "db", json!({ "down": true })).await;
+    let snap = st.snapshot();
+    let v = super::chaos::live_entry_json(
+        snap.stack.live().layer(&k).unwrap(),
+        &snap.chaos_leases,
+        &k,
+        tokio::time::Instant::now(),
+    );
+    assert!(v.get("from_ms").is_none());
+}
+
+#[tokio::test]
+async fn keyed_chaos_takes_a_start_for_a_node_or_instance_only() {
+    use super::chaos::KeyedPatch;
+    use super::set_chaos_keyed;
+    let st = state();
+    let go = |body: serde_json::Value| {
+        let st = Arc::clone(&st);
+        async move {
+            let p: KeyedPatch = serde_json::from_value(body).unwrap();
+            match set_chaos_keyed(
+                State(Arc::clone(&st)),
+                Gen(st.generation().unwrap()),
+                Ok(Json(p)),
+            )
+            .await
+            {
+                Ok(_) => StatusCode::OK,
+                Err((code, _)) => code,
+            }
+        }
+    };
+    assert_eq!(
+        go(json!({ "node": "db", "down": true, "from_ms": 500 })).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        db_live(&st).unwrap().down_from,
+        Some(Duration::from_millis(500))
+    );
+    assert_eq!(
+        go(json!({ "edge": { "from": "app", "to": "db" }, "down": true, "from_ms": 500 })).await,
+        StatusCode::BAD_REQUEST,
+        "a link outage has no start"
+    );
+}

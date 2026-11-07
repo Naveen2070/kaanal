@@ -46,6 +46,7 @@ fn call(app: NodeId, tries: u8, bad: u8, status: u16, replica: u16) -> Vec<PlanI
         size: items.len(),
         budget: None,
         breaker: Some(breaker(replica)),
+        edge: 0,
     }];
     out.extend(items);
     out
@@ -218,6 +219,7 @@ fn an_attempt_with_no_items_is_rejected_and_retried_like_any_other() {
             size: 2,
             budget: None,
             breaker: Some(breaker(0)),
+            edge: 0,
         },
         PlanItem::Attempt {
             backoff: Duration::ZERO,

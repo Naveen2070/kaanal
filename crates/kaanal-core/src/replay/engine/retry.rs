@@ -16,7 +16,7 @@ use std::cmp::Reverse;
 use std::time::Duration;
 
 use super::state::{Cut, FailCause, Failure, NOT_STARTED, RETRY, RetryState, Token, live, nanos};
-use super::{Engine, NodeId, PlanItem};
+use super::{BreakerChange, BreakerState, Engine, NodeId, PlanItem, WireCounters};
 use crate::chaos::FailKind;
 use crate::exec::{BreakerRef, RetryBudget, retryable};
 
@@ -77,6 +77,10 @@ impl Engine {
                     self.retry_attempt(r, si, &f);
                     return;
                 }
+                // this scope's call ends here, failed
+                if let Some(w) = self.wire_of(r, si) {
+                    w.failed += 1;
+                }
             }
         }
         self.fail(r, f);
@@ -128,6 +132,7 @@ impl Engine {
             budget,
             breaker,
             attempts,
+            edge,
             ..
         } = req.plan.items[at]
         else {
@@ -158,11 +163,16 @@ impl Engine {
             timer: 0,
             attempts,
             first: at + 1,
+            edge,
+            retried: false,
             starts: Vec::new(),
         });
         req.tokens[k].at = at + 2;
-        // the first attempt asks the breaker; a rejection fails it and leaves this token a zombie
         let si = req.retries.len() - 1;
+        if let Some(w) = self.wire_of(r, si) {
+            w.calls += 1;
+        }
+        // the first attempt asks the breaker; a rejection fails it and leaves this token a zombie
         self.breaker_admits(r, si);
     }
 
@@ -174,12 +184,21 @@ impl Engine {
         let mut to = at;
         let mut paid: Vec<RetryBudget> = Vec::new();
         let mut ok: Vec<BreakerRef> = Vec::new();
-        for s in &mut req.retries {
+        let mut recovered: Vec<usize> = Vec::new();
+        for (si, s) in req.retries.iter_mut().enumerate() {
             if s.open && !s.waiting && s.cur_end == at {
                 s.open = false;
                 to = to.max(s.end);
                 paid.extend(s.budget);
                 ok.extend(s.breaker);
+                if s.retried {
+                    recovered.push(si);
+                }
+            }
+        }
+        for si in recovered {
+            if let Some(w) = self.wire_of(r, si) {
+                w.recovered += 1;
             }
         }
         for b in paid {
@@ -226,6 +245,8 @@ impl Engine {
                 s.timer = 0;
             }
         }
+        let first_retry = !req.retries[si].retried;
+        req.retries[si].retried = true;
         req.retries[si].waiting = true;
         req.retries[si].timer = seq;
         // queued tokens in the attempt leave their queues, as when a request fails
@@ -246,6 +267,10 @@ impl Engine {
             let req = live(&mut self.reqs, r);
             req.tokens[k].queued_at = None;
             req.busy -= 1;
+        }
+        if let Some(w) = self.wire_of(r, si) {
+            w.retries += 1;
+            w.retried += u64::from(first_retry);
         }
         self.release_cut_holds(r);
         let at = self.after(nanos(wait));
@@ -307,11 +332,16 @@ impl Engine {
             return true;
         };
         let now = self.now;
-        let d = self
-            .breakers
-            .entry(u32::from(b.edge) << 16 | u32::from(b.replica))
-            .or_insert_with(Breaker::new)
-            .allow(&cfg, now);
+        let d = {
+            let br = self
+                .breakers
+                .entry(u32::from(b.edge) << 16 | u32::from(b.replica))
+                .or_insert_with(Breaker::new);
+            let before = br.phase();
+            let d = br.allow(&cfg, now);
+            self.log_breaker(b, before, now);
+            d
+        };
         if d != Decision::Reject {
             return true;
         }
@@ -340,10 +370,41 @@ impl Engine {
             return;
         };
         let now = self.now;
-        self.breakers
+        let br = self
+            .breakers
             .entry(u32::from(b.edge) << 16 | u32::from(b.replica))
-            .or_insert_with(Breaker::new)
-            .record(&cfg, now, ok);
+            .or_insert_with(Breaker::new);
+        let before = br.phase();
+        br.record(&cfg, now, ok);
+        self.log_breaker(b, before, now);
+    }
+
+    /// **Private.** The counters of the wire scope `si` of request `r` runs over: `None` when the
+    /// request arrived before the warmup or the edge is unknown, so those calls are not counted.
+    fn wire_of(&mut self, r: usize, si: usize) -> Option<&mut WireCounters> {
+        let req = live(&mut self.reqs, r);
+        if req.arrival < self.warmup {
+            return None;
+        }
+        self.wires.get_mut(usize::from(req.retries[si].edge))
+    }
+
+    /// **Private.** Logs the breaker's new state when it is not `before`. Every change is kept (also
+    /// outside the window, so a timeline can show a breaker that was already open), up to the cap.
+    fn log_breaker(&mut self, b: BreakerRef, before: BreakerState, now: u64) {
+        let key = u32::from(b.edge) << 16 | u32::from(b.replica);
+        let Some(br) = self.breakers.get(&key) else {
+            return;
+        };
+        let state = br.phase();
+        if state != before && self.breaker_log.len() < super::BREAKER_LOG_CAP {
+            self.breaker_log.push(BreakerChange {
+                edge: b.edge,
+                replica: b.replica,
+                at: now,
+                state,
+            });
+        }
     }
 
     /// **Private.** Lets go of the slots a cut attempt held across calls, except where a hop of the

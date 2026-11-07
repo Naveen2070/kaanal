@@ -71,7 +71,7 @@ async fn a_bad_patch_is_400_and_changes_nothing() {
         assert_eq!(r.status(), 400, "{body}");
     }
     // a body of the wrong shape is the extractor's 422, like every other route
-    let r = patch(&s, json!([{ "op": "swap", "path": [] }])).await;
+    let r = patch(&s, json!([{ "op": "rotate", "path": [] }])).await;
     assert_eq!(r.status(), 422);
     let v: Value = s.get(URL).await.json().await.unwrap();
     assert_eq!((&v["text"], &v["dirty"]), (&json!(BASE), &json!(false)));

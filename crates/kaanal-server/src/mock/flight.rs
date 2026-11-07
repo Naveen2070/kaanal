@@ -90,8 +90,7 @@ pub(super) fn finish(st: &AppState, g: &Generation, read: Read, s: Served) -> Re
     } = s;
     let ep = &route.endpoint;
     let pinned = pin.map(|o| o.state.name());
-    let TraceParts { full, header } =
-        record::trace_parts(plan, &fin.hops, &fin.result, &g.topo, pinned);
+    let TraceParts { full, header } = record::trace_parts(plan, fin, &g.topo, pinned);
     let ask = Ask {
         method,
         path,

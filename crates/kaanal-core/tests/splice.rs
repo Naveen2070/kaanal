@@ -617,3 +617,121 @@ traffic:
         src.replace("bandwidth: 250KB }", "bandwidth: 256000 }")
     );
 }
+
+fn swap(a: &[&str], b: &[&str]) -> Edit {
+    Edit::Swap { a: p(a), b: p(b) }
+}
+
+const CHAIN: &str = "endpoints:
+  GET /x:
+    chain:
+      # first, the cache
+      - { cache: c1 }  # hit ends it
+      - call: db       # then the store
+        repeat: 2
+        # about the retry
+        retry: { max_attempts: 3 }
+      - api
+";
+
+#[test]
+fn swap_exchanges_two_block_items_and_keeps_every_comment_with_its_item() {
+    let out = splice(
+        CHAIN,
+        &[swap(
+            &["endpoints", "GET /x", "chain", "0"],
+            &["endpoints", "GET /x", "chain", "1"],
+        )],
+    )
+    .unwrap();
+    assert!(out.lost.is_empty(), "{:?}", out.lost);
+    assert_eq!(
+        out.text,
+        "endpoints:
+  GET /x:
+    chain:
+      # first, the cache
+      - call: db       # then the store
+        repeat: 2
+        # about the retry
+        retry: { max_attempts: 3 }
+      - { cache: c1 }  # hit ends it
+      - api
+"
+    );
+}
+
+#[test]
+fn swap_is_its_own_inverse_and_takes_the_items_in_either_order() {
+    let ab = swap(
+        &["endpoints", "GET /x", "chain", "1"],
+        &["endpoints", "GET /x", "chain", "2"],
+    );
+    let once = splice(CHAIN, std::slice::from_ref(&ab)).unwrap().text;
+    assert_ne!(once, CHAIN);
+    let twice = splice(
+        &once,
+        &[swap(
+            &["endpoints", "GET /x", "chain", "2"],
+            &["endpoints", "GET /x", "chain", "1"],
+        )],
+    )
+    .unwrap()
+    .text;
+    assert_eq!(twice, CHAIN);
+}
+
+#[test]
+fn swap_works_in_a_flow_list() {
+    let out = splice(
+        "chain: [a, { call: b, repeat: 2 }, c]
+",
+        &[swap(&["chain", "0"], &["chain", "2"])],
+    )
+    .unwrap();
+    assert_eq!(
+        out.text,
+        "chain: [c, { call: b, repeat: 2 }, a]
+"
+    );
+}
+
+#[test]
+fn swap_of_items_in_different_lists_or_missing_or_the_same_is_refused_or_skipped() {
+    let two = "a: [1, 2]
+b: [3]
+";
+    assert_eq!(
+        splice(two, &[swap(&["a", "0"], &["b", "0"])])
+            .unwrap()
+            .lost
+            .len(),
+        1
+    );
+    assert!(matches!(
+        splice(two, &[swap(&["a", "0"], &["a", "5"])]),
+        Err(SpliceError::NotFound(_))
+    ));
+    assert_eq!(
+        splice(two, &[swap(&["a", "1"], &["a", "1"])])
+            .unwrap()
+            .lost
+            .len(),
+        1
+    );
+    assert_eq!(
+        splice(two, &[swap(&["a", "1"], &["a", "1"])]).unwrap().text,
+        two
+    );
+}
+
+#[test]
+fn swap_leaves_an_anchored_item_alone() {
+    let src = "a:
+  - &x { k: 1 }
+  - { k: 2 }
+";
+    let out = splice(src, &[swap(&["a", "0"], &["a", "1"])]).unwrap();
+    assert_eq!(out.text, src);
+    assert_eq!(out.lost.len(), 1);
+}

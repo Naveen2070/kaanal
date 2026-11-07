@@ -443,3 +443,45 @@ async fn append_adds_one_item_to_a_list_and_keeps_the_rest_of_the_text() {
         assert_eq!(draft(&s).await["text"], want.as_str(), "{path}");
     }
 }
+
+#[tokio::test]
+async fn swap_exchanges_two_list_items_without_touching_the_rest_of_the_text() {
+    let s = start(BASE).await;
+    let r = s
+        .put(
+            URL,
+            json!({ "patch": [
+                { "op": "swap", "path": ["edges", 0], "with": ["edges", 1] },
+            ] }),
+        )
+        .await;
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    let before = draft_edges_after(&s).await;
+    assert_eq!(v["doc"]["edges"], before);
+    assert_eq!(v["lost"], json!([]));
+    // twice puts the text back exactly
+    let r = s
+        .put(
+            URL,
+            json!({ "patch": [
+                { "op": "swap", "path": ["edges", 1], "with": ["edges", 0] },
+            ] }),
+        )
+        .await;
+    let back: Value = r.json().await.unwrap();
+    assert_eq!(back["text"], BASE);
+    // a second path that is not a list index, or no `with`: refused, the draft unchanged
+    for body in [
+        json!({ "op": "swap", "path": ["edges", 0] }),
+        json!({ "op": "swap", "path": ["edges", 0], "with": ["edges", 9] }),
+        json!({ "op": "swap", "path": ["edges", 0], "with": [true] }),
+    ] {
+        s.put(URL, json!({ "patch": [body] })).await;
+        assert_eq!(draft(&s).await["text"], BASE);
+    }
+}
+
+async fn draft_edges_after(s: &Srv) -> Value {
+    draft(s).await["doc"]["edges"].clone()
+}

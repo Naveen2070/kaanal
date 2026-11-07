@@ -15,7 +15,9 @@ use std::fmt::Write as _;
 use saphyr_parser::{Event, Parser, ScalarStyle};
 
 mod append;
+mod swap;
 use append::append;
+use swap::swap;
 
 use crate::diagnostics::PathSeg;
 
@@ -50,6 +52,14 @@ pub enum Edit {
     Remove {
         /// Where.
         path: Vec<PathSeg>,
+    },
+    /// Exchanges two items of one list (`splice/swap.rs`): each keeps its own text and comments, and the
+    /// text between them stays put.
+    Swap {
+        /// The first item.
+        a: Vec<PathSeg>,
+        /// The second item, in the same list.
+        b: Vec<PathSeg>,
     },
     /// Renames the mapping key at `path` (its last step) to `to`; the value is not touched.
     RenameKey {
@@ -537,6 +547,7 @@ fn apply(t: &str, root: Option<&Node>, edit: &Edit, nl: &str) -> Result<Outcome,
         Edit::Insert { parent, key, value } => insert(t, root, parent, key, value, nl),
         Edit::Append { parent, value } => append(t, root, parent, value, nl),
         Edit::Remove { path } => remove(t, root, path),
+        Edit::Swap { a, b } => swap(t, root, a, b),
         Edit::RenameKey { path, to } => rename_key(root, path, to),
     }
 }

@@ -199,6 +199,7 @@ fn record(req: &Req) -> Finished {
             idx: i,
             hop: h,
             wait: Duration::from_nanos(req.waits[i]),
+            attempt: attempt_of_hop(req, i),
         });
     }
     // a hold still open at the answer is cut there, as a hop a failure cancelled is
@@ -275,6 +276,24 @@ fn attempts_of(req: &Req) -> Vec<FinishedAttempt> {
     }
     out.sort_by_key(|a| a.at);
     out
+}
+
+/// **Private.** The try of its call that plan item `i` ran in (1 for the first, and outside any retry): the
+/// deepest of the retries that started and whose attempt holds the item.
+fn attempt_of_hop(req: &Req, i: usize) -> u8 {
+    let mut best = 1;
+    for s in &req.retries {
+        for k in 1..=s.starts.len() {
+            let m = attempt_marker(&req.plan, s, k);
+            if let PlanItem::Attempt { size, .. } = req.plan.items[m]
+                && i > m
+                && i <= m + size
+            {
+                best = best.max(u8::try_from(k + 1).unwrap_or(u8::MAX));
+            }
+        }
+    }
+    best
 }
 
 /// **Private.** Plan index of the marker of attempt `k` (0-based) of scope `s`: the scope's attempts

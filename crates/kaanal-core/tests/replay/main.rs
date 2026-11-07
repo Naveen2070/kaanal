@@ -14,3 +14,4 @@ mod reference;
 mod replicas;
 mod retry;
 mod spans;
+mod wire_stats;

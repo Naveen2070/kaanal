@@ -92,6 +92,7 @@ pub(crate) fn simulate(
     }
     let mut records: Vec<(u64, RequestRecord)> = Vec::new();
     let mut attempts = crate::AttemptsByRequest::new();
+    let mut hop_attempts = crate::HopAttemptsByRequest::new();
     loop {
         let next_arrival = pending.peek().map(|Reverse((t, q, _))| (*t, *q));
         let arrival_first = match (next_arrival, engine.peek()) {
@@ -124,18 +125,7 @@ pub(crate) fn simulate(
             engine.step().map_err(overflow)?;
         }
         for f in engine.drain_finished_iter() {
-            if !f.attempts.is_empty() {
-                let key = (
-                    usize::try_from(f.tag >> TAG_BITS).expect("stream index fits"),
-                    f.tag & ((1 << TAG_BITS) - 1),
-                );
-                let list = f
-                    .attempts
-                    .iter()
-                    .map(|a| (a.at, a.n, a.of, a.node))
-                    .collect();
-                attempts.insert(key, list);
-            }
+            note_retries(&f, &mut attempts, &mut hop_attempts);
             records.push((
                 f.order,
                 RequestRecord {
@@ -159,9 +149,39 @@ pub(crate) fn simulate(
     }
     let peak = engine.table_len();
     Ok((
-        report(topo, &engine, (records, attempts), warmup, end),
+        report(
+            topo,
+            &engine,
+            (records, attempts, hop_attempts),
+            warmup,
+            end,
+        ),
         peak,
     ))
+}
+
+/// Keeps what a finished request retried: when each retry started, and the try each hop ran in. Most
+/// requests retry nothing and add nothing.
+fn note_retries(
+    f: &kaanal_core::replay::Finished,
+    attempts: &mut crate::AttemptsByRequest,
+    hop_attempts: &mut crate::HopAttemptsByRequest,
+) {
+    if f.attempts.is_empty() {
+        return;
+    }
+    let key = (
+        usize::try_from(f.tag >> TAG_BITS).expect("stream index fits"),
+        f.tag & ((1 << TAG_BITS) - 1),
+    );
+    attempts.insert(
+        key,
+        f.attempts
+            .iter()
+            .map(|a| (a.at, a.n, a.of, a.node))
+            .collect(),
+    );
+    hop_attempts.insert(key, f.hops.iter().map(|h| h.attempt).collect());
 }
 
 /// **Private.** Builds the report from requests arriving at or after warmup.
@@ -172,7 +192,11 @@ pub(crate) fn simulate(
 fn report(
     topo: &Topology,
     engine: &Engine,
-    (mut records, attempts): (Vec<(u64, RequestRecord)>, crate::AttemptsByRequest),
+    (mut records, attempts, hop_attempts): (
+        Vec<(u64, RequestRecord)>,
+        crate::AttemptsByRequest,
+        crate::HopAttemptsByRequest,
+    ),
     warmup: u64,
     end: u64,
 ) -> SimReport {
@@ -240,6 +264,9 @@ fn report(
         link_utilization,
         nic_utilization,
         attempts,
+        hop_attempts,
+        wires: engine.wire_counters().to_vec(),
+        breaker_changes: engine.breaker_changes().to_vec(),
     }
 }
 

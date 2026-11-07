@@ -185,6 +185,7 @@ mod tests {
                 size: 6,
                 budget: None,
                 breaker: None,
+                edge: 0,
             },
             a(1),
             hop(0, 10),

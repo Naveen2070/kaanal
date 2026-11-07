@@ -115,6 +115,10 @@ pub struct HopRec {
     pub cut: bool,
     /// Per-hop attribution, e.g. `chaos +40ms` or `pin delay`.
     pub why: Option<String>,
+    /// The retry (2 or more) this hop belongs to, as the trace's `retry=N/M` marker says; absent in a
+    /// first attempt and outside any retried call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u8>,
 }
 
 /// What the chain failed with before `error_map` and before a pin hid it.

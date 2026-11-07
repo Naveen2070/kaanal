@@ -30,12 +30,16 @@ mod state;
 
 use replicas::Units;
 use retry::Next;
+pub use state::{
+    BreakerChange, BreakerState, EngineError, FailCause, Finished, FinishedAttempt, FinishedHold,
+    FinishedHop, NodeCounters, WireCounters,
+};
 use state::{
     DEADLINE, Failure, Join, NOT_STARTED, RETRY, Req, Scratch, SpanState, Token, live, nanos,
 };
-pub use state::{
-    EngineError, FailCause, Finished, FinishedAttempt, FinishedHold, FinishedHop, NodeCounters,
-};
+
+/// Most breaker state changes the engine keeps.
+pub const BREAKER_LOG_CAP: usize = 10_000;
 
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].
@@ -58,6 +62,9 @@ pub struct Engine {
     breakers: std::collections::HashMap<u32, breaker::Breaker>,
     /// Each edge's breaker settings and its callee, for the edges that have one.
     breaker_cfg: Vec<Option<(crate::config::BreakerConfig, NodeId)>>,
+    /// Per-wire retry counts by edge, and the breaker state changes in order (step 7f, see `retry.rs`).
+    wires: Vec<WireCounters>,
+    breaker_log: Vec<BreakerChange>,
     finished: Vec<Finished>,
     order: u64,
     warmup: u64,
@@ -87,6 +94,8 @@ impl Engine {
                 .iter()
                 .map(|e| e.breaker.map(|b| (b, e.to)))
                 .collect(),
+            wires: vec![WireCounters::default(); topo.edges.len()],
+            breaker_log: Vec::new(),
             finished: Vec::new(),
             order: 0,
             warmup: 0,
@@ -140,6 +149,17 @@ impl Engine {
     /// Per-node totals, indexed by [`NodeId`].
     pub fn node_counters(&self) -> &[NodeCounters] {
         &self.counters[..self.units.nodes]
+    }
+
+    /// Retry counts per wire, indexed by edge (all zero for a wire with no retry scope).
+    pub fn wire_counters(&self) -> &[WireCounters] {
+        &self.wires
+    }
+
+    /// Every circuit breaker state change so far, in order. Capped at [`BREAKER_LOG_CAP`] entries (a
+    /// breaker that flaps all run would otherwise grow without bound); the first ones are kept.
+    pub fn breaker_changes(&self) -> &[BreakerChange] {
+        &self.breaker_log
     }
 
     /// Takes the answers produced so far, in the order they were decided.
