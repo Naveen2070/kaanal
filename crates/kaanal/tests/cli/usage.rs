@@ -9,8 +9,6 @@ fn bad_log_filter_exits_64_without_an_instance_in_both_modes() {
         &["logs", "-f", "--status", "9xx"],
         &["logs", "--since", "yesterday"],
         &["logs", "-f", "--since", "yesterday"],
-        &["logs", "--scope", ""],
-        &["logs", "-f", "--scope", ""],
     ] {
         assert_64(args);
     }
@@ -93,11 +91,6 @@ fn bad_from_exits_64() {
 fn n_out_of_range_exits_64() {
     assert_64(&["logs", "-n", "0"]);
     assert_64(&["logs", "-n", "1001"]);
-}
-
-#[test]
-fn empty_scope_exits_64() {
-    assert_64(&["logs", "--scope", ""]);
 }
 
 #[test]

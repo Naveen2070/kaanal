@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use axum::http::{Method, header};
+use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use percent_encoding::percent_decode_str;
 
@@ -55,7 +55,10 @@ impl Site {
 /// `index.html`. The result is canonical and checked to be a regular file under `root`, so a
 /// symlink that leads out is refused. A folder without `index.html` is `None`: no listing. A
 /// first segment of `__kaanal` (any case, after decoding) is the control prefix, never a file.
-pub fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
+///
+/// The flag says the path named a folder without a trailing `/`: [`serve`] answers that with a
+/// redirect, so the page's relative links resolve inside the folder.
+fn resolve(root: &Path, url_path: &str) -> Option<(PathBuf, bool)> {
     let decoded = percent_decode_str(url_path).decode_utf8().ok()?;
     if decoded.contains(['\0', '\\']) {
         return None;
@@ -75,9 +78,8 @@ pub fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     {
         return None;
     }
-    // ponytail: a folder without a trailing slash serves its index.html with no redirect, so its
-    // relative links resolve against `/`; add a 308 to `<path>/` if a real nested page needs it.
-    if decoded.ends_with('/') || p.is_dir() {
+    let slashless_folder = !decoded.ends_with('/') && p.is_dir();
+    if decoded.ends_with('/') || slashless_folder {
         p.push("index.html");
     }
     let real = p.canonicalize().ok()?;
@@ -90,7 +92,7 @@ pub fn safe_join(root: &Path, url_path: &str) -> Option<PathBuf> {
     {
         return None;
     }
-    real.is_file().then_some(real)
+    real.is_file().then_some((real, slashless_folder))
 }
 
 /// **Private.** Dot-names (`.env`, `.git`) are never served; `.well-known` is the one convention
@@ -100,29 +102,64 @@ fn hidden(seg: &str) -> bool {
 }
 
 /// Serves `url_path` from the site: `GET` and `HEAD` only (hyper drops a `HEAD` body), no CORS
-/// (same origin) and no caching beyond `no-cache`. `None` means not a site file: the caller
-/// falls through to the mock.
-pub async fn serve(site: &Site, method: &Method, url_path: &str) -> Option<Response> {
+/// (same origin) and no caching beyond `no-cache`. A folder asked for without its trailing `/` is a
+/// 308 to the same path with the slash (and the same `query`), so the page's relative links resolve
+/// inside the folder. `None` means not a site file: the caller falls through to the mock.
+pub async fn serve(
+    site: &Site,
+    method: &Method,
+    url_path: &str,
+    query: Option<&str>,
+) -> Option<Response> {
     if method != Method::GET && method != Method::HEAD {
         return None;
     }
     // Off the async workers, as `tokio::fs` would do (its feature is not enabled here).
-    let (root, url_path) = (site.root().to_path_buf(), url_path.to_string());
+    let (root, owned) = (site.root().to_path_buf(), url_path.to_string());
+    // The files are read whole into memory: a site is a few small pages and assets, and a mock's
+    // load is not file serving, so there is no streaming to keep in step with `HEAD`.
     let (file, bytes) = tokio::task::spawn_blocking(move || {
-        let file = safe_join(&root, &url_path)?;
-        // ponytail: GET and HEAD read the whole file into memory; stream the body if large
-        // assets appear.
+        let (file, slashless) = resolve(&root, &owned)?;
+        if slashless {
+            return Some((file, None));
+        }
         let bytes = std::fs::read(&file).ok()?;
-        Some((file, bytes))
+        Some((file, Some(bytes)))
     })
     .await
     .ok()??;
+    let Some(bytes) = bytes else {
+        return Some(folder_redirect(url_path, query));
+    };
     let headers = [
         (header::CONTENT_TYPE, content_type(&file)),
         (header::CACHE_CONTROL, "no-cache"),
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
     ];
     Some((headers, bytes).into_response())
+}
+
+/// **Private.** The 308 for a folder asked for without its trailing slash. The target is rebuilt from
+/// the path's non-empty segments, so it is always one slash then the segments (`//shop` is `/shop/`,
+/// never a link to another host), and it keeps the query.
+fn folder_redirect(url_path: &str, query: Option<&str>) -> Response {
+    let segments: Vec<&str> = url_path
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != ".")
+        .collect();
+    let mut to = format!("/{}/", segments.join("/"));
+    if let Some(q) = query.filter(|q| !q.is_empty()) {
+        to.push('?');
+        to.push_str(q);
+    }
+    (
+        StatusCode::PERMANENT_REDIRECT,
+        [
+            (header::LOCATION, to),
+            (header::CACHE_CONTROL, "no-cache".to_string()),
+        ],
+    )
+        .into_response()
 }
 
 /// **Private.** The content type by extension; anything else is `application/octet-stream`.

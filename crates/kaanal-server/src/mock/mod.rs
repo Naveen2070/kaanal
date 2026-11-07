@@ -77,7 +77,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Respon
     };
     // C11: a site file, when no spec route has this path. Before `Flight`, so it takes no id, no
     // counter and no log entry, and never meets the engine (chaos cannot hide the page).
-    if let Some(resp) = site_page(&g, req.method(), &path).await {
+    if let Some(resp) = site_page(&g, req.method(), &path, req.uri().query()).await {
         return resp;
     }
     // Preflights and site files take no id; everything below does, so ids count the requests that are logged.
@@ -107,12 +107,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Respon
     if let (Some(i), Some(s)) = (flight.ident.as_mut(), &scope) {
         i.scope = Some(s.0.clone());
     }
-    let params: Vec<(String, String)> = matched
-        .params
-        .iter()
-        // Invalid escapes are kept as typed; invalid UTF-8 becomes U+FFFD.
-        .map(|(k, v)| (k.to_string(), percent_decode_str(v).decode_utf8_lossy().into_owned()))
-        .collect();
+    let params = decoded_params(&matched.params);
     // Read before `read_body` takes the request; only paging reads it (an unpaged route skips
     // the parse), the link keeps the raw path.
     let query = route
@@ -124,8 +119,13 @@ pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Respon
         "a route answers with its own endpoint"
     );
     let body_len = request_len(&g, route, &mut req).await;
-    let sizes = sizes(&g, route, body_len, (method, path, &params, &query));
     let body = read_body(route, &params, req).await;
+    let sizes = sizes(
+        (&st, &g),
+        route,
+        (body_len, body.1.as_ref()),
+        (method, path, &params, &query),
+    );
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
     // S10: the scoped stack, or else one snapshot of the live one (the `Arc` is cloned once here
     // and kept until the entry is built, so a swap mid-request never reaches this request). A
@@ -176,6 +176,20 @@ pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Respon
         },
     );
     cors(resp)
+}
+
+/// **Private.** The path parameters, percent-decoded: invalid escapes are kept as typed and invalid
+/// UTF-8 becomes U+FFFD.
+fn decoded_params(params: &matchit::Params<'_, '_>) -> Vec<(String, String)> {
+    params
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.to_string(),
+                percent_decode_str(v).decode_utf8_lossy().into_owned(),
+            )
+        })
+        .collect()
 }
 
 /// **Private.** The decoded query pairs of `uri`, in order (`+` is a space; invalid escapes are
@@ -230,12 +244,17 @@ fn scope_of(
 }
 
 /// **Private.** The site file for `path`, when the config has a `site:` and no spec route has it.
-async fn site_page(g: &Generation, method: &Method, path: &str) -> Option<Response> {
+async fn site_page(
+    g: &Generation,
+    method: &Method,
+    path: &str,
+    query: Option<&str>,
+) -> Option<Response> {
     let site = g.site.as_ref()?;
     if g.paths.at(path).is_ok() {
         return None;
     }
-    crate::site::serve(site, method, path).await
+    crate::site::serve(site, method, path, query).await
 }
 
 /// **Private.** The 405 for a path that has no route for this method.
@@ -356,15 +375,17 @@ type Parts<'a> = (
 );
 
 /// **Private.** The size of the body this route answers when nothing fails, for link and `per_kb`
-/// costs: the serialized [`reply::success`] body, built before the chain runs (it is pure and
-/// seeded, so it is the body the client will get). A route with a collection or a built-in
-/// responder answers from state that the chain's outcome decides, so it counts 0 here.
-// ponytail: those routes pay no response transfer; size them if a real need shows up.
-// Read before `read_body` takes the request (it needs the headers).
+/// costs, built before the chain runs: the serialized [`reply::success`] body (pure and seeded, so it
+/// is the body the client will get); for a collection route the body its operation would answer on the
+/// collection as it is now (a preview, which changes nothing, so an add that a later failure drops
+/// leaves no trace); for the JWKS route its key set. A login's reply is not sized: it is a signed
+/// token whose length depends on the account, and signing it here would double the work of a login.
+/// `call` is the collection operation `read_body` built; `body_len` is the request's size, read
+/// before the body was taken (it needs the headers).
 fn sizes(
-    g: &Generation,
+    (st, g): (&AppState, &Generation),
     route: &Route,
-    body_len: u64,
+    (body_len, call): (u64, Option<&Call>),
     (method, path, params, query): Parts,
 ) -> (u64, u64) {
     // Only a topology with a payload cost looks at sizes at all.
@@ -374,8 +395,9 @@ fn sizes(
     (
         body_len,
         resp_bytes(
-            g,
+            (st, g),
             route,
+            call,
             &Ask {
                 method,
                 path,
@@ -387,16 +409,28 @@ fn sizes(
 }
 
 /// **Private.** The response half of [`sizes`].
-fn resp_bytes(g: &Generation, route: &Route, ask: &Ask) -> u64 {
+fn resp_bytes(
+    (st, g): (&AppState, &Generation),
+    route: &Route,
+    call: Option<&Call>,
+    ask: &Ask,
+) -> u64 {
     let ep = &route.endpoint;
     // hyper strips a HEAD body, so the client never receives those bytes
-    if ask.method == "HEAD"
-        || ep.collection.is_some()
-        || (ep.responder.is_some() && ep.response.is_none())
-    {
+    if ask.method == "HEAD" {
         return 0;
     }
-    let (_, body) = reply::success(g, route, ask);
+    let body = if let Some(call) = call {
+        call.preview(&st.collections).1
+    } else {
+        match ep.responder.filter(|_| ep.response.is_none()) {
+            Some(Responder::Jwks) => auth::respond(Responder::Jwks, g.auth.as_ref(), None).1,
+            // a login's reply is not sized (see `sizes`)
+            Some(_) => return 0,
+            None if ep.collection.is_some() => return 0,
+            None => reply::success(g, route, ask).1,
+        }
+    };
     if body.is_null() {
         0
     } else {

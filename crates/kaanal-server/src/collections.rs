@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
+use crate::body::{ReadError, read_capped};
 use axum::extract::Request;
 use kaanal_core::{CollectionOp, collection_op};
 use serde_json::{Value, json};
@@ -26,9 +27,8 @@ struct List {
 }
 
 /// Every collection of a running server, by name.
-// ponytail: one lock for every collection; per-collection locks if a load test ever shows contention.
-// A list clones the whole collection under the lock (up to about 64 MB at 1000 x 64 KiB); store
-// `Arc<Value>` items, or serialize under the lock, if that memory or lock time ever matters.
+// One lock covers every collection. A list clones the whole collection under it (up to about 64 MB
+// at 1000 x 64 KiB), which a local mock's load stays far below.
 #[derive(Default)]
 pub struct Collections {
     lists: Mutex<HashMap<String, List>>,
@@ -154,18 +154,16 @@ pub(crate) fn op_of(route: &Route) -> Option<CollectionOp> {
 /// succeeded (as a login body is). The body is read with a hard cap, whatever its `Content-Length`.
 pub(crate) type Item = Result<Value, (u16, Value)>;
 
-/// Reads and parses an add's body: over [`MAX_ITEM_BYTES`] is a 413, anything that is not JSON
-/// (invalid UTF-8 and nesting past serde's recursion limit included) a 400. The shape is checked
-/// by [`Collections::apply`].
+/// Reads and parses an add's body: over [`MAX_ITEM_BYTES`] is a 413, a body that could not be read
+/// to the end or is not JSON (invalid UTF-8 and nesting past serde's recursion limit included) a
+/// 400. The shape is checked by [`Collections::apply`].
 pub(crate) async fn read_item(req: Request) -> Item {
-    let too_large = || (413, json!({ "error": "item too large" }));
-    // ponytail: any body read error counts as too large, as for a login body.
-    let body = axum::body::to_bytes(req.into_body(), MAX_ITEM_BYTES + 1)
+    let body = read_capped(req, MAX_ITEM_BYTES)
         .await
-        .map_err(|_| too_large())?;
-    if body.len() > MAX_ITEM_BYTES {
-        return Err(too_large());
-    }
+        .map_err(|e| match e {
+            ReadError::TooLarge => (413, json!({ "error": "item too large" })),
+            ReadError::Broken => (400, json!({ "error": "item body could not be read" })),
+        })?;
     serde_json::from_slice(&body)
         .map_err(|_| (400, json!({ "error": "item must be a JSON object" })))
 }

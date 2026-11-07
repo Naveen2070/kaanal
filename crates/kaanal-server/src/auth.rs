@@ -12,6 +12,7 @@
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::body::{ReadError, read_capped};
 use axum::extract::Request;
 use axum::http::header;
 use base64::Engine as _;
@@ -222,9 +223,8 @@ impl Issuer {
 const MAX_LOGIN_BODY: usize = 16 * 1024;
 
 /// The two fields `POST /login` reads. Extra fields (`grant_type`, …) are ignored; serde's
-/// derive rejects duplicate, missing and non-string ones (P12). `Debug` hides the password.
-// ponytail: serde also reads a struct from a JSON array, so `["alice","pw"]` logs in too;
-// harmless for a local mock, add a map-only visitor if that ever matters.
+/// derive rejects duplicate, missing and non-string ones (P12). `Debug` hides the password. A JSON
+/// body must be an object: serde would also read a struct from an array, which [`read_login`] refuses.
 #[derive(Deserialize)]
 pub(crate) struct Credentials {
     /// **Private.** The account name.
@@ -267,12 +267,18 @@ pub(crate) async fn read_login(req: Request) -> Result<Credentials, Reject> {
         // `fetch` with `JSON.stringify` and no header sends text/plain (documented in auth.md).
         _ => return Err((415, "unsupported_media_type")),
     };
-    // ponytail: any body read error counts as too large; a client whose body stream breaks never reads the answer.
-    let body = axum::body::to_bytes(req.into_body(), MAX_LOGIN_BODY)
+    let body = read_capped(req, MAX_LOGIN_BODY)
         .await
-        .map_err(|_| (413, "request_too_large"))?;
+        .map_err(|e| match e {
+            ReadError::TooLarge => (413, "request_too_large"),
+            ReadError::Broken => (400, "invalid_request"),
+        })?;
     let creds = if json {
-        serde_json::from_slice::<Credentials>(&body).ok()
+        // an array (`["alice","pw"]`) is not a login, though serde would read it into the struct
+        let object = body.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{');
+        object
+            .then(|| serde_json::from_slice::<Credentials>(&body).ok())
+            .flatten()
     } else {
         serde_urlencoded::from_bytes::<Credentials>(&body).ok()
     };

@@ -10,7 +10,7 @@
 use std::ffi::OsString;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kaanal_server::AuthKey;
 use sha2::{Digest, Sha256};
@@ -27,6 +27,8 @@ pub(crate) fn signing_key(config: &Path) -> Result<AuthKey, Fail> {
     )?;
     private_dir(&dir)?;
     let file = dir.join(format!("{}.pem", key_id(config)?));
+    // another `up` may be writing the key in place (no hard links here): never read half of it
+    wait_unlocked(&file, LOCK_WAIT);
     match std::fs::read_to_string(&file) {
         Ok(pem) => parse(&file, &pem),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -91,12 +93,14 @@ fn store(dir: &Path, file: &Path, pem: &str) -> Result<String, Fail> {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    // ponytail: pid + clock names the temp file; a crash may leave one behind, which is
-    // ignored (spec section 10 Q4). Add a sweep of old `*.tmp` files if they ever pile up.
+    // pid + clock names the temp file; a crash may leave one behind, which is ignored (spec
+    // section 10 Q4).
     let tmp = dir.join(format!("{stem}.{}-{nanos}.tmp", std::process::id()));
     let linked = write_new(&tmp, pem).and_then(|()| match std::fs::hard_link(&tmp, file) {
         // No hard links here (FAT, some network shares): create the final name directly.
-        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => create_direct(file, pem),
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
+            create_locked(file, pem, LOCK_WAIT)
+        }
         r => r,
     });
     let _ = std::fs::remove_file(&tmp);
@@ -116,12 +120,65 @@ fn store(dir: &Path, file: &Path, pem: &str) -> Result<String, Fail> {
     }
 }
 
-/// **Private.** The fallback when `hard_link` is unsupported: creates `file` (which must not
-/// exist; an existing one is `AlreadyExists`, so the caller adopts it) and writes the key.
-/// A failed write removes the partial file again.
-// ponytail: not atomic: a racing second `up` could read the file mid-write and stop with
-// "delete the file to generate a new key". Only on filesystems without hard links; add an
-// exclusive lock file around `store` if that ever shows up.
+/// How long a key file's lock is waited for. A lock older than this was left by a process that died
+/// holding it, and is removed.
+const LOCK_WAIT: Duration = Duration::from_secs(5);
+
+/// **Private.** `<file>.lock`: present while one `up` writes the key into place.
+fn lock_path(file: &Path) -> PathBuf {
+    let mut name = file.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// **Private.** Waits until no other process holds `file`'s lock, for at most `wait`; a lock that old
+/// is treated as left behind and removed.
+fn wait_unlocked(file: &Path, wait: Duration) {
+    let lock = lock_path(file);
+    let start = Instant::now();
+    while lock.exists() {
+        let age = std::fs::metadata(&lock)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok());
+        if age.is_some_and(|a| a >= wait) || start.elapsed() >= wait {
+            let _ = std::fs::remove_file(&lock);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// **Private.** The fallback when `hard_link` is unsupported (FAT, some shares): [`create_direct`]
+/// under an exclusive lock file, so a second `up` waits for the first to finish and then adopts its
+/// key (`AlreadyExists`) instead of reading half of it.
+fn create_locked(file: &Path, pem: &str, wait: Duration) -> std::io::Result<()> {
+    let lock = lock_path(file);
+    for _ in 0..3 {
+        let mut opts = std::fs::OpenOptions::new();
+        match opts.write(true).create_new(true).open(&lock) {
+            Ok(held) => {
+                drop(held);
+                let made = create_direct(file, pem);
+                let _ = std::fs::remove_file(&lock);
+                return made;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                wait_unlocked(file, wait);
+                if file.exists() {
+                    return Err(std::io::ErrorKind::AlreadyExists.into());
+                }
+                // the holder died before it wrote anything: take the lock ourselves
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("the key file stayed locked"))
+}
+
+/// **Private.** Creates `file` (which must not exist; an existing one is `AlreadyExists`, so the
+/// caller adopts it) and writes the key. A failed write removes the partial file again. Callers
+/// hold the file's lock ([`create_locked`]), so no one else reads it while it is written.
 fn create_direct(file: &Path, pem: &str) -> std::io::Result<()> {
     write_new(file, pem).inspect_err(|e| {
         if e.kind() != std::io::ErrorKind::AlreadyExists {
@@ -182,6 +239,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn a_fresh_locked_create_writes_the_key_and_leaves_no_lock() {
+        let d = scratch("lock-fresh");
+        let file = d.join("k.pem");
+        create_locked(&file, "KEY", Duration::from_secs(2)).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "KEY");
+        assert!(!lock_path(&file).exists());
+    }
+
+    #[test]
+    fn a_second_writer_waits_for_the_lock_then_adopts_the_first_key() {
+        let d = scratch("lock-wait");
+        let file = d.join("k.pem");
+        let lock = lock_path(&file);
+        std::fs::write(&lock, "").unwrap();
+        let (f2, l2) = (file.clone(), lock.clone());
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            write_new(&f2, "FIRST").unwrap();
+            std::fs::remove_file(&l2).unwrap();
+        });
+        let r = create_locked(&file, "SECOND", Duration::from_secs(5));
+        holder.join().unwrap();
+        assert_eq!(r.unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "FIRST");
+    }
+
+    #[test]
+    fn a_lock_left_by_a_dead_process_is_removed_and_the_key_is_written() {
+        let d = scratch("lock-stale");
+        let file = d.join("k.pem");
+        let lock = lock_path(&file);
+        let held = std::fs::File::create(&lock).unwrap();
+        held.set_modified(SystemTime::now() - Duration::from_secs(60))
+            .unwrap();
+        drop(held);
+        create_locked(&file, "KEY", Duration::from_millis(100)).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "KEY");
+        assert!(!lock_path(&file).exists());
+    }
+
+    #[test]
+    fn waiting_for_no_lock_returns_at_once() {
+        let d = scratch("lock-none");
+        let t = Instant::now();
+        wait_unlocked(&d.join("k.pem"), Duration::from_secs(5));
+        assert!(t.elapsed() < Duration::from_millis(500));
     }
 
     #[test]

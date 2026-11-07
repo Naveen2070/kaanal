@@ -31,7 +31,7 @@ site: web # a folder next to kaanal.yaml
 
 Every file is sent with `Cache-Control: no-cache` and `X-Content-Type-Options: nosniff`. The content type comes from the extension: `html`, `css`, `js`, `mjs`, `json`, `map`, `txt`, `svg`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `ico`, `woff`, `woff2`; anything else is `application/octet-stream`. Files get no CORS headers: the page is same-origin.
 
-A folder requested without a trailing slash (`/shop`) is served as `shop/index.html` with no redirect, so relative links inside that page resolve against `/`, not `/shop/`. Use root-absolute links (`/app.js`, not `app.js`).
+A folder requested without a trailing slash (`/shop`) gets a `308` to `/shop/` (the query string is kept), so the page's relative links resolve inside the folder. The target is always one slash followed by the path's own segments, so `//shop` is `/shop/` and never a link to another host. A folder with no `index.html` is still a 404.
 
 Names that start with a dot (`.env`, `.git/config`) are never served, except under `.well-known`; this is checked on the resolved path too, so a link to one is refused. Paths that try to leave the folder (`..` in any spelling, `\`, a drive letter, a `NUL` byte, a symlink that points outside) are never served; they get the mock's 404.
 

@@ -10,10 +10,6 @@ pub(crate) fn logs_cmd(a: &LogsArgs) -> Result<(), Fail> {
     if !(1..=1000).contains(&a.n) {
         return Err(Fail::usage("-n must be from 1 to 1000"));
     }
-    if a.scope.as_deref() == Some("") {
-        // ponytail: the server can filter the empty-header scope, the CLI cannot ask for it yet
-        return Err(Fail::usage("--scope needs a scope name"));
-    }
     let params: Vec<(String, String)> = [
         Some(("limit", a.n.to_string())),
         a.since.clone().map(|v| ("since", v)),

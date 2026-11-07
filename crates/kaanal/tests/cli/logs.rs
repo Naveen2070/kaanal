@@ -9,6 +9,17 @@ impl Up {
     /// A GET of `path` on the mock, with an optional client `X-Request-Id`; returns the status
     /// and the `X-Request-Id` the server answered with.
     pub(crate) fn hit(&self, path: &str, rid: Option<&str>) -> (u16, String) {
+        self.hit_with(path, rid, None)
+    }
+
+    /// Like [`Up::hit`], also sending `X-Kaanal-Scenario: <scope>` (an empty string sends the
+    /// header with no value).
+    pub(crate) fn hit_with(
+        &self,
+        path: &str,
+        rid: Option<&str>,
+        scope: Option<&str>,
+    ) -> (u16, String) {
         let run: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(self.dir.join(".kaanal/run.json")).unwrap(),
         )
@@ -21,6 +32,9 @@ impl Up {
         let mut req = agent.get(&format!("http://127.0.0.1:{}{path}", run["port"]));
         if let Some(r) = rid {
             req = req.header("X-Request-Id", r);
+        }
+        if let Some(s) = scope {
+            req = req.header("X-Kaanal-Scenario", s);
         }
         let resp = req.call().unwrap();
         let id = resp
@@ -133,7 +147,18 @@ fn logs_default_n_and_each_filter() {
     assert!(r.lines().count() == 1 && r.contains("503"), "{r}");
     assert_eq!(ok(&up, &["logs", "--scope", "nobody"]), "");
     assert!(usage_fails(&up, &["logs", "--status", "9xx"]).contains("status"));
-    assert!(usage_fails(&up, &["logs", "--scope", ""]).contains("scope"));
+}
+
+#[test]
+fn an_empty_scope_asks_for_the_requests_sent_with_an_empty_scenario_header() {
+    let up = Up::start("logs-empty-scope");
+    assert_eq!(up.hit("/health", None).0, 200);
+    assert_eq!(up.hit_with("/health", None, Some("")).0, 200);
+    let r = ok(&up, &["logs", "--scope", ""]);
+    assert_eq!(r.lines().count(), 1, "{r}");
+    // a named scope matches neither, and with no filter both show
+    assert_eq!(ok(&up, &["logs", "--scope", "nobody"]), "");
+    assert_eq!(ok(&up, &["logs"]).lines().count(), 2);
 }
 
 #[test]

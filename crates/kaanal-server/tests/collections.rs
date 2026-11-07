@@ -416,6 +416,10 @@ struct Srv {
 }
 
 async fn start(name: &str) -> Srv {
+    start_with(name, CONFIG).await
+}
+
+async fn start_with(name: &str, config: &str) -> Srv {
     let dir: PathBuf =
         std::env::temp_dir().join(format!("kaanal-coll-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -429,7 +433,7 @@ async fn start(name: &str) -> Srv {
         auth_key: None,
         draft: None,
     };
-    let s = kaanal_server::serve(&Config::from_yaml(CONFIG).unwrap(), &dir, opts)
+    let s = kaanal_server::serve(&Config::from_yaml(config).unwrap(), &dir, opts)
         .await
         .unwrap();
     Srv {
@@ -513,4 +517,41 @@ impl Srv {
             .await;
         assert!(r.status().is_success(), "{pin}");
     }
+}
+
+/// The milliseconds of the `link-resp` hop in a trace header (`app.link-resp=812.3ms`).
+fn link_resp_ms(trace: &str) -> f64 {
+    let at = trace.find("link-resp=").expect("a link-resp hop") + "link-resp=".len();
+    let num: String = trace[at..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    num.parse().unwrap()
+}
+
+#[tokio::test]
+async fn a_collection_list_pays_for_its_size_on_a_slow_link() {
+    // a 50 KB/s wire in front of the notes service
+    let config = CONFIG.replace(
+        "{ from: nginx, to: app, net: 1ms }",
+        "{ from: nginx, to: app, net: 1ms, bandwidth: 50KB/s }",
+    );
+    let s = start_with("sized", &config).await;
+    let trace_of =
+        |r: reqwest::Response| r.headers()["x-kaanal-trace"].to_str().unwrap().to_string();
+    // empty: a two-byte body, next to nothing on the wire
+    let empty = link_resp_ms(&trace_of(s.get("/notes").await));
+    // twenty notes of about 2 KB each: about 40 KB, near 0.8 s at 50 KB/s
+    for i in 0..20 {
+        assert_eq!(
+            s.post(json!({ "i": i, "text": "x".repeat(2000) })).await.0,
+            201
+        );
+    }
+    let full = link_resp_ms(&trace_of(s.get("/notes").await));
+    assert!(empty < 20.0, "{empty}");
+    assert!(full > 400.0 && full < 2000.0, "{full}");
+    // one note is about 2 KB: well under the list
+    let one = link_resp_ms(&trace_of(s.get("/notes/1").await));
+    assert!(one > 20.0 && one < full / 4.0, "{one} vs {full}");
 }

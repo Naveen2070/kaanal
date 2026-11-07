@@ -10,6 +10,7 @@
 
 mod actor;
 mod auth;
+mod body;
 mod chaos_lease;
 mod collections;
 mod control;

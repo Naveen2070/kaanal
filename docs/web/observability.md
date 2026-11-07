@@ -77,6 +77,7 @@ kaanal logs --failed              # only requests a node failed
 kaanal logs --route "GET /users/{id}"
 kaanal logs --since 5m            # a duration, or an RFC 3339 time
 kaanal logs --scope payments-down # requests that ran under that scenario scope
+kaanal logs --scope ""            # requests sent with an empty X-Kaanal-Scenario header
 kaanal logs --json                # one JSON object per line (the full entry); --json is global
 kaanal logs -f                    # follow live
 ```

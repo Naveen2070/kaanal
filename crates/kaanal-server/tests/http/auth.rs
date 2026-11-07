@@ -185,6 +185,8 @@ async fn malformed_duplicate_or_non_string_fields_are_400_without_echo() {
             r#"{"username":"alice","password":"s3cr3t-pw""#,
         ),
         ("application/json", "[]"),
+        ("application/json", r#"["alice","s3cr3t-pw"]"#),
+        ("application/json", r#"  ["alice","s3cr3t-pw"]"#),
         (
             "application/x-www-form-urlencoded",
             "username=alice&password=s3cr3t-pw&password=s3cr3t-pw",

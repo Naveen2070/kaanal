@@ -224,10 +224,63 @@ async fn index_html_at_root() {
     assert!(r.headers().get("access-control-allow-origin").is_none());
     assert!(r.headers().get("x-request-id").is_none());
     assert_eq!(r.text().await.unwrap(), "<h1>home</h1>");
-    // a folder with an index answers with it, with or without the slash
+    // a folder with an index answers with it at its slash path, and redirects to it without
     s.web("shop/index.html", b"shop");
     assert_eq!(s.get("/shop/").await.text().await.unwrap(), "shop");
-    assert_eq!(s.get("/shop").await.text().await.unwrap(), "shop");
+    assert_eq!(s.get("/shop").await.text().await.unwrap(), "shop"); // reqwest follows the 308
+}
+
+/// A client that shows a redirect instead of following it.
+fn no_follow() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_folder_without_its_slash_is_a_308_to_the_slash_and_keeps_the_query() {
+    let s = start("slash").await;
+    s.web("shop/index.html", b"shop");
+    let c = no_follow();
+    let r = c
+        .get(format!("{}/shop?x=1&y=2", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 308);
+    assert_eq!(r.headers()["location"], "/shop/?x=1&y=2");
+    assert_eq!(r.headers()["cache-control"], "no-cache");
+    // a nested folder, and HEAD, redirect the same way
+    s.web("a/b/index.html", b"ab");
+    let r = c.head(format!("{}/a/b", s.base)).send().await.unwrap();
+    assert_eq!(r.status(), 308);
+    assert_eq!(r.headers()["location"], "/a/b/");
+    // the slash form and a file are served, not redirected
+    let r = c.get(format!("{}/shop/", s.base)).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    s.web("shop/app.js", b"x");
+    let r = c
+        .get(format!("{}/shop/app.js", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+#[tokio::test]
+async fn the_redirect_never_points_at_another_host() {
+    let s = start("slash-host").await;
+    s.web("shop/index.html", b"shop");
+    for path in ["//shop", "///shop", "/./shop", "//./shop"] {
+        let r = no_follow()
+            .get(format!("{}{path}", s.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 308, "{path}");
+        assert_eq!(r.headers()["location"], "/shop/", "{path}");
+    }
 }
 
 #[tokio::test]

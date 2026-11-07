@@ -93,9 +93,11 @@ pub(crate) fn sample(g: &Generation, key: &str, seed: Option<u64>) -> Option<Sam
     })
 }
 
-/// The size in bytes the mock charges for the response of `key`: one sampled body, or 0 where the
-/// mock charges nothing (a `HEAD`, whose body hyper strips; a `collection:` route; a built-in
-/// responder without an `override`). `sample` itself still returns the body for a preview.
+/// The size in bytes the mock charges for the response of `key`: one sampled body, or 0 where there is
+/// nothing to size here: a `HEAD` (hyper strips its body), a `collection:` route (a run starts with
+/// no stored items; the live mock sizes what the collection holds) and a built-in responder without
+/// an `override` (the live mock sizes the JWKS key set). `sample` itself still returns the body for
+/// a preview.
 pub(crate) fn sized(g: &Generation, key: &str, seed: u64) -> usize {
     let Some(route) = find_route(g, key) else {
         return 0;
