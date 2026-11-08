@@ -104,6 +104,7 @@ export function Results() {
                 {/* two measures stack in one row: the name over its figure, the limit under it */}
                 <div className="tabular-nums text-[11px] text-muted">
                   {r.wire ? "Wire · " : ""}
+                  {r.cpuBound ? "CPU bound · " : ""}
                   {r.saturatesAtReqS !== null
                     ? `saturates at ${twoSignificant(r.saturatesAtReqS)} req/s`
                     : "no saturation point"}

@@ -215,6 +215,14 @@ const DEFS = {
     hint: "None by default.",
     real: "An API gateway's throttle.",
   },
+  cores: {
+    label: "Cores",
+    what: "The CPUs this component's own work shares. More work running at once than cores slows every piece down.",
+    example:
+      "Ten 10 ms requests running together on 2 cores each get a fifth of a core, so each takes about 50 ms.",
+    hint: "Leave it empty for a component that is not CPU bound; set it to your instance's vCPU count to see the slowdown near saturation.",
+    real: "A server's vCPUs, or a container's CPU limit such as 0.5.",
+  },
   burst: {
     label: "Burst",
     what: "How many requests the bucket holds, so a short spike above the limit is let through.",

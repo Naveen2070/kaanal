@@ -7,6 +7,10 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## CPUs: work slows when more runs than there are cores
+
+Off unless written (`cpu: { cores: N }` on a gateway, service, monolith, database, auth or load balancer; Studio: **CPUs** in a component's Settings). A node's own work (its `proc` and operations) is shared among the requests running it, so with `n` at once each runs at `min(1, N / n)` of its speed: processor sharing, checked against M/G/1 and Erlang C to within about 2%. Slots (`concurrency`) still decide how many are admitted. Waiting on callees, the wire and wait steps are not stretched. The summary gains `cpu_load`, `cpu_capacity_per_s` and `saturates_by`, and Results says **CPU bound**. The live mocks ignore it until live-load mode. Memory, disk and instance presets are planned.
+
 ## How failure is costed: retries, abandon, breakers and detect
 
 All off unless written (`retry`, `abandon`, `breaker`, `detect` on an edge). A retry loads the callee again and waits a

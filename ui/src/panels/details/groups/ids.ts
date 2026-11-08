@@ -17,6 +17,7 @@ export const NODE_GROUP = {
   limit: "node.limit",
   balance: "node.balance",
   style: "node.style",
+  cpu: "node.cpu",
   steps: "node.steps",
 } as const;
 

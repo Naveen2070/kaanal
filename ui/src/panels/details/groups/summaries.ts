@@ -4,7 +4,7 @@
 // read from the same constants the boxes use (`resilience.ts`, `edgeFields.ts`), never copied.
 
 import type { Doc, EdgeDoc, NodeDoc, Op } from "../../../data/api/types";
-import { balanceOf, cardOf, holdOf, rateLimitOf } from "../fields";
+import { balanceOf, cardOf, coresOf, holdOf, rateLimitOf } from "../fields";
 import { rateText } from "../units";
 import {
   callsOf,
@@ -146,13 +146,14 @@ export function nodeCardSummary(config: NodeDoc): string {
 
 // ---- a component's groups ----
 
-export type NodeGroup = "limit" | "balance" | "style";
+export type NodeGroup = "limit" | "balance" | "style" | "cpu";
 
 /** The keys of a component that each group owns. */
 export const NODE_GROUP_KEYS: Record<NodeGroup, readonly string[]> = {
   limit: ["rate_limit"],
   balance: ["balance", "spread", "detect"],
   style: ["hold"],
+  cpu: ["cpu"],
 };
 
 export const nodeGroupChanged = (g: NodeGroup, c: NodeDoc): boolean =>
@@ -170,6 +171,12 @@ export function limitSummary(c: NodeDoc): string {
   const l = rateLimitOf(c);
   if (l) return `${count(l.rps)} / s · burst ${count(l.burst)}`;
   return "rate_limit" in c ? "set in kaanal.yaml" : "none";
+}
+
+export function cpuSummary(c: NodeDoc): string {
+  const n = coresOf(c);
+  if (n !== null) return `${n} core${n === 1 ? "" : "s"}`;
+  return "cpu" in c ? "set in kaanal.yaml" : "not limited";
 }
 
 export const styleSummary = (c: NodeDoc): string =>

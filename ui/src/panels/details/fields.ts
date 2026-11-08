@@ -220,6 +220,7 @@ export const LIMITS = {
   queue: { min: 0, max: 1_000_000 },
   serviceMs: { min: 0, max: 60_000 },
   timeoutMs: { min: 0.001, max: 300_000 },
+  cores: { min: 0.001, max: 4096 },
   rate: { min: 0.000001, max: 1_000_000 },
 } as const;
 
@@ -432,4 +433,30 @@ export function setCard(
   if (out === null && rx === null) return present ? [{ op: "remove", path }] : [];
   const value = out === rx ? out : { ...(out !== null && { out }), ...(rx !== null && { in: rx }) };
   return [put(path, present, value)];
+}
+
+/** The kinds whose compute the person sizes, so they take `cpu` (not a cache, an external API or a store). */
+export const CPU_KINDS: readonly string[] = [
+  "gateway",
+  "service",
+  "monolith",
+  "database",
+  "auth",
+  "load-balancer",
+];
+export const hasCpu = (type: string): boolean => CPU_KINDS.includes(type);
+
+/** The cores a component shares its own work over (`cpu: { cores }`); null = no sharing. */
+export function coresOf(config: NodeDoc): number | null {
+  const c = config.cpu;
+  const n = isObject(c) ? c.cores : null;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** The patch for the cores box: a number writes `cpu: { cores }`, null removes the field. */
+export function setCores(name: string, config: NodeDoc, cores: number | null): Op[] {
+  const path = ["nodes", name, "cpu"];
+  const present = "cpu" in config;
+  if (cores === null || !(cores > 0)) return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, { cores })];
 }

@@ -3,6 +3,9 @@ import type { NodeDoc } from "../../data/api/types";
 import { nodeSummary } from "../../test/summary";
 import {
   balanceOf,
+  coresOf,
+  hasCpu,
+  setCores,
   carriesEstimates,
   cardOf,
   chaosBody,
@@ -330,4 +333,35 @@ test("only_the_starter_values_count_as_estimates", () => {
   expect(carriesEstimates({ ...starter, first_byte: "26ms" })).toBe(false);
   expect(carriesEstimates({ ...starter, first_byte: { p50: "25ms", p99: "100ms" } })).toBe(false);
   expect(carriesEstimates({ type: "storage" })).toBe(false);
+});
+
+describe("cores", () => {
+  const svc: NodeDoc = { type: "service" };
+
+  test("only_the_kinds_whose_compute_is_sized_have_a_cpu_box", () => {
+    for (const t of ["gateway", "service", "monolith", "database", "auth", "load-balancer"])
+      expect(hasCpu(t), t).toBe(true);
+    for (const t of ["cache", "external-api", "storage"]) expect(hasCpu(t), t).toBe(false);
+  });
+
+  test("coresOf_reads_a_positive_number_and_nothing_else", () => {
+    expect(coresOf({ ...svc, cpu: { cores: 0.5 } })).toBe(0.5);
+    expect(coresOf(svc)).toBeNull();
+    expect(coresOf({ ...svc, cpu: { cores: 0 } })).toBeNull();
+    expect(coresOf({ ...svc, cpu: { cores: "x" } })).toBeNull();
+    expect(coresOf({ ...svc, cpu: 4 })).toBeNull();
+  });
+
+  test("setCores_inserts_replaces_and_removes_in_one_op", () => {
+    expect(setCores("app", svc, 4)).toEqual([
+      { op: "insert", path: ["nodes", "app", "cpu"], value: { cores: 4 } },
+    ]);
+    expect(setCores("app", { ...svc, cpu: { cores: 4 } }, 2)).toEqual([
+      { op: "set", path: ["nodes", "app", "cpu"], value: { cores: 2 } },
+    ]);
+    expect(setCores("app", { ...svc, cpu: { cores: 4 } }, null)).toEqual([
+      { op: "remove", path: ["nodes", "app", "cpu"] },
+    ]);
+    expect(setCores("app", svc, null)).toEqual([]);
+  });
 });

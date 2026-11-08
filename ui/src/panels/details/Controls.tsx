@@ -22,6 +22,7 @@ import { NodeHeader, NodeSetups, NodeStrip } from "./NodePanelParts";
 import { DiffTable } from "./groups/RetryPictures";
 import {
   balanceSummary,
+  cpuSummary,
   limitSummary,
   nodeCardSummary,
   nodeGroupChanged,
@@ -39,8 +40,11 @@ import { RATE_UNITS, TIME_UNITS } from "./units";
 import {
   balanceOf,
   cardOf,
+  coresOf,
   deleteOps,
+  hasCpu,
   holdOf,
+  setCores,
   setStyle,
   durationMs,
   setBalance,
@@ -242,6 +246,36 @@ export function Controls({
             onChange={(c) => void patch(setStyle(name, config, c))}
           />
           <DiffTable rows={nodeGroupDiff("style", config)} />
+        </Group>
+      ) : null}
+
+      {hasCpu(config.type) ? (
+        <Group
+          id={NODE_GROUP.cpu}
+          title="CPUs"
+          summary={cpuSummary(config)}
+          changed={nodeGroupChanged("cpu", config)}
+          onReset={() => void patch(nodeResetOps("cpu", name, config))}
+        >
+          <NumberField
+            label="Cores"
+            help="cores"
+            hint="CPUs this component's own work shares, each copy its own. More work running at once than cores slows each piece down. Empty means no sharing: every request takes its service time."
+            value={coresOf(config)}
+            placeholder="Not limited"
+            min={LIMITS.cores.min}
+            max={LIMITS.cores.max}
+            step="any"
+            onCommit={(n) => patch(setCores(name, config, n))}
+          />
+          {node && typeof node.cpu_load === "number" ? (
+            <p className="mb-2 text-xs text-muted">
+              {node.cpu_load > 1
+                ? `In the run the work asked for ${twoSignificant(node.cpu_load)} times these cores, so requests piled up and slowed each other down.`
+                : `In the run the work used ${percent(node.cpu_load)} of these cores${node.cpu_load > 0.7 ? ": requests start to slow each other down near the top." : "."}`}
+            </p>
+          ) : null}
+          <DiffTable rows={nodeGroupDiff("cpu", config)} />
         </Group>
       ) : null}
 

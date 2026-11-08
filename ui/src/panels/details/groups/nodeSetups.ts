@@ -9,6 +9,7 @@ import { callsOthers } from "../../../canvas/rules";
 import {
   addRateLimit,
   cardOf,
+  coresOf,
   holdOf,
   queueOf,
   rateLimitOf,
@@ -109,6 +110,7 @@ export function nodeSetups(name: string, config: NodeDoc): NodeSetup[] {
 const PANEL_ORDER = [
   ["balance", "Picking a copy"],
   ["style", "Server style"],
+  ["cpu", "CPUs"],
   ["limit", "Request limit"],
 ] as const;
 
@@ -133,7 +135,7 @@ const count = (n: number) => n.toLocaleString("en-US");
 
 /** The settings of one group that differ from the default, old next to new; nothing when none do. */
 export function nodeGroupDiff(
-  group: "balance" | "style" | "limit" | "network",
+  group: "balance" | "style" | "limit" | "network" | "cpu",
   c: NodeDoc,
 ): DiffRow[] {
   const rows: DiffRow[] = [];
@@ -150,6 +152,10 @@ export function nodeGroupDiff(
     } else if ("rate_limit" in c) {
       add("Request limit", "none", "set in kaanal.yaml");
     }
+  } else if (group === "cpu") {
+    const cores = coresOf(c);
+    if (cores !== null) add("CPUs", "not limited", `${cores} core${cores === 1 ? "" : "s"}`);
+    else if ("cpu" in c) add("CPUs", "not limited", "set in kaanal.yaml");
   } else if (group === "balance") {
     if ("balance" in c) add("Picking a copy", "round robin", balanceWord(c.balance));
     if ("spread" in c) add("Spread", "round robin", balanceWord(c.spread));

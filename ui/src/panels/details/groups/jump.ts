@@ -24,6 +24,7 @@ export const NODE_TARGETS: readonly JumpTarget[] = [
   { label: "Timeout", words: "deadline give up" },
   { label: "Balance", group: NODE_GROUP.balance, words: "copies replicas round robin pick" },
   { label: "Server style", group: NODE_GROUP.style, words: "thread event loop hold" },
+  { label: "Cores", group: NODE_GROUP.cpu, words: "cpu processor vcpu threads shared slow" },
   { label: "Request limit", group: NODE_GROUP.limit, words: "rate limit rps throttle 429" },
   { label: "Burst", group: NODE_GROUP.limit, fallback: "Request limit", words: "rate limit" },
   { label: "Sends up to", group: NODE_GROUP.network, words: "bandwidth card nic upload" },

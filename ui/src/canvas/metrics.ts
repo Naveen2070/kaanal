@@ -233,6 +233,8 @@ export interface Ranked {
   saturatesAtReqS: number | null;
   /** A wire (named "from → to"), not a component. */
   wire?: true;
+  /** The CPUs, not the slots, set the saturation point (step 8). */
+  cpuBound?: true;
 }
 
 /**
@@ -247,13 +249,19 @@ export function rankedByPeak(summary: Summary): Ranked[] {
   };
   const nodes = summary.nodes.map((n, i) => {
     const busy = n.series.busy.filter(Number.isFinite);
-    const peak = busy.length > 0 ? Math.max(...busy) : n.utilization;
+    const slotPeak = busy.length > 0 ? Math.max(...busy) : n.utilization;
+    // a component with cores but no slot limit still has a peak: its CPU load, at most 100%
+    const cpu = finiteOrNull(n.cpu_load ?? null);
+    const cpuPeak = cpu === null ? null : Math.min(1, cpu);
+    const peak =
+      slotPeak !== null && cpuPeak !== null ? Math.max(slotPeak, cpuPeak) : (slotPeak ?? cpuPeak);
     return {
       i,
       name: n.name,
       peak,
       saturatesAtReqS: finiteOrNull(n.saturates_at_req_s),
       wire: false,
+      cpuBound: n.saturates_by === "cpu",
     };
   });
   const wires = summary.links.map((l, k) => {
@@ -265,6 +273,7 @@ export function rankedByPeak(summary: Summary): Ranked[] {
       peak: Math.min(1, Math.max(l.offered_load, l.utilization)),
       saturatesAtReqS: finiteOrNull(l.saturates_at_req_s),
       wire: true,
+      cpuBound: false,
     };
   });
   const pipes = (summary.pipes ?? []).map((p, k) => ({
@@ -273,15 +282,17 @@ export function rankedByPeak(summary: Summary): Ranked[] {
     peak: pipePeak(p),
     saturatesAtReqS: finiteOrNull(p.saturates_at_req_s),
     wire: false,
+    cpuBound: false,
   }));
   return [...nodes, ...wires, ...pipes]
     .filter((r): r is typeof r & { peak: number } => r.peak !== null)
     .sort((a, b) => b.peak - a.peak || order(a.i) - order(b.i) || a.i - b.i)
-    .map(({ name, peak, saturatesAtReqS, wire }) => ({
+    .map(({ name, peak, saturatesAtReqS, wire, cpuBound }) => ({
       name,
       peak,
       saturatesAtReqS,
       ...(wire && { wire: true as const }),
+      ...(cpuBound && { cpuBound: true as const }),
     }));
 }
 

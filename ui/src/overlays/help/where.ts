@@ -33,6 +33,7 @@ export const WHERE: Partial<Record<Id, string>> = {
   "calls-per-request": `${WIRE}: Calls per request, in the folded group How often it is used`,
   "rate-limit": `${NODE}: Request limit, in the folded group Request limit`,
   burst: `${NODE}: Burst, in the folded group Request limit`,
+  cores: `${NODE}: Cores, in the folded group CPUs`,
   balance: `${NODE}: Picking a copy, in the folded group Picking a copy`,
   "step-repeat": "Settings tab, with the gateway selected: Steps, a call row, Repeat",
   "step-chance": "Settings tab, with the gateway selected: Steps, a call row, Chance (%)",

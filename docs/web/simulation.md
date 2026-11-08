@@ -53,6 +53,8 @@ With `"source": "draft"` the run simulates the text of the draft (`GET /draft`) 
 
 **Offered load and utilization.** `offered_load` is hop time over capacity (for a node with `hold: call`, the time its slots were held, which includes the wait on what it called) and can pass 1; `utilization` is the share of slot time actually busy and tops out at 1. A node is `saturated` when its offered load is 1 or more, its utilization is 0.95 or more, or it already refuses work (a full queue or a fired `timeout:`). Its queue then grows for as long as the run lasts (with a queue limit it fills and the node turns requests away instead), so its latency is not a steady-state figure.
 
+**CPU load.** For a node with `cpu` the summary also has `cpu_load` (its own work, at the drawn times, over cores x copies x window; a callee wait inside a `hold: call` slot is not CPU), `cpu_capacity_per_s` (cores x copies over the mean own work per visit) and `saturates_by`. `saturates_at_req_s` is then the lower of the slot and CPU capacities and `saturates_by` says which (`slots` or `cpu`). `cpu_load` of 1 or more marks the node saturated even without slots, and the warning adds `CPU load`. These are offered figures: there is no measured CPU utilisation yet. See [CPUs](nodes.md#cpus-cpu).
+
 **Warnings about noise.** With fewer than 1000 reported requests the p99 is noise; with fewer than 100, so is p95. One run is one sample of a random process and has no confidence interval: run longer, or run twice with different seeds and compare.
 
 ## The run log

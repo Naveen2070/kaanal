@@ -24,7 +24,8 @@ export function copiesNeeded(n: NodeSummary, scale: number): number {
 /** Why a saturated component is red, in one or two sentences; null when it is not saturated. */
 export function whyNodeRed(n: NodeSummary): string | null {
   if (!n.saturated) return null;
-  const cap = n.capacity_per_s;
+  const cpuBound = n.saturates_by === "cpu" && typeof n.cpu_capacity_per_s === "number";
+  const cap = cpuBound ? n.cpu_capacity_per_s : n.capacity_per_s;
   const handles =
     typeof cap === "number" && Number.isFinite(cap) && cap > 0
       ? ` and finishes at most ${nf(cap)}/s`
@@ -32,11 +33,16 @@ export function whyNodeRed(n: NodeSummary): string | null {
   const waiting = n.max_queue > 0 ? `, so up to ${nf(n.max_queue)} wait in line` : "";
   const away =
     n.limited + n.overflowed > 0 ? `; ${nf(n.limited + n.overflowed)} were turned away` : "";
-  return `${n.name} gets ${twoSignificant(n.visits_per_s)}/s${handles}${waiting}${away}.`;
+  const why = cpuBound ? " Its CPUs are the limit, not its slots." : "";
+  return `${n.name} gets ${twoSignificant(n.visits_per_s)}/s${handles}${waiting}${away}.${why}`;
 }
 
 /** The step that would take a saturated component under its target, or null when none is needed. */
 export function fixNode(n: NodeSummary): string | null {
+  const cpu = n.cpu_load;
+  if (n.saturated && typeof cpu === "number" && cpu > 1 && cpu >= (n.offered_load ?? 0)) {
+    return `More CPU for ${n.name}: the work asks for ${twoSignificant(cpu)} times the cores it has; about ${twoSignificant(cpu / TARGET_BUSY)} times the cores (or copies) keeps it under ${Math.round(TARGET_BUSY * 100)}% busy.`;
+  }
   if (!n.saturated || !((n.offered_load ?? 0) > 0)) return null;
   const now = copiesOf(n);
   const need = copiesNeeded(n, 1);

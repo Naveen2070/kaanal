@@ -141,3 +141,21 @@ test("the_report_is_markdown_with_the_what_if_label_and_the_ranking", () => {
   expect(md).toContain("- w1");
   expect(md).toContain("- timeout: 4");
 });
+
+test("a_cpu_bound_component_names_its_cpus_and_asks_for_more_cores", () => {
+  const n = nodeSummary({
+    name: "shop",
+    saturated: true,
+    offered_load: null,
+    utilization: null,
+    visits_per_s: 150,
+    cpu_load: 1.5,
+    cpu_capacity_per_s: 100,
+    saturates_by: "cpu",
+  });
+  expect(whyNodeRed(n)).toContain("finishes at most 100/s");
+  expect(whyNodeRed(n)).toContain("Its CPUs are the limit, not its slots.");
+  const fix = fixNode(n);
+  expect(fix).toContain("More CPU for shop");
+  expect(fix).toContain("1.5 times the cores");
+});

@@ -260,3 +260,23 @@ test("a_node_pipe_is_ranked_by_its_larger_figure_at_most_100_percent", () => {
   } as unknown as Summary;
   expect(rankedByPeak(s)).toEqual([{ name: "app send pipe", peak: 1, saturatesAtReqS: 200 }]);
 });
+
+test("a_component_with_cores_and_no_slots_is_ranked_by_its_cpu_load_and_labelled_cpu_bound", () => {
+  const s = {
+    nodes: [
+      nodeSummary({
+        name: "app",
+        offered_load: null,
+        utilization: null,
+        series: { window_s: 1, busy: [], queue: [], latency: [] },
+        cpu_load: 3,
+        saturates_by: "cpu",
+        saturates_at_req_s: 90,
+      }),
+    ],
+    links: [],
+    bottlenecks: [0],
+    pipes: [],
+  } as unknown as Summary;
+  expect(rankedByPeak(s)).toEqual([{ name: "app", peak: 1, saturatesAtReqS: 90, cpuBound: true }]);
+});

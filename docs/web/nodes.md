@@ -307,6 +307,23 @@ Off by default. `per_kb` on any node (a duration like `proc`, e.g. `per_kb: 50us
 
 **Network card (`bandwidth` on a node).** Any node except a cache takes `bandwidth:` as a rate (at least 1 byte per second): one number for both directions, or `{ out: 125000, in: 250000 }` (either side may be left out; a missing side is unlimited). It is the node's network card, so it is shared by every wire in that direction: calls to different services from one node share its `out`, and the replies it sends share it too. Each copy has its own send and receive pipe, so more copies mean more bandwidth. A transfer from A to B is pipelined: it lasts `bytes / the narrowest of A's out, the wire's bandwidth and B's in`, when it is alone. Pipes are **shared fairly** (max-min, as TCP converges to): every pipe splits its rate equally between the transfers crossing it, and a transfer held back by a slower pipe leaves its spare share to the others, so a big upload no longer blocks a small call and a fan-out through one card finishes together. The time a transfer loses to sharing is its wait in the trace and the Log. Limits of this model: a share is floored to whole bytes per second (under 1 B/s of error), a transfer has no cap of its own (a TCP window is planned), there is no connection set-up time, and the live mock does not share a pipe between real requests. A load balancer is just a node with a `bandwidth`. In a trace a transfer held up by a card shows as `app.nic-out=20.0ms` or `app.nic-in=20.0ms` (its time alone, the wait showing what sharing added), the node being the one whose card it is. Unset means no limit and no hop. The live mock sizes the request from `Content-Length`, or, when there is none (a chunked upload) and the route does not read the body itself, from the bytes the client really sends (counted as they arrive, up to 1 GiB, and thrown away); a login or a collection route that reads its own body counts 0 without a `Content-Length`. It counts a HEAD response and a collection or built-in responder as 0 bytes, and sizes the normal success body even when a pin replaces it.
 
+## CPUs: `cpu`
+
+```yaml
+nodes:
+  app: { type: service, concurrency: 200, proc: 10ms, cpu: { cores: 4 } }
+```
+
+Off unless written: with no `cpu`, every request takes its drawn time however many run at once, so a thread-per-request server on 4 CPUs with 200 threads looks healthier than it is. With `cpu: { cores: N }` a node's **own work** (its `proc`, and a database's or monolith's operations) is shared among the requests running it: with `n` of them at once each runs at `min(1, N / n)` of its speed, so ten 10 ms requests on 2 cores each take about 50 ms. That is processor sharing, the standard model of a CPU time-sliced between threads (Kleinrock, _Queueing Systems_ vol. 1, section 4.4). The extra time shows as the hop's wait in the Log and in `mean_wait_ms`.
+
+- `cores` is a number from `0.001` to `4096`; a fraction such as `0.5` is a container's CPU limit. Each copy (`replicas`) has its own cores.
+- `concurrency` still decides how many requests are admitted; `cores` only decides how fast the admitted ones run. They are separate on purpose: slots are threads, cores are CPUs.
+- Taken by `gateway`, `service`, `monolith`, `database`, `auth` and `load-balancer`. A cache, an external API and a storage node have no `cpu` (their time is a given figure, not your CPUs), and the file is refused at that key if you write one.
+- **Not stretched:** time waiting on what the node calls (including a `hold: call` slot), the wire, and wait steps use no CPU and run at their drawn time. A request that fails keeps its CPU share until its running hop ends, as it keeps its slot.
+- The summary adds `cpu_load` (own work over cores x copies x window; 1 or more means the CPUs cannot keep up), `cpu_capacity_per_s` and `saturates_by` (`slots` or `cpu`, whichever sets `saturates_at_req_s`). A node with `cpu_load` of 1 or more is saturated even with no slot limit. Results labels such a row **CPU bound**.
+- The live mocks ignore `cpu` until live-load mode (step 8L): only the simulator slows the work.
+- Accuracy: a single core matches M/G/1 processor sharing (mean time `E[S] / (1 - rho)` for any service distribution) and `c` cores with exponential service match Erlang C, both tested to within about 2%. Context switching, cache effects and hyperthreads are not modelled: a vCPU counts as a full core, so for a cloud instance use its vCPU count as an upper bound. Memory, disk and instance presets are planned, not built.
+
 ## What a slot covers: `hold`
 
 A gateway, service, monolith or auth node with `concurrency` can say what one of its slots is held for:
