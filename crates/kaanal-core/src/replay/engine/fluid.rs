@@ -99,6 +99,16 @@ impl Fluid {
         self.moved.get(p).copied().unwrap_or(0)
     }
 
+    /// Changes pipe `pipe`'s rate to `bytes_per_s` at `now` (a live parameter edit): the bytes moved
+    /// so far are settled at the old rates, then the flows crossing the pipe are shared out again.
+    pub(super) fn set_cap(&mut self, now: u64, pipe: usize, bytes_per_s: u64) {
+        self.settle(now);
+        self.caps[pipe] = bytes_per_s.max(1);
+        if self.load[pipe] > 0 {
+            self.share();
+        }
+    }
+
     /// The slab index of a flow (to key a table of owners).
     pub(super) fn index(id: FlowId) -> usize {
         id.0
@@ -433,5 +443,33 @@ mod tests {
         f.finish(10 * S, a);
         // 100 B/s for the 4 s inside the window
         assert_eq!(f.moved(0), 400 * u128::from(S));
+    }
+
+    #[test]
+    fn a_transfer_in_flight_is_re_timed_by_the_closed_form() {
+        // 1000 B over 100 B/s: at 5 s half is moved; the pipe goes to 200 B/s: 500 B left end at 7.5 s
+        let mut f = Fluid::new(vec![100]);
+        f.add(0, 1000, &[0], None);
+        f.set_cap(5 * S, 0, 200);
+        assert_eq!(f.next_finish().map(|x| x.0), Some(5 * S + 5 * S / 2));
+    }
+
+    #[test]
+    fn two_flows_re_share_after_a_cap_change() {
+        let mut f = Fluid::new(vec![100]);
+        let a = f.add(0, 1000, &[0], None);
+        let b = f.add(0, 1000, &[0], None);
+        // each moved 250 B in 5 s at 50 B/s; the pipe halves to 50 B/s: 25 B/s each, 750 B left = 30 s
+        f.set_cap(5 * S, 0, 50);
+        assert_eq!((f.rate(a), f.rate(b)), (25, 25));
+        assert_eq!(f.next_finish().map(|x| x.0), Some(35 * S));
+    }
+
+    #[test]
+    fn a_cap_change_on_an_idle_pipe_just_stores_it() {
+        let mut f = Fluid::new(vec![100, 100]);
+        f.set_cap(S, 1, 10);
+        let a = f.add(2 * S, 100, &[1], None);
+        assert_eq!(f.rate(a), 10);
     }
 }

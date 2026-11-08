@@ -39,6 +39,15 @@ impl Bucket {
         self.status
     }
 
+    /// Changes the rate and burst of a running bucket (a live parameter edit). The cells already
+    /// charged (`tat`) stay, so a lower burst or a slower rate takes effect at once and a higher
+    /// one lets traffic through as the time already passed allows.
+    pub fn set_limit(&mut self, limit: &RateLimit) {
+        debug_assert!(limit.interval_ns >= 1 && limit.burst >= 1);
+        self.interval = limit.interval_ns;
+        self.burst = limit.burst;
+    }
+
     /// Back to full, as if never used.
     pub fn refill(&mut self) {
         self.tat = 0;

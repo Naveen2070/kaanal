@@ -142,3 +142,78 @@ fn cancel_removes_one_waiter_and_keeps_the_order_of_the_rest() {
     assert_eq!(g.release(), Some((3, 0)));
     g.cancel((9, 9)); // not queued: no effect
 }
+
+// ---- step 8L: limits changed in place (a running system is reconfigured, not rebuilt) ----
+
+#[test]
+fn lowering_slots_never_preempts_and_new_work_waits() {
+    let mut g = gate(3, None);
+    for i in 0..3 {
+        assert_eq!(g.arrive((i, 0)), Admit::Run);
+    }
+    assert_eq!(g.set_limits(1, None, 503), vec![]);
+    assert_eq!(g.busy(), 3, "running work is never cut");
+    assert_eq!(g.arrive((9, 0)), Admit::Queued, "a new arrival waits");
+    // two releases only free slots: busy 3 -> 2 -> 1, the waiter is not handed one yet
+    assert_eq!(g.release(), None);
+    assert_eq!(g.release(), None);
+    assert_eq!(g.busy(), 1);
+    // now at the limit, a release hands the slot on as always
+    assert_eq!(g.release(), Some((9, 0)));
+    assert_eq!(g.busy(), 1);
+}
+
+#[test]
+fn raising_slots_starts_waiters_at_once_in_order() {
+    let mut g = gate(1, None);
+    assert_eq!(g.arrive((0, 0)), Admit::Run);
+    for i in 1..4 {
+        assert_eq!(g.arrive((i, 0)), Admit::Queued);
+    }
+    assert_eq!(g.set_limits(3, None, 503), vec![(1, 0), (2, 0)]);
+    assert_eq!((g.busy(), g.queued(), g.slots()), (3, 1, 3));
+}
+
+#[test]
+fn a_lower_queue_cap_refuses_new_arrivals_without_evicting() {
+    let mut g = gate(1, Some(5));
+    assert_eq!(g.arrive((0, 0)), Admit::Run);
+    for i in 1..4 {
+        assert_eq!(g.arrive((i, 0)), Admit::Queued);
+    }
+    assert_eq!(g.set_limits(1, Some(1), 504), vec![]);
+    assert_eq!(g.queued(), 3, "waiters keep their places");
+    assert_eq!(g.arrive((9, 0)), Admit::Overflow);
+    assert_eq!(g.overflow_status(), 504);
+}
+
+#[test]
+fn a_faster_rate_passes_the_new_rate() {
+    let mut b = bucket(100, 1);
+    assert_eq!(b.take(0), Ok(()));
+    b.set_limit(&RateLimit {
+        interval_ns: 10 * MS,
+        burst: 1,
+    });
+    // after the change the spacing is the new 10 ms: the cell already charged at the old rate
+    // is paid for, then one every 10 ms
+    assert_eq!(b.take(100 * MS), Ok(()));
+    assert_eq!(b.take(100 * MS), Err(10 * MS));
+    assert_eq!(b.take(110 * MS), Ok(()));
+}
+
+#[test]
+fn a_smaller_burst_refuses_at_once() {
+    let mut b = bucket(10, 20);
+    for _ in 0..5 {
+        assert_eq!(b.take(0), Ok(()));
+    }
+    b.set_limit(&RateLimit {
+        interval_ns: 10 * MS,
+        burst: 2,
+    });
+    assert!(
+        b.take(0).is_err(),
+        "5 cells are already charged, over a burst of 2"
+    );
+}

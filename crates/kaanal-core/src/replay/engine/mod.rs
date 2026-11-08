@@ -25,6 +25,8 @@ mod finish;
 mod flows;
 mod fluid;
 mod hold;
+mod reconfig;
+pub use reconfig::Structural;
 mod replicas;
 mod retry;
 mod state;
@@ -49,6 +51,8 @@ pub struct Engine {
     flows: flows::Flows,
     /// Whether any node sets `cpu`: the only cost of the feature on the path of one that does not.
     has_cpu: bool,
+    /// The topology a live engine was built or last reconfigured from (`None` for a batch engine).
+    live_topo: Option<Box<Topology>>,
     /// When each unit's pending CPU event fires (ns), by unit index; a stale event is skipped.
     cpu_due: std::collections::HashMap<usize, u64>,
     /// The tokens whose CPU work just ended (kept so a finishing event allocates nothing).
@@ -82,10 +86,22 @@ pub struct Engine {
 impl Engine {
     /// An engine with every gate free. The window is `[0, u64::MAX]` until [`Engine::set_window`].
     pub fn new(topo: &Topology) -> Engine {
-        let units = Units::new(topo);
+        Engine::build(topo, false)
+    }
+
+    /// An engine for a live session (step 8L): every node has room for 64 copies whatever its
+    /// `replicas`, so the copy count can change while it runs without moving a table index. The
+    /// batch [`Engine::new`] allocates exactly the configured copies and is unchanged.
+    pub fn live(topo: &Topology) -> Engine {
+        Engine::build(topo, true)
+    }
+
+    fn build(topo: &Topology, headroom: bool) -> Engine {
+        let units = Units::new(topo, headroom);
         Engine {
             flows: flows::Flows::new(units.caps().to_vec()),
             has_cpu: topo.nodes.iter().any(|n| n.cpu.is_some()),
+            live_topo: headroom.then(|| Box::new(topo.clone())),
             cpu_due: std::collections::HashMap::new(),
             cpu_done: Vec::new(),
             units,

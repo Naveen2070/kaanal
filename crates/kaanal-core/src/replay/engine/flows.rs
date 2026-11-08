@@ -42,6 +42,18 @@ impl Flows {
 }
 
 impl Engine {
+    /// **Private.** Sets pipe unit `unit` to `bytes_per_s` now: flows in flight change speed from
+    /// here and the pending event is re-armed.
+    pub(super) fn pipe_set(&mut self, unit: usize, bytes_per_s: u64) {
+        let now = self.now;
+        self.units.set_cap(unit, bytes_per_s);
+        self.flows.fluid.set_cap(now, unit, bytes_per_s);
+        // the pending event was timed at the old rates: a later one is skipped when it fires with
+        // nothing due, and an earlier need gets a fresh one
+        self.flows.due = None;
+        self.rearm();
+    }
+
     /// **Private.** Token `k` of request `r` starts the transfer `x` now: it joins the solver and
     /// the pending event is re-armed.
     pub(super) fn join_flow(&mut self, r: usize, k: usize, x: &Xfer) {
@@ -65,6 +77,8 @@ impl Engine {
     /// its token goes on, as at the end of any hop.
     pub(super) fn flow_event(&mut self, epoch: usize) {
         if epoch != self.flows.epoch {
+            // a stale event: let any answer that waited for it go (see `cpu_event`)
+            self.flush();
             return;
         }
         let now = self.now;

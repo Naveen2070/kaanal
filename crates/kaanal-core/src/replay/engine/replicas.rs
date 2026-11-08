@@ -10,12 +10,46 @@ use super::{Bucket, Engine, Gate, NodeId, Topology};
 use crate::exec::Pipe;
 use crate::exec::{Hop, HopKind};
 
+/// **Private.** Most copies a node can have (config limit); a live engine allocates all of them.
+pub(super) const MAX_COPIES: u16 = 64;
+
+/// **Private.** Units to allocate for `n`'s copies.
+fn copies(n: &crate::topology::Node, headroom: bool) -> u16 {
+    if headroom {
+        MAX_COPIES
+    } else {
+        n.replicas.max(1)
+    }
+}
+
+/// **Private.** The admission of a node with no limit, for a live engine: every node there has a
+/// gate (so a limit added later finds the running work counted), this one never makes anyone wait.
+const UNLIMITED: crate::topology::Admission = crate::topology::Admission {
+    slots: u32::MAX,
+    queue: None,
+    overflow_status: 503,
+};
+
+/// **Private.** The gate of one copy of `n`: its own, or in a live engine an unlimited one.
+fn gate_of(n: &crate::topology::Node, headroom: bool) -> Option<Gate> {
+    match &n.admission {
+        Some(a) => Some(Gate::new(a)),
+        None if headroom => Some(Gate::new(&UNLIMITED)),
+        None => None,
+    }
+}
+
+/// **Private.** The admission a live engine applies for `n`: its own, or no limit at all.
+pub(super) fn admission_of(n: &crate::topology::Node) -> crate::topology::Admission {
+    n.admission.clone().unwrap_or(UNLIMITED)
+}
+
 /// **Private.** The queueing state of every replica of every node.
 pub(super) struct Units {
     /// Index in `states` of replica 0 of each node.
-    first: Vec<usize>,
+    pub(super) first: Vec<usize>,
     /// Replicas of each node.
-    count: Vec<u16>,
+    pub(super) count: Vec<u16>,
     /// Gate, bucket and clock of each replica, node by node.
     pub(super) states: Vec<NodeState>,
     /// Per-replica counters: `counters[node][replica]`.
@@ -33,15 +67,16 @@ pub(super) struct Units {
 }
 
 impl Units {
-    /// Every replica free, every bucket full.
-    pub(super) fn new(topo: &Topology) -> Units {
+    /// Every replica free, every bucket full. With `headroom` every node gets `MAX_COPIES` units
+    /// whatever its `replicas`, so a live change of the copy count never moves an index.
+    pub(super) fn new(topo: &Topology, headroom: bool) -> Units {
         let mut first = Vec::with_capacity(topo.nodes.len());
         let mut states = Vec::new();
         for n in &topo.nodes {
             first.push(states.len());
-            for _ in 0..n.replicas.max(1) {
+            for _ in 0..copies(n, headroom) {
                 states.push(NodeState {
-                    gate: n.admission.as_ref().map(Gate::new),
+                    gate: gate_of(n, headroom),
                     bucket: n
                         .rate_limit
                         .as_ref()
@@ -51,7 +86,7 @@ impl Units {
                 });
             }
         }
-        let mut count: Vec<u16> = topo.nodes.iter().map(|n| n.replicas.max(1)).collect();
+        let mut count: Vec<u16> = topo.nodes.iter().map(|n| copies(n, headroom)).collect();
         let mut counters: Vec<Vec<NodeCounters>> = count
             .iter()
             .map(|&c| vec![NodeCounters::default(); usize::from(c)])
@@ -73,7 +108,7 @@ impl Units {
         for n in &topo.nodes {
             for _ in 0..2 {
                 first.push(states.len());
-                for _ in 0..n.replicas.max(1) {
+                for _ in 0..copies(n, headroom) {
                     states.push(NodeState {
                         gate: None,
                         bucket: None,
@@ -81,10 +116,10 @@ impl Units {
                         since: 0,
                     });
                 }
-                count.push(n.replicas.max(1));
+                count.push(copies(n, headroom));
                 counters.push(vec![
                     NodeCounters::default();
-                    usize::from(n.replicas.max(1))
+                    usize::from(copies(n, headroom))
                 ]);
             }
         }
@@ -120,7 +155,7 @@ impl Units {
         }
         for (n, node) in topo.nodes.iter().enumerate() {
             for (side, rate) in [node.bandwidth.0, node.bandwidth.1].into_iter().enumerate() {
-                for rep in 0..node.replicas.max(1) {
+                for rep in 0..self.count[n] {
                     if let Some(bw) = rate {
                         caps[self.at(self.nodes + self.edges + 2 * n + side, rep)] = bw.max(1);
                     }
@@ -153,6 +188,11 @@ impl Units {
     /// The rate of unit `i` as a pipe (bytes a second).
     pub(super) fn cap(&self, i: usize) -> u64 {
         self.caps[i]
+    }
+
+    /// Sets the rate of unit `i` (a live parameter edit), the figure `sync_pipes` divides by.
+    pub(super) fn set_cap(&mut self, i: usize, bytes_per_s: u64) {
+        self.caps[i] = bytes_per_s.max(1);
     }
 
     /// Index in `states` of `replica` of `node`.

@@ -71,6 +71,14 @@ impl CpuUnit {
         self.at = self.at.max(now);
     }
 
+    /// Changes the copy's cores at `now` (a live parameter edit). The virtual clock is advanced to
+    /// `now` at the old speed first, so work already running keeps what it did and goes on from
+    /// here at the new speed; the caller re-arms the unit's event.
+    pub(super) fn set_capacity(&mut self, now: u64, millicores: u32) {
+        self.settle(now);
+        self.cap = u64::from(millicores).max(1);
+    }
+
     /// Own work of `demand` ns starts at `now` for `who`.
     pub(super) fn join(&mut self, now: u64, who: (usize, usize), demand: u64) {
         self.settle(now);
@@ -114,6 +122,26 @@ use super::Engine;
 use crate::exec::{Hop, HopKind};
 
 impl Engine {
+    /// **Private.** Sets the cores of copy `replica` of `node` to `millicores` now (`None`: no sharing,
+    /// every hop at full speed, which is a capacity no running count can exceed). A copy with no
+    /// unit yet gets one. The unit's pending event is re-armed.
+    pub(super) fn cpu_set(&mut self, node: usize, replica: u16, millicores: Option<u32>) {
+        let i = self.units.at(node, replica);
+        let cap = millicores.unwrap_or(u32::MAX);
+        let now = self.now;
+        if let Some(cpu) = self.units.states[i].cpu.as_deref_mut() {
+            cpu.set_capacity(now, cap);
+        } else if millicores.is_some() {
+            self.units.states[i].cpu = Some(Box::new(CpuUnit::new(cap)));
+            self.has_cpu = true;
+        } else {
+            return;
+        }
+        // a stale event of the old speed is skipped by its armed time; arm the new one
+        self.cpu_due.remove(&i);
+        self.cpu_rearm(i);
+    }
+
     /// **Private.** Token `k` of request `r` starts own work of `demand` ns at its node's copy. When
     /// that copy has `cpu` the hop joins the sharing solver and its end comes from
     /// [`Engine::cpu_event`]; returns whether it did (otherwise the caller schedules the end as
@@ -138,6 +166,9 @@ impl Engine {
     pub(super) fn cpu_event(&mut self, i: usize) {
         let now = self.now;
         if self.cpu_due.get(&i) != Some(&now) {
+            // a stale event does nothing, but answers waiting for "no other event at this instant"
+            // must not be left behind by it (`flush` convention, as at a deadline that finds nothing)
+            self.flush();
             return;
         }
         self.cpu_due.remove(&i);
@@ -299,5 +330,35 @@ mod tests {
             "ties end in join order"
         );
         assert!(u.next_end().is_none());
+    }
+
+    #[test]
+    fn halving_the_cores_mid_run_re_times_running_work_exactly() {
+        // 1 core, one 10 ms hop from 0; at 4 ms the node drops to half a core: 6 ms left at half
+        // speed take 12 ms more, so it ends at exactly 16 ms
+        let mut u = CpuUnit::new(1000);
+        u.join(0, (0, 0), 10 * MS);
+        u.set_capacity(4 * MS, 500);
+        assert_eq!(drain(&mut u), vec![(0, 16 * MS)]);
+    }
+
+    #[test]
+    fn raising_the_cores_speeds_running_work_up() {
+        // 500 mC, one 10 ms hop from 0 (half speed); at 8 ms it has done 4 ms; the node goes to 2
+        // cores (full speed for one hop): 6 ms left end at 14 ms
+        let mut u = CpuUnit::new(500);
+        u.join(0, (0, 0), 10 * MS);
+        u.set_capacity(8 * MS, 2000);
+        assert_eq!(drain(&mut u), vec![(0, 14 * MS)]);
+    }
+
+    #[test]
+    fn two_hops_re_share_after_a_change() {
+        // 1 core, two 10 ms hops from 0; at 10 ms each has 5 ms left; raise to 2 cores: both end at 15 ms
+        let mut u = CpuUnit::new(1000);
+        u.join(0, (0, 0), 10 * MS);
+        u.join(0, (1, 0), 10 * MS);
+        u.set_capacity(10 * MS, 2000);
+        assert_eq!(drain(&mut u), vec![(0, 15 * MS), (1, 15 * MS)]);
     }
 }

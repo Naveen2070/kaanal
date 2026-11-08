@@ -56,11 +56,41 @@ impl Gate {
     /// A running hop ended. The oldest waiter, if any, gets the slot at once (the slot never
     /// looks free to a later arrival: no barging); otherwise the slot is freed.
     pub fn release(&mut self) -> Option<Waiter> {
+        // the slot limit was lowered below the slots in use (a live change): this slot is not
+        // handed on, it just closes, so the limit is reached as running work finishes
+        if self.busy > self.slots {
+            self.busy -= 1;
+            return None;
+        }
         let next = self.queue.pop_front();
         if next.is_none() {
             self.busy -= 1;
         }
         next
+    }
+
+    /// Changes the limits of a running gate (a live parameter edit). Running work is never cut:
+    /// lowering `slots` below the slots in use only stops new work from starting until enough
+    /// finish (see [`Gate::release`]); raising it starts waiting work at once, oldest first, and
+    /// returns those waiters. A lower queue cap refuses new arrivals; it never evicts a waiter.
+    pub fn set_limits(
+        &mut self,
+        slots: u32,
+        cap: Option<u32>,
+        overflow_status: u16,
+    ) -> Vec<Waiter> {
+        self.slots = slots;
+        self.cap = cap;
+        self.overflow_status = overflow_status;
+        let mut started = Vec::new();
+        while self.busy < self.slots {
+            let Some(w) = self.queue.pop_front() else {
+                break;
+            };
+            self.busy += 1;
+            started.push(w);
+        }
+        started
     }
 
     /// Removes a queued waiter (its request failed); the others keep their order.

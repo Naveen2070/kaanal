@@ -11,6 +11,7 @@ mod engine;
 mod hold;
 mod limits;
 mod links;
+mod reconfig;
 mod reference;
 mod replicas;
 mod retry;
