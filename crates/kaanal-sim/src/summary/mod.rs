@@ -4,13 +4,15 @@
 //! beside it.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
-use kaanal_core::{ChainResult, Endpoint, Endpoints, HopKind, NodeKind, Topology, visits_per_s};
+use kaanal_core::{ChainResult, Endpoints, HopKind, NodeKind, Topology, visits_per_s};
 use serde::Serialize;
 
+mod parts;
 mod resilience;
 mod series;
+
+use parts::{Limits, link_summaries, mix_of, pipe_summaries, replica_summaries, stream_summaries};
 
 pub use resilience::{BreakerChangeSummary, BreakerSummary, RetrySummary};
 pub use series::{LinkSeries, Series, SystemSeries};
@@ -141,6 +143,16 @@ pub struct NodeSummary {
     pub saturates_at_req_s: Option<f64>,
     /// `1 - offered_load`, at least 0; `None` without slots.
     pub headroom: Option<f64>,
+    /// Own work (`proc` and database ops) at its drawn times over cores x replicas x window; `None`
+    /// for a node without `cpu`. 1.0 or more means the CPUs cannot keep up: work piles up whatever
+    /// the slots say (step 8). An offered figure, like `offered_load`: no measured twin yet.
+    pub cpu_load: Option<f64>,
+    /// Visits per second the CPUs can take: cores x replicas / mean own work per visit; `None`
+    /// without `cpu` or visits.
+    pub cpu_capacity_per_s: Option<f64>,
+    /// Which limit sets `saturates_at_req_s`: `"slots"` or `"cpu"`, whichever is lower; `None`
+    /// without a `saturates_at_req_s`.
+    pub saturates_by: Option<&'static str>,
     /// Median hop work time in ms (wait excluded), exact over every hop; `None` without visits.
     pub p50_ms: Option<f64>,
     /// 99th percentile of the hop work time in ms (wait excluded), exact over every hop; `None`
@@ -232,6 +244,8 @@ struct Acc {
     v: u64,
     wait: f64,
     busy: f64,
+    /// Own work at drawn times (`Proc` and `Op` hops), held or not: the CPU demand (step 8).
+    own: f64,
 }
 
 impl Acc {
@@ -248,7 +262,18 @@ impl Acc {
             v: self.v + o.v,
             wait: self.wait + o.wait,
             busy: self.busy + o.busy,
+            own: self.own + o.own,
         }
+    }
+
+    /// Visits per second `cores` CPUs can take at this mean own work per visit; `None` without
+    /// visits or own work.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "visit counts are far below 2^52"
+    )]
+    fn cpu_capacity(self, cores: f64) -> Option<f64> {
+        (self.v > 0 && self.own > 0.0).then(|| cores * self.v as f64 / self.own)
     }
 
     /// Visits per second `slots` slots can take at this mean busy time per visit; `None`
@@ -394,6 +419,9 @@ fn tally(topo: &Topology, cfg: &SimConfig, report: &SimReport) -> Tally {
                         if held { 0.0 } else { d },
                         visit,
                     );
+                    if matches!(hop.kind, HopKind::Proc | HopKind::Op(_)) {
+                        node_acc[hop.node][usize::from(hop.replica)].own += d;
+                    }
                     work_by[hop.node].push(d * 1000.0);
                 }
                 HopKind::Link { edge, .. } => link_acc[usize::from(edge)].add(w, d, true),
@@ -446,8 +474,11 @@ fn warnings(
         } else {
             "its queue grows for as long as the run lasts, so its latency is not a steady-state figure"
         };
+        let cpu = n
+            .cpu_load
+            .map_or_else(String::new, |c| format!(", CPU load {c:.2}"));
         warnings.push(format!(
-            "node {} is saturated (offered load {:.2}, utilization {:.2}): {then}",
+            "node {} is saturated (offered load {:.2}, utilization {:.2}{cpu}): {then}",
             n.name,
             n.offered_load.unwrap_or(0.0),
             n.utilization.unwrap_or(0.0)
@@ -485,7 +516,13 @@ fn bottlenecks(nodes: &[NodeSummary]) -> Vec<usize> {
     bottlenecks.sort_by(|&a, &b| {
         let (x, y) = (&nodes[a], &nodes[b]);
         // nodes with slots first, then the heavier load, then the longer wait
-        let load = |n: &NodeSummary| n.offered_load.map(|o| o.max(n.utilization.unwrap_or(0.0)));
+        let load = |n: &NodeSummary| {
+            let slots = n.offered_load.map(|o| o.max(n.utilization.unwrap_or(0.0)));
+            match (slots, n.cpu_load) {
+                (Some(a), Some(c)) => Some(a.max(c)),
+                (a, c) => a.or(c),
+            }
+        };
         load(y)
             .is_some()
             .cmp(&load(x).is_some())
@@ -497,100 +534,6 @@ fn bottlenecks(nodes: &[NodeSummary]) -> Vec<usize> {
             .then(y.mean_wait_ms.total_cmp(&x.mean_wait_ms))
     });
     bottlenecks
-}
-
-/// **Private.** Per-stream requests, failures and percentiles.
-fn stream_summaries(cfg: &SimConfig, lat_by: &[Vec<f64>], failed_by: &[u64]) -> Vec<StreamSummary> {
-    cfg.streams
-        .iter()
-        .enumerate()
-        .map(|(i, s)| StreamSummary {
-            endpoint: s.endpoint_key.clone(),
-            requests: lat_by[i].len() as u64,
-            failed: failed_by[i],
-            p50_ms: pct(&lat_by[i], 0.50),
-            p95_ms: pct(&lat_by[i], 0.95),
-            p99_ms: pct(&lat_by[i], 0.99),
-        })
-        .collect()
-}
-
-/// **Private.** Per edge that has a `bandwidth`.
-fn link_summaries(
-    topo: &Topology,
-    cfg: &SimConfig,
-    report: &SimReport,
-    link_acc: &[Acc],
-    window_s: f64,
-    mix_rate: f64,
-) -> Vec<LinkSummary> {
-    let mut series = series::link_series(topo, cfg, report);
-    topo.edges
-        .iter()
-        .zip(link_acc)
-        .enumerate()
-        .filter(|(_, (e, _))| e.bandwidth.is_some())
-        .map(|(k, (e, a))| {
-            let load = if window_s > 0.0 {
-                a.busy / window_s
-            } else {
-                0.0
-            };
-            let util = report.link_utilization[k];
-            LinkSummary {
-                from: topo.nodes[e.from].name.clone(),
-                to: topo.nodes[e.to].name.clone(),
-                transfers: a.n,
-                mean_wait_ms: a.mean_wait_ms(),
-                offered_load: load,
-                utilization: util,
-                saturated: load >= 1.0 || util >= SATURATED,
-                saturates_at_req_s: (load > 0.0 && mix_rate > 0.0).then(|| mix_rate / load),
-                series: series[k]
-                    .take()
-                    .expect("an edge with a bandwidth has a series"),
-            }
-        })
-        .collect()
-}
-
-/// **Private.** Per node pipe with a rate.
-fn pipe_summaries(
-    topo: &Topology,
-    report: &SimReport,
-    nic_acc: &[[Acc; 2]],
-    window_s: f64,
-    mix_rate: f64,
-) -> Vec<PipeSummary> {
-    let mut pipes = Vec::new();
-    for (i, n) in topo.nodes.iter().enumerate() {
-        for (side, (rate, direction)) in [(n.bandwidth.0, "send"), (n.bandwidth.1, "receive")]
-            .into_iter()
-            .enumerate()
-        {
-            if rate.is_none() {
-                continue;
-            }
-            let a = nic_acc[i][side];
-            let load = if window_s > 0.0 {
-                a.busy / (window_s * f64::from(n.replicas.max(1)))
-            } else {
-                0.0
-            };
-            let util = report.nic_utilization.get(i).map_or(0.0, |u| u[side]);
-            pipes.push(PipeSummary {
-                node: n.name.clone(),
-                direction,
-                transfers: a.n,
-                mean_wait_ms: a.mean_wait_ms(),
-                offered_load: load,
-                utilization: util,
-                saturated: load >= 1.0 || util >= SATURATED,
-                saturates_at_req_s: (load > 0.0 && mix_rate > 0.0).then(|| mix_rate / load),
-            });
-        }
-    }
-    pipes
 }
 
 /// Folds `report` (a run of `cfg` on `topo`) into a [`Summary`].
@@ -617,15 +560,7 @@ pub fn summarize(
         failed_by,
         errors,
     } = tally(topo, cfg, report);
-    let mix: Vec<(Arc<Endpoint>, f64)> = cfg
-        .streams
-        .iter()
-        .filter_map(|s| {
-            endpoints
-                .get(&s.endpoint_key)
-                .map(|e| (Arc::clone(e), s.rate_per_s))
-        })
-        .collect();
+    let mix = mix_of(endpoints, cfg);
     let expected = visits_per_s(topo, &mix);
     let mix_rate: f64 = mix.iter().map(|(_, r)| r).sum();
     let mut series = series::series(topo, cfg, report).into_iter();
@@ -636,23 +571,24 @@ pub fn summarize(
         .enumerate()
         .map(|(i, n)| {
             let slots = n.admission.as_ref().map(|a| f64::from(a.slots));
-            let replicas = node_acc[i]
-                .iter()
-                .enumerate()
-                .map(|(j, a)| ReplicaSummary {
-                    replica: u16::try_from(j).unwrap_or(u16::MAX),
-                    visits: a.v,
-                    visits_per_s: per_s(a.v as f64),
-                    mean_wait_ms: a.mean_wait_ms(),
-                    offered_load: slots.map(|s| load_of(a.busy, s)),
-                    utilization: slots.map(|_| report.replica_utilization[i][j]),
-                })
-                .collect();
+            let replicas = replica_summaries(
+                &node_acc[i],
+                slots,
+                &report.replica_utilization[i],
+                window_s,
+            );
             let total = node_acc[i].iter().fold(Acc::default(), |t, a| t.plus(*a));
             let load = slots.map(|s| load_of(total.busy, s * node_acc[i].len() as f64));
             let st = &report.nodes[i];
             let capacity = slots.and_then(|s| total.capacity(s * node_acc[i].len() as f64));
             let util = slots.map(|_| st.utilization);
+            let lim = Limits::of(
+                n.cpu,
+                node_acc[i].len(),
+                (total, per_s(total.own)),
+                capacity,
+                (expected[i], mix_rate),
+            );
             let ns = series.next().expect("one series per node");
             NodeSummary {
                 name: n.name.clone(),
@@ -664,17 +600,19 @@ pub fn summarize(
                 utilization: util,
                 // only a node with slots can be saturated; a deadline that fires at a node
                 // without slots says its callee was slow, and gets its own warning
-                saturated: slots.is_some()
+                saturated: (slots.is_some()
                     && (load.is_some_and(|l| l >= 1.0)
                         || util.is_some_and(|u| u >= SATURATED)
                         || st.overflowed > 0
-                        || st.timed_out > 0),
+                        || st.timed_out > 0))
+                    || lim.cpu_load.is_some_and(|l| l >= 1.0),
                 max_queue: st.max_queue,
                 capacity_per_s: capacity,
-                saturates_at_req_s: capacity
-                    .filter(|_| expected[i] > 0.0)
-                    .map(|c| c * mix_rate / expected[i]),
+                saturates_at_req_s: lim.saturates_at,
                 headroom: load.map(|l| (1.0 - l).max(0.0)),
+                cpu_load: lim.cpu_load,
+                cpu_capacity_per_s: lim.cpu_capacity,
+                saturates_by: lim.saturates_by,
                 // exact, from every hop's work time; the buckets only bound it within a factor of two
                 p50_ms: exact(&work_by[i], 0.50),
                 p99_ms: exact(&work_by[i], 0.99),

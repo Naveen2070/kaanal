@@ -2,8 +2,8 @@
 //! lines). It is one cohesive type; the kind itself and its accessors stay in `nodes.rs`.
 
 use super::{
-    ConcurrencyConfig, Deserialize, DistConfig, Duration, Hold, JsonSchema, LOCALE_PATTERN,
-    NodeBandwidth, RateLimitConfig, call_timeout, detect_window,
+    ConcurrencyConfig, CpuConfig, Deserialize, DistConfig, Duration, Hold, JsonSchema,
+    LOCALE_PATTERN, NodeBandwidth, RateLimitConfig, call_timeout, detect_window,
 };
 use crate::balance::Balance;
 
@@ -55,6 +55,12 @@ pub struct LoadBalancerConfig {
     /// directions or `{ out, in }`. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most
+    /// 4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than
+    /// cores slows each piece down (processor sharing); `concurrency` still caps how many run. Each
+    /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
+    #[serde(default)]
+    pub cpu: Option<CpuConfig>,
     /// Locale pack; a balancer generates no data, so this only passes down.
     #[serde(default)]
     #[schemars(extend("pattern" = LOCALE_PATTERN))]

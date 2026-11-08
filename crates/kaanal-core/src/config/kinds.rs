@@ -2,9 +2,9 @@
 
 use super::nodes::{CacheFlavor, DbFlavor, Hold, OpsConfig};
 use super::{
-    ConcurrencyConfig, Deserialize, DistConfig, Duration, IndexMap, JsonSchema, LOCALE_PATTERN,
-    NodeBandwidth, PoolConfig, RateLimitConfig, StepConfig, UserConfig, call_timeout, http_url,
-    ratio, token_ttl, unique_users,
+    ConcurrencyConfig, CpuConfig, Deserialize, DistConfig, Duration, IndexMap, JsonSchema,
+    LOCALE_PATTERN, NodeBandwidth, PoolConfig, RateLimitConfig, StepConfig, UserConfig,
+    call_timeout, http_url, ratio, token_ttl, unique_users,
 };
 use crate::balance::Balance;
 
@@ -54,6 +54,12 @@ pub struct GatewayConfig {
     /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most
+    /// 4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than
+    /// cores slows each piece down (processor sharing); `concurrency` still caps how many run. Each
+    /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
+    #[serde(default)]
+    pub cpu: Option<CpuConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -109,6 +115,12 @@ pub struct ServiceConfig {
     /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most
+    /// 4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than
+    /// cores slows each piece down (processor sharing); `concurrency` still caps how many run. Each
+    /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
+    #[serde(default)]
+    pub cpu: Option<CpuConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -171,6 +183,12 @@ pub struct MonolithConfig {
     /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most
+    /// 4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than
+    /// cores slows each piece down (processor sharing); `concurrency` still caps how many run. Each
+    /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
+    #[serde(default)]
+    pub cpu: Option<CpuConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -222,6 +240,12 @@ pub struct DatabaseConfig {
     /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most
+    /// 4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than
+    /// cores slows each piece down (processor sharing); `concurrency` still caps how many run. Each
+    /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
+    #[serde(default)]
+    pub cpu: Option<CpuConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]
@@ -394,6 +418,12 @@ pub struct AuthConfig {
     /// the rate fairly, so calls to different services share the uplink. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most
+    /// 4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than
+    /// cores slows each piece down (processor sharing); `concurrency` still caps how many run. Each
+    /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
+    #[serde(default)]
+    pub cpu: Option<CpuConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
     /// `locale`.
     #[serde(default)]

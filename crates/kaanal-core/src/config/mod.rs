@@ -60,8 +60,8 @@ pub use retry::{Abandon, Budget, DEFAULT_MAX_ATTEMPTS, MAX_ATTEMPTS, RetryConfig
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
 pub use shared::{
-    DEFAULT_HEADER_BYTES, DistConfig, EdgeConfig, HeaderBytes, HeaderBytesSplit, NodeBandwidth,
-    NodeBandwidthSplit, Override, UserConfig,
+    CpuConfig, DEFAULT_HEADER_BYTES, DistConfig, EdgeConfig, HeaderBytes, HeaderBytesSplit,
+    NodeBandwidth, NodeBandwidthSplit, Override, UserConfig,
 };
 pub use storage::{StorageConfig, StorageFlavor};
 pub use traffic::{JourneyConfig, MAX_DURATION, TrafficConfig, check_profile};

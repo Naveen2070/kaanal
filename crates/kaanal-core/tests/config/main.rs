@@ -4,6 +4,7 @@ mod auth;
 mod balancer;
 mod basics;
 mod common;
+mod cpu;
 mod endpoints;
 mod limits;
 mod link_chaos;

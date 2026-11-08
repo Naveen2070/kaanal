@@ -1,4 +1,4 @@
-# `kaanal-sim/src/summary/` (`mod.rs`, `series.rs`)
+# `kaanal-sim/src/summary/` (`mod.rs`, `parts.rs`, `series.rs`)
 
 `summarize(topo, endpoints, cfg, report) -> Summary` folds a finished `SimReport` into what Studio shows, so the hop records can be dropped (a server run keeps summaries only). `NodeStats` is frozen (R1.48(5)); this is the structure beside it. It has no timing model: it only reads the records the engine produced.
 
@@ -15,3 +15,7 @@
 - **Label.** Always `relative what-if, not a prediction` (R6.5).
 
 Tests: `tests/sim/summary.rs` (hand-computed M/M/1 load, replica split, link transfers, error kinds, visits against the engine counters, the empty window); `tests/sim/series.rs` (60 windows and busy sum against the engine's utilization, queue peak at saturation, no series without slots, capacity 122.4/s, headroom, latency columns sum to the hop count, a run under a window).
+
+Step 8 (RULES 101): a node with `cpu` gets `cpu_load` (own work, `Proc` and `Op` hops at drawn times, over cores x replicas x window; held-slot time is not counted, a callee wait uses no CPU), `cpu_capacity_per_s` (cores x replicas / mean own work per visit) and `saturates_by` (`"slots"` or `"cpu"`, whichever capacity gives the lower `saturates_at_req_s`). `cpu_load >= 1` marks the node saturated even with no slot limit, adds `CPU load` to the saturation warning and counts in the bottleneck order. Offered figures only: no measured CPU utilisation yet (the engine keeps no CPU busy-area counter).
+
+`parts.rs` (split from `mod.rs` at 800 lines, R3.8) holds the per-part builders: `stream_summaries`, `link_summaries`, `pipe_summaries`, `mix_of`, `replica_summaries` and `Limits` (a node's CPU figures and the lower of its slot and CPU capacities). `mod.rs` keeps the types, the tally, the warnings and `summarize`.

@@ -281,6 +281,23 @@
       },
       "type": "object"
     },
+    "CpuConfig": {
+      "additionalProperties": false,
+      "description": "A node's CPUs (`cpu:`, step 8): how many the copy's own work shares. Fractions are allowed (a\ncontainer limit of `0.5`); the engine keeps integer millicores.",
+      "properties": {
+        "cores": {
+          "description": "CPUs, above 0 (at least 0.001) and at most 4096: a number like `4` or `0.5`.",
+          "format": "double",
+          "maximum": 4096,
+          "minimum": 0.001,
+          "type": "number"
+        }
+      },
+      "required": [
+        "cores"
+      ],
+      "type": "object"
+    },
     "DbFlavor": {
       "description": "Database flavors with preset op costs (estimates, see [`crate::presets`]).",
       "oneOf": [
@@ -955,6 +972,17 @@
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
+            "cpu": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CpuConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
+            },
             "flavor": {
               "description": "Cosmetic label shown in status output (`nginx`, `envoy`); not a preset.",
               "type": [
@@ -1090,6 +1118,17 @@
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
+            "cpu": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CpuConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
+            },
             "hold": {
               "anyOf": [
                 {
@@ -1224,6 +1263,17 @@
                 }
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
+            },
+            "cpu": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CpuConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
             },
             "flavor": {
               "anyOf": [
@@ -1371,6 +1421,17 @@
                 }
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
+            },
+            "cpu": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CpuConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
             },
             "flavor": {
               "anyOf": [
@@ -1787,6 +1848,17 @@
               ],
               "description": "Most requests this node serves at once, as a number (the rest wait without limit) or a\nmap `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get\n`overflow_status`). Absent = unlimited."
             },
+            "cpu": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CpuConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
+            },
             "hold": {
               "anyOf": [
                 {
@@ -1917,6 +1989,17 @@
                 }
               ],
               "description": "Most calls this node passes at once, as a number (the rest wait without limit) or a map\n`{ limit, queue, overflow_status }`. Absent = unlimited."
+            },
+            "cpu": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CpuConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
             },
             "detect": {
               "default": null,

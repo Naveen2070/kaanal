@@ -7,6 +7,7 @@ mod auth;
 mod behaviour;
 mod common;
 mod config;
+mod cpu;
 mod defaults;
 mod dynamic;
 mod forks;

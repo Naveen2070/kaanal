@@ -239,6 +239,17 @@ pub(crate) fn prob_ok(p: f64) -> bool {
 /// A cache keeps its own hit ratio, and the gateway routes by endpoint, so neither takes a share.
 pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
     for (name, n) in &cfg.nodes {
+        if let Some(c) = n.cpu()
+            && !c.is_valid()
+        {
+            return Err(Located::at_value(
+                keys(&["nodes", name.as_str(), "cpu", "cores"]),
+                format!(
+                    "node '{name}': cpu cores must be a number from 0.001 to 4096 (got {})",
+                    c.cores
+                ),
+            ));
+        }
         let (out, rx) = n.bandwidth();
         if out == Some(0) || rx == Some(0) {
             return Err(Located::at_value(

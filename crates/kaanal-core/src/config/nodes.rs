@@ -268,6 +268,20 @@ impl NodeConfig {
         }
     }
 
+    /// The node's CPUs (`cpu:`); `None` = no sharing. Only the kinds whose compute the user sizes
+    /// have the field: gateway, service, monolith, database, auth and load balancer.
+    pub fn cpu(&self) -> Option<CpuConfig> {
+        match self {
+            NodeConfig::Gateway(n) => n.cpu,
+            NodeConfig::Service(n) => n.cpu,
+            NodeConfig::Monolith(n) => n.cpu,
+            NodeConfig::Database(n) => n.cpu,
+            NodeConfig::Auth(n) => n.cpu,
+            NodeConfig::LoadBalancer(n) => n.cpu,
+            NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) | NodeConfig::Storage(_) => None,
+        }
+    }
+
     /// The node's network card (`bandwidth:`) as `(send, receive)` bytes per second; `None` =
     /// unlimited that way. A cache has none (put the bandwidth on its edge).
     pub fn bandwidth(&self) -> (Option<u64>, Option<u64>) {

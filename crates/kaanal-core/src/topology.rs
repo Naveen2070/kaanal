@@ -515,7 +515,7 @@ impl Topology {
                 hold: n.hold(),
                 spread: n.spread().cloned().unwrap_or_default(),
                 detect: n.detect(),
-                cpu: None, // ponytail: config key `cpu:` arrives in S8b; tests set it directly
+                cpu: n.cpu().map(crate::config::CpuConfig::millicores),
                 bandwidth: n.bandwidth(),
                 per_kb: match n {
                     // storage: the size term is 1024 / throughput seconds per KB (RULES 61)

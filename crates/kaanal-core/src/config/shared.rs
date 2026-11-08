@@ -243,6 +243,37 @@ pub(super) fn default_status() -> u16 {
     200
 }
 
+/// A node's CPUs (`cpu:`, step 8): how many the copy's own work shares. Fractions are allowed (a
+/// container limit of `0.5`); the engine keeps integer millicores.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CpuConfig {
+    /// CPUs, above 0 (at least 0.001) and at most 4096: a number like `4` or `0.5`.
+    #[schemars(extend("minimum" = 0.001, "maximum" = 4096))]
+    pub cores: f64,
+}
+
+/// **Private.** Most cores a node may set (a 4096-core machine is far past any real instance).
+pub(super) const MAX_CORES: f64 = 4096.0;
+
+impl CpuConfig {
+    /// Whether `cores` is a usable number: finite, at least one millicore, at most [`MAX_CORES`].
+    pub(super) fn is_valid(self) -> bool {
+        self.cores.is_finite() && (self.cores * 1000.0).round() >= 1.0 && self.cores <= MAX_CORES
+    }
+
+    /// The cores as whole millicores (`0.5` is 500). Call after validation: the range makes the
+    /// cast exact.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "validated to 0.001 ..= 4096, so the product is 1 ..= 4_096_000"
+    )]
+    pub fn millicores(self) -> u32 {
+        (self.cores * 1000.0).round() as u32
+    }
+}
+
 /// A node's network card (`bandwidth:`): a rate (bytes per second as a whole number, or text
 /// with a unit like `250KB/s`), one for both directions or `{ out, in }`. Each direction is at
 /// least 1; a missing side of the pair is unlimited.

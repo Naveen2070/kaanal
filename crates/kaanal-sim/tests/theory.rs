@@ -593,3 +593,63 @@ fn a_streamed_upload_takes_the_wire_time_and_shares_the_wire_as_processor_sharin
     let got = mean_secs(rep.requests.iter().map(|r| r.latency));
     assert_close(got, 1.0 / (1.0 - 0.4), "streamed upload at rho = 0.4");
 }
+
+// ---- step 8: processor sharing on a node's own work (`cpu: { cores }`, RULES 101) ----
+
+/// `app` with `cpu: { cores }`, unlimited slots (so only the sharing slows anything) and service `proc`.
+fn shared(cores: u32, proc: &str) -> Topology {
+    topo(&format!(
+        "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, cpu: {{ cores: {cores} }}, proc: {proc} }}\nedges:\n  - {{ from: gw, to: app }}\n"
+    ))
+}
+
+/// Mean drawn service time at `app`: the input of the model, read from the plan, not the output.
+fn mean_service(t: &Topology, rep: &SimReport) -> f64 {
+    let app = t.id("app").unwrap();
+    mean_secs(rep.requests.iter().flat_map(|r| {
+        r.hops
+            .iter()
+            .filter(move |(h, _)| h.node == app && h.kind == HopKind::Proc)
+            .map(|(h, _)| h.dur)
+    }))
+}
+
+#[test]
+fn one_core_is_an_mg1_processor_sharing_queue_whatever_the_service_distribution() {
+    // M/G/1-PS: mean sojourn E[S] / (1 - rho), insensitive to the service distribution (Kleinrock,
+    // Queueing Systems vol. 1, section 4.4). Exponential and a heavy-tailed lognormal agree.
+    for (proc, lam, requests) in [
+        ("{ mean: 10ms }", 50.0, 200_000.0),
+        ("{ mean: 10ms }", 80.0, 800_000.0),
+        ("{ p50: 6ms, p99: 60ms }", 50.0, 200_000.0),
+        ("{ p50: 6ms, p99: 60ms }", 70.0, 800_000.0),
+    ] {
+        let t = shared(1, proc);
+        let rep = sim(&t, lam, requests);
+        let s = mean_service(&t, &rep);
+        let rho = lam * s;
+        let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+        assert_close(
+            got,
+            s / (1.0 - rho),
+            &format!("M/G/1-PS {proc} at rho {rho:.2}"),
+        );
+    }
+}
+
+#[test]
+fn c_cores_with_exponential_service_match_erlang_c() {
+    // With exponential service the number in system is the birth-death chain with death rate
+    // min(n, c) x mu, the same chain as M/M/c, so the mean sojourn is the Erlang C wait + 1/mu.
+    for c in [2u32, 4] {
+        let t = shared(c, "{ mean: 10ms }");
+        let lam = 0.7 * f64::from(c) * MU;
+        let rep = sim(&t, lam, 400_000.0);
+        let got = mean_secs(rep.requests.iter().map(|r| r.latency));
+        assert_close(
+            got,
+            erlang_c_wait(c, lam, MU) + 1.0 / MU,
+            &format!("{c} cores sojourn at rho 0.7"),
+        );
+    }
+}
