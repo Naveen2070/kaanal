@@ -9,6 +9,7 @@ mod chaos_replicas;
 mod common;
 mod events_ui;
 mod guard;
+mod live;
 mod mock;
 mod storage;
 mod wire;

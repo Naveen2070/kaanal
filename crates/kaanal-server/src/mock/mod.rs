@@ -306,7 +306,8 @@ fn plan_of(
     };
     let pin = pin.map(|p| resolve(&p.entry, &ep.states));
     let req = ChainRequest {
-        at: std::time::Duration::ZERO,
+        // the time since the system started: chaos that begins mid-run and `detect` read it
+        at: g.started.elapsed(),
         endpoint: ep,
         n,
         seed: g.chain_seed,
@@ -314,11 +315,9 @@ fn plan_of(
         req_bytes,
         resp_bytes,
     };
-    // the mock has no queues to look at, so `least-conn` and `p2c` are settled as for no load
-    (
-        Arc::new(sample_plan(&g.topo, chaos, &req).0.resolved()),
-        pin,
-    )
+    // `least-conn` and `p2c` stay open in the plan: the engine chooses by its live queues when the
+    // call is sent, as in a simulation (step 8L; the mock used to settle them as for no load)
+    (Arc::new(sample_plan(&g.topo, chaos, &req).0), pin)
 }
 
 /// **Private.** The request body size from `Content-Length` (`None` when absent or not a number).

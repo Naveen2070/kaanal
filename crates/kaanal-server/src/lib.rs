@@ -16,6 +16,7 @@ mod collections;
 mod control;
 mod draft;
 mod generation;
+mod live;
 mod log;
 mod log_api;
 mod mock;
@@ -197,7 +198,7 @@ pub async fn serve_with_studio(
     let auth = auth::Issuer::from_config(cfg, opts.auth_key, addr.port())?;
     let g = st.gen_mut();
     g.auth = auth;
-    g.engine = Some(actor::spawn(kaanal_core::replay::Engine::new(&g.topo)));
+    g.engine = Some(actor::spawn(kaanal_core::replay::Engine::live(&g.topo)));
     let warnings = g.warnings.clone();
     let drawn_seed = st.drawn_seed;
     Ok(launch(st, listener, addr, warnings, drawn_seed))
@@ -363,6 +364,10 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/shutdown", post(control::shutdown))
         .route("/__kaanal/events", get(control::events))
+        .route("/__kaanal/live", get(live::stream::live))
+        .route("/__kaanal/live/pause", post(live::stream::pause))
+        .route("/__kaanal/live/resume", post(live::stream::resume))
+        .route("/__kaanal/live/rate", put(live::stream::rate))
         .route("/__kaanal/ui", get(control::ui))
         .route("/__kaanal/studio", get(control::studio))
         // `any` + a catch-all so every method and every path under `studio/` (`assets%2Fx`,

@@ -132,43 +132,55 @@ pub async fn put_draft(
     if let Some(l) = &b.layout {
         l.check().map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
     }
-    let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut extra = None;
-    match (b.text, b.patch) {
-        (Some(t), None) if t.len() > MAX_DRAFT_BYTES => return Err(too_large(t.len())),
-        (Some(t), None) => {
-            if d.text != t {
-                d.rev += 1;
+    let (rev_before, edited, extra) = {
+        let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
+        let rev_before = d.rev;
+        let mut extra = None;
+        match (b.text, b.patch) {
+            (Some(t), None) if t.len() > MAX_DRAFT_BYTES => return Err(too_large(t.len())),
+            (Some(t), None) => {
+                if d.text != t {
+                    d.rev += 1;
+                }
+                d.text = t;
+                d.lost.clear();
+                d.renames.clear();
             }
-            d.text = t;
-            d.lost.clear();
-            d.renames.clear();
+            (None, Some(ops)) => {
+                let out =
+                    patch::apply(&d.text, &ops).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
+                if out.text.len() > MAX_DRAFT_BYTES {
+                    return Err(too_large(out.text.len()));
+                }
+                if d.text != out.text {
+                    d.rev += 1;
+                }
+                d.text = out.text;
+                d.lost.extend(out.lost);
+                for (from, to) in &out.renamed {
+                    d.layout.rename(from, to);
+                }
+                d.renames.extend(out.renamed);
+                extra = Some((out.touched, out.notes));
+            }
+            // a layout alone (both was refused above)
+            _ => {}
         }
-        (None, Some(ops)) => {
-            let out =
-                patch::apply(&d.text, &ops).map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
-            if out.text.len() > MAX_DRAFT_BYTES {
-                return Err(too_large(out.text.len()));
-            }
-            if d.text != out.text {
-                d.rev += 1;
-            }
-            d.text = out.text;
-            d.lost.extend(out.lost);
-            for (from, to) in &out.renamed {
-                d.layout.rename(from, to);
-            }
-            d.renames.extend(out.renamed);
-            extra = Some((out.touched, out.notes));
+        if let Some(l) = b.layout {
+            d.layout = l;
         }
-        // a layout alone (both was refused above)
-        _ => {}
-    }
-    if let Some(l) = b.layout {
-        d.layout = l;
-    }
-    drop(d);
+        (rev_before, d.rev, extra)
+    };
+    // a page is watching the live run: a parameter edit goes straight into the engine (step 8L)
+    let live = if edited == rev_before {
+        None // the text did not change (a layout alone, or the same text again)
+    } else {
+        Some(crate::live::edit::apply_params(&st).await)
+    };
     let mut v = view(&st);
+    if let Some(outcome) = live {
+        v.0["live"] = outcome.to_json();
+    }
     if let Some((touched, notes)) = extra {
         // where a rename_node changed the text, and what it could not reach
         v.0["touched"] = json!(touched);

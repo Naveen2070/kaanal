@@ -50,7 +50,7 @@ fn app_with(yaml: &str) -> Arc<AppState> {
     let cfg = Config::from_yaml(yaml).unwrap();
     let mut st = AppState::build(&cfg, &dir, "t".into(), 0).unwrap();
     let g = st.gen_mut();
-    g.engine = Some(crate::actor::spawn(Engine::new(&g.topo)));
+    g.engine = Some(crate::actor::spawn(Engine::live(&g.topo)));
     Arc::new(st)
 }
 
@@ -552,4 +552,105 @@ async fn an_edge_breaker_opens_in_the_mock_after_repeated_failures() {
         .filter(|x| format!("{x:?}").to_lowercase().contains("breaker"))
         .count();
     assert!(refused > 0, "no breaker refusals in the mock");
+}
+
+/// Step 8L: with `least-conn` or `p2c` on a node with copies, the mock sends each call to the copy
+/// the engine finds least loaded at that instant, as the simulator does. Copy 0 is slowed by
+/// 200 ms; requests come every 15 ms, so most should find copy 0 busy and take copy 1. Settled
+/// as for no load (the old behaviour) the picks alternate and half of the requests are slow.
+async fn fast_share(balance: &str) -> usize {
+    let yaml = YAML
+        .replace(
+            "db: { type: database, ops:",
+            &format!("db: {{ type: database, replicas: 2, balance: {balance}, ops:"),
+        )
+        .replace(
+            "scenarios:\n",
+            "scenarios:\n  slow0: { chaos: [ { node: db, replica: 0, latency_ms: 200 } ] }\n",
+        );
+    let st = app_with(&yaml);
+    let mut tasks = Vec::new();
+    for i in 0..16u64 {
+        let st = st.clone();
+        tasks.push(tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(15 * i)).await;
+            let start = std::time::Instant::now();
+            let r = call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "slow0")]).await;
+            assert_eq!(r.status().as_u16(), 200);
+            start.elapsed()
+        }));
+    }
+    let mut fast = 0;
+    for t in tasks {
+        if t.await.unwrap() < std::time::Duration::from_millis(120) {
+            fast += 1;
+        }
+    }
+    fast
+}
+
+#[tokio::test]
+async fn least_conn_spreads_concurrent_requests_by_live_queues_in_the_mock() {
+    let fast = fast_share("least-conn").await;
+    assert!(fast >= 12, "{fast} of 16 requests avoided the slow copy");
+}
+
+#[tokio::test]
+async fn p2c_also_shifts_load_off_the_slow_copy_in_the_mock() {
+    let fast = fast_share("p2c").await;
+    assert!(fast >= 12, "{fast} of 16 requests avoided the slow copy");
+}
+
+/// Step 8L: the mock has a clock (the time since the system started), so an outage that begins
+/// mid-run (`from_ms`) and a balancer's `detect` mean something for real requests.
+#[tokio::test]
+async fn an_outage_with_from_ms_begins_later_in_the_mock() {
+    let yaml = YAML.replace(
+        "scenarios:\n",
+        "scenarios:\n  later: { chaos: [ { node: db, down: true, from_ms: 400 } ] }\n",
+    );
+    let st = app_with(&yaml);
+    let hdr = [("x-kaanal-scenario", "later")];
+    let early = call(&st, "GET", "/users/1", &hdr).await;
+    assert_eq!(early.status().as_u16(), 200, "before the outage begins");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let late = call(&st, "GET", "/users/1", &hdr).await;
+    assert_eq!(late.status().as_u16(), 503, "after it began");
+}
+
+#[tokio::test]
+async fn a_downed_copy_is_noticed_after_detect_in_the_mock() {
+    // copy 0 of the database goes down at the start; the wire's balancer notices after 400 ms
+    let yaml = YAML
+        .replace(
+            "db: { type: database, ops:",
+            "db: { type: database, replicas: 2, ops:",
+        )
+        .replace(
+            "  - { from: app, to: db, net: 1ms }",
+            "  - { from: app, to: db, net: 1ms, detect: 400ms }",
+        )
+        .replace(
+            "scenarios:\n",
+            "scenarios:\n  down0: { chaos: [ { node: db, replica: 0, down: true, from_ms: 0 } ] }\n",
+        );
+    let st = app_with(&yaml);
+    let hdr = [("x-kaanal-scenario", "down0")];
+    let start = std::time::Instant::now();
+    let (mut early_failures, mut late_failures) = (0, 0);
+    for _ in 0..40 {
+        let at = start.elapsed();
+        let failed = call(&st, "GET", "/users/1", &hdr).await.status().as_u16() != 200;
+        if at < std::time::Duration::from_millis(300) {
+            early_failures += usize::from(failed);
+        } else if at > std::time::Duration::from_millis(550) {
+            late_failures += usize::from(failed);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        early_failures > 0,
+        "before detect the balancer still sends to the downed copy"
+    );
+    assert_eq!(late_failures, 0, "after detect it does not");
 }

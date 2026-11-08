@@ -8,6 +8,7 @@ mod draft;
 mod fix;
 mod hardening;
 mod layout;
+mod live;
 mod paths;
 mod remap;
 mod rename;

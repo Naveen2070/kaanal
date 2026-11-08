@@ -62,6 +62,10 @@ pub struct Flagged {
 pub struct Generation {
     /// Which generation this is: 1 for the first, counting up with every Apply.
     pub id: u64,
+    /// When this system started running: the clock the mock and the live generator plan with, so
+    /// an outage that begins mid-run (`from_ms`) and a balancer's `detect` mean something for
+    /// real requests (step 8L). A live parameter edit keeps it, an Apply starts it again.
+    pub started: std::time::Instant,
     /// The validated topology graph.
     pub topo: Topology,
     /// Path router: each path maps to its method routes.
@@ -266,6 +270,7 @@ impl Generation {
                 flagged,
                 auth: None,
                 engine: None,
+                started: std::time::Instant::now(),
             },
             scenarios,
         ))

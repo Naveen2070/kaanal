@@ -1,0 +1,29 @@
+# `crates/kaanal-server/src/live/` (`mod.rs`, `generator.rs`, `hist.rs`, `tick.rs`, `edit.rs`, `stream.rs`)
+
+The live simulation (step 8L, RULES 105): a generator that feeds the shared engine actor, and the session and routes that tie it to Studio pages.
+
+## `generator.rs`
+
+`start(st, mix, rps, seed, limits, forward) -> GeneratorHandle` runs Poisson arrivals over a mix of routes (`StreamShare { endpoint_key, share, req_bytes, resp_bytes }`) at `rps` requests a second. Each arrival reads the **current generation and chaos** (`AppState::generation`, `snapshot`), so an edit is seen at the next arrival; it draws a route by share, samples a plan (`sample_plan`, with `ChainRequest::at` = time since the generator started, so `detect` and `from_ms` mean something) and sends it to that generation's engine with `EngineHandle::submit`. Pacing is by catch-up (the instant of the next arrival is kept and every due arrival is submitted each turn, at most 20,000 a turn), so a coarse timer tick does not cap the rate. Caps: `MAX_RATE` 20,000 a second (`set_rate` refuses more, a negative or a NaN, and leaves the rate as it was) and `MAX_IN_FLIGHT` 200,000 unfinished requests (above it arrivals are skipped and `overloaded` is set, so an unbounded queue under overload cannot grow without limit). `pause`, `resume` (no catch-up for the paused time), `stop`, `stats() -> GenStats`. The generator sets itself as the engine's tap; a drain task counts every finished generated request and forwards it when a `forward` sender was given.
+
+## `mod.rs`
+
+`LiveSlot` (in `AppState::live`) holds at most one **session**: a generator over the first traffic profile of the current system (`mix_of`, through `sim::profile::to_sim`, so the shares are the same as a batch run). `attach(st, fresh)` returns a `ClientGuard`: with `fresh` (a page load) or no session a new session starts and the old one stops; otherwise the client joins. The session stops `GRACE` (5 s) after the last guard drops, so a closed page leaves no generator running (a grace timer for a replaced session finds a different id and does nothing). With no traffic profile (or a route that does not exist) the session runs an idle generator and `status()` carries a `note` saying why. `pause`, `resume`, `set_rate` give `LiveError::{NoSession, Refused}`. `hold_for_apply()` pauses the generator while an Apply drains and swaps and resumes it on drop unless the person had paused it; `restart(st)` after the swap starts a fresh session on the new engine (a structure change restarts the live run).
+
+## `stream.rs`
+
+`GET /__kaanal/live[?fresh=1][&token=...]`: server-sent events, a `hello` event (the session status) and a keep-alive comment every 2 s; the stream holds the client guard and ends when the server shuts down. `POST /__kaanal/live/pause`, `POST /__kaanal/live/resume`, `PUT /__kaanal/live/rate` with `{ "rps": N }` answer with the status (409 when no page is connected, 400 for a refused rate). The token may be given as `?token=` on the stream only (`control/guard.rs`), as on `/events`; the commands need the header.
+
+## `hist.rs`
+
+`LatencyHist`: counts of latencies by geometric bucket (ratio 1.0201, 10 microseconds to 1,000 seconds, about 1,000 buckets; one bucket under the range and one at the top), so any value is within about 1% of its bucket's middle (two significant digits, as `HdrHistogram`). `record(ns)`, `sparse()` (the occupied buckets, for the wire); `merge`, `count`, `quantile(q)` exist for tests and mirror what the page does with the ticks of its window (the server keeps no history). A quantile read from the buckets is within 1% of the exact one (tested on 100,000 lognormal latencies).
+
+## `tick.rs`
+
+`Aggregator`: `add(&Finished)` for each finished generated request, `take(t_ms, loads, topo, status) -> Tick` every 250 ms. Per node: `arrived` (own hops that ran, in requests finished in the tick), `dropped` by cause (`FailCause` to overflow, rate limit, deadline, breaker, chaos, at the node that failed the request), `queue` and `busy_slots` from the engine snapshot (`EngineHandle::loads`), `cpu_load` (running hops over cores x copies). Per wire: `carried`, counted as an own hop on one node after an own hop on another with an edge between them. The served requests' latencies go into a `LatencyHist`; at most `MAX_JOURNEYS` (10) sampled journeys per tick (one in `stride`, the stride adapted to the last tick's rate, and a dropped request always), each with its hops and the index where it was dropped. `Tick`, `Journey`, `JourneyHop`, `NodeTick`, `WireTick`, `TickStatus` are the JSON of the `live` event.
+
+## `edit.rs`
+
+`apply_params(st)`: after a draft change, with a live session, compares the running config (kept in the session) with the draft. The same components and wires: the draft is the new running config. Pending structure edits: the new running config is the running structure with the draft's parameters for every component and wire that exists in both. It builds a generation from that config (`build_config`), remaps chaos as an Apply does, installs it with the **same engine handle and generation id**, and calls `EngineHandle::reconfigure` so queues and running work carry over; no drain, no `applied` event. `EditOutcome`: `NoSession`, `Unchanged`, `Applied { changed, structure_pending }`, `Invalid(message)` (JSON `live` in the draft's reply). A `param` marker names what changed.
+
+**The clock.** `Generation::started` is when the running system started; the mock (`mock::plan_of`) and the generator plan every request with `ChainRequest::at = started.elapsed()`, so `from_ms` outages and `detect` mean the same for real and generated traffic. The `hello` status and each tick carry it as `system_ms`. `edit.rs` copies the old `started` into a rebuilt generation (a parameter edit is not a restart); an Apply builds a new one.

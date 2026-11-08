@@ -128,16 +128,33 @@ pub(crate) fn build_draft(
     port: u16,
 ) -> Result<Built, Diagnostic> {
     let cfg = Config::from_yaml(text).map_err(Diagnostic::parsed)?;
+    build_config(&cfg, text, dir, drawn_seed, auth_key, port)
+}
+
+/// [`build_draft`] for a config already parsed (`text` is what it came from, so a problem can be
+/// placed in it). A live parameter edit builds the running structure with the draft's parameters
+/// this way, which has no text of its own.
+///
+/// # Errors
+/// The first problem, as a [`Diagnostic`].
+pub(crate) fn build_config(
+    cfg: &Config,
+    text: &str,
+    dir: &Path,
+    drawn_seed: Option<u64>,
+    auth_key: Option<AuthKey>,
+    port: u16,
+) -> Result<Built, Diagnostic> {
     // the draft decides, not the startup config: `controlled` runs on its `seed:`, `realistic`
     // on the seed drawn at startup (or one drawn now when startup was controlled)
     let drawn_seed = match cfg.seed_source() {
         kaanal_core::SeedSource::Fixed(_) => None,
         kaanal_core::SeedSource::Entropy => Some(drawn_seed.unwrap_or_else(rand::random)),
     };
-    let (mut generation, scenarios) = Generation::build(&cfg, dir, drawn_seed, Trust::Api)
+    let (mut generation, scenarios) = Generation::build(cfg, dir, drawn_seed, Trust::Api)
         .map_err(|e| Diagnostic::located(&e, text, dir))?;
-    generation.auth = Issuer::from_config(&cfg, auth_key, port)
-        .map_err(|e| Diagnostic::located(&e, text, dir))?;
+    generation.auth =
+        Issuer::from_config(cfg, auth_key, port).map_err(|e| Diagnostic::located(&e, text, dir))?;
     // what goes back to a client names files inside the project, never the machine's layout
     for w in &mut generation.warnings {
         *w = scrub(w, dir);
@@ -208,10 +225,11 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
         scenarios,
     } = built;
     generation.id = st.generation().map_or(1, |g| g.id + 1);
-    generation.engine = Some(crate::actor::spawn(kaanal_core::replay::Engine::new(
+    generation.engine = Some(crate::actor::spawn(kaanal_core::replay::Engine::live(
         &generation.topo,
     )));
 
+    let _live_hold = st.live.hold_for_apply();
     let _paused = st.gate.pause();
     if !st.gate.drained(timeout).await {
         return Err(ApplyError::Timeout);
@@ -245,6 +263,8 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
         st.install(generation);
         (report.kept, report.dropped)
     };
+    // a running live session restarts on the new engine, with a fresh timeline (RULES 105 n)
+    st.live.restart(st);
     st.draft
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

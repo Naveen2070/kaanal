@@ -12,7 +12,7 @@ use super::{
 ///    page must load before it has the token). An asset is exempt only when [`assets::hit`]
 ///    says so: `GET`/`HEAD`, no query, and the raw path is `studio/assets/` plus a name in the
 ///    table, exactly; every other method, miss or variant falls through to the token check
-///    (R1.106). `/events` alone may take the token as `?token=`, because the browser
+///    (R1.106). `/events` and `/live` alone may take the token as `?token=`, because the browser
 ///    `EventSource` cannot set headers.
 /// 3. Responses are marked uncacheable (unless the handler set its own cache policy) and non-sniffable.
 pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
@@ -34,7 +34,7 @@ pub async fn guard(State(st): State<Arc<AppState>>, req: Request, next: Next) ->
             .get(header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer "));
-        let query = if path == "/__kaanal/events" {
+        let query = if matches!(path, "/__kaanal/events" | "/__kaanal/live") {
             query_token(req.uri().query())
         } else {
             None

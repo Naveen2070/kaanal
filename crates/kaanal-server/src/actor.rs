@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use kaanal_core::Plan;
 use kaanal_core::replay::{Engine, Finished};
+use kaanal_core::{Plan, Topology};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
@@ -27,7 +27,24 @@ enum Cmd {
     },
     /// Refill the rate-limit buckets (`POST /reset`).
     Refill,
+    /// Change the running engine's parameters in place (step 8L); the reply is the engine's answer.
+    Reconfigure {
+        topo: Arc<Topology>,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    /// Run a generated plan: no reply, the finished request goes to the tap.
+    Submit { plan: Arc<Plan> },
+    /// Where the finished requests of generated plans go (`None` drops them).
+    Tap(Option<mpsc::UnboundedSender<Finished>>),
+    /// `(running, waiting)` of every node now.
+    Loads {
+        reply: oneshot::Sender<Vec<(u32, usize)>>,
+    },
 }
+
+/// **Private.** Marks the engine tag of a generated plan, so its answer goes to the tap and not to
+/// a waiting handler.
+const GENERATED: u64 = 1 << 63;
 
 /// A handle to the engine task; clones share it.
 #[derive(Clone)]
@@ -46,6 +63,38 @@ impl EngineHandle {
 }
 
 impl EngineHandle {
+    /// Changes the running engine's parameters in place (step 8L, `Engine::reconfigure`): queues,
+    /// running work and breaker state carry over. A change of structure is refused with the
+    /// engine's reason, and so is a stopped engine.
+    ///
+    /// # Errors
+    /// The reason the engine refused the change, or that it has stopped.
+    pub async fn reconfigure(&self, topo: Arc<Topology>) -> Result<(), String> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Cmd::Reconfigure { topo, reply })
+            .map_err(|_| "the engine has stopped".to_string())?;
+        rx.await.map_err(|_| "the engine has stopped".to_string())?
+    }
+
+    /// Runs a generated plan without waiting for it (live traffic, step 8L): its finished request
+    /// goes to the tap set with [`EngineHandle::tap`].
+    pub fn submit(&self, plan: Arc<Plan>) {
+        let _ = self.tx.send(Cmd::Submit { plan });
+    }
+
+    /// `(running, waiting)` of every node at this instant (`None` when the engine has stopped).
+    pub async fn loads(&self) -> Option<Vec<(u32, usize)>> {
+        let (reply, rx) = oneshot::channel();
+        self.tx.send(Cmd::Loads { reply }).ok()?;
+        rx.await.ok()
+    }
+
+    /// Sets where generated plans' finished requests go; `None` drops them.
+    pub fn tap(&self, to: Option<mpsc::UnboundedSender<Finished>>) {
+        let _ = self.tx.send(Cmd::Tap(to));
+    }
+
     /// Refills the engine's rate-limit buckets so a seeded run can repeat with limits. Fire and
     /// forget, so it can be called under the control lock; the channel is FIFO, so every request
     /// *started* after this returns sees full buckets (events already due are run first, so they
@@ -72,6 +121,7 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
     let now = || u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let mut waiting: HashMap<u64, oneshot::Sender<Finished>> = HashMap::new();
     let mut next_tag = 0u64;
+    let mut tap: Option<mpsc::UnboundedSender<Finished>> = None;
     loop {
         let due = engine.next_due();
         // An event already due (a zero-length hop) wakes at once: `sleep_until` would round it up
@@ -98,6 +148,23 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
                     engine.refill_buckets();
                     ok
                 }
+                Some(Cmd::Reconfigure { topo, reply }) => {
+                    let result = engine.reconfigure(now(), &topo).map_err(|e| e.to_string());
+                    let _ = reply.send(result);
+                    true
+                }
+                Some(Cmd::Submit { plan }) => {
+                    next_tag += 1;
+                    engine.submit(now(), plan, GENERATED | next_tag).is_ok()
+                }
+                Some(Cmd::Loads { reply }) => {
+                    let _ = reply.send(engine.node_loads());
+                    true
+                }
+                Some(Cmd::Tap(to)) => {
+                    tap = to;
+                    true
+                }
                 Some(Cmd::Run { plan, reply }) => {
                     let t = now();
                     next_tag += 1;
@@ -111,6 +178,11 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
         for f in engine.drain_finished_iter() {
             if let Some(reply) = waiting.remove(&f.tag) {
                 let _ = reply.send(f); // the client may be gone
+            } else if f.tag & GENERATED != 0
+                && let Some(to) = &tap
+                && to.send(f).is_err()
+            {
+                tap = None; // the session ended
             }
         }
         if !ok {
@@ -344,6 +416,57 @@ mod tests {
         eprintln!(
             "{:.0} requests/s through the actor (limit-free plan, zero-duration hops)",
             f64::from(n) / start.elapsed().as_secs_f64()
+        );
+    }
+
+    /// Step 8L: a parameter change reaches the running engine and a structural one is refused.
+    #[tokio::test(start_paused = true)]
+    async fn a_reconfigure_reaches_the_engine_and_a_structural_one_is_refused() {
+        let slow = "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, concurrency: 1, proc: 50ms }\nedges:\n  - { from: gw, to: app }\n";
+        let (t, plans) = plans_for(slow, 3);
+        let h = spawn(Engine::live(&t));
+        let mut runs = Vec::new();
+        for p in &plans {
+            let (h, p) = (h.clone(), Arc::clone(p));
+            runs.push(tokio::spawn(async move { h.run(p).await.unwrap() }));
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        // three slots at 10 ms: the two that waited start at once and end at 60 ms, not 100 and 150
+        let (t3, _) = plans_for(&slow.replace("concurrency: 1", "concurrency: 3"), 1);
+        assert_eq!(h.reconfigure(Arc::new(t3)).await, Ok(()));
+        let mut done = Vec::new();
+        for r in runs {
+            done.push(r.await.unwrap().done);
+        }
+        done.sort_unstable();
+        assert_eq!(done, vec![50_000_000, 60_000_000, 60_000_000]);
+        let more = slow.replace(
+            "edges:",
+            "  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:",
+        );
+        let (t_more, _) = plans_for(&more, 1);
+        let refused = h.reconfigure(Arc::new(t_more)).await;
+        assert!(refused.is_err(), "{refused:?}");
+    }
+
+    /// Generated traffic is submitted without a reply and its finished requests go to the tap;
+    /// a mock request still gets its own answer.
+    #[tokio::test(start_paused = true)]
+    async fn submit_delivers_finished_to_the_tap_and_not_to_a_waiter() {
+        let (t, plans) = plans(3);
+        let h = spawn(Engine::live(&t));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        h.tap(Some(tx));
+        h.submit(Arc::clone(&plans[0]));
+        h.submit(Arc::clone(&plans[1]));
+        let mock = h.run(Arc::clone(&plans[2])).await.unwrap();
+        assert!(mock.done > mock.arrival);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let (a, b) = (rx.try_recv().unwrap(), rx.try_recv().unwrap());
+        assert!(a.done > a.arrival && b.done > b.arrival);
+        assert!(
+            rx.try_recv().is_err(),
+            "the mock request did not go to the tap"
         );
     }
 }

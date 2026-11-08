@@ -157,6 +157,8 @@ pub struct AppState {
     pub scoped: RwLock<HashMap<String, Arc<crate::scope::Scoped>>>,
     /// Event bus for the SSE stream (capacity 1024; slow subscribers get `lagged`).
     pub events: broadcast::Sender<BusEvent>,
+    /// The live simulation session, if a Studio page is connected (step 8L).
+    pub live: crate::live::LiveSlot,
     /// Bearer token the control API requires.
     pub token: String,
     /// The startup draw under `determinism: realistic`, printed by `up` for replay. It outlives
@@ -316,6 +318,7 @@ impl AppState {
             lease_wake: tokio::sync::Notify::new(),
             scoped: RwLock::new(HashMap::new()),
             events,
+            live: crate::live::LiveSlot::default(),
             token,
             drawn_seed,
             port,
