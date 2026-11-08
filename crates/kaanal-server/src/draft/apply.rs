@@ -263,12 +263,13 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
         st.install(generation);
         (report.kept, report.dropped)
     };
-    // a running live session restarts on the new engine, with a fresh timeline (RULES 105 n)
-    st.live.restart(st);
+    // the applied text first: the restarted live session reads it as the config it runs
     st.draft
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .applied = text;
+    // a running live session restarts on the new engine, with a fresh timeline (RULES 105 n)
+    st.live.restart(st);
     let _ = st.events.send(BusEvent::Applied { generation: id });
     Ok(Applied {
         generation: id,

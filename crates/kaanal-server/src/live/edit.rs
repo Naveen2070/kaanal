@@ -62,7 +62,18 @@ impl EditOutcome {
 fn hybrid(running: &Config, draft: &Config) -> (Config, Vec<String>, bool) {
     let mut h = running.clone();
     let mut changed = Vec::new();
-    let mut pending = h.nodes.len() != draft.nodes.len() || h.edges.len() != draft.edges.len();
+    // the engine numbers components and wires by their place in the file, so a new order is a
+    // structure edit as much as a new component is
+    let wire = |c: &Config| {
+        c.edges
+            .iter()
+            .map(|e| (e.from.clone(), e.to.clone()))
+            .collect::<Vec<_>>()
+    };
+    let mut pending = h.nodes.len() != draft.nodes.len()
+        || h.edges.len() != draft.edges.len()
+        || !h.nodes.keys().eq(draft.nodes.keys())
+        || wire(&h) != wire(draft);
     for (name, d) in &draft.nodes {
         match h.nodes.get_mut(name) {
             Some(r) if std::mem::discriminant(r) == std::mem::discriminant(d) => {
@@ -156,6 +167,11 @@ pub(crate) async fn apply_params(st: &Arc<AppState>) -> EditOutcome {
     generation.started = old.started;
     generation.engine = Some(engine.clone());
     let topo = Arc::new(generation.topo.clone());
+    // the engine first: it is the one step that can refuse, and a refusal must leave the
+    // installed system, the control state and the running config exactly as they were
+    if let Err(m) = engine.reconfigure(topo).await {
+        return EditOutcome::Invalid(m);
+    }
     {
         let mut c = crate::control::lock(st);
         let backup = (*c).clone();
@@ -167,9 +183,6 @@ pub(crate) async fn apply_params(st: &Arc<AppState>) -> EditOutcome {
             return EditOutcome::Invalid(m);
         }
         st.install(generation);
-    }
-    if let Err(m) = engine.reconfigure(topo).await {
-        return EditOutcome::Invalid(m);
     }
     st.live.set_running(next);
     if !structure_pending {

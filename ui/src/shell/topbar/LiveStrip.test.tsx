@@ -122,3 +122,14 @@ test("the_strip_has_no_accessibility_violations", async () => {
   const { container } = render(<LiveStrip />);
   await expectNoViolations(container);
 });
+
+// review finding 8
+test("the_rate_box_and_the_overload_warning_follow_the_latest_tick_not_the_hello", () => {
+  const t = tick(250);
+  useLive.setState({
+    ticks: [{ ...t, status: { rate: 500, paused: false, overloaded: true, in_flight: 9 } }],
+  });
+  render(<LiveStrip />);
+  expect((screen.getByRole("textbox", { name: /Offered/ }) as HTMLInputElement).value).toBe("500");
+  expect(screen.getByText(/cannot keep up/)).toBeTruthy();
+});

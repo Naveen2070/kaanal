@@ -169,6 +169,14 @@ impl Aggregator {
 
     /// Adds one finished request to the tick being built.
     pub(crate) fn add(&mut self, f: &Finished) {
+        // a request of another system (the old engine's, while an Apply swaps) names nodes this
+        // aggregator does not have: it belongs to no tick here
+        let n = self.nodes.len();
+        let foreign = f.hops.iter().any(|h| h.hop.node >= n)
+            || matches!(&f.result, ChainResult::Err { node, .. } if *node >= n);
+        if foreign {
+            return;
+        }
         self.requests += 1;
         self.seen += 1;
         let total = f.done.saturating_sub(f.arrival);
@@ -329,6 +337,32 @@ mod tests {
     }
 
     const CHAIN: &str = "version: 1\nnodes:\n  gw: { type: gateway, proc: 1ms }\n  app: { type: service, proc: 2ms }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\nedges:\n  - { from: gw, to: app, net: 1ms }\n  - { from: app, to: db, net: 1ms }\n";
+
+    /// Review finding 3: requests finished by an old, larger system must not panic an aggregator
+    /// built for the new, smaller one (an Apply swaps the generation before the old feed stops).
+    #[test]
+    fn requests_from_a_different_topology_are_ignored_not_indexed_out_of_range() {
+        let (_, fin) = finished(CHAIN, 10, 5);
+        let small = Topology::build(
+            &Config::from_yaml(
+                "version: 1
+nodes:
+  gw: { type: gateway, proc: 1ms }
+  app: { type: service, proc: 2ms }
+edges:
+  - { from: gw, to: app, net: 1ms }
+",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut a = Aggregator::new(&small);
+        for f in &fin {
+            a.add(f);
+        }
+        let tick = a.take((250, 250), &[(0, 0), (0, 0)], &small, STATUS);
+        assert_eq!(tick.nodes.len(), 2);
+    }
 
     #[test]
     fn a_tick_counts_sum_to_the_requests_the_engine_finished() {

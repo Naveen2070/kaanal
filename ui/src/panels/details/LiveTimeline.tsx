@@ -89,8 +89,10 @@ export function LiveTimeline() {
     return <p className="m-0 text-xs text-muted">The timeline fills in as the run goes on.</p>;
   }
   const span: [number, number] = [series[0]?.t_ms ?? 0, series.at(-1)?.t_ms ?? 1];
-  const inside = markers.filter((m) => m.at_ms >= span[0] && m.at_ms <= span[1]);
-  const marks = inside.map((m) => m.at_ms);
+  // a run's own first mark (the restart) sits at 0, just before its first tick
+  const from = (ticks[0]?.t_ms ?? 0) - 250;
+  const inside = markers.filter((m) => m.at_ms >= from && m.at_ms <= span[1]);
+  const marks = inside.map((m) => Math.max(m.at_ms, span[0]));
   return (
     <div className="flex flex-col gap-2">
       <Lines

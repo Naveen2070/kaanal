@@ -44,7 +44,10 @@ export function quantileMs(hist: ReadonlyMap<number, number>, q: number): number
 export function recent(ticks: readonly Tick[], ms: number): Tick[] {
   const last = ticks.at(-1);
   if (!last) return [];
-  return ticks.filter((t) => t.t_ms > last.t_ms - ms);
+  // walk back from the newest: a short span of a 7,200 tick window costs only its own ticks
+  let i = ticks.length;
+  while (i > 0 && (ticks[i - 1] as Tick).t_ms > last.t_ms - ms) i--;
+  return ticks.slice(i);
 }
 
 /** The strip's figures over the last `ms` of ticks: per second, and the percentiles. */

@@ -112,3 +112,37 @@ test("markers_pause_state_and_the_last_edit_are_recorded", () => {
     structure_pending: true,
   });
 });
+
+// review finding 7
+test("a_paused_generator_does_not_undo_the_hidden_pause", () => {
+  const s = useLive.getState();
+  s.ingest({ type: "hello", hello: hello(1) });
+  s.setStatus("hidden-paused");
+  s.ingest({
+    type: "tick",
+    tick: tick(250, { status: { rate: 100, paused: true, overloaded: false, in_flight: 0 } }),
+  });
+  expect(useLive.getState().status).toBe("hidden-paused");
+});
+
+// review finding 9
+test("a_restarted_session_clears_the_pending_structure_notice", () => {
+  const s = useLive.getState();
+  s.ingest({ type: "hello", hello: hello(1) });
+  s.noteEdit({ live: "unchanged", structure_pending: true });
+  s.ingest({ type: "hello", hello: hello(2) });
+  expect(useLive.getState().lastEdit).toBeNull();
+});
+
+// review finding 10: a tick costs work in proportion to what is new, and old journeys still go
+test("ingest_drops_journeys_only_of_ticks_older_than_ten_seconds", () => {
+  const s = useLive.getState();
+  s.ingest({ type: "hello", hello: hello(1) });
+  const j = [{ hops: [], dropped_at: null, total_ns: 1 }];
+  for (let t = 250; t <= 20_000; t += 250)
+    s.ingest({ type: "tick", tick: tick(t, { journeys: j }) });
+  const ticks = useLive.getState().ticks;
+  expect(ticks.find((t) => t.t_ms === 5_000)?.journeys).toEqual([]);
+  expect(ticks.find((t) => t.t_ms === 19_000)?.journeys).toEqual(j);
+  expect(ticks.at(-1)?.journeys).toEqual(j);
+});

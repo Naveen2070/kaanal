@@ -72,6 +72,10 @@ struct Inner {
     /// Stream clients connected now.
     clients: u64,
     next_id: u64,
+    /// The config the engine runs after live parameter edits, kept across sessions (a page reload
+    /// or a stop after the last page leaves the engine as edited); `None` means the applied one.
+    /// An Apply swaps the engine, so it clears this.
+    engine_running: Option<kaanal_core::Config>,
 }
 
 struct Session {
@@ -107,7 +111,6 @@ impl Session {
 /// A connected stream client: the session lives while at least one exists (plus [`GRACE`]).
 pub(crate) struct ClientGuard {
     st: Arc<AppState>,
-    session: u64,
 }
 
 /// Held while an Apply drains and swaps: the generator is paused for it and resumes after, unless
@@ -277,7 +280,7 @@ impl LiveSlot {
     /// session starts and the old one stops; otherwise the client joins the running one.
     pub(crate) fn attach(&self, st: &Arc<AppState>, fresh: bool) -> ClientGuard {
         // parsed before the lock: the draft lock is never taken inside it
-        let running = applied_config(st);
+        let applied = applied_config(st);
         let mut g = self.lock();
         if fresh || g.session.is_none() {
             if let Some(old) = g.session.take() {
@@ -285,14 +288,11 @@ impl LiveSlot {
             }
             g.next_id += 1;
             let id = g.next_id;
+            let running = g.engine_running.clone().or(applied);
             g.session = Some(start_session(st, id, running));
         }
         g.clients += 1;
-        let session = g.session.as_ref().map_or(0, |s| s.id);
-        ClientGuard {
-            st: Arc::clone(st),
-            session,
-        }
+        ClientGuard { st: Arc::clone(st) }
     }
 
     /// A receiver for the running session's ticks and markers; `None` when no session runs.
@@ -389,15 +389,17 @@ impl LiveSlot {
     pub(crate) fn restart(&self, st: &Arc<AppState>) {
         let running = applied_config(st);
         let mut g = self.lock();
-        if g.session.is_none() {
-            return;
-        }
-        if let Some(old) = g.session.take() {
-            old.feed.stop();
-        }
+        // a new engine runs the applied system, whether or not a page follows it now
+        g.engine_running = None;
+        let Some(old) = g.session.take() else { return };
+        old.feed.stop();
         g.next_id += 1;
         let id = g.next_id;
         g.session = Some(start_session(st, id, running));
+        if g.clients == 0 {
+            // the last page left inside its grace: the timer that was set watches the old session
+            schedule_stop(st, id);
+        }
     }
 
     /// The config the engine runs now; `None` when no session runs.
@@ -407,34 +409,44 @@ impl LiveSlot {
 
     /// Records the config the engine runs after a live parameter edit.
     pub(crate) fn set_running(&self, cfg: kaanal_core::Config) {
-        if let Some(s) = self.lock().session.as_mut() {
+        let mut g = self.lock();
+        g.engine_running = Some(cfg.clone());
+        if let Some(s) = g.session.as_mut() {
             s.running = Some(cfg);
         }
     }
 }
 
+/// Stops session `id` after [`GRACE`] if no page is connected by then and it is still the one
+/// that runs (a page load or an Apply may have replaced it).
+fn schedule_stop(st: &Arc<AppState>, id: u64) {
+    let st = Arc::clone(st);
+    if let Ok(rt) = tokio::runtime::Handle::try_current() {
+        rt.spawn(async move {
+            tokio::time::sleep(GRACE).await;
+            let mut g = st.live.lock();
+            if g.clients == 0
+                && g.session.as_ref().is_some_and(|s| s.id == id)
+                && let Some(old) = g.session.take()
+            {
+                old.feed.stop();
+            }
+        });
+    }
+}
+
 impl Drop for ClientGuard {
     fn drop(&mut self) {
-        let last = {
+        let current = {
             let mut g = self.st.live.lock();
             g.clients = g.clients.saturating_sub(1);
-            g.clients == 0
+            // the session that runs now, not the one this page joined: an Apply may have restarted it
+            (g.clients == 0)
+                .then(|| g.session.as_ref().map(|s| s.id))
+                .flatten()
         };
-        if !last {
-            return;
-        }
-        let (st, id) = (Arc::clone(&self.st), self.session);
-        if let Ok(rt) = tokio::runtime::Handle::try_current() {
-            rt.spawn(async move {
-                tokio::time::sleep(GRACE).await;
-                let mut g = st.live.lock();
-                if g.clients == 0
-                    && g.session.as_ref().is_some_and(|s| s.id == id)
-                    && let Some(old) = g.session.take()
-                {
-                    old.feed.stop();
-                }
-            });
+        if let Some(id) = current {
+            schedule_stop(&self.st, id);
         }
     }
 }
@@ -524,6 +536,65 @@ traffic:
             second
         );
         drop(g3);
+    }
+
+    /// Review finding 4: an Apply restarts the session while the last page is gone; the grace
+    /// timer must still stop the restarted one.
+    #[tokio::test(start_paused = true)]
+    async fn a_session_restarted_inside_the_grace_is_still_stopped() {
+        let st = state(YAML);
+        let guard = st.live.attach(&st, true);
+        drop(guard);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        st.live.restart(&st);
+        assert!(running(&st));
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        assert!(!running(&st), "no orphan after an Apply inside the grace");
+    }
+
+    /// Review finding 4, other order: the page leaves just after the restart.
+    #[tokio::test(start_paused = true)]
+    async fn the_last_page_leaving_after_a_restart_stops_the_new_session() {
+        let st = state(YAML);
+        let guard = st.live.attach(&st, true);
+        st.live.restart(&st);
+        drop(guard);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        assert!(
+            !running(&st),
+            "the guard must watch the session that runs now"
+        );
+    }
+
+    /// Review finding 6: a new session on the same engine keeps the running config, not the stale
+    /// applied text, so a later edit compares against what the engine really runs.
+    #[tokio::test(start_paused = true)]
+    async fn a_new_session_keeps_the_config_the_engine_runs() {
+        let st = state(YAML);
+        let g1 = st.live.attach(&st, true);
+        let edited = Config::from_yaml(&YAML.replace(
+            "proc: 1ms }
+  app",
+            "proc: 9ms }
+  app",
+        ))
+        .unwrap();
+        st.live.set_running(edited.clone());
+        drop(g1);
+        let g2 = st.live.attach(&st, true);
+        assert_eq!(
+            format!("{:?}", st.live.running().unwrap()),
+            format!("{edited:?}")
+        );
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        // after every page left and came back, still the engine's config
+        drop(g2);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let _g3 = st.live.attach(&st, true);
+        assert_eq!(
+            format!("{:?}", st.live.running().unwrap()),
+            format!("{edited:?}")
+        );
     }
 
     #[tokio::test(start_paused = true)]

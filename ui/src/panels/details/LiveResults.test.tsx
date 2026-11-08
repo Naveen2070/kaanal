@@ -114,3 +114,16 @@ test("the_window_group_waits_for_a_file", () => {
   const { container } = render(<LiveWindow />);
   expect(container.firstChild).toBeNull();
 });
+
+// review finding 9: the restart marker sits at the start of the new run, before its first tick
+test("the_restart_marker_at_the_start_of_a_run_is_listed", () => {
+  const ticks = Array.from({ length: 10 }, (_, i) => tick((i + 1) * 250, [1, 1]));
+  useLive.setState({
+    ticks,
+    markers: [{ at_ms: 0, kind: "structure", text: "Applied: the live run restarted" }],
+  });
+  render(<LiveTimeline />);
+  expect(screen.getByRole("list", { name: "Changes on the timeline" }).textContent).toContain(
+    "Applied: the live run restarted",
+  );
+});

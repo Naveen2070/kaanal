@@ -3,6 +3,7 @@
 //! file changes only on Save.
 
 use crate::common::*;
+use reqwest::Method;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
@@ -170,11 +171,7 @@ async fn the_file_on_disk_changes_only_on_save() {
         "an edit never writes the file"
     );
     let saved = s
-        .send(
-            reqwest::Method::POST,
-            "/__kaanal/draft/save",
-            Some(json!({})),
-        )
+        .send(Method::POST, "/__kaanal/draft/save", Some(json!({})))
         .await;
     assert_eq!(saved.status(), 200);
     assert!(std::fs::read_to_string(&file).unwrap().contains("55ms"));
@@ -240,4 +237,56 @@ async fn a_parameter_edit_that_is_running_leaves_the_draft_clean_and_pending_str
     .await;
     assert_eq!(v["live"]["structure_pending"], true);
     assert_eq!(v["dirty"], true);
+}
+
+/// Review finding 1: an Apply restarts the live session, and the new session must run on what was
+/// just applied, so a parameter edit after it is a plain edit and not a structure mismatch.
+#[tokio::test]
+async fn a_parameter_edit_after_an_apply_that_added_a_component_reaches_the_new_engine() {
+    let s = start(LIVE).await;
+    let _page = follow(&s).await;
+    patch(
+        &s,
+        json!([{ "op": "insert", "path": ["nodes", "extra"], "value": { "type": "service" } }]),
+    )
+    .await;
+    let r = s.send(Method::POST, "/__kaanal/draft/apply", None).await;
+    assert_eq!(r.status(), 200);
+    let v = patch(
+        &s,
+        json!([{ "op": "set", "path": ["nodes", "app", "proc"], "value": "90ms" }]),
+    )
+    .await;
+    assert_eq!(v["live"]["live"], "applied", "{v}");
+    assert_eq!(v["live"]["structure_pending"], false, "{v}");
+    let start_t = Instant::now();
+    let r = s
+        .client
+        .get(format!("{}/users", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(start_t.elapsed() >= Duration::from_millis(85));
+}
+
+/// Review finding 2: a draft that only reorders the components is a structure edit (node numbers
+/// change), so it waits for Apply and the running system is left alone.
+#[tokio::test]
+async fn reordering_components_waits_for_apply_and_leaves_the_engine_alone() {
+    let s = start(LIVE).await;
+    let _page = follow(&s).await;
+    let reordered = LIVE.replace(
+        "  nginx: { type: gateway, proc: 1ms }\n  app: { type: service, spec: openapi.yaml, proc: 40ms }\n",
+        "  app: { type: service, spec: openapi.yaml, proc: 40ms }\n  nginx: { type: gateway, proc: 1ms }\n",
+    );
+    assert_ne!(reordered, LIVE);
+    let v = s
+        .put("/__kaanal/draft", json!({ "text": reordered }))
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(v["live"]["structure_pending"], true, "{v}");
+    assert_ne!(v["live"]["live"], "invalid", "{v}");
 }

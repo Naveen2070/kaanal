@@ -227,9 +227,7 @@ async fn arrivals(st: Arc<AppState>, mix: Vec<StreamShare>, seed: u64, ctl: Arc<
                 arrive(&st, &mix, total, &mut rng, n, &ctl);
                 n += 1;
             }
-            // exponential gap, `1 - u` keeps the logarithm finite
-            let gap = -(1.0 - rng.random::<f64>()).ln() / rps;
-            next += Duration::from_secs_f64(gap);
+            next += gap(rng.random::<f64>(), rps);
             burst += 1;
         }
         if burst >= BURST {
@@ -237,6 +235,16 @@ async fn arrivals(st: Arc<AppState>, mix: Vec<StreamShare>, seed: u64, ctl: Arc<
         }
         sleep_until(next.min(now + TURN)).await;
     }
+}
+
+/// The longest wait between two arrivals: a tiny rate would otherwise overflow the instant.
+const MAX_GAP: Duration = Duration::from_secs(3600);
+
+/// **Private.** The exponential gap to the next arrival for a uniform draw `u` in `[0, 1)` at
+/// `rps` a second; `1 - u` keeps the logarithm finite, and it never exceeds [`MAX_GAP`].
+fn gap(u: f64, rps: f64) -> Duration {
+    let secs = -(1.0 - u).ln() / rps;
+    Duration::try_from_secs_f64(secs).map_or(MAX_GAP, |d| d.min(MAX_GAP))
 }
 
 /// **Private.** One arrival: a route drawn by share, a plan sampled from the current generation
@@ -294,6 +302,16 @@ edges:
 endpoints:
   \"GET /users/{id}\": { chain: [ db ] }
 ";
+
+    /// Review finding 5: a tiny positive rate must not overflow the next-arrival instant.
+    #[test]
+    fn the_gap_between_arrivals_is_capped_so_a_tiny_rate_cannot_overflow_an_instant() {
+        let g = gap(0.5, 1e-12);
+        assert!(g <= Duration::from_secs(3600), "{g:?}");
+        let mut at = Instant::now();
+        at += g;
+        assert_eq!(gap(0.5, 100.0).as_secs_f64().round(), 0.0);
+    }
 
     fn state(yaml: &str) -> Arc<AppState> {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");

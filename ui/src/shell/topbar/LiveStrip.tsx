@@ -49,7 +49,10 @@ export function LiveStrip() {
     return () => clearInterval(t);
   }, [sentence]);
   const [rate, setRate] = useState("");
-  const shownRate = rate !== "" ? rate : String(hello?.rate ?? "");
+  // hello is sent once; every tick carries the rate and the overload now in force
+  const now = ticks.at(-1)?.status;
+  const shownRate = rate !== "" ? rate : String(now?.rate ?? hello?.rate ?? "");
+  const overloaded = now?.overloaded ?? hello?.overloaded ?? false;
   const commitRate = async () => {
     const n = Number(rate);
     setRate("");
@@ -121,7 +124,7 @@ export function LiveStrip() {
         </button>
       </div>
       {hello?.note ? <p className="m-0 w-full text-xs text-warn">{hello.note}</p> : null}
-      {hello?.overloaded ? (
+      {overloaded ? (
         <p className="m-0 w-full text-xs text-warn">
           The system cannot keep up: new requests stop being added until it catches up.
         </p>

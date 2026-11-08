@@ -63,18 +63,34 @@ export const useLive = create<LiveState>((set, get) => ({
         markers: restarted
           ? [{ at_ms: 0, kind: "structure", text: "Applied: the live run restarted" }]
           : s.markers,
+        // the restart is the Apply: nothing waits for it any more
+        lastEdit: restarted ? null : s.lastEdit,
       });
     } else if (ev.type === "tick") {
       const newest = ev.tick.t_ms;
-      const ticks = [...s.ticks, ev.tick].map((t) =>
-        t !== ev.tick && t.journeys.length > 0 && t.t_ms < newest - JOURNEY_KEEP_MS
-          ? { ...t, journeys: [] }
-          : t,
-      );
+      const ticks = [...s.ticks, ev.tick];
+      // journeys are only drawn for a few seconds: strip the ticks that just aged out. Older ones
+      // were stripped when they crossed, so the first stripped one ends the walk (a tick costs
+      // work in proportion to what is new, not to the 7,200 ticks of a 30 minute window).
+      for (let i = ticks.length - 2; i >= 0; i--) {
+        const t = ticks[i] as Tick;
+        if (t.t_ms >= newest - JOURNEY_KEEP_MS) continue;
+        if (t.journeys.length === 0) break;
+        ticks[i] = { ...t, journeys: [] };
+      }
       set({
         ticks: trim(ticks, newest, s.windowMin),
         markers: trim(s.markers, newest, s.windowMin),
-        status: ev.tick.status.paused ? "paused" : s.status === "paused" ? "running" : s.status,
+        // the generator stays paused while the page is hidden, so its ticks say paused too: that
+        // must not turn "paused because hidden" into "paused by you" (it would never resume)
+        status:
+          s.status === "hidden-paused" && ev.tick.status.paused
+            ? s.status
+            : ev.tick.status.paused
+              ? "paused"
+              : s.status === "paused"
+                ? "running"
+                : s.status,
       });
     } else if (ev.type === "marker") {
       set({ markers: [...s.markers, ev.marker] });
