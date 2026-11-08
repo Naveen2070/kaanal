@@ -19,8 +19,14 @@ import { Panel } from "./panels/details/Panel";
 import { LazyBoundary } from "./kit/LazyBoundary";
 import { useDraft } from "./data/store/draft";
 import { runNow, startStudioLoop } from "./data/store/loopRuntime";
+import { startStudioLive } from "./data/store/liveRuntime";
+import { useMode } from "./data/store/mode";
+import { useLive } from "./data/store/live";
+import { liveFeed } from "./canvas/liveFeed";
+import { useDotFeeder } from "./canvas/dots/dotStore";
 import { useRun } from "./data/store/run";
 import { KpiStrip } from "./shell/topbar/KpiStrip";
+import { LiveStrip } from "./shell/topbar/LiveStrip";
 import { TrafficHost } from "./panels/traffic/TrafficHost";
 import { TopBar, TopTools } from "./shell/topbar/TopBar";
 import { startNotifications } from "./shell/toast/bind";
@@ -34,8 +40,12 @@ export function App() {
   const dimmed = useRun((s) => s.dimmed);
 
   useEffect(() => void load(), [load]);
-  // the loop starts listening before the first draft arrives, so that arrival starts the first run
-  useEffect(() => startStudioLoop(), []);
+  // live (the default) runs by itself on the applied system; batch starts listening before the
+  // first draft arrives, so that arrival starts the first run
+  const mode = useMode((s) => s.mode);
+  const ticks = useLive((s) => s.ticks);
+  useDotFeeder();
+  useEffect(() => (mode === "batch" ? startStudioLoop() : startStudioLive()), [mode]);
   // what the stores report about the state of things becomes notices
   useEffect(() => startNotifications(), []);
 
@@ -44,7 +54,7 @@ export function App() {
   const nodes = latest?.summary?.nodes ?? [];
   const links = latest?.summary?.links ?? [];
   const pipes = latest?.summary?.pipes ?? [];
-  const feed: StatsFeed = {
+  const batchFeed: StatsFeed = {
     node: (name) => nodes.find((n) => n.name === name),
     link: (from, to) => links.find((l) => l.from === from && l.to === to),
     links,
@@ -53,6 +63,9 @@ export function App() {
     dimmed,
     peakVisits: Math.max(0, ...nodes.map((n) => n.visits_per_s).filter(Number.isFinite)),
   };
+  // live mode reads the last seconds of the live run; batch reads the finished run
+  const order = useLive((s) => s.hello?.nodes);
+  const feed = mode === "live" ? liveFeed(ticks, view?.doc ?? null, order) : batchFeed;
   return (
     <Loading ready={view !== null}>
       <FeedContext.Provider value={feed}>
@@ -60,7 +73,7 @@ export function App() {
           topLeft={<TopBar onRun={runNow} />}
           top={
             <>
-              <KpiStrip />
+              {mode === "live" ? <LiveStrip /> : <KpiStrip />}
               <FirstRun />
               <PaletteHost />
               <GuideHost />

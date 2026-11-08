@@ -2,6 +2,7 @@
 // the view is always the last answer the server gave plus the edits still waiting, so a refused
 // edit drops out without taking the later ones with it.
 
+import { useLive } from "./live";
 import { create } from "zustand";
 import { ApiError, api } from "../api/client";
 import type { DraftView, Layout, Op } from "../api/types";
@@ -102,6 +103,13 @@ export const useDraft = create<DraftState>((set, get) => {
           return false;
         }
         confirmed = answer;
+        if (answer.live) {
+          useLive.getState().noteEdit(answer.live);
+          // the draft parsed but the running engine refused it (a parse failure is undone above)
+          if (answer.live.live === "invalid" && answer.doc) {
+            notify.warn(`Not applied live: ${answer.live.message}`, "live-edit");
+          }
+        }
         history.save(answer.boot, answer.rev);
         set({ error: null });
         show();

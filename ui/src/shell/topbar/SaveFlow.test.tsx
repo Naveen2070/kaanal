@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { mockFetch } from "../../test/fetch";
-import { SaveFlow } from "./SaveFlow";
+import { useMode } from "../../data/store/mode";
+import { SaveFlow, statusText } from "./SaveFlow";
 
 function view(over: Partial<DraftView> = {}): DraftView {
   return {
@@ -41,7 +42,10 @@ const saved = {
 };
 const valid = { ok: true, diagnostics: [], warnings: [], flagged: [] };
 
-beforeEach(() => useDraft.setState({ view: null, error: null, restarted: false }));
+beforeEach(() => {
+  useDraft.setState({ view: null, error: null, restarted: false });
+  useMode.setState({ mode: "batch" });
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -324,4 +328,11 @@ test("apply_is_never_called_by_the_run_loop", () => {
   for (const [f, src] of files) {
     expect(src, f).not.toMatch(/\.apply\(|\/draft\/apply|\.save\(|\/draft\/save/);
   }
+});
+
+test("the_status_line_in_live_mode_says_changes_run_at_once_and_structure_waits_for_apply", () => {
+  expect(statusText("idle", false, true, true)).toBe("Changes run at once");
+  expect(statusText("blocked", true, false, true)).toBe("Waiting for Apply · not saved");
+  // batch words are unchanged
+  expect(statusText("idle", false, true)).toBe("Edits re-run on their own");
 });

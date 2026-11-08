@@ -8,6 +8,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "../../data/api/client";
 import type { ApplyResult, SaveResult, ValidateResult } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
+import { useMode } from "../../data/store/mode";
 
 type Dialog =
   | { kind: "applied"; result: ApplyResult }
@@ -114,7 +115,13 @@ function problemsOf(v: ValidateResult): string[] {
 export type RunWord = "idle" | "running" | "blocked" | "done";
 
 /** The words of the one status line: the results, then what the draft still lacks. */
-export function statusText(run: RunWord, dirty: boolean, saved: boolean): string {
+export function statusText(run: RunWord, dirty: boolean, saved: boolean, live = false): string {
+  if (live) {
+    // live: there is no finished result to be out of date; a setting runs at once, structure waits
+    const parts = [dirty ? "Waiting for Apply" : "Changes run at once"];
+    if (!saved) parts.push("not saved");
+    return parts.join(" · ");
+  }
   if (run === "done" && !dirty && saved) return "Everything saved";
   const parts = [
     run === "running"
@@ -131,14 +138,15 @@ export function statusText(run: RunWord, dirty: boolean, saved: boolean): string
 }
 
 function StatusLine({ run, dirty, saved }: { run: RunWord; dirty: boolean; saved: boolean }) {
-  const warn = run === "blocked" || dirty || !saved;
+  const live = useMode((m) => m.mode) === "live";
+  const warn = (!live && run === "blocked") || dirty || !saved;
   return (
     <output className={`flex items-start gap-1.5 text-xs ${warn ? "text-warn" : "text-muted"}`}>
       <span
         aria-hidden
         className={`mt-1 size-1.5 shrink-0 rounded-full ${warn ? "bg-warn-fill" : "bg-ok-fill"}`}
       />
-      {statusText(run, dirty, saved)}
+      {statusText(run, dirty, saved, live)}
     </output>
   );
 }

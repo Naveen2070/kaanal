@@ -11,6 +11,7 @@ import type { NodeDoc } from "../data/api/types";
 import { HelpPopover } from "../overlays/help/HelpPopover";
 import { useFeed } from "./feed";
 import { configLine, fmtMs, nodeFigures, stateWords } from "./metrics";
+import { LivePile } from "./dots/LivePile";
 import { Meter } from "./Meter";
 import { catColour, kindInfo } from "./nodeKinds";
 import { setUpdating, useUpdating } from "./updating";
@@ -109,6 +110,7 @@ export function NodeCard({ data, selected }: NodeProps) {
             </dd>
           </dl>
         </div>
+        <LivePile name={name} />
         <Handle type="source" position={Position.Right} />
       </div>
     </fieldset>

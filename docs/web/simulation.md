@@ -27,6 +27,10 @@ A profile name the config does not have is a `404` whose message says what to do
 
 A run is answered at once with `202`; poll `GET /sim/runs/{id}` until `state` is `done` (or `failed`, with an `error`). `GET /sim/runs` lists the last eight runs without their reports.
 
+## Live and batch
+
+A **batch run** (the rest of this page) simulates a stretch of time at once, seeded: the same inputs give the same figures, so it is the tool for comparing two settings. The **live simulation** (Studio's default view) runs the same engine on the wall clock with generated traffic, so the figures are what the system is doing now, not a finished measurement, and a live run is seeded but not repeatable (timing follows the clock). Both use the same model, so a setting means the same in each: `cpu`, slots, queues, retries, breakers, balancing, `detect` and `from_ms` all apply. Live figures are counts per 250 ms (served, dropped by cause, queue, slots in use, cpu load) and a latency histogram with 1% precision; see the [control API](control-api.md#the-live-simulation-get-__kaanallive-and-its-commands).
+
 ## Run on the draft
 
 With `"source": "draft"` the run simulates the text of the draft (`GET /draft`) as it is now, without Apply: nothing is swapped, no counter is reset, mock traffic is untouched. The live chaos is carried onto the draft by name (what the draft no longer has is left out), and a `scenario` resolves against the draft's scenarios. A draft that does not build is `400` with `{ "error", "diagnostic" }` and does not take the run slot. The run record says `"source": "draft"` and a `draft_rev` (the draft's `rev`, which `GET /draft` shows and which counts each change of its text), so a result can be matched to the edit it describes; `generation` is the one in force.

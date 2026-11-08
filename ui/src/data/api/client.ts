@@ -93,6 +93,11 @@ function query(q: object): string {
 }
 
 export const api = {
+  /** Stops the live generator (the engine keeps serving and draining). */
+  livePause: (o: Opts = {}) => call<unknown>("POST", "/live/pause", undefined, o),
+  liveResume: (o: Opts = {}) => call<unknown>("POST", "/live/resume", undefined, o),
+  /** The offered rate of the live run, requests a second (at most 20,000). */
+  liveRate: (rps: number, o: Opts = {}) => call<unknown>("PUT", "/live/rate", { rps }, o),
   getDraft: (o: Opts = {}) => call<DraftView>("GET", "/draft", undefined, o),
   putDraft: (body: PutBody, o: Opts = {}) => call<DraftView>("PUT", "/draft", body, o),
   validate: (text?: string, o: Opts = {}) =>

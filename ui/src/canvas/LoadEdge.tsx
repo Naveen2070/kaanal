@@ -23,6 +23,7 @@ import { useFeed } from "./feed";
 import { laneColour, laneCount, laneLoads, laneOffsets } from "./lanes";
 import { replicasOf } from "./metrics";
 import { bendX } from "./routing";
+import { DotsOnEdge } from "./dots/DotsOnEdge";
 import { removeWires } from "./wires";
 
 const HALO = { muted: null, warn: "var(--warn-fill)", bad: "var(--bad-fill)" } as const;
@@ -156,6 +157,7 @@ export function LoadEdge({
           </g>
         );
       })}
+      <DotsOnEdge path={path} edge={index} />
       {fullLabel ? (
         <EdgeLabelRenderer>
           <span

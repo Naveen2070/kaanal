@@ -138,3 +138,36 @@ test("replacing_the_text_waits_for_the_edits_already_queued", async () => {
   expect(sent.map((s) => s.body)).toEqual([{ layout: { gw: [1, 2] } }, { text: "new: text\n" }]);
   expect(useDraft.getState().view?.text).toBe("new: text\n");
 });
+
+test("a_patch_that_the_engine_applied_is_noted_for_the_live_view", async () => {
+  await loaded(view());
+  const { useLive } = await import("./live");
+  useLive.getState().noteEdit({ live: "none" });
+  mockFetch([
+    {
+      json: view({
+        rev: 1,
+        live: { live: "applied", changed: ["app"], structure_pending: true },
+      }),
+    },
+  ]);
+  await useDraft.getState().patch([{ op: "set", path: ["nodes", "app", "proc"], value: "5ms" }]);
+  expect(useLive.getState().lastEdit).toEqual({
+    live: "applied",
+    changed: ["app"],
+    structure_pending: true,
+  });
+});
+
+test("a_value_the_engine_refused_says_so_while_a_parse_failure_is_undone_as_before", async () => {
+  await loaded(view());
+  const { useToasts } = await import("../../shell/toast/toasts");
+  useToasts.setState({ toasts: [] });
+  mockFetch([
+    { json: view({ rev: 1, live: { live: "invalid", message: "the engine is not running" } }) },
+  ]);
+  await useDraft.getState().patch([{ op: "set", path: ["nodes", "app", "proc"], value: "5ms" }]);
+  expect(useToasts.getState().toasts.map((t) => t.text)).toEqual([
+    "Not applied live: the engine is not running",
+  ]);
+});

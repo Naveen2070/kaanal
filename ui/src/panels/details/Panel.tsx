@@ -5,6 +5,7 @@ import { plainSentence } from "../../canvas/metrics";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
 import { runNow } from "../../data/store/loopRuntime";
+import { useMode } from "../../data/store/mode";
 import { useSelected } from "../../data/store/view";
 import { usePickedWire } from "../../canvas/picked";
 import { useEffect } from "react";
@@ -16,6 +17,7 @@ import { Live } from "./Live.lazy";
 import { LogTab } from "./LogTab.lazy";
 import { useLogDrawer } from "./logDrawer";
 import { Rail } from "./Rail";
+import { LiveResults } from "./LiveResults.lazy";
 import { Results } from "./Results.lazy";
 import { SystemSummary } from "./SystemSummary";
 import { LiveSkeleton, LogSkeleton, ResultsSkeleton } from "./Skeletons";
@@ -23,6 +25,7 @@ import { LiveSkeleton, LogSkeleton, ResultsSkeleton } from "./Skeletons";
 export function Panel() {
   const view = useDraft((s) => s.view);
   const feed = useFeed();
+  const mode = useMode((s) => s.mode);
   const [selected, setSelected] = useSelected();
   const config = selected !== null ? view?.doc?.nodes?.[selected] : undefined;
   const picked = usePickedWire((s) => s.index);
@@ -106,7 +109,7 @@ export function Panel() {
           ),
           results: (
             <LazyBoundary fallback={<ResultsSkeleton />}>
-              <Results />
+              {mode === "live" ? <LiveResults /> : <Results />}
             </LazyBoundary>
           ),
         }}

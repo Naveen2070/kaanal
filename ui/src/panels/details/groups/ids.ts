@@ -22,7 +22,7 @@ export const NODE_GROUP = {
 } as const;
 
 /** The groups of the panel with nothing selected. */
-export const DOC_GROUP = { headers: "doc.headers" } as const;
+export const DOC_GROUP = { headers: "doc.headers", live: "doc.live" } as const;
 
 /** The folded groups at the foot of Results. */
 export const RESULTS_GROUP = {

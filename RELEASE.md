@@ -7,6 +7,10 @@ data, simulated service and database timing, and live chaos.
 
 This is an early build. Expect breaking changes between `0.0.x` releases.
 
+## Live: a continuous simulation in Studio
+
+Studio opens in **Live** (the default; **Batch** keeps the seeded, repeatable run). When the file is valid it runs traffic from its first `traffic:` profile all the time on the engine the mocks run on: sampled request dots move along the wires, a queue piles up at a busy component, drops show a cross, and the strip counts what arrives, what is dropped this second, p50 and p99. One continuous timeline carries a mark for every change you make. A setting you change (cores, slots, copies, bandwidth, rate limits, times, chaos) acts at once on the running system and on any frontend calling the mocks, keeping queues and running work; adding or removing a component or wire waits for Apply and restarts the run. Real speed with Pause (a hidden page pauses after 60 seconds); the timeline keeps 5 minutes, up to 30. The mocks now choose copies by their live queues (`least-conn`, `p2c`) and plan with a clock, so `from_ms` and `detect` apply to real requests. Server-sent events at `/__kaanal/live`.
+
 ## CPUs: work slows when more runs than there are cores
 
 Off unless written (`cpu: { cores: N }` on a gateway, service, monolith, database, auth or load balancer; Studio: **CPUs** in a component's Settings). A node's own work (its `proc` and operations) is shared among the requests running it, so with `n` at once each runs at `min(1, N / n)` of its speed: processor sharing, checked against M/G/1 and Erlang C to within about 2%. Slots (`concurrency`) still decide how many are admitted. Waiting on callees, the wire and wait steps are not stretched. The summary gains `cpu_load`, `cpu_capacity_per_s` and `saturates_by`, and Results says **CPU bound**. The live mock shares the cores too: it runs every request through the same engine. Memory, disk and instance presets are planned.
@@ -17,8 +21,8 @@ All off unless written (`retry`, `abandon`, `breaker`, `detect` on an edge). A r
 jittered, growing backoff; `retry.budget` is gRPC's retry throttling; `abandon: continue` lets a timed-out call's work
 run on, which with retries is the metastable retry storm; `breaker` is resilience4j's count-based breaker (a refused
 call is a 503 that never reaches the callee, counted as `short_circuited`); `detect` is the delay before a balancer
-notices a downed copy (`from_ms` on a scenario entry says when it went down). Circuit breakers and `from_ms` act in the
-simulator; the live mock runs the breaker like the simulator (a refused call is a 503 flagged `CB`), but plays every copy as noticed at once.
+notices a downed copy (`from_ms` on a scenario entry says when it went down). Circuit breakers, `from_ms` and `detect` act in the
+simulator and in the live mock alike: the mock runs every request on the same engine (a refused call is a 503 flagged `CB`) and plans with the time since the system started.
 
 ## Studio: easier controls
 

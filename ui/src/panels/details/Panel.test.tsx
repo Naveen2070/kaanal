@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DraftView } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { usePickedWire } from "../../canvas/picked";
+import { useMode } from "../../data/store/mode";
 import { mockFetch } from "../../test/fetch";
 import { Panel } from "./Panel";
 
@@ -44,6 +45,7 @@ beforeEach(() => {
   useRail.setState({ open: true });
   useDraft.setState({ view: null, error: null, restarted: false });
   usePickedWire.setState({ index: null });
+  useMode.setState({ mode: "batch" });
 });
 afterEach(() => {
   cleanup();

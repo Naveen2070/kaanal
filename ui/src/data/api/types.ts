@@ -2,6 +2,8 @@
 // field is optional here only when the server may leave it out or send null.
 
 /** Node name to `[x, y]`. */
+import type { LiveEdit } from "./liveTypes";
+
 export type Layout = Record<string, [number, number]>;
 
 /** One node of the draft as the file writes it (`type` plus its own fields). */
@@ -43,6 +45,8 @@ export interface KindRules {
 }
 
 export interface DraftView {
+  /** What this change did to the running live system, when a page follows the live run. */
+  live?: LiveEdit;
   text: string;
   dirty: boolean;
   generation: number;

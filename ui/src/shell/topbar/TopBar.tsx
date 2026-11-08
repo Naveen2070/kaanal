@@ -8,14 +8,51 @@ import { Play } from "lucide-react";
 import { Mark } from "../../look/brand/Mark";
 import { MenuButton } from "../../overlays/menu/MenuButton";
 import { useDraft } from "../../data/store/draft";
+import { useLive } from "../../data/store/live";
+import { useMode, type Mode } from "../../data/store/mode";
 import { useRun } from "../../data/store/run";
 import { SaveFlow } from "./SaveFlow";
 import { ThemeToggle } from "./ThemeToggle";
 import { UndoRedo } from "./UndoRedo";
 
+const MODES: { id: Mode; label: string; hint: string }[] = [
+  { id: "live", label: "Live", hint: "Traffic runs all the time; changes show at once" },
+  { id: "batch", label: "Batch", hint: "Run once, seeded and repeatable, then compare" },
+];
+
+/** Live or batch: a two-way switch beside Run. */
+function ModeSwitch() {
+  const mode = useMode((s) => s.mode);
+  const set = useMode((s) => s.set);
+  return (
+    <fieldset
+      aria-label="Mode"
+      className="m-0 flex rounded-lg border border-control bg-sheet p-0.5 min-w-0 border"
+    >
+      {MODES.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          aria-pressed={mode === m.id}
+          title={m.hint}
+          onClick={() => set(m.id)}
+          className={`h-7 rounded-md px-2.5 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${mode === m.id ? "bg-raised text-text" : "text-muted hover:bg-raised"}`}
+        >
+          {m.label}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
 export function TopBar({ onRun }: { onRun: () => void }) {
   const view = useDraft((st) => st.view);
   const status = useRun((s) => s.status);
+  const mode = useMode((s) => s.mode);
+  const pendingStructure = useLive((s) => {
+    const e = s.lastEdit;
+    return e !== null && "structure_pending" in e && e.structure_pending;
+  });
 
   return (
     <header className="flex w-76 flex-col gap-2 p-3 text-sm">
@@ -34,17 +71,26 @@ export function TopBar({ onRun }: { onRun: () => void }) {
         </h1>
         <UndoRedo />
       </div>
+      <ModeSwitch />
+      {mode === "live" && pendingStructure ? (
+        <output className="block text-xs text-muted">
+          Parameter edits run at once. Added or removed components and wires wait for Apply, which
+          restarts the live run.
+        </output>
+      ) : null}
       <SaveFlow
         lead={
-          <button
-            type="button"
-            data-tour="run"
-            onClick={onRun}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-3 font-medium hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <Play size={14} aria-hidden />
-            Run
-          </button>
+          mode === "batch" ? (
+            <button
+              type="button"
+              data-tour="run"
+              onClick={onRun}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-3 font-medium hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <Play size={14} aria-hidden />
+              Run
+            </button>
+          ) : null
         }
         run={status}
       />
