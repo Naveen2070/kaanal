@@ -86,8 +86,9 @@ impl Engine {
         self.rearm();
     }
 
-    /// **Private.** A transfer ended: record the time sharing cost it, then end the hop.
-    fn transfer_done(&mut self, r: usize, k: usize) {
+    /// **Private.** A transfer (or a hop sharing CPUs, `cpu.rs`) ended: record the time sharing
+    /// cost it, then end the hop.
+    pub(super) fn transfer_done(&mut self, r: usize, k: usize) {
         let now = self.now;
         let warmup = self.warmup;
         let req = live(&mut self.reqs, r);

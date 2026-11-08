@@ -5,6 +5,7 @@ mod breaker;
 mod bucket_gate;
 mod cause;
 mod common;
+mod cpu;
 mod dispatch;
 mod engine;
 mod hold;

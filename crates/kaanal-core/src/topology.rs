@@ -60,6 +60,9 @@ pub struct Node {
     /// How long a load balancer keeps sending to a downed copy before it notices (step 7d); zero for
     /// every other kind.
     pub detect: Duration,
+    /// CPUs the copy's own work (`Proc` and `Op` hops) shares, in millicores (`500` = half a core);
+    /// `None` = no sharing, every hop runs at its drawn time (step 8, RULES 101).
+    pub cpu: Option<u32>,
     /// Network card in bytes per second as `(send, receive)`; `None` = unlimited that way. Each
     /// replica has its own pair of pipes.
     pub bandwidth: (Option<u64>, Option<u64>),
@@ -512,6 +515,7 @@ impl Topology {
                 hold: n.hold(),
                 spread: n.spread().cloned().unwrap_or_default(),
                 detect: n.detect(),
+                cpu: None, // ponytail: config key `cpu:` arrives in S8b; tests set it directly
                 bandwidth: n.bandwidth(),
                 per_kb: match n {
                     // storage: the size term is 1024 / throughput seconds per KB (RULES 61)

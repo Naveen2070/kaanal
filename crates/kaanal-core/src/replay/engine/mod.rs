@@ -19,6 +19,7 @@ use crate::chaos::FailKind;
 use crate::exec::{ChainResult, Hop, PickKind, Plan, PlanItem};
 use crate::topology::{NodeId, Topology};
 mod breaker;
+mod cpu;
 mod dispatch;
 mod finish;
 mod flows;
@@ -46,6 +47,12 @@ pub const BREAKER_LOG_CAP: usize = 10_000;
 pub struct Engine {
     units: Units,
     flows: flows::Flows,
+    /// Whether any node sets `cpu`: the only cost of the feature on the path of one that does not.
+    has_cpu: bool,
+    /// When each unit's pending CPU event fires (ns), by unit index; a stale event is skipped.
+    cpu_due: std::collections::HashMap<usize, u64>,
+    /// The tokens whose CPU work just ended (kept so a finishing event allocates nothing).
+    cpu_done: Vec<(usize, usize)>,
     counters: Vec<NodeCounters>,
     /// Hop-end events ordered by `(time, seq)`: (time, seq, request slot, token).
     heap: BinaryHeap<Reverse<(u64, u64, usize, usize)>>,
@@ -78,6 +85,9 @@ impl Engine {
         let units = Units::new(topo);
         Engine {
             flows: flows::Flows::new(units.caps().to_vec()),
+            has_cpu: topo.nodes.iter().any(|n| n.cpu.is_some()),
+            cpu_due: std::collections::HashMap::new(),
+            cpu_done: Vec::new(),
             units,
             counters: vec![NodeCounters::default(); topo.nodes.len() * 3 + topo.edges.len()],
             heap: BinaryHeap::new(),
@@ -263,6 +273,8 @@ impl Engine {
         self.now = at;
         if r == usize::MAX {
             self.flow_event(k);
+        } else if r == usize::MAX - 1 {
+            self.cpu_event(k);
         } else if seq & DEADLINE != 0 {
             self.deadline(r, k, seq);
         } else if seq & RETRY != 0 {
@@ -611,7 +623,11 @@ impl Engine {
             self.join_flow(r, k, &x);
             return;
         }
-        let done = self.after(nanos(h.dur));
+        let demand = nanos(h.dur);
+        if self.cpu_join(r, k, h, demand) {
+            return;
+        }
+        let done = self.after(demand);
         self.push(done, r, k);
     }
 
@@ -676,11 +692,15 @@ impl Engine {
             unreachable!("queued at a hop or a hold")
         };
         let dur = nanos(qh.dur);
+        let qh = qh.clone();
         if counted {
             self.count(node, rep, |c| {
                 c.completed += 1;
                 c.wait += u128::from(wait);
             });
+        }
+        if self.cpu_join(qr, qk, &qh, dur) {
+            return;
         }
         let done = self.after(dur);
         self.push(done, qr, qk);

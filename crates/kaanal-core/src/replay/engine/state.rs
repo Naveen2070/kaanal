@@ -336,6 +336,8 @@ impl Req {
 pub(super) struct NodeState {
     pub(super) gate: Option<Gate>,
     pub(super) bucket: Option<Bucket>,
+    /// The sharing solver of a copy that sets `cpu` (step 8); `None` = hops run at their drawn time.
+    pub(super) cpu: Option<Box<super::cpu::CpuUnit>>,
     /// Last time `busy` changed (ns); `NodeCounters::area` is integrated up to here.
     pub(super) since: u64,
 }

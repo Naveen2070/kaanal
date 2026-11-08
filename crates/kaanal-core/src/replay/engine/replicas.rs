@@ -46,6 +46,7 @@ impl Units {
                         .rate_limit
                         .as_ref()
                         .map(|r| Bucket::new(r).with_status(n.kind.rate_limit_status())),
+                    cpu: n.cpu.map(|c| Box::new(super::cpu::CpuUnit::new(c))),
                     since: 0,
                 });
             }
@@ -62,6 +63,7 @@ impl Units {
             states.push(NodeState {
                 gate: None,
                 bucket: None,
+                cpu: None,
                 since: 0,
             });
             count.push(1);
@@ -75,6 +77,7 @@ impl Units {
                     states.push(NodeState {
                         gate: None,
                         bucket: None,
+                        cpu: None,
                         since: 0,
                     });
                 }
