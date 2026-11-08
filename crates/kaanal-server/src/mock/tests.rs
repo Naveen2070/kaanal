@@ -496,3 +496,60 @@ async fn a_blank_state_answers_404_and_a_system_answers_again_once_installed() {
     st.set_generation(Some(g));
     assert_eq!(call(&st, "GET", "/users/1", &[]).await.status(), 200);
 }
+
+/// Step 8: the mock runs every request through the replay engine, so a node's `cpu` shares its
+/// cores between concurrent real requests exactly as in a simulation.
+const CPU_YAML: &str = "version: 1
+seed: 42
+nodes:
+  nginx: { type: gateway, proc: 0ms }
+  app: { type: service, spec: openapi.yaml, proc: 60ms, CPU }
+  db: { type: database, ops: { read: 0ms, write: 0ms, scan: 0ms } }
+edges:
+  - { from: nginx, to: app }
+  - { from: app, to: db }
+endpoints:
+  \"GET /users/{id}\": { chain: [ db ] }
+";
+
+async fn two_at_once(yaml: &str) -> std::time::Duration {
+    let st = app_with(yaml);
+    let start = std::time::Instant::now();
+    let (a, b) = tokio::join!(
+        call(&st, "GET", "/users/1", &[]),
+        call(&st, "GET", "/users/2", &[])
+    );
+    assert_eq!((a.status().as_u16(), b.status().as_u16()), (200, 200));
+    start.elapsed()
+}
+
+#[tokio::test]
+async fn two_concurrent_requests_share_one_core_in_the_mock() {
+    let alone = two_at_once(&CPU_YAML.replace(", CPU", "")).await;
+    let shared = two_at_once(&CPU_YAML.replace("CPU", "cpu: { cores: 1 }")).await;
+    // no cpu: both run at once in about 60 ms; one core: each gets half, so both take about 120 ms
+    assert!(alone < std::time::Duration::from_millis(100), "{alone:?}");
+    assert!(
+        shared >= std::time::Duration::from_millis(110),
+        "{shared:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_edge_breaker_opens_in_the_mock_after_repeated_failures() {
+    let yaml = YAML.replace(
+        "  - { from: app, to: db, net: 1ms }",
+        "  - { from: app, to: db, net: 1ms, breaker: { window: 10, min_calls: 10, open_for: 30s } }",
+    );
+    let st = app_with(&yaml);
+    for _ in 0..15 {
+        let r = call(&st, "GET", "/users/1", &[("x-kaanal-scenario", "down")]).await;
+        assert_eq!(r.status().as_u16(), 503);
+    }
+    let e = entries(&st);
+    let refused = e
+        .iter()
+        .filter(|x| format!("{x:?}").to_lowercase().contains("breaker"))
+        .count();
+    assert!(refused > 0, "no breaker refusals in the mock");
+}

@@ -321,7 +321,7 @@ Off unless written: with no `cpu`, every request takes its drawn time however ma
 - Taken by `gateway`, `service`, `monolith`, `database`, `auth` and `load-balancer`. A cache, an external API and a storage node have no `cpu` (their time is a given figure, not your CPUs), and the file is refused at that key if you write one.
 - **Not stretched:** time waiting on what the node calls (including a `hold: call` slot), the wire, and wait steps use no CPU and run at their drawn time. A request that fails keeps its CPU share until its running hop ends, as it keeps its slot.
 - The summary adds `cpu_load` (own work over cores x copies x window; 1 or more means the CPUs cannot keep up), `cpu_capacity_per_s` and `saturates_by` (`slots` or `cpu`, whichever sets `saturates_at_req_s`). A node with `cpu_load` of 1 or more is saturated even with no slot limit. Results labels such a row **CPU bound**.
-- The live mocks ignore `cpu` until live-load mode (step 8L): only the simulator slows the work.
+- The live mock shares the cores too: every real request runs through the same replay engine as a simulation, so concurrent requests slow each other down exactly as in a run.
 - Accuracy: a single core matches M/G/1 processor sharing (mean time `E[S] / (1 - rho)` for any service distribution) and `c` cores with exponential service match Erlang C, both tested to within about 2%. Context switching, cache effects and hyperthreads are not modelled: a vCPU counts as a full core, so for a cloud instance use its vCPU count as an upper bound. Memory, disk and instance presets are planned, not built.
 
 ## What a slot covers: `hold`

@@ -9,7 +9,7 @@ This is an early build. Expect breaking changes between `0.0.x` releases.
 
 ## CPUs: work slows when more runs than there are cores
 
-Off unless written (`cpu: { cores: N }` on a gateway, service, monolith, database, auth or load balancer; Studio: **CPUs** in a component's Settings). A node's own work (its `proc` and operations) is shared among the requests running it, so with `n` at once each runs at `min(1, N / n)` of its speed: processor sharing, checked against M/G/1 and Erlang C to within about 2%. Slots (`concurrency`) still decide how many are admitted. Waiting on callees, the wire and wait steps are not stretched. The summary gains `cpu_load`, `cpu_capacity_per_s` and `saturates_by`, and Results says **CPU bound**. The live mocks ignore it until live-load mode. Memory, disk and instance presets are planned.
+Off unless written (`cpu: { cores: N }` on a gateway, service, monolith, database, auth or load balancer; Studio: **CPUs** in a component's Settings). A node's own work (its `proc` and operations) is shared among the requests running it, so with `n` at once each runs at `min(1, N / n)` of its speed: processor sharing, checked against M/G/1 and Erlang C to within about 2%. Slots (`concurrency`) still decide how many are admitted. Waiting on callees, the wire and wait steps are not stretched. The summary gains `cpu_load`, `cpu_capacity_per_s` and `saturates_by`, and Results says **CPU bound**. The live mock shares the cores too: it runs every request through the same engine. Memory, disk and instance presets are planned.
 
 ## How failure is costed: retries, abandon, breakers and detect
 
@@ -18,7 +18,7 @@ jittered, growing backoff; `retry.budget` is gRPC's retry throttling; `abandon: 
 run on, which with retries is the metastable retry storm; `breaker` is resilience4j's count-based breaker (a refused
 call is a 503 that never reaches the callee, counted as `short_circuited`); `detect` is the delay before a balancer
 notices a downed copy (`from_ms` on a scenario entry says when it went down). Circuit breakers and `from_ms` act in the
-simulator; the live mocks play every breaker closed and every copy as noticed at once.
+simulator; the live mock runs the breaker like the simulator (a refused call is a 503 flagged `CB`), but plays every copy as noticed at once.
 
 ## Studio: easier controls
 
