@@ -55,6 +55,10 @@ impl Compiler<'_> {
                     .key("status")
                     .bad(format!("override: status {s} must be between 200 and 599")));
             }
+            if let Some(o) = &cfg.response {
+                o.check_headers()
+                    .map_err(|m| place.key("override").bad(format!("override: {m}")))?;
+            }
             // Every entry, live or stale, so a typo in `states:` is always caught.
             Self::states(Some(cfg), &place)?;
             if let Some(name) = &cfg.collection {

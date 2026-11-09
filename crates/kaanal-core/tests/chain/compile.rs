@@ -323,3 +323,49 @@ fn a_cache_timeout_at_or_above_the_hit_p50_or_none_is_quiet() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn an_override_with_a_reserved_header_fails_to_compile() {
+    let e = err(&format!(
+        "{BASE}  \"GET /users/{{id}}\": {{ override: {{ body: {{}}, headers: {{ content-length: \"1\" }} }} }}
+"
+    ));
+    assert!(
+        e.msg.contains("override: headers: content-length"),
+        "{}",
+        e.msg
+    );
+}
+
+#[test]
+fn an_override_with_headers_compiles() {
+    let (_, eps) = ok(
+        "  \"GET /users/{id}\": { override: { status: 503, body: {}, headers: { x-demo: \"1\" } } }
+",
+    );
+    let ov = eps
+        .get("GET /users/{id}")
+        .unwrap()
+        .response
+        .as_ref()
+        .unwrap();
+    assert_eq!(ov.headers["x-demo"], "1");
+}
+
+#[test]
+fn a_file_override_that_loaded_before_step_8a_still_loads() {
+    // 8A's status and body limits are for live edits; a file keeps the rules it always had
+    let (_, eps) = ok(
+        "  \"GET /users/{id}\": { override: { status: 204, body: {} } }
+",
+    );
+    assert_eq!(
+        eps.get("GET /users/{id}")
+            .unwrap()
+            .response
+            .as_ref()
+            .unwrap()
+            .status,
+        204
+    );
+}

@@ -236,6 +236,98 @@ pub struct Override {
     /// Response body, returned verbatim.
     #[serde(default)]
     pub body: serde_json::Value,
+    /// Extra response headers (`name: value`). Kaanal owns framing, content type, CORS and
+    /// `x-request-id` / `x-kaanal-*`, so those names are refused.
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+impl Override {
+    /// Largest serialized body.
+    pub const MAX_BODY: usize = 1 << 20;
+    /// Most headers.
+    pub const MAX_HEADERS: usize = 32;
+    /// Longest header value, in bytes (clients refuse far less than a megabyte).
+    pub const MAX_HEADER_VALUE: usize = 4096;
+
+    /// The check of a live edit (step 8A): the status and body limits, then [`Self::check_headers`].
+    /// The message starts with the field it is about (`status`, `body`, `headers`).
+    ///
+    /// # Errors
+    /// The first problem found.
+    pub fn check(&self) -> Result<(), String> {
+        if !(200..=599).contains(&self.status) {
+            return Err(format!(
+                "status: {} must be between 200 and 599",
+                self.status
+            ));
+        }
+        if matches!(self.status, 204 | 304) && !self.body.is_null() {
+            return Err(format!("status: {} has no body", self.status));
+        }
+        if serde_json::to_vec(&self.body).map_or(usize::MAX, |b| b.len()) > Self::MAX_BODY {
+            return Err("body: larger than 1 MiB".into());
+        }
+        self.check_headers()
+    }
+
+    /// The header rules alone: the check a file's `override:` runs when it compiles. A file keeps
+    /// the status and body rules it always had, so 8A does not stop a file that loaded before.
+    ///
+    /// # Errors
+    /// The first problem found, starting `headers:`.
+    pub fn check_headers(&self) -> Result<(), String> {
+        if self.headers.len() > Self::MAX_HEADERS {
+            return Err("headers: at most 32".into());
+        }
+        for (k, v) in &self.headers {
+            if !is_token(k) {
+                return Err(format!("headers: '{k}' is not a valid name"));
+            }
+            if reserved_header(&k.to_ascii_lowercase()) {
+                return Err(format!("headers: {k} is set by Kaanal"));
+            }
+            if v.len() > Self::MAX_HEADER_VALUE {
+                return Err(format!(
+                    "headers: the value of {k} is longer than 4096 bytes"
+                ));
+            }
+            if !v.bytes().all(|b| b == b'\t' || (0x20..=0x7e).contains(&b)) {
+                return Err(format!(
+                    "headers: the value of {k} has a control or non-ASCII character"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// **Private.** An RFC 9110 token: ASCII letters, digits and ``!#$%&'*+-.^_`|~``.
+fn is_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+}
+
+/// **Private.** Names Kaanal sets itself (`n` is lower case).
+fn reserved_header(n: &str) -> bool {
+    matches!(
+        n,
+        "content-length"
+            | "content-type"
+            | "content-encoding"
+            | "transfer-encoding"
+            | "connection"
+            | "keep-alive"
+            | "upgrade"
+            | "te"
+            | "trailer"
+            | "host"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "x-request-id"
+    ) || n.starts_with("access-control-")
+        || n.starts_with("x-kaanal-")
 }
 
 /// **Private.** serde default for [`Override::status`].

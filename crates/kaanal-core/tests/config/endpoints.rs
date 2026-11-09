@@ -90,7 +90,8 @@ fn endpoints_parse_inline_with_every_step_shape() {
         e.response,
         Some(Override {
             status: 201,
-            body: json!({ "ok": true })
+            body: json!({ "ok": true }),
+            headers: std::collections::BTreeMap::default(),
         })
     );
     assert_eq!(

@@ -2285,6 +2285,14 @@
           "default": null,
           "description": "Response body, returned verbatim."
         },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra response headers (`name: value`). Kaanal owns framing, content type, CORS and\n`x-request-id` / `x-kaanal-*`, so those names are refused.",
+          "type": "object"
+        },
         "status": {
           "default": 200,
           "description": "HTTP status to return. Defaults to 200.",
