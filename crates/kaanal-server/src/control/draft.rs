@@ -476,6 +476,7 @@ pub async fn apply_draft(
             "kept": a.kept,
             "dropped": a.dropped,
             "flagged": a.flagged,
+            "payloads_dropped": a.payloads_dropped,
         }))),
         Err(ApplyError::Invalid(d)) => Err((
             StatusCode::BAD_REQUEST,

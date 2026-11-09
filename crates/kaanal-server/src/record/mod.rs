@@ -333,6 +333,8 @@ pub struct Answer<'a> {
     pub pin: Option<&'static str>,
     /// The node whose failure the client saw, and how.
     pub failed: Option<&'a (String, FailKind)>,
+    /// A live payload edit answered it (step 8A).
+    pub edited: bool,
 }
 
 /// What the chain did: the plan, the engine's verdict and the chaos the plan was sampled under.
@@ -410,6 +412,7 @@ fn blank(f: Facts, status: u16) -> LogEntry {
         failed_node: None,
         kind: None,
         rejected: None,
+        edited: false,
         trace: String::new(),
         hops: Vec::new(),
         truncated: false,
@@ -475,6 +478,7 @@ pub fn build_entry(f: Facts, a: &Answer, run: &Run, trace: String) -> LogEntry {
             .max()
             .map_or(0.0, ms),
         pin: a.pin,
+        edited: a.edited,
         flags,
         chain_error,
         failed_node: a.failed.map(|x| x.0.clone()),

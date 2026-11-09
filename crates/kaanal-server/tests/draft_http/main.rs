@@ -10,6 +10,7 @@ mod hardening;
 mod layout;
 mod live;
 mod paths;
+mod payload;
 mod remap;
 mod rename;
 mod save;

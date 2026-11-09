@@ -145,6 +145,7 @@ mod tests {
                 overloaded: false,
                 in_flight: 0,
             },
+            real: None,
         };
         let t = Ok(Arc::new(LiveEvent::Tick(Box::new(tick))));
         assert_eq!(event_name(&t), "live");

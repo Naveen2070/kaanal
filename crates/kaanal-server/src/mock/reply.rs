@@ -327,9 +327,40 @@ pub(super) fn touched_nodes(
     nodes
 }
 
-/// **Private.** Adds permissive CORS headers (mock routes only) and exposes
-/// `x-kaanal-trace` to browsers.
+/// **Private.** The response headers a browser on another origin may always read, besides the
+/// CORS-safelisted ones (`Access-Control-Expose-Headers`).
+const EXPOSED: [&str; 6] = [
+    "x-kaanal-trace",
+    "x-kaanal-scope",
+    "x-request-id",
+    "retry-after",
+    "x-total-count",
+    "link",
+];
+
+/// **Private.** The headers a browser reads without being told (CORS-safelisted response headers).
+const SAFELISTED: [&str; 7] = [
+    "cache-control",
+    "content-language",
+    "content-length",
+    "content-type",
+    "expires",
+    "last-modified",
+    "pragma",
+];
+
+/// **Private.** Adds permissive CORS headers (mock routes only) and exposes `x-kaanal-trace` and
+/// the like to browsers, plus any header the response carries beyond those: a header a file's
+/// `override:` or a live edit sets (step 8A) would otherwise read as `null` in `fetch`.
 pub(super) fn with_cors(mut r: Response) -> Response {
+    let mut expose = EXPOSED.join(", ");
+    for name in r.headers().keys() {
+        let n = name.as_str();
+        if !(SAFELISTED.contains(&n) || EXPOSED.contains(&n) || n.starts_with("access-control-")) {
+            expose.push_str(", ");
+            expose.push_str(n);
+        }
+    }
     let h = r.headers_mut();
     h.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
@@ -343,11 +374,8 @@ pub(super) fn with_cors(mut r: Response) -> Response {
         header::ACCESS_CONTROL_ALLOW_HEADERS,
         HeaderValue::from_static("*"),
     );
-    h.insert(
-        header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static(
-            "x-kaanal-trace, x-kaanal-scope, x-request-id, retry-after, x-total-count, link",
-        ),
-    );
+    if let Ok(v) = HeaderValue::from_str(&expose) {
+        h.insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, v);
+    }
     r
 }

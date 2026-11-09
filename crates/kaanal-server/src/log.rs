@@ -173,6 +173,9 @@ pub struct LogEntry {
     pub kind: Option<&'static str>,
     /// `unmatched`, `bad-scope`, `engine-stopped` or `client-gone` (the client left first).
     pub rejected: Option<&'static str>,
+    /// A live payload edit (step 8A) answered it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub edited: bool,
     /// The trace-header text, at most [`MAX_TRACE`] bytes.
     pub trace: String,
     /// At most [`MAX_HOPS`] hops.
@@ -455,6 +458,7 @@ mod tests {
             failed_node: None,
             kind: None,
             rejected: None,
+            edited: false,
             trace: String::new(),
             hops: vec![],
             truncated: false,

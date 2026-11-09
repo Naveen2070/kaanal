@@ -91,6 +91,7 @@ fn entry_of(t: &Topology, plan: &Plan, fin: &Finished, pin: Option<&'static str>
         status: 200,
         pin,
         failed: None,
+        edited: false,
     };
     build_entry(facts(), &ans, &run, String::new())
 }
@@ -147,6 +148,7 @@ fn header_equals_cap_of_full_trace_for_every_existing_trace_case() {
         status: 200,
         pin: None,
         failed: None,
+        edited: false,
     };
     let chaos = EffectiveChaos::default();
     let run = Run {
@@ -298,6 +300,7 @@ fn flags_per_cause() {
         status: 200,
         pin: Some("slow"),
         failed: None,
+        edited: false,
     };
     let e = build_entry(facts(), &ans, &run, String::new());
     assert_eq!(e.flags, ["DI", "PD", "PN"]);
@@ -366,6 +369,7 @@ fn entry_with(t: &Topology, chaos: &EffectiveChaos, plan: &Plan, fin: &Finished)
         status: 200,
         pin: None,
         failed: None,
+        edited: false,
     };
     build_entry(facts(), &ans, &run, String::new())
 }
@@ -464,6 +468,7 @@ fn chain_error_survives_error_map_and_pin() {
         status: 502,
         pin: None,
         failed: Some(&failed),
+        edited: false,
     };
     let e = build_entry(facts(), &ans, &run, String::new());
     assert_eq!(e.chain_error.as_ref().map(|c| c.status), Some(503));

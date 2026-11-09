@@ -146,6 +146,9 @@ pub struct AppState {
     generation: RwLock<Option<Arc<Generation>>>,
     /// The published chaos state; readers clone the `Arc` and drop the lock ([`AppState::snapshot`]).
     pub chaos: RwLock<Arc<Effective>>,
+    /// Live response edits (step 8A), copy on write: a request reads one snapshot
+    /// ([`AppState::payloads`]).
+    pub payloads: RwLock<Arc<crate::payload::Payloads>>,
     /// The scenarios and the stack. Every control write locks it, mutates, and calls
     /// [`AppState::publish`] before unlocking. Never held across an `.await`.
     pub control: Mutex<Control>,
@@ -302,6 +305,7 @@ impl AppState {
         let log = Mutex::new(crate::log::LogRing::new(ids.boot()));
         AppState {
             generation: RwLock::new(g.map(Arc::new)),
+            payloads: RwLock::new(Arc::default()),
             chaos: RwLock::new(Arc::new(Effective {
                 stack: ChaosStack::default(),
                 chaos: EffectiveChaos::default(),

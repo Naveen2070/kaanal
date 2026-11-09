@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use kaanal_core::{
     ChainRequest, ChainResult, CollectionOp, EffectiveChaos, EffectivePins, Endpoint, FailKind,
@@ -39,6 +39,8 @@ use crate::wire::Cut;
 
 mod flight;
 mod paging;
+#[cfg(test)]
+mod payload_tests;
 mod reply;
 #[cfg(test)]
 mod tests;
@@ -123,7 +125,8 @@ pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Respon
     let sizes = sizes(
         (&st, &g),
         route,
-        (body_len, body.1.as_ref()),
+        // an edit is only the body of an unscoped request
+        (body_len, body.1.as_ref(), scope.is_none()),
         (method, path, &params, &query),
     );
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
@@ -320,6 +323,38 @@ fn plan_of(
     (Arc::new(sample_plan(&g.topo, chaos, &req).0), pin)
 }
 
+/// What a route answers with no live edit: status, body and a file `override:`'s headers, for the
+/// payload editor's starting text. `key` is a normalized route key; path parameters are filled
+/// with `1`. `None` for an unknown route.
+pub(crate) fn preview(
+    g: &Generation,
+    key: &str,
+) -> Option<(u16, Value, std::collections::BTreeMap<String, String>)> {
+    let (method, tpl) = key.split_once(' ')?;
+    let path: String = tpl
+        .split('/')
+        .map(|s| if s.starts_with('{') { "1" } else { s })
+        .collect::<Vec<_>>()
+        .join("/");
+    let matched = g.paths.at(&path).ok()?;
+    let route = matched.value.iter().find(|r| r.method == method)?;
+    let params = decoded_params(&matched.params);
+    let ask = Ask {
+        method,
+        path: &path,
+        params: &params,
+        query: &[],
+    };
+    let (status, body) = reply::success(g, route, &ask);
+    let headers = route
+        .endpoint
+        .response
+        .as_ref()
+        .map(|o| o.headers.clone())
+        .unwrap_or_default();
+    Some((status, body, headers))
+}
+
 /// **Private.** The request body size from `Content-Length` (`None` when absent or not a number).
 fn content_length(headers: &axum::http::HeaderMap) -> Option<u64> {
     headers
@@ -384,7 +419,7 @@ type Parts<'a> = (
 fn sizes(
     (st, g): (&AppState, &Generation),
     route: &Route,
-    (body_len, call): (u64, Option<&Call>),
+    (body_len, call, edits): (u64, Option<&Call>, bool),
     (method, path, params, query): Parts,
 ) -> (u64, u64) {
     // Only a topology with a payload cost looks at sizes at all.
@@ -403,6 +438,7 @@ fn sizes(
                 params,
                 query,
             },
+            edits,
         ),
     )
 }
@@ -413,6 +449,7 @@ fn resp_bytes(
     route: &Route,
     call: Option<&Call>,
     ask: &Ask,
+    edits: bool,
 ) -> u64 {
     let ep = &route.endpoint;
     // hyper strips a HEAD body, so the client never receives those bytes
@@ -427,7 +464,16 @@ fn resp_bytes(
             // a login's reply is not sized (see `sizes`)
             Some(_) => return 0,
             None if ep.collection.is_some() => return 0,
-            None => reply::success(g, route, ask).1,
+            // a live edit is the body an unscoped request will get (step 8A); a scoped one never
+            // sees it, so it is sized by the body it does get
+            None => match edits
+                .then(|| st.payloads())
+                .as_deref()
+                .and_then(|t| t.get_for(ep))
+            {
+                Some(edit) => edit.body.clone(),
+                None => reply::success(g, route, ask).1,
+            },
         }
     };
     if body.is_null() {

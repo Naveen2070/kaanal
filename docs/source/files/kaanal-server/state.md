@@ -53,3 +53,5 @@ Rejects two paths that differ only in parameter names (`/users/{id}` vs `/users/
 [../tests.md](../../tests.md#crateskaanal-servertestsstaters) — conflict detection, endpoints file errors, warnings plumbing.
 
 `AppState::blank(base_dir, token, port)` is a state with no generation (a blank start). `build` and `blank` share one private constructor (`assemble`). The startup seed is drawn at once (`drawn_seed` outlives every generation, so a realistic config applied later must find one), though the banner prints none.
+
+**`payloads` (step 8A).** `AppState.payloads: RwLock<Arc<Payloads>>` holds the live response edits, copy on write ([payload.md](payload.md)); `POST /reset` clears it and an Apply prunes it.

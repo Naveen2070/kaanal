@@ -5,7 +5,7 @@ use axum::http::Request as HttpRequest;
 use kaanal_core::Config;
 use kaanal_core::replay::Engine;
 
-const YAML: &str = "version: 1
+pub(super) const YAML: &str = "version: 1
 seed: 42
 nodes:
   nginx: { type: gateway, proc: 1ms }
@@ -41,11 +41,11 @@ type Req<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
 
 /// The server state of `YAML` with a live engine, driven by calling [`handle`] directly: the
 /// ring is read through `st.log`, which no route serves yet.
-fn app() -> Arc<AppState> {
+pub(super) fn app() -> Arc<AppState> {
     app_with(YAML)
 }
 
-fn app_with(yaml: &str) -> Arc<AppState> {
+pub(super) fn app_with(yaml: &str) -> Arc<AppState> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let cfg = Config::from_yaml(yaml).unwrap();
     let mut st = AppState::build(&cfg, &dir, "t".into(), 0).unwrap();
@@ -54,7 +54,12 @@ fn app_with(yaml: &str) -> Arc<AppState> {
     Arc::new(st)
 }
 
-async fn call(st: &Arc<AppState>, method: &str, uri: &str, headers: &[(&str, &str)]) -> Response {
+pub(super) async fn call(
+    st: &Arc<AppState>,
+    method: &str,
+    uri: &str,
+    headers: &[(&str, &str)],
+) -> Response {
     let mut b = HttpRequest::builder().method(method).uri(uri);
     for (k, v) in headers {
         b = b.header(*k, *v);
@@ -62,7 +67,7 @@ async fn call(st: &Arc<AppState>, method: &str, uri: &str, headers: &[(&str, &st
     handle(State(Arc::clone(st)), b.body(Body::from("{}")).unwrap()).await
 }
 
-fn entries(st: &AppState) -> Vec<LogEntry> {
+pub(super) fn entries(st: &AppState) -> Vec<LogEntry> {
     st.log
         .lock()
         .unwrap()

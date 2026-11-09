@@ -68,3 +68,5 @@ Never in an entry: bodies, request headers, query strings.
 ## Tests
 
 [../../tests.md](../../tests.md#crateskaanal-serversrclogrs-unit--ids-the-ring-and-the-filters): 18 unit tests in the file.
+
+**`edited` (step 8A).** `LogEntry.edited` is true when a live [payload edit](payload.md) answered the request; it is left out of the JSON when false.

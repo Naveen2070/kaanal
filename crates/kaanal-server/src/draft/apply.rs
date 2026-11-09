@@ -189,6 +189,8 @@ pub(crate) struct Applied {
     pub(crate) dropped: Value,
     /// Scenario files left out because they name something the new system lacks.
     pub(crate) flagged: Vec<Flagged>,
+    /// Routes whose live payload edit the swap dropped (the route is gone or takes none now).
+    pub(crate) payloads_dropped: Vec<String>,
 }
 
 /// Applies the draft: builds the new system off to the side, holds mock traffic back, waits up
@@ -236,7 +238,7 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
     }
     let id = generation.id;
     let flagged = generation.flagged.clone();
-    let (kept, dropped) = {
+    let (kept, dropped, payloads_dropped) = {
         let mut c = crate::control::lock(st);
         let backup = (*c).clone();
         // None only for a blank start, which has no chaos to keep
@@ -260,8 +262,10 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
         // Collections belong to the system that defined them: an item of a removed or changed
         // `collection:` must not leak into the new one. Like the route counters, they start over.
         st.collections.clear();
+        // a live edit belongs to a route of the system it was made on (step 8A)
+        let payloads_dropped = st.prune_payloads(&generation);
         st.install(generation);
-        (report.kept, report.dropped)
+        (report.kept, report.dropped, payloads_dropped)
     };
     // the applied text first: the restarted live session reads it as the config it runs
     st.draft
@@ -276,6 +280,7 @@ pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Appli
         kept,
         dropped,
         flagged,
+        payloads_dropped,
     })
 }
 

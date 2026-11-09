@@ -2,8 +2,8 @@
 
 use super::{
     Answer, AppState, Arc, Ask, BusEvent, ChainResult, Duration, EffectiveChaos, Endpoint, Facts,
-    Finished, Generation, HeaderValue, Instant, IntoResponse, Json, LogEntry, Outcome, PinState,
-    Plan, Read, Reply, Request, Responder, Response, Route, Run, StatusCode, SystemTime,
+    Finished, Generation, HeaderName, HeaderValue, Instant, IntoResponse, Json, LogEntry, Outcome,
+    PinState, Plan, Read, Reply, Request, Responder, Response, Route, Run, StatusCode, SystemTime,
     TraceParts, UNIX_EPOCH, Value, chaos_reply, header, json, log, no_store, pinned_reply, record,
     scope, touched_nodes,
 };
@@ -108,14 +108,46 @@ pub(super) fn finish(st: &AppState, g: &Generation, read: Read, s: Served) -> Re
         Some(o) => pinned_reply(st, g, route, &ask, read, o),
         None => chaos_reply(st, g, route, &fin.result, &ask, read, &header),
     };
+    // 8A: a live edit answers a request that nothing failed and no pin turned into error or empty,
+    // and that no scope hid from live state (a scoped request never sees live pins either, S10).
+    // Its headers, or a file `override:`'s, go on the response below.
+    let normal = failed.is_none()
+        && wire.is_none()
+        && pin.is_none_or(|o| {
+            matches!(
+                o.state,
+                PinState::Loading | PinState::Slow | PinState::Success
+            )
+        });
+    let table = (normal && scope.is_none()).then(|| st.payloads());
+    let edit = table.as_deref().and_then(|t| t.get_for(ep));
+    let (status, body) = match edit {
+        Some(e) => (e.status, e.body.clone()),
+        None => (status, body),
+    };
+    let extra = edit
+        .or(ep.response.as_ref().filter(|_| normal))
+        .map(|o| &o.headers);
 
     // D3: only a normal success of a paged route carries `X-Total-Count` and `Link`; a failure,
     // a wire break, a pinned `empty` or `error` and the 400 of a bad query do not.
     let paged = failed.is_none()
+        && edit.is_none()
         && wire.is_none()
         && status == route.status
         && pin.is_none_or(|o| !matches!(o.state, PinState::Empty | PinState::Error));
     let mut resp = wire.unwrap_or_else(|| response(status, body, &header, retry));
+    if let Some(h) = extra {
+        for (k, v) in h {
+            // `Override::check` ran, so a pair that still fails to parse is only skipped
+            if let (Ok(k), Ok(v)) = (
+                HeaderName::from_bytes(k.as_bytes()),
+                HeaderValue::from_str(v),
+            ) {
+                resp.headers_mut().insert(k, v);
+            }
+        }
+    }
     if paged {
         super::paging::add_headers(g, route, &ask, &mut resp);
     }
@@ -144,6 +176,7 @@ pub(super) fn finish(st: &AppState, g: &Generation, read: Read, s: Served) -> Re
         status,
         pin: pinned,
         failed: failed.as_ref(),
+        edited: edit.is_some(),
     };
     publish(st, record::build_entry(facts, &ans, &run, full), nodes);
     resp

@@ -46,6 +46,12 @@ enum Cmd {
 /// a waiting handler.
 const GENERATED: u64 = 1 << 63;
 
+/// Whether `f` is a generated request (the live generator's) and not a real mock request.
+#[must_use]
+pub fn is_generated(f: &Finished) -> bool {
+    f.tag & GENERATED != 0
+}
+
 /// A handle to the engine task; clones share it.
 #[derive(Clone)]
 pub struct EngineHandle {
@@ -177,8 +183,14 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
         };
         for f in engine.drain_finished_iter() {
             if let Some(reply) = waiting.remove(&f.tag) {
+                // a real request: the live session reads a copy (step 8A), while one holds the tap
+                if let Some(to) = &tap
+                    && to.send(f.clone()).is_err()
+                {
+                    tap = None; // the session ended
+                }
                 let _ = reply.send(f); // the client may be gone
-            } else if f.tag & GENERATED != 0
+            } else if is_generated(&f)
                 && let Some(to) = &tap
                 && to.send(f).is_err()
             {
@@ -450,7 +462,7 @@ mod tests {
     }
 
     /// Generated traffic is submitted without a reply and its finished requests go to the tap;
-    /// a mock request still gets its own answer.
+    /// a mock request still gets its own answer (and, since step 8A, a copy goes to the tap too).
     #[tokio::test(start_paused = true)]
     async fn submit_delivers_finished_to_the_tap_and_not_to_a_waiter() {
         let (t, plans) = plans(3);
@@ -462,11 +474,48 @@ mod tests {
         let mock = h.run(Arc::clone(&plans[2])).await.unwrap();
         assert!(mock.done > mock.arrival);
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let (a, b) = (rx.try_recv().unwrap(), rx.try_recv().unwrap());
-        assert!(a.done > a.arrival && b.done > b.arrival);
+        let mut got = Vec::new();
+        while let Ok(f) = rx.try_recv() {
+            got.push(f);
+        }
+        assert_eq!(got.len(), 3);
+        assert!(got.iter().all(|f| f.done > f.arrival));
+        assert_eq!(got.iter().filter(|f| is_generated(f)).count(), 2);
+    }
+
+    /// Step 8A: a real request answers its handler and also reaches the tap, as a copy a live
+    /// session reads; a generated plan reaches only the tap.
+    #[tokio::test(start_paused = true)]
+    async fn a_real_request_reaches_the_tap_and_still_answers_its_handler() {
+        let (t, plans) = plans(2);
+        let h = spawn(Engine::new(&t));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        h.tap(Some(tx));
+        h.submit(Arc::clone(&plans[0]));
+        let real = h.run(Arc::clone(&plans[1])).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut seen = Vec::new();
+        while let Ok(f) = rx.try_recv() {
+            seen.push(f);
+        }
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen.iter().filter(|f| is_generated(f)).count(), 1);
+        let copy = seen.iter().find(|f| !is_generated(f)).unwrap();
+        assert_eq!((copy.arrival, copy.done), (real.arrival, real.done));
+        assert_eq!(copy.hops, real.hops);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_real_request_after_the_tap_closed_still_answers() {
+        let (t, plans) = plans(2);
+        let h = spawn(Engine::new(&t));
+        let (tx, rx) = mpsc::unbounded_channel();
+        h.tap(Some(tx));
+        drop(rx);
+        assert!(h.run(Arc::clone(&plans[0])).await.is_some());
         assert!(
-            rx.try_recv().is_err(),
-            "the mock request did not go to the tap"
+            h.run(Arc::clone(&plans[1])).await.is_some(),
+            "the tap went away, the mock did not"
         );
     }
 }

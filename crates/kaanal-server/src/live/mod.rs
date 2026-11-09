@@ -234,7 +234,7 @@ async fn tick_loop(
                 }
                 let a = &mut agg.as_mut().expect("just set").1;
                 while let Ok(f) = finished.try_recv() {
-                    a.add(&f);
+                    a.add(&f, !crate::actor::is_generated(&f));
                 }
                 let loads = match &g.engine {
                     Some(e) => e.loads().await.unwrap_or_default(),
@@ -730,5 +730,33 @@ traffic:
                 assert_eq!(t.nodes.len(), 3);
             }
         }
+    }
+
+    /// Step 8A: a request the mock served is in the next tick, counted in the total and in the
+    /// real share, and drawn as a real journey.
+    #[tokio::test(start_paused = true)]
+    async fn a_mock_request_shows_in_the_next_tick_as_real() {
+        let st = state(YAML);
+        let _c = st.live.attach(&st, true);
+        st.live.pause().unwrap(); // no generated requests: every figure below is the real one
+        let mut rx = st.live.subscribe().unwrap();
+        let req = axum::http::Request::builder()
+            .method("GET")
+            .uri("/users/1")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let r = crate::mock::handle(axum::extract::State(Arc::clone(&st)), req).await;
+        assert_eq!(r.status(), 200);
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let (mut total, mut real, mut journeys) = (0, 0, Vec::new());
+        while let Ok(ev) = rx.try_recv() {
+            if let LiveEvent::Tick(t) = &*ev {
+                total += t.requests;
+                real += t.real.as_ref().map_or(0, |r| r.requests);
+                journeys.extend(t.journeys.iter().filter(|j| j.real).cloned());
+            }
+        }
+        assert_eq!((total, real), (1, 1));
+        assert_eq!(journeys.len(), 1);
     }
 }

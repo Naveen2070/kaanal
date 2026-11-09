@@ -1,5 +1,6 @@
 //! Integration tests for the `kaanal` binary, one module per topic (R3.8).
 
+mod admin_mode;
 mod auth;
 mod capacity;
 mod chains;
@@ -11,5 +12,6 @@ mod events_ui;
 mod guard;
 mod live;
 mod mock;
+mod payload;
 mod storage;
 mod wire;

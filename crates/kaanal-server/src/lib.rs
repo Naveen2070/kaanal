@@ -21,6 +21,7 @@ mod log;
 mod log_api;
 mod mock;
 mod paths;
+mod payload;
 mod pin_api;
 mod pins;
 mod record;
@@ -336,6 +337,16 @@ fn router(st: Arc<state::AppState>) -> Router {
                 .delete(pin_api::delete_pins),
         )
         .route("/__kaanal/cycle", post(pin_api::cycle))
+        .route(
+            "/__kaanal/payload",
+            get(control::list_payloads)
+                .put(control::put_payload)
+                .delete(control::delete_payload),
+        )
+        .route(
+            "/__kaanal/payload/preview",
+            get(control::payload_preview),
+        )
         .route("/__kaanal/logs", get(log_api::logs))
         .route("/__kaanal/trace/{id}", get(log_api::trace))
         .route(

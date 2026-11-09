@@ -162,7 +162,7 @@ It is checked exactly like a file: names against your topology, limits, duplicat
 - `warnings` is an array of strings: with `from: "live"` or `"effective"`, live fields set with a `ttl` are written as permanent (a file has no `ttl`), and the response says how many: `"N fields have a ttl; the file has none"`.
 - `clear_live: true` clears the live chaos after writing, so activating the saved scenario does not count it twice. Saving over an active scenario updates it in place.
 
-**Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats), refills rate-limit buckets, empties every [collection](collections.md) and empties the [request log](observability.md) (request ids keep counting). Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.
+**Reset.** `POST /__kaanal/reset` deactivates every scenario, **undefines the runtime-defined ones** (inline and file scenarios stay), clears the live chaos, zeroes the per-route request counters (so a seeded run repeats), refills rate-limit buckets, empties every [collection](collections.md), clears every [response edit](#payload-edits) and empties the [request log](observability.md) (request ids keep counting). Queues and pools are not reset; requests already in flight finish with the chaos they started with. Call it between tests.
 
 ### Pins
 
@@ -205,6 +205,28 @@ Live [pins](pins.md) force an endpoint to answer as `loading`, `empty`, `error`,
 | `422`  | The body is not a pin (unknown key, missing `endpoint`)                                                                                                                                   |
 
 A `400` or `404` changes nothing. `POST /__kaanal/reset` clears live pins; `DELETE /__kaanal/chaos` leaves them.
+
+### Payload edits
+
+A live edit rewrites what one route answers: its status, headers and JSON body, from the next request on. It is what Studio's [Admin mode](admin-mode.md) edits. It sits below chaos and pins and above the route's `override:`; a request that names a scenario scope never sees it. All routes need the token.
+
+| Method and path                           | Purpose                                                                                    | Success                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| `GET /__kaanal/payload`                   | The edits, in route order                                                                  | `200 { "edits": [ { route, status, body, headers } ] }` |
+| `PUT /__kaanal/payload`                   | Set the edit of one route                                                                  | `204`                                                   |
+| `DELETE /__kaanal/payload?route=KEY`      | Back to normal for one route                                                               | `204`                                                   |
+| `GET /__kaanal/payload/preview?route=KEY` | What the route answers with no edit (a starting text; path parameters are filled with `1`) | `200 { status, body, headers }`                         |
+
+**Body** of `PUT`: `{ "route": "GET /users/{id}", "status": 503, "body": { "down": true }, "headers": { "retry-after": "5" } }`. `route` is required; `status` defaults to 200, `body` to none and `headers` to none. Unknown keys are `400`.
+
+| Status | When                                                                                                                                                                                                                                                                                                                                                              |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | The body is not JSON or has an unknown key; a missing or malformed `route` in the query                                                                                                                                                                                                                                                                           |
+| `404`  | No such route (`PUT`), no edit on the route (`DELETE`), unknown route (`preview`)                                                                                                                                                                                                                                                                                 |
+| `413`  | The body is over 1 MiB                                                                                                                                                                                                                                                                                                                                            |
+| `422`  | `{ "error", "field" }`: the edit is refused, and `field` is `status` (not 200 to 599, or a body on a `204` or `304`), `body` (over 1 MiB), `headers` (over 32, a bad name, a value over 4096 bytes or with a control character, or a name Kaanal sets itself) or `route` (a `collection:` route, a built-in login or key-set route, a `HEAD` made from its `GET`) |
+
+A refused `PUT` changes nothing. An Apply keeps the edits whose route still takes one and lists the others as `payloads_dropped` in its reply. `POST /__kaanal/reset` clears every edit.
 
 ### Draft
 

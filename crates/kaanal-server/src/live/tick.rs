@@ -20,6 +20,9 @@ use super::hist::LatencyHist;
 /// Most journeys one tick carries (40 a second at four ticks a second).
 pub(crate) const MAX_JOURNEYS: usize = 10;
 
+/// Most real (mock) requests' journeys one tick carries, apart from the generated ones.
+pub(crate) const MAX_REAL_JOURNEYS: usize = 10;
+
 /// Requests dropped at a node in the tick, by cause.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct Dropped {
@@ -73,6 +76,9 @@ pub(crate) struct Journey {
     /// The index in `hops` where it was dropped; `None` when it was served.
     pub dropped_at: Option<usize>,
     pub total_ns: u64,
+    /// A real mock request (step 8A), drawn apart from the generated ones.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub real: bool,
 }
 
 /// What the generator is doing, repeated in every tick so the strip needs no other call.
@@ -82,6 +88,19 @@ pub(crate) struct TickStatus {
     pub paused: bool,
     pub overloaded: bool,
     pub in_flight: u64,
+}
+
+/// The real mock requests' share of a tick (step 8A, RULES 108): the same counts as the tick, for
+/// requests a frontend made. The tick's own figures include them; a page shows the generated
+/// share as the tick minus this. Queue, busy slots and CPU load are engine snapshots, so they
+/// stay on the tick and are zero here.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct RealTick {
+    pub requests: u32,
+    pub failed: u32,
+    pub nodes: Vec<NodeTick>,
+    pub wires: Vec<WireTick>,
+    pub hist: Vec<(u16, u32)>,
 }
 
 /// One tick.
@@ -101,6 +120,9 @@ pub(crate) struct Tick {
     pub hist: Vec<(u16, u32)>,
     pub journeys: Vec<Journey>,
     pub status: TickStatus,
+    /// Present only in a tick that had a real request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub real: Option<RealTick>,
 }
 
 /// A label for the page: what kind of time a hop is.
@@ -131,54 +153,40 @@ fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// Sums finished requests into ticks.
-pub(crate) struct Aggregator {
+/// What a set of finished requests adds up to: counts per node and wire and a latency histogram.
+struct Counts {
     nodes: Vec<NodeTick>,
     wires: Vec<WireTick>,
-    /// `edge_of[from][to]`, the index of the wire between two nodes.
-    edge_of: Vec<Vec<Option<usize>>>,
     hist: LatencyHist,
     requests: u32,
     failed: u32,
-    journeys: Vec<Journey>,
-    /// Requests seen since the session began (the sampling stride counts them).
-    seen: u64,
-    /// One request in `stride` is sampled, adapted to the last tick's rate.
-    stride: u64,
 }
 
-impl Aggregator {
-    pub(crate) fn new(topo: &Topology) -> Aggregator {
-        let n = topo.nodes.len();
-        let mut edge_of = vec![vec![None; n]; n];
-        for (i, e) in topo.edges.iter().enumerate() {
-            edge_of[e.from][e.to] = Some(i);
-        }
-        Aggregator {
-            nodes: vec![NodeTick::default(); n],
-            wires: vec![WireTick::default(); topo.edges.len()],
-            edge_of,
+/// A request's journey, built once: its hops, where it was dropped, its total time.
+type Built = (Vec<JourneyHop>, Option<usize>, u64);
+
+impl Counts {
+    fn new(nodes: usize, wires: usize) -> Counts {
+        Counts {
+            nodes: vec![NodeTick::default(); nodes],
+            wires: vec![WireTick::default(); wires],
             hist: LatencyHist::new(),
             requests: 0,
             failed: 0,
-            journeys: Vec::new(),
-            seen: 0,
-            stride: 1,
         }
     }
 
-    /// Adds one finished request to the tick being built.
-    pub(crate) fn add(&mut self, f: &Finished) {
-        // a request of another system (the old engine's, while an Apply swaps) names nodes this
-        // aggregator does not have: it belongs to no tick here
+    /// Adds one finished request; with `build`, also returns its journey. `None` for a request of
+    /// another system (the old engine's, while an Apply swaps): it names nodes this set does not
+    /// have and belongs to no tick here.
+    fn add(&mut self, f: &Finished, edge_of: &[Vec<Option<usize>>], build: bool) -> Option<Built> {
         let n = self.nodes.len();
         let foreign = f.hops.iter().any(|h| h.hop.node >= n)
             || matches!(&f.result, ChainResult::Err { node, .. } if *node >= n);
         if foreign {
-            return;
+            return None;
         }
         self.requests += 1;
-        self.seen += 1;
         let total = f.done.saturating_sub(f.arrival);
         let mut prev_own: Option<usize> = None;
         let mut hops = Vec::new();
@@ -188,7 +196,7 @@ impl Aggregator {
             if is_own(kind) {
                 self.nodes[h.hop.node].arrived += 1;
                 if let Some(p) = prev_own.filter(|p| *p != h.hop.node)
-                    && let Some(e) = self.edge_of[p][h.hop.node]
+                    && let Some(e) = edge_of[p][h.hop.node]
                 {
                     self.wires[e].carried += 1;
                     // the wire this hop was entered through, so a wire with no latency hop of its
@@ -199,18 +207,20 @@ impl Aggregator {
             } else if let HopKind::Link { edge: e, .. } = kind {
                 edge = Some(usize::from(e));
             } else if matches!(kind, HopKind::Net) {
-                edge = prev_own.and_then(|p| self.edge_of[p][h.hop.node]);
+                edge = prev_own.and_then(|p| edge_of[p][h.hop.node]);
             }
-            hops.push(JourneyHop {
-                node: h.hop.node,
-                replica: h.hop.replica,
-                kind: kind_label(kind),
-                start_ns: nanos(h.hop.start),
-                end_ns: nanos(h.hop.start + h.hop.dur),
-                wait_ns: nanos(h.wait),
-                attempt: h.attempt,
-                edge,
-            });
+            if build {
+                hops.push(JourneyHop {
+                    node: h.hop.node,
+                    replica: h.hop.replica,
+                    kind: kind_label(kind),
+                    start_ns: nanos(h.hop.start),
+                    end_ns: nanos(h.hop.start + h.hop.dur),
+                    wait_ns: nanos(h.wait),
+                    attempt: h.attempt,
+                    edge,
+                });
+            }
         }
         let mut dropped_at = None;
         match &f.result {
@@ -225,20 +235,79 @@ impl Aggregator {
                     Some(FailCause::Breaker) => d.breaker += 1,
                     Some(FailCause::Chaos) | None => d.chaos += 1,
                 }
-                dropped_at = Some(
-                    hops.iter()
-                        .position(|h| h.node == *node)
-                        .unwrap_or_else(|| hops.len().saturating_sub(1)),
-                );
+                if build {
+                    dropped_at = Some(
+                        hops.iter()
+                            .position(|h| h.node == *node)
+                            .unwrap_or_else(|| hops.len().saturating_sub(1)),
+                    );
+                }
             }
         }
-        // one request in `stride` is a journey; a dropped one is always worth drawing
-        let sample = self.seen.is_multiple_of(self.stride) || dropped_at.is_some();
-        if sample && self.journeys.len() < MAX_JOURNEYS && !hops.is_empty() {
+        Some((hops, dropped_at, total))
+    }
+}
+
+/// Sums finished requests into ticks: every request into the tick's own counts, and a real one
+/// (a mock request, step 8A) into a second set as well, so the page can tell the two apart.
+pub(crate) struct Aggregator {
+    total: Counts,
+    real: Counts,
+    /// `edge_of[from][to]`, the index of the wire between two nodes.
+    edge_of: Vec<Vec<Option<usize>>>,
+    /// The tick's journeys, generated and real together; `real_journeys` of them are real.
+    journeys: Vec<Journey>,
+    real_journeys: usize,
+    /// Generated requests seen since the session began (the sampling stride counts them).
+    seen: u64,
+    /// One generated request in `stride` is sampled, adapted to the last tick's rate.
+    stride: u64,
+}
+
+impl Aggregator {
+    pub(crate) fn new(topo: &Topology) -> Aggregator {
+        let n = topo.nodes.len();
+        let mut edge_of = vec![vec![None; n]; n];
+        for (i, e) in topo.edges.iter().enumerate() {
+            edge_of[e.from][e.to] = Some(i);
+        }
+        Aggregator {
+            total: Counts::new(n, topo.edges.len()),
+            real: Counts::new(n, topo.edges.len()),
+            edge_of,
+            journeys: Vec::new(),
+            real_journeys: 0,
+            seen: 0,
+            stride: 1,
+        }
+    }
+
+    /// Adds one finished request to the tick being built; `real` for a mock request.
+    pub(crate) fn add(&mut self, f: &Finished, real: bool) {
+        let Some((hops, dropped_at, total_ns)) = self.total.add(f, &self.edge_of, true) else {
+            return;
+        };
+        if real {
+            // the same counts again, for the real share; the journey is already built
+            self.real.add(f, &self.edge_of, false);
+        } else {
+            self.seen += 1;
+        }
+        // a real request is always worth drawing (up to its own cap); of the generated ones one
+        // in `stride` is, and a dropped one always
+        let sample = if real {
+            self.real_journeys < MAX_REAL_JOURNEYS
+        } else {
+            (self.seen.is_multiple_of(self.stride) || dropped_at.is_some())
+                && self.journeys.len() - self.real_journeys < MAX_JOURNEYS
+        };
+        if sample && !hops.is_empty() {
+            self.real_journeys += usize::from(real);
             self.journeys.push(Journey {
                 hops,
                 dropped_at,
-                total_ns: total,
+                total_ns,
+                real,
             });
         }
     }
@@ -253,34 +322,41 @@ impl Aggregator {
         topo: &Topology,
         status: TickStatus,
     ) -> Tick {
-        let mut nodes =
-            std::mem::replace(&mut self.nodes, vec![NodeTick::default(); topo.nodes.len()]);
-        for (i, n) in nodes.iter_mut().enumerate() {
+        let (n, w) = (topo.nodes.len(), topo.edges.len());
+        let mut total = std::mem::replace(&mut self.total, Counts::new(n, w));
+        let real = std::mem::replace(&mut self.real, Counts::new(n, w));
+        for (i, node) in total.nodes.iter_mut().enumerate() {
             let (busy, queued) = loads.get(i).copied().unwrap_or((0, 0));
-            n.busy_slots = busy;
-            n.queue = queued;
-            n.cpu_load = topo.nodes[i].cpu.map(|mc| {
+            node.busy_slots = busy;
+            node.queue = queued;
+            node.cpu_load = topo.nodes[i].cpu.map(|mc| {
                 let cores = f64::from(mc) / 1000.0 * f64::from(topo.nodes[i].replicas.max(1));
                 f64::from(busy) / cores
             });
         }
-        let wires = std::mem::replace(&mut self.wires, vec![WireTick::default(); topo.edges.len()]);
-        let hist = std::mem::take(&mut self.hist).sparse();
+        let generated = total.requests - real.requests;
+        let real_tick = (real.requests > 0).then(|| RealTick {
+            requests: real.requests,
+            failed: real.failed,
+            nodes: real.nodes,
+            wires: real.wires,
+            hist: real.hist.sparse(),
+        });
         let tick = Tick {
             t_ms,
             system_ms,
-            requests: self.requests,
-            failed: self.failed,
-            nodes,
-            wires,
-            hist,
+            requests: total.requests,
+            failed: total.failed,
+            nodes: total.nodes,
+            wires: total.wires,
+            hist: total.hist.sparse(),
             journeys: std::mem::take(&mut self.journeys),
             status,
+            real: real_tick,
         };
-        // aim for about MAX_JOURNEYS journeys a tick at the rate just seen
-        self.stride = (u64::from(self.requests) / MAX_JOURNEYS as u64).max(1);
-        self.requests = 0;
-        self.failed = 0;
+        // aim for about MAX_JOURNEYS generated journeys a tick at the rate just seen
+        self.stride = (u64::from(generated) / MAX_JOURNEYS as u64).max(1);
+        self.real_journeys = 0;
         tick
     }
 }
@@ -358,7 +434,7 @@ edges:
         .unwrap();
         let mut a = Aggregator::new(&small);
         for f in &fin {
-            a.add(f);
+            a.add(f, false);
         }
         let tick = a.take((250, 250), &[(0, 0), (0, 0)], &small, STATUS);
         assert_eq!(tick.nodes.len(), 2);
@@ -369,7 +445,7 @@ edges:
         let (t, fin) = finished(CHAIN, 40, 5);
         let mut a = Aggregator::new(&t);
         for f in &fin {
-            a.add(f);
+            a.add(f, false);
         }
         let tick = a.take((250, 250), &[(0, 0), (0, 0), (0, 0)], &t, STATUS);
         assert_eq!(tick.requests, 40);
@@ -401,7 +477,7 @@ edges:
         let (t, fin) = finished(&yaml, 10, 0);
         let mut a = Aggregator::new(&t);
         for f in &fin {
-            a.add(f);
+            a.add(f, false);
         }
         let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
         let app = t.id("app").unwrap();
@@ -425,7 +501,7 @@ edges:
         let (t, fin) = finished(CHAIN, 400, 1);
         let mut a = Aggregator::new(&t);
         for f in &fin {
-            a.add(f);
+            a.add(f, false);
         }
         let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
         assert!(
@@ -448,7 +524,7 @@ edges:
         assert!(j.hops.windows(2).all(|w| w[0].start_ns <= w[1].start_ns));
         // the stride adapts: the next tick at the same rate samples about the cap, not every request
         for f in &fin {
-            a.add(f);
+            a.add(f, false);
         }
         let again = a.take((500, 500), &[(0, 0); 3], &t, STATUS);
         assert!(again.journeys.len() <= MAX_JOURNEYS);
@@ -470,5 +546,125 @@ edges:
         // 8 running over 2 cores x 2 copies
         assert_eq!(tick.nodes[app].cpu_load, Some(2.0));
         assert_eq!(tick.nodes[t.id("gw").unwrap()].cpu_load, None);
+    }
+
+    #[test]
+    fn real_requests_are_in_the_total_and_in_real() {
+        let (t, fin) = finished(CHAIN, 8, 5);
+        let mut a = Aggregator::new(&t);
+        for (i, f) in fin.iter().enumerate() {
+            a.add(f, i < 3);
+        }
+        let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        assert_eq!(tick.requests, 8);
+        assert_eq!(tick.real.as_ref().unwrap().requests, 3);
+    }
+
+    #[test]
+    fn real_and_generated_add_up_to_the_same_total_node_by_node_and_wire_by_wire() {
+        let (t, fin) = finished(CHAIN, 40, 5);
+        let mut all = Aggregator::new(&t);
+        for f in &fin {
+            all.add(f, false);
+        }
+        let all = all.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        let mut mixed = Aggregator::new(&t);
+        for (i, f) in fin.iter().enumerate() {
+            mixed.add(f, i % 4 == 0);
+        }
+        let m = mixed.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        let arrived = |t: &Tick| t.nodes.iter().map(|n| n.arrived).collect::<Vec<_>>();
+        assert_eq!(arrived(&m), arrived(&all), "the total ignores the source");
+        assert_eq!(m.wires, all.wires);
+        let real = m.real.expect("10 real requests");
+        assert_eq!(real.requests, 10);
+        // each request ran one own hop at each of the 3 nodes and crossed both wires once
+        assert!(
+            real.nodes.iter().all(|n| n.arrived == 10),
+            "{:?}",
+            real.nodes
+        );
+        assert_eq!(real.wires, vec![WireTick { carried: 10 }; 2]);
+        let served: u32 = real.hist.iter().map(|(_, c)| c).sum();
+        assert_eq!(served, 10, "a served real request is in the real histogram");
+    }
+
+    #[test]
+    fn a_dropped_real_request_is_counted_by_cause_in_real_too() {
+        let yaml = CHAIN.replace(
+            "app: { type: service, proc: 2ms }",
+            "app: { type: service, proc: 20ms, concurrency: { limit: 1, queue: 0 } }",
+        );
+        let (t, fin) = finished(&yaml, 10, 0);
+        let mut a = Aggregator::new(&t);
+        for f in &fin {
+            a.add(f, true);
+        }
+        let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        let real = tick.real.unwrap();
+        let app = t.id("app").unwrap();
+        assert!(real.failed > 0);
+        assert_eq!(real.nodes[app].dropped.overflow, real.failed);
+        assert_eq!((real.requests, real.failed), (tick.requests, tick.failed));
+    }
+
+    #[test]
+    fn with_no_real_request_real_is_none_and_the_json_has_no_real_key() {
+        let (t, fin) = finished(CHAIN, 5, 5);
+        let mut a = Aggregator::new(&t);
+        for f in &fin {
+            a.add(f, false);
+        }
+        let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        assert!(tick.real.is_none());
+        let v = serde_json::to_value(&tick).unwrap();
+        assert!(v.get("real").is_none());
+        assert!(
+            v["journeys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|j| j.get("real").is_none()),
+            "a generated journey has no real flag"
+        );
+    }
+
+    #[test]
+    fn real_journeys_are_flagged_and_capped_apart_from_generated() {
+        let (t, fin) = finished(CHAIN, 1000, 1);
+        let mut a = Aggregator::new(&t);
+        for (i, f) in fin.iter().enumerate() {
+            a.add(f, i < 30);
+        }
+        let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        let real = tick.journeys.iter().filter(|j| j.real).count();
+        let generated = tick.journeys.len() - real;
+        assert_eq!(real, MAX_REAL_JOURNEYS);
+        assert!(generated <= MAX_JOURNEYS && generated > 0, "{generated}");
+    }
+
+    #[test]
+    fn a_real_request_of_another_topology_is_ignored_in_both_sets() {
+        let (_, fin) = finished(CHAIN, 10, 5);
+        let small = Topology::build(
+            &Config::from_yaml(
+                "version: 1
+nodes:
+  gw: { type: gateway, proc: 1ms }
+  app: { type: service, proc: 2ms }
+edges:
+  - { from: gw, to: app, net: 1ms }
+",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut a = Aggregator::new(&small);
+        for f in &fin {
+            a.add(f, true);
+        }
+        let tick = a.take((250, 250), &[(0, 0); 2], &small, STATUS);
+        assert_eq!(tick.requests, 0);
+        assert!(tick.real.is_none());
     }
 }

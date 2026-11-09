@@ -55,6 +55,7 @@ pub async fn reset(State(st): State<Arc<AppState>>) -> Result<StatusCode, Reject
         .unwrap_or_else(PoisonError::into_inner)
         .clear();
     st.collections.clear();
+    st.clear_payloads();
     emit(&st, "reset", None, &snap);
     Ok(StatusCode::NO_CONTENT)
 }

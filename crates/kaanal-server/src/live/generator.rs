@@ -184,7 +184,10 @@ pub fn start(
     let drain = Arc::clone(&ctl);
     tokio::spawn(async move {
         while let Some(f) = rx.recv().await {
-            drain.completed.fetch_add(1, Ordering::Relaxed);
+            // a real mock request rides the same tap (step 8A) but was never submitted here
+            if crate::actor::is_generated(&f) {
+                drain.completed.fetch_add(1, Ordering::Relaxed);
+            }
             if let Some(to) = &forward {
                 let _ = to.send(f);
             }
@@ -424,6 +427,33 @@ endpoints:
             got += 1;
         }
         assert_eq!(got, s.completed);
+        g.stop();
+    }
+
+    /// Step 8A: real mock requests are forwarded to the session but never counted as generated,
+    /// so the in-flight cap and the overload flag are about generated load only.
+    #[tokio::test(start_paused = true)]
+    async fn real_requests_are_forwarded_but_not_counted_as_generated() {
+        let st = state(YAML);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let g = start(Arc::clone(&st), mix(), 0.0, 7, Limits::default(), Some(tx));
+        for _ in 0..3 {
+            let req = axum::http::Request::builder()
+                .method("GET")
+                .uri("/users/1")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let r = crate::mock::handle(axum::extract::State(Arc::clone(&st)), req).await;
+            assert_eq!(r.status(), 200);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let s = g.stats();
+        assert_eq!((s.submitted, s.completed, s.in_flight), (0, 0, 0));
+        let mut got = 0;
+        while rx.try_recv().is_ok() {
+            got += 1;
+        }
+        assert_eq!(got, 3, "the session still sees the real requests");
         g.stop();
     }
 }
