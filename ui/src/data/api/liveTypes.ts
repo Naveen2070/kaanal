@@ -44,6 +44,8 @@ export interface Journey {
   /** The index in `hops` where it was dropped; null when it was served. */
   dropped_at: number | null;
   total_ns: number;
+  /** A request a real frontend made (step 8A), drawn apart from the generated ones. */
+  real?: boolean;
 }
 
 export interface TickStatus {
@@ -51,6 +53,15 @@ export interface TickStatus {
   paused: boolean;
   overloaded: boolean;
   in_flight: number;
+}
+
+/** The real (frontend) requests' share of a tick; the tick's own figures include them. */
+export interface RealTick {
+  requests: number;
+  failed: number;
+  nodes: NodeTick[];
+  wires: WireTick[];
+  hist: [number, number][];
 }
 
 export interface Tick {
@@ -66,9 +77,11 @@ export interface Tick {
   hist: [number, number][];
   journeys: Journey[];
   status: TickStatus;
+  /** Only in a tick that had a real request (step 8A). */
+  real?: RealTick;
 }
 
-export type MarkerKind = "param" | "chaos" | "structure" | "pause" | "resume" | "gap";
+export type MarkerKind = "param" | "chaos" | "structure" | "pause" | "resume" | "gap" | "payload";
 
 export interface Marker {
   at_ms: number;

@@ -148,6 +148,10 @@ The graph has no cycles, nothing calls the gateway, and a component calls anothe
 
 A wire dashed on the canvas, or marked "no traffic in the last run" in the Settings tab, carried nothing in the last run: its source had requests and its target got none. That says nothing is wrong with the wire, only that the route the traffic took did not use it.
 
+## Admin mode
+
+The mode switch has a third button, **Admin**: the live view with a real frontend in it. Requests the mock serves show in the live numbers tagged as real (drawn as rings on the canvas), the Log tab shows them as a request feed, and **Edit response** rewrites what a route answers. See [admin-mode.md](admin-mode.md).
+
 ## Look and feel
 
 - **Theme:** the one icon button at the right of the top bar (a monitor, sun or moon for the current choice) moves to the next of system, light and dark on each click, from the system setting by default. Neither theme uses pure white or pure black: light is warm paper (ground `#ece7de`, sheets `#f8f5ef`, cards `#fffdf9`), dark is a soft charcoal with a trace of violet (ground `#17161c`, sheets `#201f27`, cards `#282731`), so a long session is easy on the eyes. Blue stays the only action and data colour, and each kind of component and each copy lane has its own hue (`--cat-*`, `--lane-*`) (`<meta name="color-scheme">` and CSS `light-dark()` in `ui/src/look/theme/tokens.css`). A saved choice wins: a tiny same-origin script (`boot-<hash>.js`, one of the bundle's entries) applies it to `<html data-theme>` before the first paint, so there is no flash; blocked storage just means the system setting. The colour tokens are checked for WCAG contrast (text 4.5:1, non-text 3:1) in both themes by a test that reads the CSS.

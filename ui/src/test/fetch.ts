@@ -30,9 +30,15 @@ export function mockFetch(answers: Answer[]): Sent[] {
         body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
       });
       if (a.delayMs) await new Promise((r) => setTimeout(r, a.delayMs));
-      return new Response(a.json === undefined ? "" : JSON.stringify(a.json), {
-        status: a.status ?? 200,
-      });
+      const status = a.status ?? 200;
+      // a 204 or 304 may carry no body at all, not even an empty one
+      const body =
+        a.json === undefined
+          ? [204, 205, 304].includes(status)
+            ? null
+            : ""
+          : JSON.stringify(a.json);
+      return new Response(body, { status });
     }),
   );
   return sent;

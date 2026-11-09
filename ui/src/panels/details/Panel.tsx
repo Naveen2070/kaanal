@@ -5,12 +5,13 @@ import { plainSentence } from "../../canvas/metrics";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
 import { runNow } from "../../data/store/loopRuntime";
-import { useMode } from "../../data/store/mode";
+import { isLive, useMode } from "../../data/store/mode";
 import { useSelected } from "../../data/store/view";
 import { usePickedWire } from "../../canvas/picked";
 import { useEffect } from "react";
 import { PanelBottomClose } from "lucide-react";
 import { createPortal } from "react-dom";
+import { AdminFeed } from "./AdminFeed";
 import { Controls } from "./Controls";
 import { EdgeControls } from "./EdgeControls";
 import { Live } from "./Live.lazy";
@@ -97,11 +98,14 @@ export function Panel() {
             ) : (
               <SystemSummary />
             ),
-          log: (
-            <LazyBoundary fallback={<LogSkeleton />}>
-              <LogTab />
-            </LazyBoundary>
-          ),
+          log:
+            mode === "admin" ? (
+              <AdminFeed />
+            ) : (
+              <LazyBoundary fallback={<LogSkeleton />}>
+                <LogTab />
+              </LazyBoundary>
+            ),
           live: (
             <LazyBoundary fallback={<LiveSkeleton />}>
               <Live />
@@ -109,7 +113,7 @@ export function Panel() {
           ),
           results: (
             <LazyBoundary fallback={<ResultsSkeleton />}>
-              {mode === "live" ? <LiveResults /> : <Results />}
+              {isLive(mode) ? <LiveResults /> : <Results />}
             </LazyBoundary>
           ),
         }}

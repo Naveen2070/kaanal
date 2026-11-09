@@ -26,6 +26,25 @@ export function sumHist(ticks: readonly Tick[]): Map<number, number> {
   return out;
 }
 
+/** Which requests a figure counts: all of them, the real (frontend) ones, or the generated ones. */
+export type Source = "all" | "real" | "generated";
+
+/** Like `sumHist`, for one source; generated is all minus real. */
+export function sumHistOf(ticks: readonly Tick[], src: Source): Map<number, number> {
+  if (src === "all") return sumHist(ticks);
+  const real = new Map<number, number>();
+  for (const t of ticks)
+    for (const [b, c] of t.real?.hist ?? []) real.set(b, (real.get(b) ?? 0) + c);
+  if (src === "real") return real;
+  const out = sumHist(ticks);
+  for (const [b, c] of real) {
+    const left = (out.get(b) ?? 0) - c;
+    if (left > 0) out.set(b, left);
+    else out.delete(b);
+  }
+  return out;
+}
+
 /** The latency in ms below which a share `q` of the counted requests fall; null with none. */
 export function quantileMs(hist: ReadonlyMap<number, number>, q: number): number | null {
   let total = 0;
@@ -60,12 +79,28 @@ export interface WindowFigures {
   p99Ms: number | null;
 }
 
-export function windowFigures(ticks: readonly Tick[], ms: number): WindowFigures {
+export function windowFigures(
+  ticks: readonly Tick[],
+  ms: number,
+  src: Source = "all",
+): WindowFigures {
   const w = recent(ticks, ms);
   const seconds = Math.max(w.length * 0.25, 0.25);
-  const requests = w.reduce((a, t) => a + t.requests, 0);
-  const failed = w.reduce((a, t) => a + t.failed, 0);
-  const hist = sumHist(w);
+  const count = (pick: (t: Tick) => number, realPick: (t: Tick) => number) =>
+    w.reduce(
+      (a, t) =>
+        a + (src === "all" ? pick(t) : src === "real" ? realPick(t) : pick(t) - realPick(t)),
+      0,
+    );
+  const requests = count(
+    (t) => t.requests,
+    (t) => t.real?.requests ?? 0,
+  );
+  const failed = count(
+    (t) => t.failed,
+    (t) => t.real?.failed ?? 0,
+  );
+  const hist = sumHistOf(w, src);
   return {
     reqPerS: requests / seconds,
     droppedPerS: failed / seconds,

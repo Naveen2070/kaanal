@@ -24,15 +24,16 @@ This documentation has three parts.
 
 ### `web/` — user-facing documentation (for the docs site)
 
-| Doc                                      | What it covers                                                  |
-| ---------------------------------------- | --------------------------------------------------------------- |
-| [web/index.md](web/index.md)             | What the docs site is and how it is organised                   |
-| [web/user-guide.md](web/user-guide.md)   | Install, `kaanal.yaml`, CLI commands, the embedded UI           |
-| [web/control-api.md](web/control-api.md) | The `/__kaanal/*` HTTP control API reference                    |
-| [web/scenarios.md](web/scenarios.md)     | Named chaos scenarios: YAML, stacking, CLI, API, test recipes   |
-| [web/concepts.md](web/concepts.md)       | Topology, call chains, chaos, determinism — explained for users |
-| [web/web-ui.md](web/web-ui.md)           | Embedded status page guide, live counters, security rules       |
-| [web/paging.md](web/paging.md)           | Paged list routes: styles, headers, `total:`, envelopes, limits |
+| Doc                                      | What it covers                                                               |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| [web/index.md](web/index.md)             | What the docs site is and how it is organised                                |
+| [web/user-guide.md](web/user-guide.md)   | Install, `kaanal.yaml`, CLI commands, the embedded UI                        |
+| [web/control-api.md](web/control-api.md) | The `/__kaanal/*` HTTP control API reference                                 |
+| [web/scenarios.md](web/scenarios.md)     | Named chaos scenarios: YAML, stacking, CLI, API, test recipes                |
+| [web/concepts.md](web/concepts.md)       | Topology, call chains, chaos, determinism — explained for users              |
+| [web/web-ui.md](web/web-ui.md)           | Embedded status page guide, live counters, security rules                    |
+| [web/paging.md](web/paging.md)           | Paged list routes: styles, headers, `total:`, envelopes, limits              |
+| [web/admin-mode.md](web/admin-mode.md)   | Studio's Admin mode: a real frontend in the live numbers, rewrite a response |
 
 ## The 30-second version
 

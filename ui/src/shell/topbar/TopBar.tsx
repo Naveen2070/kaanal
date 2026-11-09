@@ -9,7 +9,7 @@ import { Mark } from "../../look/brand/Mark";
 import { MenuButton } from "../../overlays/menu/MenuButton";
 import { useDraft } from "../../data/store/draft";
 import { useLive } from "../../data/store/live";
-import { useMode, type Mode } from "../../data/store/mode";
+import { isLive, useMode, type Mode } from "../../data/store/mode";
 import { useRun } from "../../data/store/run";
 import { SaveFlow } from "./SaveFlow";
 import { ThemeToggle } from "./ThemeToggle";
@@ -18,9 +18,14 @@ import { UndoRedo } from "./UndoRedo";
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "live", label: "Live", hint: "Traffic runs all the time; changes show at once" },
   { id: "batch", label: "Batch", hint: "Run once, seeded and repeatable, then compare" },
+  {
+    id: "admin",
+    label: "Admin",
+    hint: "A real frontend in the live numbers; rewrite what a route answers",
+  },
 ];
 
-/** Live or batch: a two-way switch beside Run. */
+/** Live, batch or admin: a three-way switch beside Run. */
 function ModeSwitch() {
   const mode = useMode((s) => s.mode);
   const set = useMode((s) => s.set);
@@ -72,7 +77,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
         <UndoRedo />
       </div>
       <ModeSwitch />
-      {mode === "live" && pendingStructure ? (
+      {isLive(mode) && pendingStructure ? (
         <output className="block text-xs text-muted">
           Parameter edits run at once. Added or removed components and wires wait for Apply, which
           restarts the live run.

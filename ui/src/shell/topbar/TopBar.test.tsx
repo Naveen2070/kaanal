@@ -102,3 +102,16 @@ test("a_pending_structure_edit_says_it_waits_for_apply_in_live_mode", async () =
   await vi.waitFor(() => expect(screen.queryByText(/wait for Apply/)).toBeNull());
   useLive.getState().noteEdit({ live: "none" });
 });
+
+test("the_admin_button_sets_the_mode_is_pressed_and_keeps_the_pending_structure_note", async () => {
+  await show(100);
+  const btn = screen.getByRole("button", { name: "Admin" });
+  expect(btn.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(btn);
+  expect(useMode.getState().mode).toBe("admin");
+  expect(btn.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Live" }).getAttribute("aria-pressed")).toBe("false");
+  // admin shows no Run button either: only Batch runs once
+  expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+  useMode.getState().set("live");
+});

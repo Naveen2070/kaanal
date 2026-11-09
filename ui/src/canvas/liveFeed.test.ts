@@ -116,3 +116,30 @@ test("a_hello_that_lists_other_components_than_the_draft_is_ignored_for_the_miss
   const feed = liveFeed([tick(250, { busy: 1 })], doc, ["gw", "app", "db", "ghost"]);
   expect(feed.nodes.map((n) => n.name)).toEqual(["gw", "app", "db"]);
 });
+
+test("the_real_source_reads_arrivals_and_drops_from_tick_real_and_keeps_the_engine_snapshot", () => {
+  const t = tick(250, { busy: 6, queue: 4, arrived: 10, drop: 2 });
+  const real = {
+    requests: 3,
+    failed: 1,
+    nodes: [
+      { arrived: 3, dropped, queue: 0, busy_slots: 0, cpu_load: null },
+      { arrived: 3, dropped: { ...dropped, overflow: 1 }, queue: 0, busy_slots: 0, cpu_load: null },
+      { arrived: 0, dropped, queue: 0, busy_slots: 0, cpu_load: null },
+    ],
+    wires: [],
+    hist: [],
+  };
+  const withReal = [{ ...t, real }];
+  const all = liveFeed(withReal, doc).node("app");
+  const only = liveFeed(withReal, doc, undefined, "real").node("app");
+  // 5 s window at 4 ticks a second is one tick here; per second figures scale the same way
+  expect((only?.visits_per_s ?? 0) / (all?.visits_per_s ?? 1)).toBeCloseTo(3 / 10);
+  expect(only?.overflowed).toBe(1);
+  expect(all?.overflowed).toBe(2);
+  // the queue and the slots in use are the engine's, whichever requests made them
+  expect(only?.max_queue).toBe(all?.max_queue);
+  // a tick with no real request reads as nothing arriving
+  const none = liveFeed([t], doc, undefined, "real").node("app");
+  expect(none?.visits_per_s).toBe(0);
+});

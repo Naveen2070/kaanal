@@ -18,14 +18,16 @@ import { PaletteHost } from "./overlays/palette/PaletteHost";
 import { Panel } from "./panels/details/Panel";
 import { LazyBoundary } from "./kit/LazyBoundary";
 import { useDraft } from "./data/store/draft";
-import { runNow, startStudioLoop } from "./data/store/loopRuntime";
-import { startStudioLive } from "./data/store/liveRuntime";
-import { useMode } from "./data/store/mode";
+import { runNow } from "./data/store/loopRuntime";
+import { useModeStream } from "./data/store/useModeStream";
+import { useAdmin } from "./data/store/admin";
+import { isLive, useMode } from "./data/store/mode";
 import { useLive } from "./data/store/live";
 import { liveFeed } from "./canvas/liveFeed";
 import { useDotFeeder } from "./canvas/dots/dotStore";
 import { useRun } from "./data/store/run";
 import { KpiStrip } from "./shell/topbar/KpiStrip";
+import { AdminStrip } from "./shell/topbar/AdminStrip";
 import { LiveStrip } from "./shell/topbar/LiveStrip";
 import { TrafficHost } from "./panels/traffic/TrafficHost";
 import { TopBar, TopTools } from "./shell/topbar/TopBar";
@@ -45,7 +47,7 @@ export function App() {
   const mode = useMode((s) => s.mode);
   const ticks = useLive((s) => s.ticks);
   useDotFeeder();
-  useEffect(() => (mode === "batch" ? startStudioLoop() : startStudioLive()), [mode]);
+  useModeStream(mode);
   // what the stores report about the state of things becomes notices
   useEffect(() => startNotifications(), []);
 
@@ -65,7 +67,10 @@ export function App() {
   };
   // live mode reads the last seconds of the live run; batch reads the finished run
   const order = useLive((s) => s.hello?.nodes);
-  const feed = mode === "live" ? liveFeed(ticks, view?.doc ?? null, order) : batchFeed;
+  const realOnly = useAdmin((s) => s.realOnly) && mode === "admin";
+  const feed = isLive(mode)
+    ? liveFeed(ticks, view?.doc ?? null, order, realOnly ? "real" : "all")
+    : batchFeed;
   return (
     <Loading ready={view !== null}>
       <FeedContext.Provider value={feed}>
@@ -73,7 +78,7 @@ export function App() {
           topLeft={<TopBar onRun={runNow} />}
           top={
             <>
-              {mode === "live" ? <LiveStrip /> : <KpiStrip />}
+              {mode === "admin" ? <AdminStrip /> : isLive(mode) ? <LiveStrip /> : <KpiStrip />}
               <FirstRun />
               <PaletteHost />
               <GuideHost />

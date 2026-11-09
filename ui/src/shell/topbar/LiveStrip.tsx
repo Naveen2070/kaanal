@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../data/api/client";
 import { useDraft } from "../../data/store/draft";
 import { useLive, type LiveStatus } from "../../data/store/live";
-import { windowFigures } from "../../data/store/liveMath";
+import { windowFigures, type Source } from "../../data/store/liveMath";
 import { pauseLive, resumeLive } from "../../data/store/liveRuntime";
 import { liveFeed } from "../../canvas/liveFeed";
 import { fmtMs, twoSignificant } from "../../canvas/metrics";
@@ -25,14 +25,14 @@ const STATE_WORDS: Record<LiveStatus, string> = {
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-export function LiveStrip() {
+export function LiveStrip({ src = "all" }: { src?: Source } = {}) {
   const ticks = useLive((s) => s.ticks);
   const status = useLive((s) => s.status);
   const hello = useLive((s) => s.hello);
   const doc = useDraft((s) => s.view?.doc ?? null);
-  const fig = windowFigures(ticks, 1000);
-  const slow = windowFigures(ticks, 10_000);
-  const busiest = liveFeed(ticks, doc, hello?.nodes)
+  const fig = windowFigures(ticks, 1000, src);
+  const slow = windowFigures(ticks, 10_000, src);
+  const busiest = liveFeed(ticks, doc, hello?.nodes, src === "real" ? "real" : "all")
     .nodes.filter((n) => n.utilization !== null)
     .sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0))[0];
   const queue = busiest?.series.queue.at(-1) ?? 0;

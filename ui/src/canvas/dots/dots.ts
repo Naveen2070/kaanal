@@ -24,6 +24,8 @@ export interface Dot {
   delayMs: number;
   /** How long it takes along the wire. */
   durMs: number;
+  /** A request a real frontend made (step 8A): drawn as a ring, not a dot. Absent for generated ones. */
+  real?: true;
 }
 
 const ms = (ns: number) => ns / 1e6;
@@ -51,6 +53,7 @@ export function planDots(journeys: readonly Journey[], tick: number): Dot[] {
         edge: h.edge,
         delayMs: Math.round(delay),
         durMs: Math.round(dur),
+        ...(j.real ? { real: true as const } : {}),
       });
     });
   });

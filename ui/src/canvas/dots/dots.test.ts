@@ -83,3 +83,11 @@ test("a_dot_is_done_after_its_delay_and_travel", () => {
 test("the_pile_is_the_queue_up_to_twelve", () => {
   expect([0, 3, 12, 400, -5, 2.9].map(pileSize)).toEqual([0, 3, 12, 12, 0, 2]);
 });
+
+test("a_real_journey_makes_real_dots_and_a_generated_one_has_no_real_key", () => {
+  const hops = [hop({ kind: "net", edge: 0, start_ns: 0, end_ns: 200e6 })];
+  const real = planDots([{ ...journey(hops), real: true }], 1);
+  const gen = planDots([journey(hops)], 1);
+  expect(real[0]?.real).toBe(true);
+  expect("real" in (gen[0] as object)).toBe(false);
+});

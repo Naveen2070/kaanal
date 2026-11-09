@@ -19,6 +19,7 @@ const KIND_WORDS: Record<Marker["kind"], string> = {
   pause: "Paused",
   resume: "Resumed",
   gap: "Missed updates",
+  payload: "Response edit",
 };
 
 function Lines({

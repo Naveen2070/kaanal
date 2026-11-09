@@ -8,7 +8,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "../../data/api/client";
 import type { ApplyResult, SaveResult, ValidateResult } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
-import { useMode } from "../../data/store/mode";
+import { isLive, useMode } from "../../data/store/mode";
 
 type Dialog =
   | { kind: "applied"; result: ApplyResult }
@@ -138,7 +138,7 @@ export function statusText(run: RunWord, dirty: boolean, saved: boolean, live = 
 }
 
 function StatusLine({ run, dirty, saved }: { run: RunWord; dirty: boolean; saved: boolean }) {
-  const live = useMode((m) => m.mode) === "live";
+  const live = isLive(useMode((m) => m.mode));
   const warn = (!live && run === "blocked") || dirty || !saved;
   return (
     <output className={`flex items-start gap-1.5 text-xs ${warn ? "text-warn" : "text-muted"}`}>

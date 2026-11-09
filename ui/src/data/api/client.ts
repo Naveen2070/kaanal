@@ -21,6 +21,8 @@ import type {
   Topology,
   ValidateResult,
 } from "./types";
+import type { FeedRow } from "./logFeed";
+import type { PayloadEdit, PayloadPreview } from "./payload";
 
 const ROOT = "/__kaanal";
 
@@ -147,6 +149,17 @@ export const api = {
       o,
     ),
   getTopology: (o: Opts = {}) => call<Topology>("GET", "/topology", undefined, o),
+  /** The live response edits (step 8A). */
+  getPayloads: (o: Opts = {}) => call<{ edits: PayloadEdit[] }>("GET", "/payload", undefined, o),
+  putPayload: (edit: PayloadEdit, o: Opts = {}) => call<null>("PUT", "/payload", edit, o),
+  deletePayload: (route: string, o: Opts = {}) =>
+    call<null>("DELETE", `/payload${query({ route })}`, undefined, o),
+  /** What a route answers with no edit: a starting text for the editor. */
+  previewPayload: (route: string, o: Opts = {}) =>
+    call<PayloadPreview>("GET", `/payload/preview${query({ route })}`, undefined, o),
+  /** The mock's request log: rows finished after `after` (completion order), newest last. */
+  getFeed: (q: { after?: number; limit: number }, o: Opts = {}) =>
+    call<{ entries: FeedRow[] }>("GET", `/logs${query(q)}`, undefined, o),
   /** A busy simulator (409, or 429 while draft builds are in progress) is a result, not an error. */
   async startRun(body: RunBody, o: Opts = {}): Promise<StartRun> {
     const { status, json } = await send("POST", "/sim/run", body, o);

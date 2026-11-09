@@ -22,7 +22,7 @@ export function DotsOnEdge({ path, edge }: { path: string; edge: number | undefi
           key={d.key}
           aria-hidden
           data-dot
-          className="kaanal-dot"
+          className={d.real ? "kaanal-dot kaanal-dot-real" : "kaanal-dot"}
           style={{
             offsetPath: `path("${path}")`,
             animationDuration: `${d.durMs}ms`,

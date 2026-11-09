@@ -74,13 +74,38 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
   };
 }
 
+const NO_DROPS = { overflow: 0, rate_limit: 0, deadline: 0, breaker: 0, chaos: 0 };
+
+/**
+ * The ticks as if only the real (frontend) requests had been counted: arrivals, drops and totals
+ * come from `tick.real`; the queue, the slots in use and the CPU load are the engine's snapshot and
+ * stay, whichever requests made them. Only the newest ticks, which is all a card reads.
+ */
+function realOnly(ticks: readonly Tick[]): Tick[] {
+  return ticks.slice(-SERIES_TICKS).map((t) => ({
+    ...t,
+    requests: t.real?.requests ?? 0,
+    failed: t.real?.failed ?? 0,
+    nodes: t.nodes.map((n, i) => ({
+      ...n,
+      arrived: t.real?.nodes[i]?.arrived ?? 0,
+      dropped: t.real?.nodes[i]?.dropped ?? NO_DROPS,
+    })),
+    wires: t.wires.map((_, i) => t.real?.wires[i] ?? { carried: 0 }),
+    hist: t.real?.hist ?? [],
+  }));
+}
+
 /** The feed of the last seconds of the live run; the empty feed before the first tick. */
 export function liveFeed(
-  ticks: readonly Tick[],
+  all: readonly Tick[],
   doc: Doc | null,
   /** The components in the order of the ticks' `nodes` (from the stream's `hello`). */
   order?: readonly string[],
+  /** Which requests the figures count (Admin mode's "Real only"); all by default. */
+  src: "all" | "real" = "all",
 ): StatsFeed {
+  const ticks = src === "real" ? realOnly(all) : all;
   if (ticks.length === 0 || !doc?.nodes) return EMPTY_FEED;
   const docNames = Object.keys(doc.nodes);
   // a tick's nodes are in file order but the draft's JSON is alphabetical: map by name, not by position

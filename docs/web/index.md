@@ -19,6 +19,7 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 | [traffic.md](traffic.md)             | Everyone                      | Traffic profiles: rate, weighted journeys, payload sizes for the simulator   |
 | [simulation.md](simulation.md)       | Everyone                      | Run the simulator: start a run, limits, reading the report, sampling a body  |
 | [pins.md](pins.md)                   | Frontend developers, testers  | Pinned UI states (loading, empty, error, slow) and `kaanal cycle`            |
+| [admin-mode.md](admin-mode.md)       | Frontend developers           | Studio's Admin mode: your frontend in the live numbers, rewrite a response   |
 | [observability.md](observability.md) | Everyone                      | Request ids, `kaanal logs`, `kaanal trace`, flags, test-runner recipes       |
 | [lifecycle.md](lifecycle.md)         | CI authors, test authors      | `up -d`, `down`, stale state, signals, the drain, exit codes, CI recipes     |
 | [data-packs.md](data-packs.md)       | Everyone                      | Locale packs, the field dictionary, `kaanal schema` and the contributor rule |

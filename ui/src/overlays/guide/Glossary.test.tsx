@@ -17,6 +17,7 @@ test("opens_on_the_components_chapter_with_every_chapter_as_a_tab", () => {
     "Wires and routes",
     "Wire settings",
     "Reading Results",
+    "Admin mode",
     "Keys",
   ]);
   expect(screen.getByRole("tab", { name: "Components" }).getAttribute("aria-selected")).toBe(

@@ -6,6 +6,7 @@
 // the real icons, hues and meter (Samples.tsx); its figures are examples, and the dialog says so.
 
 /** One step of a chain sample: a component, and what happens at it. */
+import { ADMIN_CHAPTER } from "./contentAdmin";
 import { RESULTS_CHAPTER } from "./contentResults";
 import { SETTINGS_CHAPTER } from "./contentSettings";
 
@@ -478,6 +479,7 @@ export const CHAPTERS: Chapter[] = [
   },
   SETTINGS_CHAPTER,
   RESULTS_CHAPTER,
+  ADMIN_CHAPTER,
 ];
 
 /** Entries whose term, text or real-world note holds every word typed, with their chapter. */
