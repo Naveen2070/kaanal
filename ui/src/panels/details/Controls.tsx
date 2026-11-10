@@ -37,7 +37,8 @@ import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { StepsGroup } from "../steps/StepsGroup.lazy";
 import { anyChain, cacheNodes, callableNodes } from "../steps/describe";
 import { RATE_UNITS, TIME_UNITS } from "./units";
-import { InstanceField, MemoryFields } from "./MachineFields";
+import { InstancePicker } from "./InstancePicker";
+import { MemoryFields } from "./MachineFields";
 import {
   balanceOf,
   cardOf,
@@ -269,7 +270,7 @@ export function Controls({
             step="any"
             onCommit={(n) => patch(setCores(name, config, n))}
           />
-          <InstanceField name={name} config={config} />
+          <InstancePicker name={name} config={config} />
           <MemoryFields name={name} config={config} />
           {node && typeof node.cpu_utilization === "number" ? (
             <p className="mb-2 text-xs text-muted">
@@ -408,6 +409,12 @@ export function Controls({
             <dd>{node.limited + node.overflowed}</dd>
             <dt>Timed out</dt>
             <dd>{node.timed_out}</dd>
+            {(node.oom_kills ?? 0) > 0 ? (
+              <>
+                <dt>Killed for memory</dt>
+                <dd>{node.oom_kills}</dd>
+              </>
+            ) : null}
             {node.short_circuited > 0 ? (
               <>
                 <dt>Refused by a breaker</dt>

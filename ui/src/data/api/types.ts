@@ -199,6 +199,8 @@ export interface NodeSummary {
   timed_out: number;
   /** Calls an open circuit breaker refused without sending (step 7c). */
   short_circuited: number;
+  /** Times a copy was killed for lack of memory (`memory.on_limit: kill`, step 8K). */
+  oom_kills?: number;
 }
 
 /** A wire over the run, in the same 60 windows as a node's `Series`: time on the wire (transfer plus time lost sharing it). */

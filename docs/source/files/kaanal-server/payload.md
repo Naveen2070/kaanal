@@ -18,6 +18,10 @@ Live response edits (step 8A, RULES 108): rewrite the status, headers and JSON b
 
 [`mock/flight.rs::finish`](mock.md): after the reply is built, when the request is unscoped, nothing failed (no chain error, no wire failure) and no pin forced `error` or `empty`, the edit's status and body replace the reply's and its headers go on the response (a file `override:`'s headers are sent the same way). `paged` is off for an edited reply, and `mock::resp_bytes` counts the edit's stored bytes for size costs (`len()`, no serialization). A one-shot edit is claimed in `finish` (`Edit::take`). `settle` turns an edit, or a file `override:` with a `content_type`, into raw bytes sent by `response_raw`. The log entry carries `edited: true`.
 
+## `control/instances.rs`
+
+`get_instances` for `GET /__kaanal/instances`: `{ types: [[name, vcpu, memory_mib, net_mbps], ...] }` from `kaanal_core::instances::all()`, so Studio's picker and the loader read one table.
+
 ## `control/stage_file.rs`
 
 `stage_file` for `POST /__kaanal/payload/stage-file` (RULES 111): takes the control lock (`lock_gen`, as `put` does, so an Apply cannot swap the system mid-write; the write is one small synchronous file operation), validates the edit as `put` does (`PutBody::to_override`, `Override::check`, `check_route`), reads the draft's `endpoints:` file (`Trust::Api` path), patches its text with `draft::patch::apply` (a `set` or `insert` at `[key, override]` in the file's own key spelling, or at `[key]` for a new entry), checks the result still parses, checks the file did not change since it was read, and writes with `save::commit` (temp file and rename). Inline `endpoints:` is a `409`.

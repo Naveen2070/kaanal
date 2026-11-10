@@ -148,6 +148,9 @@ export const api = {
       seed === undefined ? { endpoint } : { endpoint, seed },
       o,
     ),
+  /** Every cloud instance type the loader knows: `[name, vcpu, memory MiB, network Mbit/s]`. */
+  getInstances: (o: Opts = {}) =>
+    call<{ types: [string, number, number, number][] }>("GET", "/instances", undefined, o),
   getTopology: (o: Opts = {}) => call<Topology>("GET", "/topology", undefined, o),
   /** The live response edits (step 8A). */
   getPayloads: (o: Opts = {}) => call<{ edits: PayloadEdit[] }>("GET", "/payload", undefined, o),

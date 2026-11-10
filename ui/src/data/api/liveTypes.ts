@@ -7,6 +7,7 @@ export interface Dropped {
   rate_limit: number;
   deadline: number;
   breaker: number;
+  oom?: number;
   chaos: number;
 }
 

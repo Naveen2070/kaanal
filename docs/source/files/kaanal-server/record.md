@@ -32,7 +32,7 @@ The pieces are the same as before the log existed (the rules live with the heade
 
 ## Flags
 
-`build_entry` sets, in this order, each of `FI DI PD RL UO DT PN`:
+`build_entry` sets, in this order, each of `FI DI PD RL UO DT CB OM PN`:
 
 | Flag             | Rule                                                                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -40,6 +40,7 @@ The pieces are the same as before the log existed (the rules live with the heade
 | `DI`             | Some hop carried chaos `latency_add` that it actually ran, or a pin delay. A hang is never `DI`.                                           |
 | `PD`             | `Run.pin_delay`: the pin planned a delay (its hop leads the plan and shows `why: pin delay`). A pin delay is therefore `DI` + `PD` + `PN`. |
 | `RL`, `UO`, `DT` | `cause` is `RateLimit`, `Overflow` or `Deadline`.                                                                                          |
+| `CB`, `OM`       | `cause` is `Breaker`, or `Oom` (killed for memory, or refused while the copy is down, step 8K).                                            |
 | `PN`             | The answer was pinned.                                                                                                                     |
 
 `chain_error` is set whenever the chain failed, whatever the client saw. It is built from `Finished.result` (node, status, kind) and the cause (`chaos`, `rate-limit`, `overflow`, `deadline`), so an `error_map` that changed the status and a pin that hid the failure both leave it intact. `failed_node` and `kind` come from the _answer_ (`None` under a pin).

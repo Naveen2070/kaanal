@@ -39,9 +39,10 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
   const last = ticks.at(-1);
   const at = (t: Tick) => t.nodes[i];
   const arrived = sum(w.map((t) => at(t)?.arrived ?? 0));
-  const drop = (k: "overflow" | "rate_limit" | "deadline" | "breaker" | "chaos") =>
+  const drop = (k: "overflow" | "rate_limit" | "deadline" | "breaker" | "oom" | "chaos") =>
     sum(w.map((t) => at(t)?.dropped[k] ?? 0));
-  const dropped = drop("overflow") + drop("rate_limit") + drop("deadline") + drop("breaker");
+  const dropped =
+    drop("overflow") + drop("rate_limit") + drop("deadline") + drop("breaker") + drop("oom");
   const util = fullness(last, i, slots, copies);
   const queue = last?.nodes[i]?.queue ?? 0;
   const series: Series = {
@@ -70,12 +71,13 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
     overflowed: drop("overflow"),
     timed_out: drop("deadline"),
     short_circuited: drop("breaker"),
+    oom_kills: drop("oom"),
     cpu_load: last?.nodes[i]?.cpu_load ?? null,
     cpu_utilization: last?.nodes[i]?.cpu_utilization ?? null,
   };
 }
 
-const NO_DROPS = { overflow: 0, rate_limit: 0, deadline: 0, breaker: 0, chaos: 0 };
+const NO_DROPS = { overflow: 0, rate_limit: 0, deadline: 0, breaker: 0, oom: 0, chaos: 0 };
 
 /**
  * The ticks as if only the real (frontend) requests had been counted: arrivals, drops and totals

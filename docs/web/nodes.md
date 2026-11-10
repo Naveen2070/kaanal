@@ -339,8 +339,25 @@ A **hard limit**, off unless written. Each request being served holds `per_reque
 - Sizes take units above 1 GiB (`B`, `KB`, `MB`, `GB`; 1 KB = 1024 bytes). `per_request` is required; `limit` may come from an `instance:`; `base` defaults to 0. A limit that cannot hold one request is refused at load.
 - Taken by the same kinds as `cpu`. Each copy has its own memory.
 - A `hold: call` slot keeps its memory while the node waits on what it calls, as a thread-per-request server does.
-- **Not modelled:** garbage-collection pauses, swapping, and the kernel killing the process. No model of them is published across runtimes, so any curve would be a guess; this is the capacity the memory sets, nothing softer.
+- **Not modelled:** swapping, and the pauses of any one collector (below, a single labelled estimate stands in). What the kernel does at the limit, killing the process, is `on_limit: kill`.
+- **Garbage-collection cost: `gc`** (off unless set, an **estimate**). `memory: { ..., gc: 0.2 }` makes the node's own work take `1 + gc x u / (1 - u)` times its drawn time, `u` being the share of the memory that is live when the work starts (`base` plus `per_request` for each request being served, over `limit`; capped at 0.99). The shape is published: for live data `L` in a heap `H` a collector does about `L / (H - L)` work per byte allocated (Appel 1987; Jones, Hosking and Moss, _The Garbage Collection Handbook_, 2011). The **weight `gc`** (the cost of collecting a byte against the work of using it) depends on your runtime and allocation rate, so you set it: `0.05` to `0.5` is a range to try, `0` or absent is none. It uses the load when the work starts and is not updated while it runs. Tested against the formula within 0.5%.
 - Accuracy: with no queue the node is an `M/G/c/c` loss system, so the share refused is **Erlang B** for any service distribution, tested to within 1 percentage point.
+
+### Killing the copy: `on_limit: kill`
+
+```yaml
+memory: { limit: 4GB, per_request: 512MB, on_limit: kill, restart: 20s }
+```
+
+By default a request the memory cannot hold is turned away (`on_limit: refuse`). With `kill` it does what the kernel's OOM killer does: it **kills the whole copy**.
+
+- Everything the copy is serving or has queued fails at that instant with a **502**, and counts as one kill (`oom_kills` in the summary, cause `oom`, flag `OM` in the log). A retry policy retries those calls like any other failure.
+- The copy is **down for `restart`** (default `10s`, above 0, at most `1h`): every call that reaches it is refused with **503**. Then it is back, empty.
+- The other copies of the node carry on. **`least-conn` and `p2c` skip a killed copy** (they choose when the call is sent, as a balancer with a health check would). **`round-robin`, `random` and `hash` do not**: they choose when the request starts, before the engine runs, and cannot know the copy died, so some calls still go to the dead one and are refused (503); use `replicas` and the balancer's `detect` to see what a caller feels.
+- It applies only when the **memory** is what limits the node's slots (a `concurrency` lower than what the memory holds refuses as before). `restart` without `on_limit: kill` is refused at load.
+- **The copy is emptied at the kill**, as a real process's memory is: its slots are free, its queue gone, its `hold: call` slots closed and what ran on its CPUs stopped, so a request longer than `restart` leaves nothing behind.
+- Accuracy: a copy with one request of room, Poisson arrivals and exponential service fails the share a renewal argument gives, `(lambda R + 2) / (lambda (T0 + R))` with `T0 = (2 lambda + mu) / lambda^2`, tested within 2 percentage points.
+- A kill during a live run takes effect for new requests at once.
 
 ## Cloud instances: `instance`
 
@@ -349,13 +366,36 @@ nodes:
   app: { type: service, proc: 10ms, instance: aws/m5.large, memory: { per_request: 256MB } }
 ```
 
-`instance: provider/type` fills, from an embedded table, the `cpu.cores`, the network card (`bandwidth`, both directions) and the `memory.limit` you **leave out**. A value you write always wins. The table has about two dozen AWS (`m5`, `c6i`, `r6i`, `t3`), GCP (`n2`, `e2`) and Azure (`D`-series v5) types; an unknown name is refused with the names of that provider.
+`instance: provider/type` fills, from an embedded table, the `cpu.cores`, the network card (`bandwidth`, both directions) and the `memory.limit` you **leave out**. A value you write always wins. The table lists **every** type of the three big clouds, about 3,300 (`aws/` 1,400, `azure/` 1,300, `gcp/` 550), as `aws/m5.large`, `azure/standard_d4s_v5`, `gcp/n2-standard-8`; names are not case sensitive. An unknown name is refused with how many types that provider has and a few that start like it.
 
 - **A preset is capacity, not speed.** Per-core speed differs between families, so your `proc` stays your own figure.
-- **Estimates, as of 2026-11,** rounded from the providers' public pages. A vCPU is a hardware thread but counts as a full core here, and the network figure is the **peak** ("up to") rate, so every figure is an upper bound.
-- Burstable types (`t3`, `e2-medium`) run above their baseline only on CPU credits, which are not modelled: they are listed at their full vCPU count.
+- **Estimates.** vCPU and memory are the providers' own figures. A vCPU is a hardware thread but counts as a full core here, so every figure is an upper bound. **Network:** AWS types carry their stated "Gigabit" figure (older types that say only Low, Moderate or High have none); GCP types use the documented default egress cap of 2 Gbit/s per vCPU, at most 32 (16 for the E2 family); Azure's catalogue gives none. **A type with no network figure leaves the card unlimited**, which is what an absent `bandwidth` means.
+- Burstable types (`t3`, `e2-medium`, the Azure `B` series) run above their baseline only on CPU credits, which are not modelled: they are listed at their full vCPU count.
 - An instance alone sets no memory model: add `memory: { per_request }` to use its memory as the limit.
-- Studio: pick the type under the component's CPUs; the memory boxes sit beside it.
+- The table is `crates/kaanal-core/data/instances.csv`, generated by `scripts/gen-instances.mjs` from the public catalogues at instances.vantage.sh (a mirror of each provider's pages); run it again to refresh and commit the diff. The server serves it at `GET /__kaanal/instances`, so Studio and the loader read one list.
+- Studio: under a component's CPUs, pick a provider and search its types; the line below the box says what it fills.
+
+> **Known gap: Azure has no network figures.** The catalogue the table is built from gives none for any Azure size (all 1,337), so an Azure `instance:` fills cores and memory but leaves the network card **unlimited**, which can make a wire look faster than the VM really is. If it matters, set `bandwidth:` on the node yourself (Azure publishes an expected bandwidth per size on each size's page). AWS has no figure for 47 older types and GCP's figures are the documented per-vCPU estimate, so the same advice applies there.
+>
+> **Planned: cost estimates.** The same catalogues carry hourly prices for every AWS, Azure and GCP type, so a node that names an instance could show what it costs: per hour, per run and per thousand requests, beside the capacity figures. Not built; the open questions (region, on-demand against reserved or spot, whether egress and storage count) are in the project notes.
+
+### Your own machines: `instances:`
+
+A self-hosted server, an on-premises box or another provider's size is not in the table. Describe it once at the top of the file and use it by name:
+
+```yaml
+instances:
+  build-box: { cores: 32, memory: 128GB, bandwidth: 10GB }
+  edge-pi: { cores: 4 }
+nodes:
+  app: { type: service, instance: build-box, memory: { per_request: 512MB } }
+  gw: { type: gateway, instance: edge-pi }
+```
+
+- `cores` is required (0.001 to 4096). `memory` is a size (`64GB`); `bandwidth` is a rate for both directions or `{ out, in }`, like a node's. Leave out what the machine does not give: no `memory` means no limit from the instance, no `bandwidth` means an unlimited card.
+- A node that names it takes what it leaves out, exactly as with a table type, and what the node writes wins. Several nodes can share one.
+- Names have letters, digits, `.`, `_` and `-` (up to 64), **no `/`**: that is how the cloud table is written, so the two never collide. An unknown name is refused, listing yours.
+- In Studio choose **Your own** under Instance type: pick one of yours, edit its cores, memory and network, add a new one (a name and its cores), or delete one no node uses.
 
 ## What a slot covers: `hold`
 
