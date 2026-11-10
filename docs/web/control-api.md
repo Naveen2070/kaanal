@@ -208,14 +208,15 @@ A `400` or `404` changes nothing. `POST /__kaanal/reset` clears live pins; `DELE
 
 ### Payload edits
 
-A live edit rewrites what one route answers: its status, headers and JSON body, from the next request on. It is what Studio's [Admin mode](admin-mode.md) edits. It sits below chaos and pins and above the route's `override:`; a request that names a scenario scope never sees it. All routes need the token.
+A live edit rewrites what one route answers: its status, headers and body (JSON; text with a `content_type`; or bytes with `encoding: "base64"`, the body then being base64 and the `content_type` required), from the next request on; `once: true` makes it answer one request only. It is what Studio's [Admin mode](admin-mode.md) edits. It sits below chaos and pins and above the route's `override:`; a request that names a scenario scope never sees it. All routes need the token.
 
-| Method and path                           | Purpose                                                                                    | Success                                                 |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| `GET /__kaanal/payload`                   | The edits, in route order                                                                  | `200 { "edits": [ { route, status, body, headers } ] }` |
-| `PUT /__kaanal/payload`                   | Set the edit of one route                                                                  | `204`                                                   |
-| `DELETE /__kaanal/payload?route=KEY`      | Back to normal for one route                                                               | `204`                                                   |
-| `GET /__kaanal/payload/preview?route=KEY` | What the route answers with no edit (a starting text; path parameters are filled with `1`) | `200 { status, body, headers }`                         |
+| Method and path                           | Purpose                                                                                                             | Success                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `GET /__kaanal/payload`                   | The edits, in route order                                                                                           | `200 { "edits": [ { route, status, body, headers } ] }` |
+| `PUT /__kaanal/payload`                   | Set the edit of one route                                                                                           | `204`                                                   |
+| `DELETE /__kaanal/payload?route=KEY`      | Back to normal for one route                                                                                        | `204`                                                   |
+| `POST /__kaanal/payload/stage-file`       | Write the edit (the body of `PUT`) into the endpoints file the draft names; `endpoints:` must be a file, not inline | `200 { "file" }`                                        |
+| `GET /__kaanal/payload/preview?route=KEY` | What the route answers with no edit (a starting text; path parameters are filled with `1`)                          | `200 { status, body, headers }`                         |
 
 **Body** of `PUT`: `{ "route": "GET /users/{id}", "status": 503, "body": { "down": true }, "headers": { "retry-after": "5" } }`. `route` is required; `status` defaults to 200, `body` to none and `headers` to none. Unknown keys are `400`.
 
@@ -226,7 +227,7 @@ A live edit rewrites what one route answers: its status, headers and JSON body, 
 | `413`  | The body is over 1 MiB                                                                                                                                                                                                                                                                                                                                            |
 | `422`  | `{ "error", "field" }`: the edit is refused, and `field` is `status` (not 200 to 599, or a body on a `204` or `304`), `body` (over 1 MiB), `headers` (over 32, a bad name, a value over 4096 bytes or with a control character, or a name Kaanal sets itself) or `route` (a `collection:` route, a built-in login or key-set route, a `HEAD` made from its `GET`) |
 
-A refused `PUT` changes nothing. An Apply keeps the edits whose route still takes one and lists the others as `payloads_dropped` in its reply. `POST /__kaanal/reset` clears every edit.
+`stage-file` validates like `PUT`, patches the file with the comment-keeping splice and writes it atomically (`409` when the draft's `endpoints:` is inline, the file changed meanwhile, or the result would not be an endpoints file); the running system keeps its live edit until the next Apply reads the file. A refused `PUT` changes nothing. An Apply keeps the edits whose route still takes one and lists the others as `payloads_dropped` in its reply. `POST /__kaanal/reset` clears every edit.
 
 ### Draft
 

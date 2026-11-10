@@ -51,12 +51,12 @@ Never in an entry: bodies, request headers, query strings.
 
 ## `LogRing`
 
-| Item                    | What it does                                                                                                                                                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `push(entry) -> done`   | Assigns `done` (1, 2, ...), raises the high-water mark to `max(seq)`, appends, and drops the **earliest completion** past `LOG_CAP` (counted in `evicted`). The lowest `seq` is not what goes: a late slow request stays until 1000 later ones finish. |
-| `clear()`               | Empties the entries; `done`, the high-water mark and `evicted` keep counting, so every id issued before is `Evicted`, not `Unknown`, and `done` stays unique for `logs -f`. Called by `POST /reset`.                                                   |
-| `query(&filter, limit)` | The last `limit` matches in completion order, as a `Page { entries, oldest, newest, cap, evicted }`. `oldest`/`newest` are the ids with the lowest/highest `seq` **in the ring**; both `None` when empty.                                              |
-| `find(key) -> Lookup`   | Precedence: the literal `last` (highest `done`), then one of our ids, then a client id (the newest match). So a client id shaped like an id resolves as an id. See below.                                                                              |
+| Item                    | What it does                                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push(entry) -> done`   | Assigns `done` (1, 2, ...), raises the high-water mark to `max(seq)`, appends, and drops the **earliest completion** past `LOG_CAP` (counted in `evicted`). The lowest `seq` is not what goes: a late slow request stays until 1000 later ones finish.                 |
+| `clear()`               | Empties the entries; `done`, the high-water mark and `evicted` keep counting, so every id issued before is `Evicted`, not `Unknown`, and `done` stays unique for `logs -f`. Called by `POST /reset`.                                                                   |
+| `query(&filter, limit)` | The last `limit` matches in completion order (with `after` set, the first `limit` after the cursor), as a `Page { entries, oldest, newest, cap, evicted, boot }`. `oldest`/`newest` are the ids with the lowest/highest `seq` **in the ring**; both `None` when empty. |
+| `find(key) -> Lookup`   | Precedence: the literal `last` (highest `done`), then one of our ids, then a client id (the newest match). So a client id shaped like an id resolves as an id. See below.                                                                                              |
 
 `Lookup`:
 

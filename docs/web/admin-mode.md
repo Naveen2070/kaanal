@@ -14,15 +14,17 @@ A real request goes through the same simulated system as a generated one. It wai
 
 ## Rewriting what a route answers
 
-Press **Edit response** on a row of the feed. The editor opens on what the route answers now (or on the edit it already has). Set the **status**, any **headers** and the **JSON body**, then:
+Press **Edit response** on a row of the feed. The editor opens on what the route answers now (or on the edit it already has). Set the **status**, any **headers** and the **body** (JSON, or text: plain text, HTML, XML or CSV, sent exactly as typed with its `Content-Type`; or **binary**, written as base64, sent as the bytes it decodes to, with a `Content-Type` you can change), then:
 
-| Button                | What it does                                                                                                                                                         |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Apply now**         | From the next request on, the route answers exactly this. Nothing to restart. It is kept in memory and marked _Live only, not in the file_.                          |
-| **Back to normal**    | Removes the edit.                                                                                                                                                    |
-| **Stage in the file** | Writes it into the draft as the route's `override:` (a `set` or `insert` in `kaanal.yaml`, in the file's own key spelling). The usual **Save** then writes the file. |
+| Button                | What it does                                                                                                                                                                                                                                                                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Apply now**         | From the next request on, the route answers exactly this. Nothing to restart. It is kept in memory and marked _Live only, not in the file_.                                                                                                                                                                                                           |
+| **Back to normal**    | Removes the edit.                                                                                                                                                                                                                                                                                                                                     |
+| **Stage in the file** | Writes it into the draft as the route's `override:` (a `set` or `insert` in `kaanal.yaml`, in the file's own key spelling). The usual **Save** then writes the file. When `endpoints:` names **another file**, it writes that file at once instead (no Save, comments and key order kept, the draft untouched); **Apply** then runs it from the file. |
 
-A problem is said under the field it is about: a status outside 200 to 599, a body that is not JSON, a body on a `204` or `304`, a header Kaanal sets itself (`content-length`, `content-type`, `content-encoding`, `access-control-*`, `x-request-id`, `x-kaanal-*` and the connection headers), a header value over 4096 bytes, a body over 1 MiB, more than 32 headers.
+A problem is said under the field it is about: a status outside 200 to 599, a body that is not JSON (for a JSON body), a body on a `204`, `205` or `304`, a header Kaanal sets itself (`content-length`, `content-type`, `content-encoding`, `access-control-*`, `x-request-id`, `x-kaanal-*` and the connection headers), a header value over 4096 bytes, a body over 1 MiB, more than 32 headers.
+
+Tick **Answer one request only** to make the edit a one-shot: the next request gets it, then the route is back to normal. A one-shot is live only (it is not staged into the file).
 
 ### Who wins
 
@@ -43,7 +45,7 @@ A request that names a [scenario scope](scenarios.md) (`X-Kaanal-Scenario`) neve
 - **Parameter edits** in Studio keep your edits. An **Apply** keeps the edits whose route still takes one and drops the rest, and says which in the reply (`payloads_dropped`).
 - **`POST /__kaanal/reset`** clears every edit.
 - A restart of the server loses edits that were not staged and saved.
-- If `endpoints:` in your `kaanal.yaml` names another file, **Stage in the file** is off (Studio does not edit that file); **Apply now** still works.
+- If `endpoints:` in your `kaanal.yaml` names another file, **Stage in the file** writes that file itself (the draft holds only `kaanal.yaml`), refusing if the file changed while it was written; a one-shot edit cannot be staged.
 
 A header an edit (or an `override:`) sets is listed in `Access-Control-Expose-Headers`, so a browser frontend on another origin can read it with `fetch`.
 

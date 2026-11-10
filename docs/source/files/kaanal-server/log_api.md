@@ -14,7 +14,7 @@ Errors use the control API's `{ "error": ... }` shape; `evicted` adds `detail`, 
 ## Rules worth knowing
 
 - Nothing is applied partly: `Filter::from_params` rejects an unknown, repeated, empty (except `scope`) or malformed parameter, naming it; `limit` is checked here, not there. `limit=+5`, `limit= 5`, `limit=0`, `limit=1001` and a number too large for a `usize` are all `400`.
-- `after=` is the polling cursor: pass the highest `done` seen. Because entries are ordered by completion, nothing is missed, however out of order requests finish.
+- `after=` is the polling cursor: pass the highest `done` seen. With `after`, the answer is the **first** `limit` entries after the cursor (not the newest), so a poller that falls behind pages forward and skips nothing. The page carries `boot`, this start's nonce: `done` counts from 1 again after a restart, so a poller starts over when `boot` changes. Because entries are ordered by completion, nothing is missed, however out of order requests finish.
 - A bad query string (not decodable) is the `400` of axum's own rejection, with its message.
 - The ring and the bus are fed in this order: entry first, event second (`mock::publish`). So when an SSE event for id X is received, `GET /trace/X` finds it. `kaanal logs -f` relies on this.
 

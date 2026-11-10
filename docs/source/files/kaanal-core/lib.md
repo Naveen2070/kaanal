@@ -4,7 +4,7 @@ Crate root of **kaanal-core**: the pure logic crate (no tokio, no axum, no IO).
 
 ## What it does
 
-- Declares the modules `chain`, `chaos`, `config`, `diagnostics`, `dist`, `exec`, `pin`, `presets`, `replay`, `scenario`, `schema`, `topology`, `units`.
+- Declares the modules `chain`, `chaos`, `config`, `diagnostics`, `dist`, `exec`, `instances`, `pin`, `presets`, `replay`, `scenario`, `schema`, `topology`, `units`.
 - Re-exports the public API so users of the crate write `kaanal_core::{Config, Topology, execute, ...}` instead of knowing module paths.
 - Defines the one hash function the whole project uses for seeding.
 

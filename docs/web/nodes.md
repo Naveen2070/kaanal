@@ -320,9 +320,42 @@ Off unless written: with no `cpu`, every request takes its drawn time however ma
 - `concurrency` still decides how many requests are admitted; `cores` only decides how fast the admitted ones run. They are separate on purpose: slots are threads, cores are CPUs.
 - Taken by `gateway`, `service`, `monolith`, `database`, `auth` and `load-balancer`. A cache, an external API and a storage node have no `cpu` (their time is a given figure, not your CPUs), and the file is refused at that key if you write one.
 - **Not stretched:** time waiting on what the node calls (including a `hold: call` slot), the wire, and wait steps use no CPU and run at their drawn time. A request that fails keeps its CPU share until its running hop ends, as it keeps its slot.
-- The summary adds `cpu_load` (own work over cores x copies x window; 1 or more means the CPUs cannot keep up), `cpu_capacity_per_s` and `saturates_by` (`slots` or `cpu`, whichever sets `saturates_at_req_s`). A node with `cpu_load` of 1 or more is saturated even with no slot limit. Results labels such a row **CPU bound**.
+- The summary adds `cpu_load` (own work over cores x copies x window; 1 or more means the CPUs cannot keep up), `cpu_utilization` (the CPU the work **really used** in the window over the same, at most 1 (the live ticks carry it too, over each tick's span): a measured figure, where `cpu_load` is the offered one; any work-conserving server uses `lambda x E[S]` cores on average, so it equals `cpu_load` while the CPUs keep up and stays at 1 past that), `cpu_capacity_per_s` and `saturates_by` (`slots`, `memory` or `cpu`, whichever sets `saturates_at_req_s`). A node with `cpu_load` of 1 or more is saturated even with no slot limit. Results labels such a row **CPU bound**.
 - The live mock shares the cores too: every real request runs through the same replay engine as a simulation, so concurrent requests slow each other down exactly as in a run.
-- Accuracy: a single core matches M/G/1 processor sharing (mean time `E[S] / (1 - rho)` for any service distribution) and `c` cores with exponential service match Erlang C, both tested to within about 2%. Context switching, cache effects and hyperthreads are not modelled: a vCPU counts as a full core, so for a cloud instance use its vCPU count as an upper bound. Memory, disk and instance presets are planned, not built.
+- Accuracy: a single core matches M/G/1 processor sharing (mean time `E[S] / (1 - rho)` for any service distribution) and `c` cores with exponential service match Erlang C, both tested to within about 2%. Context switching, cache effects and hyperthreads are not modelled: a vCPU counts as a full core, so for a cloud instance use its vCPU count as an upper bound (or let an `instance:` do it, below). Disk presets are planned, not built.
+
+## Memory: `memory`
+
+```yaml
+nodes:
+  app:
+    type: service
+    proc: 10ms
+    memory: { limit: 4GB, per_request: 512MB, base: 1GB }
+```
+
+A **hard limit**, off unless written. Each request being served holds `per_request` bytes on top of the `base` the process holds idle, so a copy holds at most `(limit - base) / per_request` requests at once: here 6. That is a slot count, the same as `concurrency`, and the **lower** of the two applies. A request that finds them taken waits in the node's `concurrency` queue, or, when the node has no `concurrency` of its own, is **refused at once with 503** (memory does not queue). The Results row says **memory** in `saturates_by` when the memory is what holds the copy to that many.
+
+- Sizes take units above 1 GiB (`B`, `KB`, `MB`, `GB`; 1 KB = 1024 bytes). `per_request` is required; `limit` may come from an `instance:`; `base` defaults to 0. A limit that cannot hold one request is refused at load.
+- Taken by the same kinds as `cpu`. Each copy has its own memory.
+- A `hold: call` slot keeps its memory while the node waits on what it calls, as a thread-per-request server does.
+- **Not modelled:** garbage-collection pauses, swapping, and the kernel killing the process. No model of them is published across runtimes, so any curve would be a guess; this is the capacity the memory sets, nothing softer.
+- Accuracy: with no queue the node is an `M/G/c/c` loss system, so the share refused is **Erlang B** for any service distribution, tested to within 1 percentage point.
+
+## Cloud instances: `instance`
+
+```yaml
+nodes:
+  app: { type: service, proc: 10ms, instance: aws/m5.large, memory: { per_request: 256MB } }
+```
+
+`instance: provider/type` fills, from an embedded table, the `cpu.cores`, the network card (`bandwidth`, both directions) and the `memory.limit` you **leave out**. A value you write always wins. The table has about two dozen AWS (`m5`, `c6i`, `r6i`, `t3`), GCP (`n2`, `e2`) and Azure (`D`-series v5) types; an unknown name is refused with the names of that provider.
+
+- **A preset is capacity, not speed.** Per-core speed differs between families, so your `proc` stays your own figure.
+- **Estimates, as of 2026-11,** rounded from the providers' public pages. A vCPU is a hardware thread but counts as a full core here, and the network figure is the **peak** ("up to") rate, so every figure is an upper bound.
+- Burstable types (`t3`, `e2-medium`) run above their baseline only on CPU credits, which are not modelled: they are listed at their full vCPU count.
+- An instance alone sets no memory model: add `memory: { per_request }` to use its memory as the limit.
+- Studio: pick the type under the component's CPUs; the memory boxes sit beside it.
 
 ## What a slot covers: `hold`
 
