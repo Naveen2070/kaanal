@@ -453,6 +453,51 @@ export function coresOf(config: NodeDoc): number | null {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** The instance type a component names (`instance: aws/m5.large`); null = none. */
+export function instanceOf(config: NodeDoc): string | null {
+  const v = config.instance;
+  return typeof v === "string" && v.trim() !== "" ? v : null;
+}
+
+/** The patch for the instance picker: a name writes `instance`, null removes it. */
+export function setInstance(name: string, config: NodeDoc, value: string | null): Op[] {
+  const path = ["nodes", name, "instance"];
+  const present = "instance" in config;
+  if (value === null || value === "") return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, value)];
+}
+
+/** The three sizes of `memory: { limit, per_request, base }`, in bytes; null where not a number. */
+export type MemoryKey = "limit" | "per_request" | "base";
+export function memoryOf(config: NodeDoc): Record<MemoryKey, number | null> {
+  const m = isObject(config.memory) ? config.memory : {};
+  const n = (k: MemoryKey) => {
+    const v = m[k];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  };
+  return { limit: n("limit"), per_request: n("per_request"), base: n("base") };
+}
+
+/**
+ * The patch for one memory box (bytes): the field is set or left out and the map is written
+ * whole; no field left removes `memory`. A size written as text in the file (`8GB`) is kept as
+ * it is for the boxes not touched.
+ */
+export function setMemory(
+  name: string,
+  config: NodeDoc,
+  key: MemoryKey,
+  bytes: number | null,
+): Op[] {
+  const path = ["nodes", name, "memory"];
+  const present = "memory" in config;
+  const next: Record<string, unknown> = isObject(config.memory) ? { ...config.memory } : {};
+  if (bytes === null || !(bytes > 0)) delete next[key];
+  else next[key] = Math.round(bytes);
+  if (Object.keys(next).length === 0) return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, next)];
+}
+
 /** The patch for the cores box: a number writes `cpu: { cores }`, null removes the field. */
 export function setCores(name: string, config: NodeDoc, cores: number | null): Op[] {
   const path = ["nodes", name, "cpu"];

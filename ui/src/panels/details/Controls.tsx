@@ -37,6 +37,7 @@ import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { StepsGroup } from "../steps/StepsGroup.lazy";
 import { anyChain, cacheNodes, callableNodes } from "../steps/describe";
 import { RATE_UNITS, TIME_UNITS } from "./units";
+import { InstanceField, MemoryFields } from "./MachineFields";
 import {
   balanceOf,
   cardOf,
@@ -268,6 +269,13 @@ export function Controls({
             step="any"
             onCommit={(n) => patch(setCores(name, config, n))}
           />
+          <InstanceField name={name} config={config} />
+          <MemoryFields name={name} config={config} />
+          {node && typeof node.cpu_utilization === "number" ? (
+            <p className="mb-2 text-xs text-muted">
+              Measured: the CPUs were busy {percent(node.cpu_utilization)} of the time.
+            </p>
+          ) : null}
           {node && typeof node.cpu_load === "number" ? (
             <p className="mb-2 text-xs text-muted">
               {node.cpu_load > 1

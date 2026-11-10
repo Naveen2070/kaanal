@@ -4,7 +4,7 @@
 // read from the same constants the boxes use (`resilience.ts`, `edgeFields.ts`), never copied.
 
 import type { Doc, EdgeDoc, NodeDoc, Op } from "../../../data/api/types";
-import { balanceOf, cardOf, coresOf, holdOf, rateLimitOf } from "../fields";
+import { balanceOf, cardOf, coresOf, holdOf, instanceOf, rateLimitOf } from "../fields";
 import { rateText } from "../units";
 import {
   callsOf,
@@ -153,7 +153,7 @@ export const NODE_GROUP_KEYS: Record<NodeGroup, readonly string[]> = {
   limit: ["rate_limit"],
   balance: ["balance", "spread", "detect"],
   style: ["hold"],
-  cpu: ["cpu"],
+  cpu: ["cpu", "instance", "memory"],
 };
 
 export const nodeGroupChanged = (g: NodeGroup, c: NodeDoc): boolean =>
@@ -175,8 +175,13 @@ export function limitSummary(c: NodeDoc): string {
 
 export function cpuSummary(c: NodeDoc): string {
   const n = coresOf(c);
-  if (n !== null) return `${n} core${n === 1 ? "" : "s"}`;
-  return "cpu" in c ? "set in kaanal.yaml" : "not limited";
+  const parts: string[] = [];
+  if (n !== null) parts.push(`${n} core${n === 1 ? "" : "s"}`);
+  else if ("cpu" in c) parts.push("set in kaanal.yaml");
+  const inst = instanceOf(c);
+  if (inst !== null) parts.push(inst);
+  if ("memory" in c) parts.push("memory limit");
+  return parts.length > 0 ? parts.join(" · ") : "not limited";
 }
 
 export const styleSummary = (c: NodeDoc): string =>

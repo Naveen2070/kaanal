@@ -119,22 +119,40 @@ export interface Point {
 }
 
 /**
+ * Finished points by the first tick object of their chunk: a full chunk never changes, so it is
+ * summed once. A hit needs the same chunk size and the same last tick object, so a restarted
+ * session (new tick objects) can never read an old point.
+ */
+const chunkCache = new WeakMap<Tick, { per: number; last: Tick | undefined; point: Point }>();
+
+/**
  * The window as at most `points` points (a 30 minute window is 7,200 ticks): consecutive ticks are
- * added up, so a point's rates and its p99 are those of the span it stands for.
+ * added up, so a point's rates and its p99 are those of the span it stands for. A full chunk is
+ * kept by its first tick, so a tick that arrives re-sums only the chunk it lands in, not the window.
  */
 export function timelineSeries(ticks: readonly Tick[], points = 240): Point[] {
   if (ticks.length === 0) return [];
   const per = Math.max(1, Math.ceil(ticks.length / points));
   const out: Point[] = [];
   for (let i = 0; i < ticks.length; i += per) {
+    const full = i + per <= ticks.length;
+    const first = ticks[i];
+    const last = ticks[i + per - 1];
+    const hit = full && first ? chunkCache.get(first) : undefined;
+    if (hit && hit.per === per && hit.last === last) {
+      out.push(hit.point);
+      continue;
+    }
     const chunk = ticks.slice(i, i + per);
     const seconds = chunk.length * 0.25;
-    out.push({
+    const point: Point = {
       t_ms: chunk.at(-1)?.t_ms ?? 0,
       reqPerS: chunk.reduce((a, t) => a + t.requests, 0) / seconds,
       droppedPerS: chunk.reduce((a, t) => a + t.failed, 0) / seconds,
       p99Ms: quantileMs(sumHist(chunk), 0.99),
-    });
+    };
+    if (full && first) chunkCache.set(first, { per, last, point });
+    out.push(point);
   }
   return out;
 }

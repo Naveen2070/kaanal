@@ -20,6 +20,8 @@ export interface NodeTick {
   busy_slots: number;
   /** Running hops over cores x copies; null for a component with no `cpu`. */
   cpu_load: number | null;
+  /** The CPU the work really used over the tick's span, at most 1; null without `cpu` or at first. */
+  cpu_utilization?: number | null;
 }
 
 export interface WireTick {

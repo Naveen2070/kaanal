@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   putPayload: vi.fn(),
   clearPayload: vi.fn(),
   previewPayload: vi.fn(),
+  stagePayloadFile: vi.fn(),
 }));
 vi.mock("../../data/api/payload", () => api);
 
@@ -131,16 +132,31 @@ test("stage_patches_the_draft_override_and_clears_the_live_only_line", async () 
   expect(await screen.findByText(/In the draft; Save writes the file/)).toBeTruthy();
 });
 
-test("stage_is_disabled_with_a_reason_when_endpoints_is_a_file_reference", async () => {
-  draftWith({ endpoints: "endpoints.yaml" });
+test("with_endpoints_in_another_file_stage_writes_that_file_through_the_server", async () => {
+  draftWith({ endpoints: "routes.yaml" });
+  api.stagePayloadFile.mockResolvedValue("routes.yaml");
+  useAdmin.setState({ liveOnly: [ROUTE] });
   await open();
-  const stage = screen.getByRole("button", { name: "Stage in the file" }) as HTMLButtonElement;
-  expect(stage.disabled).toBe(true);
-  expect(screen.getByText(/another file/)).toBeTruthy();
-  // Apply now still works
-  expect((screen.getByRole("button", { name: "Apply now" }) as HTMLButtonElement).disabled).toBe(
-    false,
-  );
+  set("Status", "503");
+  fireEvent.click(screen.getByRole("button", { name: "Stage in the file" }));
+  await waitFor(() => expect(api.stagePayloadFile).toHaveBeenCalled());
+  expect(api.stagePayloadFile.mock.calls[0]?.[0]).toMatchObject({ route: ROUTE, status: 503 });
+  expect(patch).not.toHaveBeenCalled();
+  expect(await screen.findByText(/Written to routes.yaml. Apply to run it/)).toBeTruthy();
+  await waitFor(() => expect(useAdmin.getState().liveOnly).not.toContain(ROUTE));
+});
+
+test("a_refused_file_stage_is_shown_and_a_one_shot_cannot_be_staged", async () => {
+  draftWith({ endpoints: "routes.yaml" });
+  api.stagePayloadFile.mockRejectedValue({ field: null, message: "the file changed; try again" });
+  await open();
+  fireEvent.click(screen.getByRole("button", { name: "Stage in the file" }));
+  expect(await screen.findByText(/the file changed; try again/)).toBeTruthy();
+  fireEvent.click(screen.getByLabelText(/Answer one request only/));
+  expect(
+    (screen.getByRole("button", { name: "Stage in the file" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.getByText(/one-shot edit is live only/)).toBeTruthy();
 });
 
 test("a_refused_route_disables_apply_and_says_why", async () => {

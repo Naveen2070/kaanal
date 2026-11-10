@@ -66,3 +66,19 @@ test("a_failed_poll_is_skipped_and_the_next_one_goes_on", async () => {
   expect(sent.length).toBeGreaterThanOrEqual(2);
   expect(got.flat().map((r) => r.done)).toEqual([1]);
 });
+
+test("a_new_boot_starts_the_cursor_over", async () => {
+  const sent = mockFetch([
+    { json: { entries: [row(40), row(41)], boot: 1 } },
+    { json: { entries: [], boot: 2 } },
+    { json: { entries: [row(1)], boot: 2 } },
+  ]);
+  const got: number[][] = [];
+  const stop = startFeed((rows) => got.push(rows.map((r) => r.done)), { everyMs: 1000 });
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(1000);
+  stop();
+  expect(sent[1]?.url).toBe("/__kaanal/logs?after=41&limit=200");
+  expect(sent[2]?.url).toBe("/__kaanal/logs?limit=100");
+  expect(got).toEqual([[40, 41], [1]]);
+});

@@ -10,6 +10,8 @@ import {
   addRateLimit,
   cardOf,
   coresOf,
+  instanceOf,
+  memoryOf,
   holdOf,
   queueOf,
   rateLimitOf,
@@ -156,6 +158,11 @@ export function nodeGroupDiff(
     const cores = coresOf(c);
     if (cores !== null) add("CPUs", "not limited", `${cores} core${cores === 1 ? "" : "s"}`);
     else if ("cpu" in c) add("CPUs", "not limited", "set in kaanal.yaml");
+    const inst = instanceOf(c);
+    if (inst !== null) add("Instance", "none", inst);
+    const mem = memoryOf(c);
+    if (mem.limit !== null) add("Memory limit", "none", `${mem.limit.toLocaleString("en-US")} B`);
+    else if ("memory" in c) add("Memory", "none", "set in kaanal.yaml");
   } else if (group === "balance") {
     if ("balance" in c) add("Picking a copy", "round robin", balanceWord(c.balance));
     if ("spread" in c) add("Spread", "round robin", balanceWord(c.spread));

@@ -33,7 +33,11 @@ export function whyNodeRed(n: NodeSummary): string | null {
   const waiting = n.max_queue > 0 ? `, so up to ${nf(n.max_queue)} wait in line` : "";
   const away =
     n.limited + n.overflowed > 0 ? `; ${nf(n.limited + n.overflowed)} were turned away` : "";
-  const why = cpuBound ? " Its CPUs are the limit, not its slots." : "";
+  const why = cpuBound
+    ? " Its CPUs are the limit, not its slots."
+    : n.saturates_by === "memory"
+      ? " Its memory is the limit: it holds fewer requests at once than its slots allow."
+      : "";
   return `${n.name} gets ${twoSignificant(n.visits_per_s)}/s${handles}${waiting}${away}.${why}`;
 }
 

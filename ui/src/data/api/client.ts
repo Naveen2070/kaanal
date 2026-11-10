@@ -152,14 +152,17 @@ export const api = {
   /** The live response edits (step 8A). */
   getPayloads: (o: Opts = {}) => call<{ edits: PayloadEdit[] }>("GET", "/payload", undefined, o),
   putPayload: (edit: PayloadEdit, o: Opts = {}) => call<null>("PUT", "/payload", edit, o),
+  /** Writes the edit into the endpoints file the draft names (it is not part of the draft). */
+  stagePayloadFile: (edit: PayloadEdit, o: Opts = {}) =>
+    call<{ file: string }>("POST", "/payload/stage-file", edit, o),
   deletePayload: (route: string, o: Opts = {}) =>
     call<null>("DELETE", `/payload${query({ route })}`, undefined, o),
   /** What a route answers with no edit: a starting text for the editor. */
   previewPayload: (route: string, o: Opts = {}) =>
     call<PayloadPreview>("GET", `/payload/preview${query({ route })}`, undefined, o),
-  /** The mock's request log: rows finished after `after` (completion order), newest last. */
+  /** The mock's request log: the first rows finished after `after` (completion order, a page at a time), or the newest ones with no cursor. */
   getFeed: (q: { after?: number; limit: number }, o: Opts = {}) =>
-    call<{ entries: FeedRow[] }>("GET", `/logs${query(q)}`, undefined, o),
+    call<{ entries: FeedRow[]; boot?: number }>("GET", `/logs${query(q)}`, undefined, o),
   /** A busy simulator (409, or 429 while draft builds are in progress) is a result, not an error. */
   async startRun(body: RunBody, o: Opts = {}): Promise<StartRun> {
     const { status, json } = await send("POST", "/sim/run", body, o);

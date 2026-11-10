@@ -10,11 +10,21 @@ import {
   listPayloads,
   previewPayload,
   putPayload,
+  stagePayloadFile,
   type FieldError,
 } from "../../data/api/payload";
 import { useAdmin } from "../../data/store/admin";
 import { useDraft } from "../../data/store/draft";
-import { fromEdit, fromPreview, stageOps, toEdit, type Form } from "./payloadModel";
+import {
+  BODY_KINDS,
+  endpointsInFile,
+  kindOf,
+  fromEdit,
+  fromPreview,
+  stageOps,
+  toEdit,
+  type Form,
+} from "./payloadModel";
 
 const INPUT =
   "h-8 rounded-md border border-control bg-sheet px-2 font-mono text-sm focus-visible:outline-2 focus-visible:outline-accent";
@@ -35,7 +45,8 @@ export function PayloadEditor({ route, onClose }: { route: string; onClose: () =
   const [form, setForm] = useState<Form | null>(null);
   const [hasEdit, setHasEdit] = useState(false);
   const [error, setError] = useState<FieldError | null>(null);
-  const [staged, setStaged] = useState(false);
+  // where a staged edit went: "draft", or the endpoints file's name
+  const [staged, setStaged] = useState<string | false>(false);
   const [busy, setBusy] = useState(false);
 
   useLayoutEffect(() => {
@@ -73,7 +84,13 @@ export function PayloadEditor({ route, onClose }: { route: string; onClose: () =
   }, [form === null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stage = form ? stageOps({ route, status: 200, body: null, headers: {} }, doc) : null;
-  const stageReason = stage && !stage.ok ? stage.reason : null;
+  // a one-shot edit is a live trick: the file would keep it for good
+  const inFile = endpointsInFile(doc);
+  const stageReason = form?.once
+    ? "A one-shot edit is live only."
+    : !inFile && stage && !stage.ok
+      ? stage.reason
+      : null;
 
   const edit = (patch: Partial<Form>) => {
     setForm((f) => (f ? { ...f, ...patch } : f));
@@ -126,13 +143,31 @@ export function PayloadEditor({ route, onClose }: { route: string; onClose: () =
     if (!form) return;
     const parsed = toEdit(form);
     if (!parsed.ok) return setError(parsed.error);
+    if (inFile) {
+      setBusy(true);
+      try {
+        const file = await stagePayloadFile(parsed.edit);
+        useAdmin.getState().unmarkLive(route);
+        setStaged(file);
+        setError(null);
+      } catch (e) {
+        setError(
+          typeof e === "object" && e !== null && "field" in e
+            ? (e as FieldError)
+            : { field: null, message: message(e) },
+        );
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const ops = stageOps(parsed.edit, doc);
     if (!ops.ok) return setError({ field: null, message: ops.reason });
     setBusy(true);
     try {
       if (await useDraft.getState().patch(ops.ops)) {
         useAdmin.getState().unmarkLive(route);
-        setStaged(true);
+        setStaged("draft");
         setError(null);
       } else {
         setError({ field: null, message: "The draft refused the change." });
@@ -250,7 +285,43 @@ export function PayloadEditor({ route, onClose }: { route: string; onClose: () =
             </p>
           ) : null}
           <label className="flex flex-col gap-1 text-sm font-medium">
-            Body (JSON)
+            Body type
+            <select
+              name="contentType"
+              value={kindOf(form)}
+              onChange={(e) => {
+                const k = BODY_KINDS.find((x) => x.label === e.currentTarget.value);
+                // "Other" keeps the media type typed below
+                if (k) edit({ contentType: k.contentType, base64: k.base64 });
+                else edit({ base64: false, contentType: form.contentType || "text/plain" });
+              }}
+              className={`${INPUT} w-48`}
+            >
+              {BODY_KINDS.map((k) => (
+                <option key={k.label} value={k.label}>
+                  {k.label}
+                </option>
+              ))}
+              <option value="Other">Other media type</option>
+            </select>
+          </label>
+          {form.contentType !== "" ? (
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Content-Type
+              <input
+                name="mediaType"
+                value={form.contentType}
+                onChange={(e) => edit({ contentType: e.currentTarget.value })}
+                className={INPUT}
+              />
+            </label>
+          ) : null}
+          <label className="flex flex-col gap-1 text-sm font-medium">
+            {form.contentType === ""
+              ? "Body (JSON)"
+              : form.base64
+                ? "Body (base64 of the bytes)"
+                : "Body (text, sent as typed)"}
             <textarea
               name="body"
               rows={8}
@@ -267,11 +338,24 @@ export function PayloadEditor({ route, onClose }: { route: string; onClose: () =
               {error.message}
             </p>
           ) : null}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="once"
+              checked={form.once}
+              onChange={(e) => edit({ once: e.currentTarget.checked })}
+            />
+            Answer one request only, then back to normal
+          </label>
           <p className="m-0 min-h-5 text-xs text-muted" aria-live="polite">
             {live
-              ? "Live only, not in the file. Stage it, then Save, to keep it."
+              ? inFile
+                ? "Live only, not in the file. Stage it to write the endpoints file."
+                : "Live only, not in the file. Stage it, then Save, to keep it."
               : staged
-                ? "In the draft; Save writes the file."
+                ? staged === "draft"
+                  ? "In the draft; Save writes the file."
+                  : `Written to ${staged}. Apply to run it from the file.`
                 : hasEdit
                   ? "Live."
                   : ""}

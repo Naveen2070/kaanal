@@ -11,6 +11,27 @@ export interface Form {
   status: string;
   headers: { name: string; value: string }[];
   body: string;
+  /** `""` is JSON; anything else is a media type and the body is sent as typed. */
+  contentType: string;
+  /** The body is base64 of the bytes to send (a binary body). */
+  base64: boolean;
+  once: boolean;
+}
+
+/** The body kinds the editor offers: the label and the `Content-Type` sent (`""` is JSON). */
+export const BODY_KINDS: { label: string; contentType: string; base64: boolean }[] = [
+  { label: "JSON", contentType: "", base64: false },
+  { label: "Plain text", contentType: "text/plain; charset=utf-8", base64: false },
+  { label: "HTML", contentType: "text/html; charset=utf-8", base64: false },
+  { label: "XML", contentType: "application/xml", base64: false },
+  { label: "CSV", contentType: "text/csv; charset=utf-8", base64: false },
+  { label: "Binary (base64)", contentType: "application/octet-stream", base64: true },
+];
+
+/** The kind a form is in: the one with its media type, `Binary` for base64, else `Other`. */
+export function kindOf(f: Pick<Form, "contentType" | "base64">): string {
+  if (f.base64) return "Binary (base64)";
+  return BODY_KINDS.find((k) => !k.base64 && k.contentType === f.contentType)?.label ?? "Other";
 }
 
 type Parsed = { ok: true; edit: PayloadEdit } | { ok: false; error: FieldError };
@@ -29,7 +50,10 @@ export function toEdit(f: Form): Parsed {
   }
   const text = f.body.trim();
   let body: unknown = null;
-  if (text !== "") {
+  if (f.contentType !== "") {
+    // a text body goes out as typed (spaces and line ends are part of it); base64 may be wrapped
+    body = f.base64 ? f.body.replace(/\s+/g, "") : f.body;
+  } else if (text !== "") {
     try {
       body = JSON.parse(text);
     } catch (e) {
@@ -39,7 +63,8 @@ export function toEdit(f: Form): Parsed {
       );
     }
   }
-  if ((status === 204 || status === 304) && body !== null) {
+  if ([204, 205, 304].includes(status) && f.contentType !== "" && f.body === "") body = null;
+  if ([204, 205, 304].includes(status) && body !== null) {
     return refuse("body", `A ${status} reply has no body. Clear the body or pick another status.`);
   }
   const headers: Record<string, string> = {};
@@ -52,16 +77,30 @@ export function toEdit(f: Form): Parsed {
     seen.add(n.toLowerCase());
     headers[n] = value;
   }
-  return { ok: true, edit: { route: f.route, status, body, headers } };
+  const edit: PayloadEdit = { route: f.route, status, body, headers };
+  if (f.contentType !== "" && body !== null) edit.content_type = f.contentType;
+  if (f.base64 && body !== null) edit.encoding = "base64";
+  if (f.once) edit.once = true;
+  return { ok: true, edit };
 }
 
-const pretty = (body: unknown): string => (body === null ? "" : JSON.stringify(body, null, 2));
+const pretty = (body: unknown, text: boolean): string =>
+  body === null ? "" : text && typeof body === "string" ? body : JSON.stringify(body, null, 2);
 const rows = (h: Record<string, string>) =>
   Object.entries(h).map(([name, value]) => ({ name, value }));
 
 /** What a route answers now, as a form to start from. */
 export function fromPreview(route: string, p: PayloadPreview): Form {
-  return { route, status: String(p.status), headers: rows(p.headers), body: pretty(p.body) };
+  const contentType = p.content_type ?? "";
+  return {
+    base64: p.encoding === "base64",
+    route,
+    status: String(p.status),
+    headers: rows(p.headers),
+    body: pretty(p.body, contentType !== ""),
+    contentType,
+    once: false,
+  };
 }
 
 /** An edit the route already has, as a form. */
@@ -70,7 +109,10 @@ export function fromEdit(e: PayloadEdit): Form {
     route: e.route,
     status: String(e.status),
     headers: rows(e.headers),
-    body: pretty(e.body),
+    body: pretty(e.body, Boolean(e.content_type)),
+    contentType: e.content_type ?? "",
+    base64: e.encoding === "base64",
+    once: e.once ?? false,
   };
 }
 
@@ -89,10 +131,14 @@ export function findRouteKey(endpoints: Record<string, unknown>, route: string):
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** Whether the draft's `endpoints:` names another file (the server stages into that one). */
+export const endpointsInFile = (doc: Doc | null): boolean => typeof doc?.endpoints === "string";
+
 /**
  * The draft patch that writes `e` as the route's `override:`. `set` replaces an override that is
  * there; `insert` adds what is missing (the override, the route's entry, or `endpoints:` itself).
- * Not possible when `endpoints:` names another file, which Studio does not edit.
+ * Not possible when `endpoints:` names another file (the draft is only `kaanal.yaml`): the server
+ * writes that file itself, see `stagePayloadFile`.
  */
 export function stageOps(
   e: PayloadEdit,
@@ -102,6 +148,8 @@ export function stageOps(
     status: e.status,
     ...(e.body !== null ? { body: e.body } : {}),
     ...(Object.keys(e.headers).length > 0 ? { headers: e.headers } : {}),
+    ...(e.content_type ? { content_type: e.content_type } : {}),
+    ...(e.encoding ? { encoding: e.encoding } : {}),
   };
   const eps = doc?.endpoints;
   if (typeof eps === "string") {

@@ -71,6 +71,7 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
     timed_out: drop("deadline"),
     short_circuited: drop("breaker"),
     cpu_load: last?.nodes[i]?.cpu_load ?? null,
+    cpu_utilization: last?.nodes[i]?.cpu_utilization ?? null,
   };
 }
 

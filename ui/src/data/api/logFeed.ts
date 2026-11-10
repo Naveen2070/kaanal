@@ -32,6 +32,8 @@ export function startFeed(
   opts: { everyMs?: number } = {},
 ): () => void {
   let last: number | null = null;
+  // the server's boot nonce: `done` counts from 1 again after a restart, so the cursor starts over
+  let boot: number | undefined;
   let stopped = false;
   let busy = false;
   const poll = async () => {
@@ -39,8 +41,17 @@ export function startFeed(
     busy = true;
     try {
       const q = last === null ? { limit: FIRST } : { after: last, limit: NEXT };
-      const rows = (await api.getFeed(q)).entries;
+      const page = await api.getFeed(q);
       if (stopped) return;
+      if (page.boot !== undefined && boot !== undefined && page.boot !== boot) {
+        boot = page.boot;
+        last = null;
+        busy = false;
+        void poll();
+        return;
+      }
+      boot = page.boot ?? boot;
+      const rows = page.entries;
       if (rows.length > 0) last = rows[rows.length - 1]?.done ?? last;
       // an empty first answer still moves the cursor, or every poll would be a "first" one
       if (last === null) last = 0;

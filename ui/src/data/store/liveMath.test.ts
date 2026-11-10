@@ -87,3 +87,17 @@ test("a_long_window_is_cut_to_at_most_240_points_that_keep_their_sums", () => {
   expect(pts[10]?.p99Ms).toBeCloseTo(20, 0);
   expect(timelineSeries([])).toEqual([]);
 });
+
+test("a_tick_that_arrives_changes_only_the_last_point_and_a_new_session_never_reads_an_old_one", () => {
+  const mk = (n: number, requests: number) =>
+    Array.from({ length: n }, (_, i) => tick((i + 1) * 250, { requests, failed: 0, hist: [] }));
+  const a = mk(996, 25); // 10 ticks a point, and one more tick keeps it so
+  const first = timelineSeries(a, 100);
+  const again = timelineSeries([...a, tick(249250, { requests: 25, failed: 0, hist: [] })], 100);
+  // finished chunks are the very same points; only the tail differs
+  expect(again.slice(0, 50)).toEqual(first.slice(0, 50));
+  // a restarted session has the same t_ms but other counts: nothing stale comes back
+  const b = timelineSeries(mk(996, 50), 100);
+  expect(b[3]?.reqPerS).toBeCloseTo(200, 5);
+  expect(first[3]?.reqPerS).toBeCloseTo(100, 5);
+});

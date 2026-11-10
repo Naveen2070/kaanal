@@ -186,8 +186,10 @@ export interface NodeSummary {
   cpu_load?: number | null;
   /** Visits per second the CPUs can take; null without `cpu`. */
   cpu_capacity_per_s?: number | null;
-  /** Which limit sets `saturates_at_req_s`: the slots or the CPUs, whichever is lower. */
-  saturates_by?: "slots" | "cpu" | null;
+  /** CPU the work really used over cores x replicas x window, at most 1 (step 8U); null without `cpu`. */
+  cpu_utilization?: number | null;
+  /** Which limit sets `saturates_at_req_s`: the slots, the memory or the CPUs, whichever is lower. */
+  saturates_by?: "slots" | "memory" | "cpu" | null;
   /** Hop work-time percentiles (wait excluded), exact over every hop; null without visits. */
   p50_ms: number | null;
   p99_ms: number | null;
