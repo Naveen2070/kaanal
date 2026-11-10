@@ -36,6 +36,11 @@ pub(super) struct CpuUnit {
     at: u64,
     /// Join counter (the tie-break).
     seq: u64,
+    /// Reporting window `[warmup, end]` (ns): busy time is counted only inside it.
+    win: (u64, u64),
+    /// Busy millicore-nanoseconds inside the window: the integral of `min(1000 n, cap)`, the
+    /// CPU the running hops really used (step 8U, the measured twin of the offered `cpu_load`).
+    busy: u128,
 }
 
 impl CpuUnit {
@@ -47,7 +52,26 @@ impl CpuUnit {
             v: 0,
             at: 0,
             seq: 0,
+            win: (0, u64::MAX),
+            busy: 0,
         }
+    }
+
+    /// Sets the reporting window (as [`super::Engine::set_window`]).
+    pub(super) fn set_window(&mut self, warmup: u64, end: u64) {
+        self.win = (warmup, end);
+    }
+
+    /// [`Self::busy`] brought up to `now` first (a live engine is read between events).
+    pub(super) fn busy_at(&mut self, now: u64) -> u128 {
+        self.settle(now);
+        self.busy
+    }
+
+    /// Busy millicore-nanoseconds inside the window, up to the last change. The unit settles at
+    /// every join and leave, so after a run (nothing running) this is the whole figure.
+    pub(super) fn busy(&self) -> u128 {
+        self.busy
     }
 
     /// Whether `n` running hops all run at full speed: each has a whole core or more.
@@ -60,6 +84,10 @@ impl CpuUnit {
         let dt = now.saturating_sub(self.at);
         let n = self.runs.len();
         if dt > 0 && n > 0 {
+            // CPU in use: every running hop takes a core, up to the copy's cap
+            let (from, to) = (self.at.max(self.win.0), now.min(self.win.1));
+            let used = u128::from((MILLI * n as u64).min(self.cap));
+            self.busy += used * u128::from(to.saturating_sub(from));
             // work each hop did in dt: dt at full speed, else dt x cap / (1000 n); fits 128 bits
             self.v += if self.full(n) {
                 dt
@@ -132,7 +160,9 @@ impl Engine {
         if let Some(cpu) = self.units.states[i].cpu.as_deref_mut() {
             cpu.set_capacity(now, cap);
         } else if millicores.is_some() {
-            self.units.states[i].cpu = Some(Box::new(CpuUnit::new(cap)));
+            let mut unit = CpuUnit::new(cap);
+            unit.set_window(self.warmup, self.end);
+            self.units.states[i].cpu = Some(Box::new(unit));
             self.has_cpu = true;
         } else {
             return;

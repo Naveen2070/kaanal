@@ -33,6 +33,36 @@ pub(crate) struct Dropped {
     pub chaos: u32,
 }
 
+/// **Private.** The CPU each node really used between two readings of its busy area: busy
+/// millicore-ns gained over `millicores x copies x span`, at most 1; `None` for a node with no `cpu`
+/// or a span of zero.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a ratio of nanosecond totals; f64 precision is ample"
+)]
+pub(crate) fn cpu_use(
+    topo: &Topology,
+    before: &[u128],
+    after: &[u128],
+    span_ns: u64,
+) -> Vec<Option<f64>> {
+    topo.nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let mc = n.cpu?;
+            if span_ns == 0 {
+                return None;
+            }
+            let gained = after
+                .get(i)?
+                .saturating_sub(before.get(i).copied().unwrap_or(0));
+            let capacity = f64::from(mc) * f64::from(n.replicas.max(1)) * span_ns as f64;
+            Some((gained as f64 / capacity).min(1.0))
+        })
+        .collect()
+}
+
 /// One component in the tick.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct NodeTick {
@@ -45,6 +75,9 @@ pub(crate) struct NodeTick {
     pub busy_slots: u32,
     /// Running hops over the cores of a node with `cpu`, at that instant; `None` without `cpu`.
     pub cpu_load: Option<f64>,
+    /// The CPU the running work really used over the cores of a node with `cpu`, across this tick's
+    /// span, at most 1 (step 8U); `None` without `cpu`, or before there are two readings.
+    pub cpu_utilization: Option<f64>,
 }
 
 /// One wire in the tick.
@@ -262,6 +295,8 @@ pub(crate) struct Aggregator {
     seen: u64,
     /// One generated request in `stride` is sampled, adapted to the last tick's rate.
     stride: u64,
+    /// The measured CPU use of each node over the coming tick, set by [`Aggregator::set_cpu_use`].
+    cpu_use: Vec<Option<f64>>,
 }
 
 impl Aggregator {
@@ -279,7 +314,13 @@ impl Aggregator {
             real_journeys: 0,
             seen: 0,
             stride: 1,
+            cpu_use: Vec::new(),
         }
+    }
+
+    /// Sets the measured CPU use of each node over the tick about to be taken (see [`cpu_use`]).
+    pub(crate) fn set_cpu_use(&mut self, use_: Vec<Option<f64>>) {
+        self.cpu_use = use_;
     }
 
     /// Adds one finished request to the tick being built; `real` for a mock request.
@@ -329,6 +370,7 @@ impl Aggregator {
             let (busy, queued) = loads.get(i).copied().unwrap_or((0, 0));
             node.busy_slots = busy;
             node.queue = queued;
+            node.cpu_utilization = self.cpu_use.get(i).copied().flatten();
             node.cpu_load = topo.nodes[i].cpu.map(|mc| {
                 let cores = f64::from(mc) / 1000.0 * f64::from(topo.nodes[i].replicas.max(1));
                 f64::from(busy) / cores
@@ -438,6 +480,53 @@ edges:
         }
         let tick = a.take((250, 250), &[(0, 0), (0, 0)], &small, STATUS);
         assert_eq!(tick.nodes.len(), 2);
+    }
+
+    /// Deferred from 8A: after an Apply the old engine still finishes requests; with a new system
+    /// of the same size they would be summed into nodes they never touched.
+    #[test]
+    fn what_the_old_engine_finishes_after_an_apply_is_dropped_not_counted() {
+        let (t, fin) = finished(CHAIN, 6, 5);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        for f in &fin {
+            tx.send(f.clone()).unwrap();
+        }
+        let mut a = Aggregator::new(&t);
+        crate::live::drain_finished(&mut a, &mut rx, false);
+        assert!(rx.try_recv().is_err(), "read and dropped");
+        let none = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+        assert_eq!(none.requests, 0);
+        for f in &fin {
+            tx.send(f.clone()).unwrap();
+        }
+        crate::live::drain_finished(&mut a, &mut rx, true);
+        let some = a.take((500, 500), &[(0, 0); 3], &t, STATUS);
+        assert_eq!(some.requests, 6);
+    }
+
+    #[test]
+    fn measured_cpu_use_is_the_gained_busy_area_over_cores_copies_and_span() {
+        let t = Topology::build(&Config::from_yaml(CHAIN).unwrap()).unwrap();
+        let t2 = Topology::build(
+            &Config::from_yaml(&CHAIN.replace(
+                "app: { type: service, proc: 2ms }",
+                "app: { type: service, proc: 2ms, cpu: { cores: 2 }, replicas: 2 }",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let app = t2.id("app").unwrap();
+        // 4 cores in all, a quarter second: 1 core-second of busy area is 25% use
+        let mut after = vec![0u128; 3];
+        after[app] = 1_000_000_000_000; // 1 core-second in millicore-ns
+        let u = cpu_use(&t2, &[0, 0, 0], &after, 1_000_000_000);
+        assert!((u[app].unwrap() - 0.25).abs() < 1e-12);
+        assert_eq!(u[0], None, "no cpu, no figure");
+        // more than the cores could do in the span reads as 1, a span of zero as nothing
+        after[app] = u128::MAX / 4;
+        assert_eq!(cpu_use(&t2, &[0; 3], &after, 1_000_000_000)[app], Some(1.0));
+        assert_eq!(cpu_use(&t2, &[0; 3], &after, 0)[app], None);
+        assert!(cpu_use(&t, &[0; 3], &[0; 3], 1)[1].is_none());
     }
 
     #[test]

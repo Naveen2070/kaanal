@@ -40,6 +40,8 @@ enum Cmd {
     Loads {
         reply: oneshot::Sender<Vec<(u32, usize)>>,
     },
+    /// Busy CPU millicore-nanoseconds of every node up to now (step 8U, live).
+    CpuBusy { reply: oneshot::Sender<Vec<u128>> },
 }
 
 /// **Private.** Marks the engine tag of a generated plan, so its answer goes to the tap and not to
@@ -93,6 +95,14 @@ impl EngineHandle {
     pub async fn loads(&self) -> Option<Vec<(u32, usize)>> {
         let (reply, rx) = oneshot::channel();
         self.tx.send(Cmd::Loads { reply }).ok()?;
+        rx.await.ok()
+    }
+
+    /// Busy CPU millicore-nanoseconds of every node (all copies) up to this instant; two readings
+    /// give the utilisation between them (`None` when the engine has stopped).
+    pub async fn cpu_busy(&self) -> Option<Vec<u128>> {
+        let (reply, rx) = oneshot::channel();
+        self.tx.send(Cmd::CpuBusy { reply }).ok()?;
         rx.await.ok()
     }
 
@@ -166,6 +176,11 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
                 Some(Cmd::Loads { reply }) => {
                     let _ = reply.send(engine.node_loads());
                     true
+                }
+                Some(Cmd::CpuBusy { reply }) => {
+                    let ok = engine.advance_to(now()).is_ok();
+                    let _ = reply.send(engine.cpu_busy_at(now()));
+                    ok
                 }
                 Some(Cmd::Tap(to)) => {
                     tap = to;
@@ -459,6 +474,26 @@ mod tests {
         let (t_more, _) = plans_for(&more, 1);
         let refused = h.reconfigure(Arc::new(t_more)).await;
         assert!(refused.is_err(), "{refused:?}");
+    }
+
+    /// Step 8U, live: the busy area of a node with `cpu` grows by the CPU the work used. One core, one
+    /// 50 ms request: 50 ms of one core is 50,000,000 x 1000 millicore-ns, read between events.
+    #[tokio::test(start_paused = true)]
+    async fn the_cpu_busy_area_grows_by_the_work_a_request_does() {
+        let y = "version: 1
+nodes:
+  gw: { type: gateway }
+  app: { type: service, cpu: { cores: 1 }, proc: 50ms }
+edges:
+  - { from: gw, to: app }
+";
+        let (t, plans) = plans_for(y, 1);
+        let h = spawn(Engine::live(&t));
+        assert_eq!(h.cpu_busy().await.unwrap()[t.id("app").unwrap()], 0);
+        h.run(Arc::clone(&plans[0])).await.unwrap();
+        let busy = h.cpu_busy().await.unwrap();
+        assert_eq!(busy[t.id("app").unwrap()], 50_000_000 * 1000);
+        assert_eq!(busy[t.id("gw").unwrap()], 0, "no cpu, no area");
     }
 
     /// Generated traffic is submitted without a reply and its finished requests go to the tap;

@@ -653,3 +653,64 @@ fn c_cores_with_exponential_service_match_erlang_c() {
         );
     }
 }
+
+// ---- step 8U: measured CPU utilisation ----
+
+#[test]
+fn measured_cpu_utilization_is_the_offered_load_while_the_cpus_keep_up() {
+    // Any work-conserving server: the mean number of busy cores is lambda x E[S] (Little's law
+    // on the work), so utilization is rho = lambda E[S] / c, whatever the sharing does inside.
+    for (cores, rho) in [(1u32, 0.5), (1, 0.8), (2, 0.6), (4, 0.7)] {
+        let t = shared(cores, "{ mean: 10ms }");
+        let lam = rho * f64::from(cores) * MU;
+        let rep = sim(&t, lam, 400_000.0);
+        let got = rep.nodes[t.id("app").unwrap()].cpu_utilization;
+        assert_close(got, rho, &format!("{cores} cores at rho {rho}"));
+    }
+}
+
+#[test]
+fn past_saturation_the_cpus_are_busy_all_the_time_while_the_offered_load_passes_one() {
+    // Offered 1.5 cores of work onto one core with no slot limit: the core is never idle, so the
+    // measured figure is 1 (it cannot pass it), where `cpu_load` in the summary says 1.5.
+    let t = shared(1, "{ mean: 10ms }");
+    let rep = sim(&t, 1.5 * MU, 20_000.0);
+    let got = rep.nodes[t.id("app").unwrap()].cpu_utilization;
+    assert!((0.99..=1.0 + 1e-9).contains(&got), "utilization {got}");
+}
+
+#[test]
+fn a_node_without_cpu_reports_no_cpu_utilization() {
+    let t = single(4, "{ mean: 10ms }");
+    let rep = sim(&t, 100.0, 5_000.0);
+    assert_eq!(rep.nodes[t.id("app").unwrap()].cpu_utilization, 0.0);
+}
+
+// ---- step 8M: a memory limit is a loss system (Erlang B) ----
+
+#[test]
+fn a_memory_limit_with_no_queue_blocks_like_an_erlang_b_loss_system() {
+    // 4 GB, 1 GB per request: 4 requests at once, no waiting (memory does not queue). Insensitive to
+    // the service distribution (M/G/c/c), so the exponential and the heavy-tailed lognormal agree.
+    for (proc, offered) in [("{ mean: 10ms }", 3.0), ("{ p50: 6ms, p99: 60ms }", 2.0)] {
+        let t = topo(&format!(
+            "version: 1\nnodes:\n  gw: {{ type: gateway }}\n  app: {{ type: service, memory: {{ limit: 4GB, per_request: 1GB }}, proc: {proc} }}\nedges:\n  - {{ from: gw, to: app }}\n"
+        ));
+        let s = mean_service_of(&t);
+        let rate = offered / s;
+        let rep = sim(&t, rate, 300_000.0);
+        let lost = share(&rep, 503);
+        let want = erlang_b(4, rate * mean_service(&t, &rep));
+        assert!(
+            (lost - want).abs() < 0.01,
+            "{proc}: refused {lost:.4}, Erlang B {want:.4}"
+        );
+    }
+}
+
+/// The mean of the `proc` the topology draws at `app`, from one run's plan (so the offered load
+/// uses the drawn times, not the written parameters).
+fn mean_service_of(t: &Topology) -> f64 {
+    let rep = sim(t, 50.0, 20_000.0);
+    mean_service(t, &rep)
+}

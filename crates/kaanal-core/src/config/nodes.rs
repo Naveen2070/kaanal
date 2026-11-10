@@ -271,6 +271,15 @@ impl NodeConfig {
     /// The node's CPUs (`cpu:`); `None` = no sharing. Only the kinds whose compute the user sizes
     /// have the field: gateway, service, monolith, database, auth and load balancer.
     pub fn cpu(&self) -> Option<CpuConfig> {
+        self.own_cpu().or_else(|| {
+            self.instance().map(|i| CpuConfig {
+                cores: f64::from(i.vcpu),
+            })
+        })
+    }
+
+    /// **Private.** The `cpu:` the node itself sets.
+    fn own_cpu(&self) -> Option<CpuConfig> {
         match self {
             NodeConfig::Gateway(n) => n.cpu,
             NodeConfig::Service(n) => n.cpu,
@@ -285,6 +294,19 @@ impl NodeConfig {
     /// The node's network card (`bandwidth:`) as `(send, receive)` bytes per second; `None` =
     /// unlimited that way. A cache has none (put the bandwidth on its edge).
     pub fn bandwidth(&self) -> (Option<u64>, Option<u64>) {
+        let own = self.own_bandwidth();
+        match (own, self.instance()) {
+            // an instance fills the side the node leaves out, as it does for `cpu`
+            ((None, None), Some(i)) if !matches!(self, NodeConfig::Cache(_)) => {
+                let b = Some(i.net_bytes_per_s());
+                (b, b)
+            }
+            _ => own,
+        }
+    }
+
+    /// **Private.** The `bandwidth:` the node itself sets.
+    fn own_bandwidth(&self) -> (Option<u64>, Option<u64>) {
         match self {
             NodeConfig::Gateway(n) => n.bandwidth,
             NodeConfig::Service(n) => n.bandwidth,
@@ -297,6 +319,52 @@ impl NodeConfig {
             NodeConfig::Cache(_) => None,
         }
         .map_or((None, None), NodeBandwidth::pair)
+    }
+
+    /// The cloud instance the node names (`instance:`), when the table has it. An unknown name is
+    /// a load error ([`Self::instance_name`] is what was written), so this is `None` only for a
+    /// node with no `instance:`.
+    pub fn instance(&self) -> Option<&'static crate::instances::Instance> {
+        self.instance_name().and_then(crate::instances::lookup)
+    }
+
+    /// The `instance:` as written; only the kinds with `cpu:` have the field.
+    pub fn instance_name(&self) -> Option<&str> {
+        match self {
+            NodeConfig::Gateway(n) => n.instance.as_deref(),
+            NodeConfig::Service(n) => n.instance.as_deref(),
+            NodeConfig::Monolith(n) => n.instance.as_deref(),
+            NodeConfig::Database(n) => n.instance.as_deref(),
+            NodeConfig::Auth(n) => n.instance.as_deref(),
+            NodeConfig::LoadBalancer(n) => n.instance.as_deref(),
+            NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) | NodeConfig::Storage(_) => None,
+        }
+    }
+
+    /// The node's `memory:` as written (the `limit` may still be missing: see
+    /// [`Self::memory`]).
+    pub fn memory_config(&self) -> Option<crate::config::MemoryConfig> {
+        match self {
+            NodeConfig::Gateway(n) => n.memory,
+            NodeConfig::Service(n) => n.memory,
+            NodeConfig::Monolith(n) => n.memory,
+            NodeConfig::Database(n) => n.memory,
+            NodeConfig::Auth(n) => n.memory,
+            NodeConfig::LoadBalancer(n) => n.memory,
+            NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) | NodeConfig::Storage(_) => None,
+        }
+    }
+
+    /// The node's memory limit settled and checked (`limit` from the `instance:` when left out);
+    /// `None` without a `memory:`. Valid once the config has loaded (the load checks it).
+    pub fn memory(&self) -> Option<crate::config::Memory> {
+        self.memory_config().and_then(|m| {
+            m.resolve(
+                self.instance()
+                    .map(crate::instances::Instance::memory_bytes),
+            )
+            .ok()
+        })
     }
 
     /// How a load balancer picks one of its callee components (`spread:`); `None` for every other

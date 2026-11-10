@@ -15,7 +15,7 @@ use indexmap::IndexMap;
 
 use crate::balance::Balance;
 use crate::config::{
-    ConcurrencyConfig, Config, Hold, NodeConfig, NodeKind, RateLimitConfig, StepConfig,
+    ConcurrencyConfig, Config, Hold, Memory, NodeConfig, NodeKind, RateLimitConfig, StepConfig,
 };
 use crate::diagnostics::{Located, PathSeg, keys};
 use crate::dist::Dist;
@@ -42,8 +42,12 @@ pub struct Node {
     pub ops: Option<[Dist; 3]>,
     /// Hit ratio and hit/miss costs of a cache node, presets applied (walked from A2).
     pub cache: Option<CacheModel>,
-    /// Slots, queue and overflow status of this node's own hops; `None` = unlimited.
+    /// Slots, queue and overflow status of this node's own hops; `None` = unlimited. With a
+    /// `memory:` the slot count is already the lower of `concurrency` and what the memory holds.
     pub admission: Option<Admission>,
+    /// The node's memory limit (step 8M), when it sets one; [`Memory::slots`] is the most requests
+    /// it holds at once and is folded into `admission`.
+    pub memory: Option<Memory>,
     /// Token-bucket rate limit, one token per visit (see the replay engine); `None` = none.
     pub rate_limit: Option<RateLimit>,
     /// Per-call deadline (B2a Z2): queue wait, own work and everything downstream; `None` = none.
@@ -115,6 +119,26 @@ fn admission_of(n: &NodeConfig) -> Option<Admission> {
             overflow_status: b.overflow_status,
         }),
         (None, None) => None,
+    }
+}
+
+/// **Private.** The admission with a memory limit folded in (step 8M): the copy holds at most
+/// `memory.slots()` requests at once, so the slot count is the lower of that and `concurrency`. A node
+/// with no admission of its own refuses what does not fit at once (queue 0, 503): memory does not
+/// wait. Nothing changes for a node with no memory.
+fn with_memory(adm: Option<Admission>, memory: Option<&Memory>) -> Option<Admission> {
+    let Some(m) = memory else { return adm };
+    let cap = m.slots().max(1);
+    match adm {
+        Some(a) => Some(Admission {
+            slots: a.slots.min(cap),
+            ..a
+        }),
+        None => Some(Admission {
+            slots: cap,
+            queue: Some(0),
+            overflow_status: 503,
+        }),
     }
 }
 
@@ -507,7 +531,8 @@ impl Topology {
                 proc: Dist::from_config(n.proc()),
                 ops,
                 cache,
-                admission: admission_of(n),
+                admission: with_memory(admission_of(n), n.memory().as_ref()),
+                memory: n.memory(),
                 rate_limit: n.rate_limit().map(rate_limit_of),
                 timeout: n.timeout(),
                 replicas: n.replicas(),

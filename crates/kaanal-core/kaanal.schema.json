@@ -47,6 +47,16 @@
       ],
       "description": "How traffic picks a replica: `round-robin` (default), `random`, `least-conn` (the replica with the fewest requests in it), `p2c` (the less loaded of two random replicas), or `{ weighted: [..] }` with one weight per replica (at least one above 0)."
     },
+    "BodyEncoding": {
+      "description": "How an [`Override`] body is written (`encoding:`).",
+      "oneOf": [
+        {
+          "const": "base64",
+          "description": "Standard base64 (RFC 4648); the bytes it decodes to are sent.",
+          "type": "string"
+        }
+      ]
+    },
     "BoundedConcurrency": {
       "additionalProperties": false,
       "description": "The map form of `concurrency`: the same queue and overflow defaults as `pool`.",
@@ -868,6 +878,64 @@
       ],
       "type": "object"
     },
+    "MemoryConfig": {
+      "additionalProperties": false,
+      "description": "A node's memory (`memory:`, step 8M): a hard limit. Each request being served holds\n`per_request` bytes on top of the `base` the process uses idle, so the copy holds at most\n`(limit - base) / per_request` requests at once (a slot count, the same as `concurrency`), and the\nlower of the two applies. A request past it waits or is refused like any other that finds the\nslots full (the `queue` and `overflow_status` of `concurrency`, else refused at once with 503).\nThe `limit` may come from the node's `instance:`.\n\n**Not modelled**: garbage-collection pauses, swapping and the kernel killing the process\n(no model is published across runtimes): this is the capacity the memory sets, nothing softer.",
+      "properties": {
+        "base": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the process holds with no request (default 0)."
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The copy's memory in bytes (`512MiB`, `8GB`); absent = the `instance:`'s."
+        },
+        "per_request": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What one request being served holds, in bytes: required."
+        }
+      },
+      "type": "object"
+    },
     "NodeBandwidth": {
       "anyOf": [
         {
@@ -1001,6 +1069,14 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "locale": {
               "default": null,
               "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
@@ -1009,6 +1085,17 @@
                 "string",
                 "null"
               ]
+            },
+            "memory": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MemoryConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
             },
             "per_kb": {
               "anyOf": [
@@ -1140,6 +1227,14 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "locale": {
               "default": null,
               "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
@@ -1148,6 +1243,17 @@
                 "string",
                 "null"
               ]
+            },
+            "memory": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MemoryConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
             },
             "per_kb": {
               "anyOf": [
@@ -1297,6 +1403,14 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "locale": {
               "default": null,
               "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
@@ -1305,6 +1419,17 @@
                 "string",
                 "null"
               ]
+            },
+            "memory": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MemoryConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
             },
             "ops": {
               "anyOf": [
@@ -1444,6 +1569,14 @@
               ],
               "description": "Preset that fills ops the user left out (estimates)."
             },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "locale": {
               "default": null,
               "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
@@ -1452,6 +1585,17 @@
                 "string",
                 "null"
               ]
+            },
+            "memory": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MemoryConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
             },
             "ops": {
               "anyOf": [
@@ -1870,6 +2014,14 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "locale": {
               "default": null,
               "description": "Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level\n`locale`.",
@@ -1878,6 +2030,17 @@
                 "string",
                 "null"
               ]
+            },
+            "memory": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MemoryConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
             },
             "per_kb": {
               "anyOf": [
@@ -2018,6 +2181,14 @@
               ],
               "description": "What a slot of this node covers (default `own`); with `call` it is held until the chosen\ncomponent has answered, as a connection-limited proxy does."
             },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "locale": {
               "default": null,
               "description": "Locale pack; a balancer generates no data, so this only passes down.",
@@ -2026,6 +2197,17 @@
                 "string",
                 "null"
               ]
+            },
+            "memory": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MemoryConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
             },
             "per_kb": {
               "anyOf": [
@@ -2284,6 +2466,26 @@
         "body": {
           "default": null,
           "description": "Response body, returned verbatim."
+        },
+        "content_type": {
+          "default": null,
+          "description": "The `Content-Type` of a text body (`text/html`, `text/plain`, `application/xml`, ...).\nWhen set, `body` must be a string and is sent as is, not as JSON. Left out, the body is JSON.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BodyEncoding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How a text `body` stands for the bytes sent: `base64` sends the decoded bytes (an image, a\nPDF, any binary) with the `content_type`, which is then required. Left out, the text is sent\nas is."
         },
         "headers": {
           "additionalProperties": {

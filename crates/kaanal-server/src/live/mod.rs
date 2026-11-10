@@ -222,6 +222,10 @@ async fn tick_loop(
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // the aggregator belongs to one generation: a different topology starts a new one
     let mut agg: Option<(u64, Aggregator)> = None;
+    // the engine this session taps belongs to the generation that was running when it began
+    let tapped = st.generation().map(|g| g.id);
+    // the last reading of the engine's CPU busy area and when it was taken
+    let mut cpu_seen: Option<(Instant, Vec<u128>)> = None;
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -231,15 +235,30 @@ async fn tick_loop(
                 let Some(g) = st.generation() else { continue };
                 if agg.as_ref().is_none_or(|(id, _)| *id != g.id) {
                     agg = Some((g.id, Aggregator::new(&g.topo)));
+                    cpu_seen = None;
                 }
                 let a = &mut agg.as_mut().expect("just set").1;
-                while let Ok(f) = finished.try_recv() {
-                    a.add(&f, !crate::actor::is_generated(&f));
-                }
+                drain_finished(a, &mut finished, tapped == Some(g.id));
                 let loads = match &g.engine {
                     Some(e) => e.loads().await.unwrap_or_default(),
                     None => Vec::new(),
                 };
+                // measured CPU use over the span since the last reading (step 8U)
+                if g.topo.nodes.iter().any(|n| n.cpu.is_some()) {
+                    let reading = match &g.engine {
+                        Some(e) => e.cpu_busy().await,
+                        None => None,
+                    };
+                    if let Some(now_busy) = reading {
+                        let at = Instant::now();
+                        if let Some((was_at, was)) = &cpu_seen {
+                            let span = u64::try_from(at.duration_since(*was_at).as_nanos())
+                                .unwrap_or(u64::MAX);
+                            a.set_cpu_use(tick::cpu_use(&g.topo, was, &now_busy, span));
+                        }
+                        cpu_seen = Some((at, now_busy));
+                    }
+                }
                 let s = feed.stats();
                 let status = TickStatus {
                     rate: s.rate,
@@ -267,6 +286,21 @@ async fn tick_loop(
                 Err(broadcast::error::RecvError::Closed) => return,
                 _ => {}
             },
+        }
+    }
+}
+
+/// **Private.** Moves what the tapped engine finished into the aggregator. After an Apply the
+/// running generation is another one: what the old engine still finishes is counted in no tick
+/// (it would be summed into nodes it never touched), so it is read and dropped.
+fn drain_finished(
+    a: &mut Aggregator,
+    finished: &mut mpsc::UnboundedReceiver<kaanal_core::replay::Finished>,
+    same_generation: bool,
+) {
+    while let Ok(f) = finished.try_recv() {
+        if same_generation {
+            a.add(&f, !crate::actor::is_generated(&f));
         }
     }
 }

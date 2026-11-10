@@ -203,11 +203,13 @@ fn report(
     records.sort_by_key(|(order, _)| *order);
     let requests = records.into_iter().map(|(_, r)| r).collect();
     let window = (end - warmup) as f64;
+    let cpu_busy = engine.cpu_busy();
     let nodes = engine
         .node_counters()
         .iter()
         .zip(&topo.nodes)
-        .map(|(c, n)| NodeStats {
+        .zip(&cpu_busy)
+        .map(|((c, n), busy)| NodeStats {
             completed: c.completed,
             mean_wait: match u128::from(c.completed) {
                 0 => Duration::ZERO,
@@ -215,6 +217,10 @@ fn report(
             },
             utilization: n.admission.as_ref().map_or(0.0, |a| {
                 c.area as f64 / (f64::from(a.slots) * f64::from(n.replicas.max(1)) * window)
+            }),
+            cpu_utilization: n.cpu.map_or(0.0, |mc| {
+                busy.iter().sum::<u128>() as f64
+                    / (f64::from(mc) * f64::from(n.replicas.max(1)) * window)
             }),
             max_queue: c.max_queue,
             limited: c.limited,

@@ -48,6 +48,7 @@ mod save;
 mod scenario;
 mod sim;
 mod skeleton;
+mod stage_file;
 mod studio;
 #[cfg(test)]
 mod tests;
@@ -66,6 +67,7 @@ pub use payload::{
 pub use save::save_scenario;
 pub use sim::{get_run, get_run_log, list_runs, post_run, post_sample};
 pub use skeleton::get_skeleton;
+pub use stage_file::stage_file;
 pub use studio::{studio, studio_asset};
 // What only the unit tests reach by `super::`.
 #[cfg(test)]

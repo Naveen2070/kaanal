@@ -10,6 +10,8 @@ fn edit(status: u16, body: Value, h: &[(&str, &str)]) -> Override {
     Override {
         status,
         body,
+        content_type: None,
+        encoding: None,
         headers: h
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
@@ -269,4 +271,129 @@ async fn custom_headers_are_exposed_to_a_browser_on_another_origin() {
         .unwrap()
         .to_string();
     assert!(exp.starts_with(base) && exp.contains("x-feature"), "{exp}");
+}
+
+async fn text_of(r: Response) -> String {
+    let b = axum::body::to_bytes(r.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    String::from_utf8(b.to_vec()).unwrap()
+}
+
+#[tokio::test]
+async fn a_text_edit_is_sent_as_is_with_its_content_type() {
+    let st = app();
+    let g = st.generation().unwrap();
+    let mut ov = edit(200, json!("<h1>hi</h1>"), &[]);
+    ov.content_type = Some("text/html; charset=utf-8".into());
+    st.set_payload(&g, "GET /users/{id}", ov).unwrap();
+    let r = call(&st, "GET", "/users/1", &[]).await;
+    assert_eq!(r.headers()["content-type"], "text/html; charset=utf-8");
+    assert_eq!(text_of(r).await, "<h1>hi</h1>");
+}
+
+#[tokio::test]
+async fn a_text_edit_needs_a_text_body_and_a_media_type() {
+    let st = app();
+    let g = st.generation().unwrap();
+    let mut ov = edit(200, json!({"a": 1}), &[]);
+    ov.content_type = Some("text/html".into());
+    let e = st.set_payload(&g, "GET /users/{id}", ov).unwrap_err();
+    assert!(matches!(e, PayloadError::Invalid(m) if m.starts_with("content_type:")));
+    let mut ov = edit(200, json!("x"), &[]);
+    ov.content_type = Some("not a type".into());
+    assert!(st.set_payload(&g, "GET /users/{id}", ov).is_err());
+    assert!(st.payloads().is_empty());
+}
+
+#[tokio::test]
+async fn a_one_shot_edit_answers_once_then_the_route_is_normal_again() {
+    let st = app();
+    let g = st.generation().unwrap();
+    st.set_payload_with(
+        &g,
+        "GET /users/{id}",
+        edit(503, json!({"once": 1}), &[]),
+        true,
+    )
+    .unwrap();
+    assert_eq!(st.payloads().iter().count(), 1);
+    let first = call(&st, "GET", "/users/1", &[]).await;
+    assert_eq!(first.status(), 503);
+    assert!(entries(&st).last().unwrap().edited);
+    let second = call(&st, "GET", "/users/1", &[]).await;
+    assert_eq!(second.status(), 200);
+    assert!(!entries(&st).last().unwrap().edited);
+    assert_eq!(
+        st.payloads().iter().count(),
+        0,
+        "a spent edit is not listed"
+    );
+}
+
+#[tokio::test]
+async fn two_requests_at_once_cannot_both_take_a_one_shot() {
+    let e = crate::payload::Edit::new(edit(200, json!(1), &[]), true);
+    assert!(e.take());
+    assert!(!e.take());
+    let lasting = crate::payload::Edit::new(edit(200, json!(1), &[]), false);
+    assert!(lasting.take() && lasting.take());
+}
+
+#[tokio::test]
+async fn a_file_override_with_a_content_type_sends_its_text() {
+    let yaml = YAML.replace(
+        "  \"POST /orders\": { chain: [ h ] }\n",
+        "  \"POST /orders\": { chain: [ h ] }\n  \"GET /page\": { override: { body: \"<p>x</p>\", content_type: text/html } }\n",
+    );
+    let st = app_with(&yaml);
+    let r = call(&st, "GET", "/page", &[]).await;
+    assert_eq!(r.headers()["content-type"], "text/html");
+    assert_eq!(text_of(r).await, "<p>x</p>");
+}
+
+#[tokio::test]
+async fn a_base64_edit_sends_the_decoded_bytes_and_refuses_what_does_not_decode() {
+    use kaanal_core::config::BodyEncoding;
+    let st = app();
+    let gen_ = st.generation().unwrap();
+    // the PNG signature: bytes that are not text
+    let mut ov = edit(200, json!("iVBORw0KGgo="), &[]);
+    ov.content_type = Some("image/png".into());
+    ov.encoding = Some(BodyEncoding::Base64);
+    st.set_payload(&gen_, "GET /users/{id}", ov.clone())
+        .unwrap();
+    let resp = call(&st, "GET", "/users/1", &[]).await;
+    assert_eq!(resp.headers()["content-type"], "image/png");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        body.as_ref(),
+        [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
+    );
+    ov.body = json!("not base64!");
+    let err = st
+        .set_payload(&gen_, "GET /users/{id}", ov.clone())
+        .unwrap_err();
+    assert!(matches!(err, PayloadError::Invalid(m) if m.starts_with("encoding:")));
+    ov.body = json!("iVBORw0KGgo=");
+    ov.content_type = None;
+    let err = st.set_payload(&gen_, "GET /users/{id}", ov).unwrap_err();
+    assert!(matches!(err, PayloadError::Invalid(m) if m.contains("needed with encoding")));
+}
+
+#[tokio::test]
+async fn a_file_override_can_be_binary_too() {
+    let yaml = YAML.replace(
+        "  \"POST /orders\": { chain: [ h ] }\n",
+        "  \"POST /orders\": { chain: [ h ] }\n  \"GET /pic\": { override: { body: \"AAEC\", content_type: application/octet-stream, encoding: base64 } }\n",
+    );
+    let st = app_with(&yaml);
+    let r = call(&st, "GET", "/pic", &[]).await;
+    assert_eq!(r.headers()["content-type"], "application/octet-stream");
+    let b = axum::body::to_bytes(r.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(b.as_ref(), [0, 1, 2]);
 }

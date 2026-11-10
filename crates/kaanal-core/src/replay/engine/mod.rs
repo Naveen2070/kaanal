@@ -148,6 +148,46 @@ impl Engine {
         self.warmup = warmup;
         self.end = end;
         self.flows.set_window(warmup, end);
+        for n in &mut self.units.states {
+            if let Some(c) = n.cpu.as_deref_mut() {
+                c.set_window(warmup, end);
+            }
+        }
+    }
+
+    /// Busy millicore-nanoseconds of each node's CPUs (all copies together) up to `now`, for a live
+    /// engine that is read between events; zero for a node with no `cpu:`. Two readings and their
+    /// difference over the time between them is the utilisation of that span.
+    pub fn cpu_busy_at(&mut self, now: u64) -> Vec<u128> {
+        let mut out = vec![0u128; self.units.nodes];
+        for (node, total) in out.iter_mut().enumerate() {
+            for r in 0..usize::from(self.units.count[node]) {
+                let i = self.units.first[node] + r;
+                if let Some(c) = self.units.states[i].cpu.as_deref_mut() {
+                    *total += c.busy_at(now);
+                }
+            }
+        }
+        out
+    }
+
+    /// Busy millicore-nanoseconds of each copy's CPUs inside the reporting window, `[node][replica]`
+    /// (zero for a copy with no `cpu:`): the CPU the running work really used. Divide by the copy's
+    /// millicores and the window for a utilisation (step 8U). Complete once the run is over.
+    #[must_use]
+    pub fn cpu_busy(&self) -> Vec<Vec<u128>> {
+        (0..self.units.nodes)
+            .map(|node| {
+                (0..usize::from(self.units.count[node]))
+                    .map(|r| {
+                        self.units.states[self.units.first[node] + r]
+                            .cpu
+                            .as_deref()
+                            .map_or(0, cpu::CpuUnit::busy)
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     /// The next sequence number. Callers that keep their own event queue (the simulator's

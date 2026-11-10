@@ -7,6 +7,7 @@ license.workspace = true
 description = "Kaanal engine: topology, cost model, chaos, chain executor (pure, no IO)"
 
 [dependencies]
+base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true

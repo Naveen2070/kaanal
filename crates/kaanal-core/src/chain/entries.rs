@@ -57,6 +57,7 @@ impl Compiler<'_> {
             }
             if let Some(o) = &cfg.response {
                 o.check_headers()
+                    .and_then(|()| o.check_content_type())
                     .map_err(|m| place.key("override").bad(format!("override: {m}")))?;
             }
             // Every entry, live or stale, so a typo in `states:` is always caught.

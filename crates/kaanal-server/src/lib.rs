@@ -343,6 +343,7 @@ fn router(st: Arc<state::AppState>) -> Router {
                 .put(control::put_payload)
                 .delete(control::delete_payload),
         )
+        .route("/__kaanal/payload/stage-file", post(control::stage_file))
         .route(
             "/__kaanal/payload/preview",
             get(control::payload_preview),

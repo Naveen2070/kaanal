@@ -147,10 +147,15 @@ pub struct NodeSummary {
     /// for a node without `cpu`. 1.0 or more means the CPUs cannot keep up: work piles up whatever
     /// the slots say (step 8). An offered figure, like `offered_load`: no measured twin yet.
     pub cpu_load: Option<f64>,
+    /// CPU the node's own work really used in the window over cores x replicas x window, at most 1
+    /// (the engine's busy area, step 8U); `None` for a node without `cpu`. The measured twin of
+    /// `cpu_load`: below `cpu_load` when work queues, and equal to it while the CPUs keep up.
+    pub cpu_utilization: Option<f64>,
     /// Visits per second the CPUs can take: cores x replicas / mean own work per visit; `None`
     /// without `cpu` or visits.
     pub cpu_capacity_per_s: Option<f64>,
-    /// Which limit sets `saturates_at_req_s`: `"slots"` or `"cpu"`, whichever is lower; `None`
+    /// Which limit sets `saturates_at_req_s`: `"slots"`, `"memory"` (the node's `memory:` holds fewer
+    /// requests than its `concurrency`, step 8M) or `"cpu"`, whichever is lower; `None`
     /// without a `saturates_at_req_s`.
     pub saturates_by: Option<&'static str>,
     /// Median hop work time in ms (wait excluded), exact over every hop; `None` without visits.
@@ -536,6 +541,24 @@ fn bottlenecks(nodes: &[NodeSummary]) -> Vec<usize> {
     bottlenecks
 }
 
+/// **Private.** The limit that sets a node's saturation point. A memory limit is folded into the
+/// slot count (step 8M), so a "slots" limit is called "memory" when the memory is what holds the
+/// copy to that many requests.
+fn limit_label(n: &kaanal_core::Node, by: Option<&'static str>) -> Option<&'static str> {
+    let memory_binds = n.memory.is_some_and(|m| {
+        n.admission
+            .as_ref()
+            .is_some_and(|a| a.slots == m.slots().max(1))
+    });
+    by.map(|b| {
+        if b == "slots" && memory_binds {
+            "memory"
+        } else {
+            b
+        }
+    })
+}
+
 /// Folds `report` (a run of `cfg` on `topo`) into a [`Summary`].
 #[must_use]
 #[expect(
@@ -611,8 +634,9 @@ pub fn summarize(
                 saturates_at_req_s: lim.saturates_at,
                 headroom: load.map(|l| (1.0 - l).max(0.0)),
                 cpu_load: lim.cpu_load,
+                cpu_utilization: n.cpu.map(|_| st.cpu_utilization),
                 cpu_capacity_per_s: lim.cpu_capacity,
-                saturates_by: lim.saturates_by,
+                saturates_by: limit_label(n, lim.saturates_by),
                 // exact, from every hop's work time; the buckets only bound it within a factor of two
                 p50_ms: exact(&work_by[i], 0.50),
                 p99_ms: exact(&work_by[i], 0.99),

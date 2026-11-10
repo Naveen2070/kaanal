@@ -92,6 +92,8 @@ fn endpoints_parse_inline_with_every_step_shape() {
             status: 201,
             body: json!({ "ok": true }),
             headers: std::collections::BTreeMap::default(),
+            content_type: None,
+            encoding: None,
         })
     );
     assert_eq!(

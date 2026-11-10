@@ -7,6 +7,8 @@ use super::{
     TraceParts, UNIX_EPOCH, Value, chaos_reply, header, json, log, no_store, pinned_reply, record,
     scope, touched_nodes,
 };
+use crate::payload::Edit;
+use kaanal_core::config::Override;
 
 /// **Private.** A mock request in flight. If the handler future is dropped (the client went away)
 /// before it finished, the drop publishes a `client-gone` entry (status 499, no hops) and its
@@ -55,6 +57,39 @@ impl Drop for Flight {
             let entry = record::reject_entry(facts, 499, "client-gone");
             publish(&self.st, entry, Vec::new());
         }
+    }
+}
+
+/// A body that is already bytes, with its content type.
+type Raw = (Option<String>, axum::body::Bytes);
+
+/// **Private.** What a normal request answers once an edit or a file `override:` has had its say:
+/// the edit's status and its body as bytes (serialized once, when it was set), or the text a
+/// file's `override:` sends with its `content_type`; anything else keeps what the chain made.
+fn settle(
+    edit: Option<&Edit>,
+    file_ov: Option<&Override>,
+    status: u16,
+    body: Value,
+) -> (u16, Value, Option<Raw>) {
+    match (edit, file_ov) {
+        (Some(e), _) => (
+            e.ov.status,
+            Value::Null,
+            Some((e.ov.content_type.clone(), e.body.clone())),
+        ),
+        (None, Some(o)) if o.content_type.is_some() => match body {
+            Value::String(_) => (
+                status,
+                Value::Null,
+                Some((
+                    o.content_type.clone(),
+                    o.raw_bytes().unwrap_or_default().into(),
+                )),
+            ),
+            other => (status, other, None),
+        },
+        _ => (status, body, None),
     }
 }
 
@@ -120,14 +155,14 @@ pub(super) fn finish(st: &AppState, g: &Generation, read: Read, s: Served) -> Re
             )
         });
     let table = (normal && scope.is_none()).then(|| st.payloads());
-    let edit = table.as_deref().and_then(|t| t.get_for(ep));
-    let (status, body) = match edit {
-        Some(e) => (e.status, e.body.clone()),
-        None => (status, body),
-    };
-    let extra = edit
-        .or(ep.response.as_ref().filter(|_| normal))
-        .map(|o| &o.headers);
+    // a one-shot edit is claimed here, so two requests at once never both get it
+    let edit = table
+        .as_deref()
+        .and_then(|t| t.get_for(ep))
+        .filter(|e| e.take());
+    let file_ov = ep.response.as_ref().filter(|_| normal);
+    let (status, body, raw) = settle(edit.map(|e| &**e), file_ov, status, body);
+    let extra = edit.map(|e| &e.ov.headers).or(file_ov.map(|o| &o.headers));
 
     // D3: only a normal success of a paged route carries `X-Total-Count` and `Link`; a failure,
     // a wire break, a pinned `empty` or `error` and the 400 of a bad query do not.
@@ -136,7 +171,10 @@ pub(super) fn finish(st: &AppState, g: &Generation, read: Read, s: Served) -> Re
         && wire.is_none()
         && status == route.status
         && pin.is_none_or(|o| !matches!(o.state, PinState::Empty | PinState::Error));
-    let mut resp = wire.unwrap_or_else(|| response(status, body, &header, retry));
+    let mut resp = wire.unwrap_or_else(|| match raw {
+        Some((ct, bytes)) => response_raw(status, ct.as_deref(), bytes, &header, retry),
+        None => response(status, body, &header, retry),
+    });
     if let Some(h) = extra {
         for (k, v) in h {
             // `Override::check` ran, so a pair that still fails to parse is only skipped
@@ -264,11 +302,37 @@ pub(super) fn no_route(path: &str) -> Response {
 /// 429, `Retry-After` in whole seconds rounded up (at least 1).
 pub(super) fn response(status: u16, body: Value, trace: &str, retry: Option<Duration>) -> Response {
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let mut resp = if body.is_null() {
+    let resp = if body.is_null() {
         code.into_response()
     } else {
         (code, Json(body)).into_response()
     };
+    stamp(resp, trace, retry)
+}
+
+/// **Private.** [`response`] for a body that is already bytes: JSON text unless `content_type`
+/// says otherwise; no body, no content type, when `bytes` is empty (a `null` body).
+pub(super) fn response_raw(
+    status: u16,
+    content_type: Option<&str>,
+    bytes: axum::body::Bytes,
+    trace: &str,
+    retry: Option<Duration>,
+) -> Response {
+    let code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let resp = if bytes.is_empty() && content_type.is_none() {
+        code.into_response()
+    } else {
+        let ct = content_type
+            .and_then(|c| HeaderValue::from_str(c).ok())
+            .unwrap_or_else(|| HeaderValue::from_static("application/json"));
+        (code, [(header::CONTENT_TYPE, ct)], bytes).into_response()
+    };
+    stamp(resp, trace, retry)
+}
+
+/// **Private.** `Retry-After` and `x-kaanal-trace`, the same on every reply of [`response`].
+fn stamp(mut resp: Response, trace: &str, retry: Option<Duration>) -> Response {
     if let Some(d) = retry {
         let secs = d
             .as_secs()

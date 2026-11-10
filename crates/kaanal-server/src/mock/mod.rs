@@ -324,12 +324,9 @@ fn plan_of(
 }
 
 /// What a route answers with no live edit: status, body and a file `override:`'s headers, for the
-/// payload editor's starting text. `key` is a normalized route key; path parameters are filled
+/// payload editor's starting text (and the `content_type` of a text body). `key` is a normalized route key; path parameters are filled
 /// with `1`. `None` for an unknown route.
-pub(crate) fn preview(
-    g: &Generation,
-    key: &str,
-) -> Option<(u16, Value, std::collections::BTreeMap<String, String>)> {
+pub(crate) fn preview(g: &Generation, key: &str) -> Option<Preview> {
     let (method, tpl) = key.split_once(' ')?;
     let path: String = tpl
         .split('/')
@@ -352,8 +349,23 @@ pub(crate) fn preview(
         .as_ref()
         .map(|o| o.headers.clone())
         .unwrap_or_default();
-    Some((status, body, headers))
+    let content_type = route
+        .endpoint
+        .response
+        .as_ref()
+        .and_then(|o| o.content_type.clone());
+    let encoding = route.endpoint.response.as_ref().and_then(|o| o.encoding);
+    Some((status, body, headers, content_type, encoding))
 }
+
+/// **Private.** What [`preview`] returns: status, body, headers, content type.
+pub(crate) type Preview = (
+    u16,
+    Value,
+    std::collections::BTreeMap<String, String>,
+    Option<String>,
+    Option<kaanal_core::config::BodyEncoding>,
+);
 
 /// **Private.** The request body size from `Content-Length` (`None` when absent or not a number).
 fn content_length(headers: &axum::http::HeaderMap) -> Option<u64> {
@@ -466,14 +478,16 @@ fn resp_bytes(
             None if ep.collection.is_some() => return 0,
             // a live edit is the body an unscoped request will get (step 8A); a scoped one never
             // sees it, so it is sized by the body it does get
-            None => match edits
-                .then(|| st.payloads())
-                .as_deref()
-                .and_then(|t| t.get_for(ep))
-            {
-                Some(edit) => edit.body.clone(),
-                None => reply::success(g, route, ask).1,
-            },
+            None => {
+                if let Some(edit) = edits
+                    .then(|| st.payloads())
+                    .as_deref()
+                    .and_then(|t| t.get_for(ep))
+                {
+                    return edit.body.len() as u64;
+                }
+                reply::success(g, route, ask).1
+            }
         }
     };
     if body.is_null() {

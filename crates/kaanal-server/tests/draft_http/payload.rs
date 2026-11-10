@@ -42,7 +42,37 @@ async fn put_then_the_route_answers_the_edit_and_get_lists_it() {
     let list: Value = s.get(PAYLOAD).await.json().await.unwrap();
     assert_eq!(
         list,
-        json!({ "edits": [ { "route": "GET /users/{id}", "status": 503, "body": { "down": true }, "headers": { "x-demo": "1" } } ] })
+        json!({ "edits": [ { "route": "GET /users/{id}", "status": 503, "body": { "down": true }, "headers": { "x-demo": "1" }, "content_type": null, "encoding": null, "once": false } ] })
+    );
+}
+
+#[tokio::test]
+async fn a_text_one_shot_edit_is_sent_as_is_once_and_then_leaves_the_list() {
+    let s = start(&system("1ms")).await;
+    let r = put(
+        &s,
+        json!({ "route": "GET /users/{id}", "body": "<h1>hi</h1>", "content_type": "text/html", "once": true }),
+    )
+    .await;
+    assert_eq!(r.status(), 204);
+    let r = mock(&s, "/users/1").await;
+    assert_eq!(r.headers()["content-type"], "text/html");
+    assert_eq!(r.text().await.unwrap(), "<h1>hi</h1>");
+    let again = mock(&s, "/users/1").await;
+    assert_eq!(again.status(), 200);
+    assert_ne!(again.headers()["content-type"], "text/html");
+    let list: Value = s.get(PAYLOAD).await.json().await.unwrap();
+    assert_eq!(list, json!({ "edits": [] }));
+    let r = put(
+        &s,
+        json!({ "route": "GET /users/{id}", "body": { "a": 1 }, "content_type": "text/html" }),
+    )
+    .await;
+    assert_eq!(r.status(), 422);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(
+        body["field"], "body",
+        "a body-type problem is said under the body"
     );
 }
 
@@ -221,4 +251,108 @@ async fn apply_prunes_an_edit_of_a_route_that_became_a_collection_and_says_so() 
     assert_eq!(v["payloads_dropped"], json!(["GET /users"]));
     let list: Value = s.get(PAYLOAD).await.json().await.unwrap();
     assert_eq!(list, json!({ "edits": [] }));
+}
+
+/// A server whose `endpoints:` is the file `routes.yaml` (with a comment the splice must keep).
+async fn start_with_endpoints_file(routes: &str) -> Srv {
+    let dir = new_dir();
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/openapi.yaml");
+    std::fs::copy(fixture, dir.join("openapi.yaml")).unwrap();
+    std::fs::write(dir.join("routes.yaml"), routes).unwrap();
+    let text = format!("{}endpoints: routes.yaml\n", system("1ms"));
+    start_at(dir.clone(), &dir, &text, &text).await
+}
+
+#[tokio::test]
+async fn stage_file_writes_the_edit_into_the_endpoints_file_and_keeps_its_comments() {
+    let routes = "# the routes\n\"GET /users/{id}\": { chain: [ db ] } # users\n";
+    let s = start_with_endpoints_file(routes).await;
+    let r = s
+        .send(
+            Method::POST,
+            "/__kaanal/payload/stage-file",
+            Some(json!({ "route": "get /users/{id}", "status": 503, "body": { "down": true } })),
+        )
+        .await;
+    assert_eq!(r.status(), 200, "{:?}", r.text().await);
+    let on_disk = std::fs::read_to_string(s.dir.join("routes.yaml")).unwrap();
+    assert!(
+        on_disk.contains("# the routes") && on_disk.contains("# users"),
+        "{on_disk}"
+    );
+    assert!(
+        on_disk.contains("override") && on_disk.contains("503"),
+        "{on_disk}"
+    );
+    // an Apply reads the file: the route now answers the staged edit with no live edit at all
+    let r = s.send(Method::POST, "/__kaanal/draft/apply", None).await;
+    assert_eq!(r.status(), 200, "{:?}", r.text().await);
+    let r = mock(&s, "/users/1").await;
+    assert_eq!(r.status(), 503);
+    // a second stage replaces the override instead of adding another
+    let r = s
+        .send(
+            Method::POST,
+            "/__kaanal/payload/stage-file",
+            Some(json!({ "route": "GET /users/{id}", "status": 202, "content_type": "text/plain", "body": "ok" })),
+        )
+        .await;
+    assert_eq!(r.status(), 200);
+    let on_disk = std::fs::read_to_string(s.dir.join("routes.yaml")).unwrap();
+    assert_eq!(on_disk.matches("override").count(), 1, "{on_disk}");
+    assert!(
+        on_disk.contains("202") && !on_disk.contains("503"),
+        "{on_disk}"
+    );
+}
+
+#[tokio::test]
+async fn stage_file_adds_a_missing_entry_and_refuses_inline_endpoints_and_bad_edits() {
+    let s = start_with_endpoints_file("\"GET /other\": { chain: [ db ] }\n").await;
+    let r = s
+        .send(
+            Method::POST,
+            "/__kaanal/payload/stage-file",
+            Some(json!({ "route": "GET /users/{id}", "status": 200 })),
+        )
+        .await;
+    assert_eq!(r.status(), 200, "{:?}", r.text().await);
+    let on_disk = std::fs::read_to_string(s.dir.join("routes.yaml")).unwrap();
+    assert!(
+        on_disk.contains("GET /other") && on_disk.contains("GET /users/{id}"),
+        "{on_disk}"
+    );
+    // a refused value writes nothing
+    let before = on_disk;
+    let r = s
+        .send(
+            Method::POST,
+            "/__kaanal/payload/stage-file",
+            Some(json!({ "route": "GET /users/{id}", "status": 99 })),
+        )
+        .await;
+    assert_eq!(r.status(), 422);
+    assert_eq!(
+        std::fs::read_to_string(s.dir.join("routes.yaml")).unwrap(),
+        before
+    );
+    let r = s
+        .send(
+            Method::POST,
+            "/__kaanal/payload/stage-file",
+            Some(json!({ "route": "GET /nope" })),
+        )
+        .await;
+    assert_eq!(r.status(), 404);
+    // inline endpoints: stage through the draft, not here
+    let inline = start(&system("1ms")).await;
+    let r = inline
+        .send(
+            Method::POST,
+            "/__kaanal/payload/stage-file",
+            Some(json!({ "route": "GET /users/{id}" })),
+        )
+        .await;
+    assert_eq!(r.status(), 409);
 }

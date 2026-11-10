@@ -12,6 +12,8 @@ fn ov(status: u16, body: Value, h: &[(&str, &str)]) -> Override {
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect(),
+        content_type: None,
+        encoding: None,
     }
 }
 
@@ -65,6 +67,7 @@ fn check_rejects_by_field() {
         (ov(600, json!({}), &[]), "status"),
         (ov(204, json!({"a": 1}), &[]), "status"),
         (ov(304, json!({"a": 1}), &[]), "status"),
+        (ov(205, json!({"a": 1}), &[]), "status"),
         (ov(200, json!(long), &[]), "body"),
         (ov(200, json!({}), &many), "headers"),
         (ov(200, json!({}), &[("content-length", "1")]), "headers"),

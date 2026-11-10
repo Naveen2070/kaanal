@@ -219,6 +219,83 @@ impl<'de> Deserialize<'de> for DistConfig {
     }
 }
 
+/// A node's memory (`memory:`, step 8M): a hard limit. Each request being served holds
+/// `per_request` bytes on top of the `base` the process uses idle, so the copy holds at most
+/// `(limit - base) / per_request` requests at once (a slot count, the same as `concurrency`), and the
+/// lower of the two applies. A request past it waits or is refused like any other that finds the
+/// slots full (the `queue` and `overflow_status` of `concurrency`, else refused at once with 503).
+/// The `limit` may come from the node's `instance:`.
+///
+/// **Not modelled**: garbage-collection pauses, swapping and the kernel killing the process
+/// (no model is published across runtimes): this is the capacity the memory sets, nothing softer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryConfig {
+    /// The copy's memory in bytes (`512MiB`, `8GB`); absent = the `instance:`'s.
+    #[serde(default, deserialize_with = "crate::units::memory_limit")]
+    #[schemars(schema_with = "crate::schema::memory_size")]
+    pub limit: Option<u64>,
+    /// What one request being served holds, in bytes: required.
+    #[serde(default, deserialize_with = "crate::units::memory_per_request")]
+    #[schemars(schema_with = "crate::schema::memory_size")]
+    pub per_request: Option<u64>,
+    /// What the process holds with no request (default 0).
+    #[serde(default, deserialize_with = "crate::units::memory_base")]
+    #[schemars(schema_with = "crate::schema::memory_size")]
+    pub base: Option<u64>,
+}
+
+/// A [`MemoryConfig`] with its `limit` settled and checked: what the topology uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Memory {
+    /// Bytes the copy has.
+    pub limit: u64,
+    /// Bytes one request being served holds (at least 1).
+    pub per_request: u64,
+    /// Bytes held with no request.
+    pub base: u64,
+}
+
+impl Memory {
+    /// The most requests the memory holds at once: `(limit - base) / per_request`, at most
+    /// `u32::MAX`.
+    #[must_use]
+    pub fn slots(&self) -> u32 {
+        u32::try_from(self.limit.saturating_sub(self.base) / self.per_request.max(1))
+            .unwrap_or(u32::MAX)
+    }
+}
+
+impl MemoryConfig {
+    /// The settled memory, `limit` falling back to `instance_limit`.
+    ///
+    /// # Errors
+    /// A message naming the field: `per_request` or `limit` missing or 0, or no room for one
+    /// request above the `base`.
+    pub fn resolve(&self, instance_limit: Option<u64>) -> Result<Memory, String> {
+        let per_request = self
+            .per_request
+            .filter(|p| *p > 0)
+            .ok_or("memory: per_request is required (what one request holds, at least 1 byte)")?;
+        let limit = self
+            .limit
+            .or(instance_limit)
+            .filter(|l| *l > 0)
+            .ok_or("memory: limit is required (or set an instance: that has one)")?;
+        let base = self.base.unwrap_or(0);
+        if limit.saturating_sub(base) < per_request {
+            return Err(format!(
+                "memory: limit {limit} B less base {base} B leaves no room for one request of {per_request} B"
+            ));
+        }
+        Ok(Memory {
+            limit,
+            per_request,
+            base,
+        })
+    }
+}
+
 /// **Private.** Longest configurable cost. Samples are capped at 10 × p99, so one hop is
 /// at most 10 h and a chain's sum stays far from `Duration`'s limit.
 pub(super) const MAX_DURATION: Duration = Duration::from_secs(3600);
@@ -240,6 +317,40 @@ pub struct Override {
     /// `x-request-id` / `x-kaanal-*`, so those names are refused.
     #[serde(default)]
     pub headers: std::collections::BTreeMap<String, String>,
+    /// The `Content-Type` of a text body (`text/html`, `text/plain`, `application/xml`, ...).
+    /// When set, `body` must be a string and is sent as is, not as JSON. Left out, the body is JSON.
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// How a text `body` stands for the bytes sent: `base64` sends the decoded bytes (an image, a
+    /// PDF, any binary) with the `content_type`, which is then required. Left out, the text is sent
+    /// as is.
+    #[serde(default)]
+    pub encoding: Option<BodyEncoding>,
+}
+
+/// How an [`Override`] body is written (`encoding:`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BodyEncoding {
+    /// Standard base64 (RFC 4648); the bytes it decodes to are sent.
+    Base64,
+}
+
+impl Override {
+    /// The bytes a text or binary body stands for: the decoded base64, or the text itself. `None`
+    /// for a body that is not text, or for base64 that does not decode ([`Self::check_content_type`]
+    /// refuses that).
+    #[must_use]
+    pub fn raw_bytes(&self) -> Option<Vec<u8>> {
+        use base64::Engine as _;
+        let text = self.body.as_str()?;
+        match self.encoding {
+            Some(BodyEncoding::Base64) => base64::engine::general_purpose::STANDARD
+                .decode(text.trim())
+                .ok(),
+            None => Some(text.as_bytes().to_vec()),
+        }
+    }
 }
 
 impl Override {
@@ -249,6 +360,8 @@ impl Override {
     pub const MAX_HEADERS: usize = 32;
     /// Longest header value, in bytes (clients refuse far less than a megabyte).
     pub const MAX_HEADER_VALUE: usize = 4096;
+    /// Longest `content_type`, in bytes.
+    pub const MAX_CONTENT_TYPE: usize = 255;
 
     /// The check of a live edit (step 8A): the status and body limits, then [`Self::check_headers`].
     /// The message starts with the field it is about (`status`, `body`, `headers`).
@@ -262,13 +375,58 @@ impl Override {
                 self.status
             ));
         }
-        if matches!(self.status, 204 | 304) && !self.body.is_null() {
+        if matches!(self.status, 204 | 205 | 304) && !self.body.is_null() {
             return Err(format!("status: {} has no body", self.status));
         }
         if serde_json::to_vec(&self.body).map_or(usize::MAX, |b| b.len()) > Self::MAX_BODY {
             return Err("body: larger than 1 MiB".into());
         }
-        self.check_headers()
+        self.check_headers()?;
+        self.check_content_type()
+    }
+
+    /// The `content_type` rules: a `type/subtype` (parameters allowed) of visible ASCII, and a
+    /// text body to send with it. Nothing to check when it is left out.
+    ///
+    /// # Errors
+    /// The message, starting `content_type:`.
+    pub fn check_content_type(&self) -> Result<(), String> {
+        let Some(ct) = &self.content_type else {
+            return if self.encoding.is_some() {
+                Err("content_type: needed with encoding (the media type of the bytes)".into())
+            } else {
+                Ok(())
+            };
+        };
+        let essence = ct.split(';').next().unwrap_or_default().trim();
+        let ok_essence = essence
+            .split_once('/')
+            .is_some_and(|(a, b)| is_token(a) && is_token(b));
+        if ct.len() > Self::MAX_CONTENT_TYPE
+            || !ok_essence
+            || !ct.bytes().all(|b| (0x20..=0x7e).contains(&b))
+        {
+            return Err(format!(
+                "content_type: '{ct}' is not a media type like text/html"
+            ));
+        }
+        if !self.body.is_string() {
+            return Err("content_type: the body must be text".into());
+        }
+        self.check_encoding()
+    }
+
+    /// `encoding: base64` needs a `content_type`, a body that decodes, and at most
+    /// [`Self::MAX_BODY`] decoded bytes.
+    fn check_encoding(&self) -> Result<(), String> {
+        if self.encoding.is_none() {
+            return Ok(());
+        }
+        match self.raw_bytes() {
+            None => Err("encoding: the body is not valid base64".into()),
+            Some(b) if b.len() > Self::MAX_BODY => Err("body: larger than 1 MiB".into()),
+            Some(_) => Ok(()),
+        }
     }
 
     /// The header rules alone: the check a file's `override:` runs when it compiles. A file keeps

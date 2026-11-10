@@ -168,6 +168,9 @@ field_fns! {
     returns, "returns", false;
     header_request, "request", false;
     header_response, "response", false;
+    memory_limit, "limit", false;
+    memory_per_request, "per_request", false;
+    memory_base, "base", false;
 }
 
 #[cfg(test)]

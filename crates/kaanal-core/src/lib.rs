@@ -22,6 +22,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod dist;
 pub mod exec;
+pub mod instances;
 pub mod pin;
 pub mod presets;
 pub mod replay;

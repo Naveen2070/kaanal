@@ -96,6 +96,17 @@ pub(crate) fn size_value(_: &mut SchemaGenerator) -> Schema {
     )
 }
 
+/// **Private.** Schema of a memory size (`memory:` `limit`, `per_request`, `base`): bytes or text
+/// with a unit, no 1 GiB cap.
+pub(crate) fn memory_size(_: &mut SchemaGenerator) -> Schema {
+    bytes_schema(
+        SIZE_PATTERN,
+        1,
+        "A whole number of bytes (at least 1), or text with a unit: `64MB`, `512MiB`, `8GB` (units B, KB, MB, GB; 1 KB = 1024 bytes).",
+        true,
+    )
+}
+
 /// **Private.** Schema of `stream`: a boolean (both bodies, or neither) or one body.
 pub(crate) fn stream_mode(_: &mut SchemaGenerator) -> Schema {
     json_schema!({

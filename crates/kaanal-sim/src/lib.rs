@@ -225,6 +225,10 @@ pub struct NodeStats {
     /// Busy slot-time inside the reporting window `[warmup, duration]` ÷ (slots × window), so
     /// it never exceeds 1; `0.0` for unlimited nodes.
     pub utilization: f64,
+    /// CPU the node's own work really used inside the window: busy millicore-time over millicores
+    /// x copies x window, at most 1 (step 8U); `0.0` for a node without `cpu`. The measured twin of
+    /// the offered `cpu_load`: a queue that never fills shows load above 1 but utilization 1.
+    pub cpu_utilization: f64,
     /// Longest queue seen when a request joined at or after warmup (so it can include
     /// requests that arrived earlier; a queue that only drains after warmup is not counted).
     pub max_queue: usize,

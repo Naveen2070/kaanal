@@ -3,7 +3,7 @@
 
 use super::{
     ConcurrencyConfig, CpuConfig, Deserialize, DistConfig, Duration, Hold, JsonSchema,
-    LOCALE_PATTERN, NodeBandwidth, RateLimitConfig, call_timeout, detect_window,
+    LOCALE_PATTERN, MemoryConfig, NodeBandwidth, RateLimitConfig, call_timeout, detect_window,
 };
 use crate::balance::Balance;
 
@@ -61,6 +61,16 @@ pub struct LoadBalancerConfig {
     /// copy has its own cores. Absent = no sharing, every call takes its drawn time.
     #[serde(default)]
     pub cpu: Option<CpuConfig>,
+    /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
+    /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    #[serde(default)]
+    pub instance: Option<String>,
+    /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
+    /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    #[serde(default)]
+    pub memory: Option<MemoryConfig>,
     /// Locale pack; a balancer generates no data, so this only passes down.
     #[serde(default)]
     #[schemars(extend("pattern" = LOCALE_PATTERN))]

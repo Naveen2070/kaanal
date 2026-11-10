@@ -6,6 +6,7 @@ mod basics;
 mod common;
 mod cpu;
 mod endpoints;
+mod instance_memory;
 mod limits;
 mod link_chaos;
 mod locale;

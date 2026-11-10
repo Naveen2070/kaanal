@@ -321,6 +321,9 @@ pub struct Page {
     pub cap: usize,
     /// Entries dropped by the cap so far.
     pub evicted: u64,
+    /// This start's boot nonce. `done` counts from 1 again after a restart, so a poller that
+    /// keeps a cursor starts over when this changes.
+    pub boot: u16,
 }
 
 /// The answer to [`LogRing::find`].
@@ -375,17 +378,29 @@ impl LogRing {
         self.entries.clear();
     }
 
-    /// The last `limit` entries matching `f`, oldest completion first.
+    /// The last `limit` entries matching `f`, oldest completion first. With `after` set, the
+    /// first `limit` after the cursor instead, so a poller that falls behind pages forward and
+    /// skips nothing (`done` is the order of the ring, so the scan stops at `limit`).
     pub fn query(&self, f: &Filter, limit: usize) -> Page {
-        let mut entries: Vec<LogEntry> = self
-            .entries
-            .iter()
-            .rev()
-            .filter(|e| matches(e, f))
-            .take(limit)
-            .cloned()
-            .collect();
-        entries.reverse();
+        let entries: Vec<LogEntry> = if f.after_done.is_some() {
+            self.entries
+                .iter()
+                .filter(|e| matches(e, f))
+                .take(limit)
+                .cloned()
+                .collect()
+        } else {
+            let mut v: Vec<LogEntry> = self
+                .entries
+                .iter()
+                .rev()
+                .filter(|e| matches(e, f))
+                .take(limit)
+                .cloned()
+                .collect();
+            v.reverse();
+            v
+        };
         Page {
             entries,
             oldest: self
@@ -400,6 +415,7 @@ impl LogRing {
                 .map(|e| e.id.clone()),
             cap: LOG_CAP,
             evicted: self.evicted,
+            boot: self.boot,
         }
     }
 
@@ -537,6 +553,25 @@ mod tests {
             after.entries.iter().map(|e| e.seq).collect::<Vec<_>>(),
             [3, 4]
         );
+    }
+
+    #[test]
+    fn after_pages_forward_from_the_cursor_and_names_the_boot() {
+        let mut r = LogRing::new(BOOT);
+        for d in 1..=6 {
+            r.push(entry(d));
+        }
+        let first = r.query(&filter(&[("after", "1")]), 2);
+        let dones: Vec<u64> = first.entries.iter().map(|e| e.done).collect();
+        assert_eq!(
+            dones,
+            [2, 3],
+            "the oldest two after the cursor, not the newest two"
+        );
+        assert_eq!(first.boot, BOOT);
+        let last = r.query(&Filter::default(), 2);
+        let dones: Vec<u64> = last.entries.iter().map(|e| e.done).collect();
+        assert_eq!(dones, [5, 6], "no cursor keeps the newest page");
     }
 
     #[test]
