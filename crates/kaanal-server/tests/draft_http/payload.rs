@@ -356,3 +356,18 @@ async fn stage_file_adds_a_missing_entry_and_refuses_inline_endpoints_and_bad_ed
         .await;
     assert_eq!(r.status(), 409);
 }
+
+#[tokio::test]
+async fn the_instance_table_is_served_whole_and_sorted() {
+    let s = start(&system("1ms")).await;
+    let r = s.get("/__kaanal/instances").await;
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    let types = v["types"].as_array().unwrap();
+    assert!(types.len() > 3000, "{} types", types.len());
+    assert_eq!(types.len(), kaanal_core::instances::all().len());
+    let m5 = types.iter().find(|t| t[0] == "aws/m5.large").unwrap();
+    assert_eq!(m5, &json!(["aws/m5.large", 2, 8192, 10000]));
+    let names: Vec<&str> = types.iter().map(|t| t[0].as_str().unwrap()).collect();
+    assert!(names.windows(2).all(|w| w[0] < w[1]));
+}

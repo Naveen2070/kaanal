@@ -239,17 +239,6 @@ pub(crate) fn prob_ok(p: f64) -> bool {
 /// A cache keeps its own hit ratio, and the gateway routes by endpoint, so neither takes a share.
 pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
     for (name, n) in &cfg.nodes {
-        if let Some(i) = n.instance_name()
-            && crate::instances::lookup(i).is_none()
-        {
-            return Err(Located::at_value(
-                keys(&["nodes", name.as_str(), "instance"]),
-                format!(
-                    "node '{name}': instance '{i}' is not in the table ({})",
-                    crate::instances::hint(i)
-                ),
-            ));
-        }
         if let Some(m) = n.memory_config()
             && let Err(e) = m.resolve(n.instance().map(crate::instances::Instance::memory_bytes))
         {

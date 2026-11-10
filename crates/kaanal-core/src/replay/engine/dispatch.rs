@@ -34,8 +34,16 @@ impl Engine {
         else {
             unreachable!("dispatch is called at a Pick")
         };
-        let ranked: Vec<(usize, u16)> = (0..64u16)
-            .filter(|i| cands >> i & 1 == 1)
+        // a copy killed for lack of memory is skipped, as a balancer with a health check would,
+        // unless every candidate is down
+        let all: Vec<u16> = (0..64u16).filter(|i| cands >> i & 1 == 1).collect();
+        let up: Vec<u16> = all
+            .iter()
+            .copied()
+            .filter(|&i| !self.copy_down(node, i))
+            .collect();
+        let ranked: Vec<(usize, u16)> = if up.is_empty() { all } else { up }
+            .into_iter()
             .map(|i| (self.copy_load(node, i), i))
             .collect();
         let least = ranked.iter().map(|(l, _)| *l).min().unwrap_or(0);

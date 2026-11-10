@@ -714,3 +714,35 @@ fn mean_service_of(t: &Topology) -> f64 {
     let rep = sim(t, 50.0, 20_000.0);
     mean_service(t, &rep)
 }
+
+// ---- step 8K: a memory limit that kills the copy (a renewal process) ----
+
+#[test]
+fn a_copy_killed_for_memory_fails_the_share_a_renewal_argument_gives() {
+    // One copy that holds one request at once, exponential service (rate mu), Poisson arrivals
+    // (rate lambda), no queue; a request that finds it busy kills it, and it is down for R.
+    // Up time from an empty copy: T0 = 1/lambda + T1, T1 = 1/(lambda+mu) + mu/(lambda+mu) T0, so
+    // T0 = (2 lambda + mu) / lambda^2. A cycle is T0 up and R down. In it the failures are the
+    // lambda R arrivals of the down time and 2 at the kill (the arrival, and the one in service),
+    // out of lambda (T0 + R) arrivals: the failed share is (lambda R + 2) / (lambda (T0 + R)).
+    let (lam, mu, down) = (20.0, MU, 0.2);
+    let t = topo(
+        "version: 1\nnodes:\n  gw: { type: gateway }\n  app: { type: service, memory: { limit: 1GB, per_request: 1GB, on_limit: kill, restart: 200ms }, proc: { mean: 10ms } }\nedges:\n  - { from: gw, to: app }\n",
+    );
+    let rep = sim(&t, lam, 60_000.0);
+    let up = (2.0 * lam + mu) / (lam * lam);
+    let want = (lam * down + 2.0) / (lam * (up + down));
+    let got = share(&rep, 502) + share(&rep, 503);
+    assert!(
+        (got - want).abs() < 0.02,
+        "failed {got:.4}, renewal argument {want:.4}"
+    );
+    // and the kills themselves: one per cycle of the run
+    let n = f64::from(u32::try_from(rep.requests.len()).unwrap());
+    let cycles = n / lam / (up + down);
+    let kills = f64::from(u32::try_from(rep.nodes[t.id("app").unwrap()].oom_kills).unwrap());
+    assert!(
+        (kills / cycles - 1.0).abs() < 0.05,
+        "{kills} kills in {cycles:.0} cycles"
+    );
+}

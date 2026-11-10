@@ -61,7 +61,7 @@ pub struct EdgeConfig {
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 1))]
     pub prob: Option<f64>,
     /// How calls over this edge pick a replica of the callee; overrides the callee's own
-    /// `balance`.
+    /// `balance`. Absent = the callee's own `balance` (round-robin when it sets none).
     #[serde(default)]
     pub balance: Option<crate::balance::Balance>,
     /// Link capacity: bytes per second (at least 1) as a whole number, or text with a unit like
@@ -228,7 +228,7 @@ impl<'de> Deserialize<'de> for DistConfig {
 ///
 /// **Not modelled**: garbage-collection pauses, swapping and the kernel killing the process
 /// (no model is published across runtimes): this is the capacity the memory sets, nothing softer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryConfig {
     /// The copy's memory in bytes (`512MiB`, `8GB`); absent = the `instance:`'s.
@@ -243,6 +243,49 @@ pub struct MemoryConfig {
     #[serde(default, deserialize_with = "crate::units::memory_base")]
     #[schemars(schema_with = "crate::schema::memory_size")]
     pub base: Option<u64>,
+    /// What happens to a request the memory cannot hold: `refuse` (default) turns it away, `kill`
+    /// takes the whole copy down as the kernel's OOM killer does (step 8K).
+    #[serde(default)]
+    pub on_limit: Option<OnLimit>,
+    /// With `on_limit: kill`: how long the copy stays down before it is back, empty (default `10s`,
+    /// above 0, at most 1h). Refused for `refuse`.
+    #[serde(default, deserialize_with = "restart_window")]
+    #[schemars(schema_with = "crate::schema::duration_text")]
+    pub restart: Option<Duration>,
+    /// Garbage-collection cost, off unless set: what collecting costs per byte allocated relative to
+    /// the node's own work, above 0 and at most 10 (`0.2` = a fifth). Own work then takes
+    /// `1 + gc x u / (1 - u)` times its drawn time, `u` being the share of the memory that is live
+    /// when it starts. **An estimate**: the shape is published (Appel 1987; Jones, Hosking and Moss,
+    /// *The Garbage Collection Handbook*, 2011), the weight depends on the runtime and is yours.
+    #[serde(default)]
+    #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 10))]
+    pub gc: Option<f64>,
+}
+
+/// What a node does with a request its memory cannot hold (`memory.on_limit`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum OnLimit {
+    /// Turn the request away (the slot count of the memory, like `concurrency`).
+    #[default]
+    Refuse,
+    /// Kill the copy: everything it is serving or has queued fails with 502, and it refuses work
+    /// (503) until `restart` has passed. The other copies carry on.
+    Kill,
+}
+
+/// **Private.** Default `restart` of a killed copy: a container restart.
+pub(super) const DEFAULT_RESTART: Duration = Duration::from_secs(10);
+
+/// **Private.** `restart`: above 0 and at most 1 h, with a unit like `10s`.
+fn restart_window<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+    let v: Duration = humantime_serde::deserialize(d)
+        .map_err(|_| de::Error::custom("restart: use a duration with a unit, like `10s`"))?;
+    if v.is_zero() || v > Duration::from_secs(3600) {
+        Err(de::Error::custom("restart must be above 0 and at most 1h"))
+    } else {
+        Ok(Some(v))
+    }
 }
 
 /// A [`MemoryConfig`] with its `limit` settled and checked: what the topology uses.
@@ -254,6 +297,12 @@ pub struct Memory {
     pub per_request: u64,
     /// Bytes held with no request.
     pub base: u64,
+    /// Refuse what does not fit, or kill the copy.
+    pub on_limit: OnLimit,
+    /// How long a killed copy stays down (used only with [`OnLimit::Kill`]).
+    pub restart: Duration,
+    /// The `gc` weight in thousandths (`0.2` is 200); 0 = no GC cost.
+    pub gc_permille: u32,
 }
 
 impl Memory {
@@ -288,10 +337,31 @@ impl MemoryConfig {
                 "memory: limit {limit} B less base {base} B leaves no room for one request of {per_request} B"
             ));
         }
+        let on_limit = self.on_limit.unwrap_or_default();
+        if self.restart.is_some() && on_limit != OnLimit::Kill {
+            return Err("memory: restart needs on_limit: kill".into());
+        }
+        let gc_permille = match self.gc {
+            None => 0,
+            Some(g) if g.is_finite() && g > 0.0 && g <= 10.0 => {
+                // validated to (0, 10], so the product is 1 ..= 10_000 after rounding up from 0
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "g is in (0, 10]"
+                )]
+                let pm = ((g * 1000.0).round() as u32).max(1);
+                pm
+            }
+            Some(_) => return Err("memory: gc must be above 0 and at most 10".into()),
+        };
         Ok(Memory {
             limit,
             per_request,
             base,
+            on_limit,
+            restart: self.restart.unwrap_or(DEFAULT_RESTART),
+            gc_permille,
         })
     }
 }
@@ -310,7 +380,7 @@ pub struct Override {
     /// HTTP status to return. Defaults to 200.
     #[serde(default = "default_status")]
     pub status: u16,
-    /// Response body, returned verbatim.
+    /// Response body, returned verbatim. Absent = no body.
     #[serde(default)]
     pub body: serde_json::Value,
     /// Extra response headers (`name: value`). Kaanal owns framing, content type, CORS and

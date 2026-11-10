@@ -163,6 +163,7 @@ fn lines_of(
             Some(Cause::Overflow) => ("overflowed", "queue full"),
             Some(Cause::Deadline) => ("timeout", "deadline passed"),
             Some(Cause::Breaker) => ("short-circuited", "circuit breaker open"),
+            Some(Cause::Oom) => ("oom-killed", "out of memory"),
             Some(Cause::Chaos) | None => ("failed", kind.as_str()),
         };
         out.push(LogLine {

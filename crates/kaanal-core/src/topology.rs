@@ -48,6 +48,10 @@ pub struct Node {
     /// The node's memory limit (step 8M), when it sets one; [`Memory::slots`] is the most requests
     /// it holds at once and is folded into `admission`.
     pub memory: Option<Memory>,
+    /// `Some(restart)` when the node's memory is what limits its slots **and** `on_limit: kill`
+    /// (step 8K): a request refused for lack of memory kills the copy, which stays down for this
+    /// long. `None` for a node that refuses.
+    pub oom_restart: Option<Duration>,
     /// Token-bucket rate limit, one token per visit (see the replay engine); `None` = none.
     pub rate_limit: Option<RateLimit>,
     /// Per-call deadline (B2a Z2): queue wait, own work and everything downstream; `None` = none.
@@ -533,6 +537,12 @@ impl Topology {
                 cache,
                 admission: with_memory(admission_of(n), n.memory().as_ref()),
                 memory: n.memory(),
+                oom_restart: n.memory().and_then(|m| {
+                    // memory is the limit only when it is what the slot count came to
+                    let binds = with_memory(admission_of(n), Some(&m))
+                        .is_some_and(|a| a.slots == m.slots().max(1));
+                    (m.on_limit == crate::config::OnLimit::Kill && binds).then_some(m.restart)
+                }),
                 rate_limit: n.rate_limit().map(rate_limit_of),
                 timeout: n.timeout(),
                 replicas: n.replicas(),

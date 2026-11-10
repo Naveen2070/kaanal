@@ -54,27 +54,27 @@ impl ScenarioConfig {
 #[serde(deny_unknown_fields)]
 pub struct ChaosEntry {
     /// A node name. With `endpoint`: only when visited through that endpoint; with `replica`:
-    /// one copy of the node.
+    /// one copy of the node. Absent = not tied to a node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<String>,
-    /// `METHOD /path`: the front door of that endpoint.
+    /// `METHOD /path`: the front door of that endpoint. Absent = every endpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
     /// A link: the edge from one node to another (it must exist). Takes no node, endpoint or
     /// replica; sets `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`,
-    /// `down` (a partition) and `bandwidth_cap`.
+    /// `down` (a partition) and `bandwidth_cap`. Absent = the entry targets a node, an endpoint or the whole system, not a link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge: Option<EdgeRef>,
     /// With `node`: one replica of it (0-based), whatever the endpoint. Needs the node to have
-    /// that many `replicas`.
+    /// that many `replicas`. Absent = every copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(extend("minimum" = 0, "maximum" = 63))]
     pub replica: Option<u16>,
     /// Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc
-    /// attribute cannot compute it, so keep the two in step).
+    /// attribute cannot compute it, so keep the two in step). Absent = no extra latency.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
-    /// Failure probability, 0 to 1.
+    /// Failure probability, 0 to 1. Absent = no extra failures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_rate: Option<f64>,
     /// How a failure shows up: `status` (default), `reset`, `hang` or `malformed`.
@@ -83,11 +83,11 @@ pub struct ChaosEntry {
     /// Status of a failed visit, 500 to 504 (default 503).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_status: Option<u16>,
-    /// Edge only: random extra latency of up to this many milliseconds either way.
+    /// Edge only: random extra latency of up to this many milliseconds either way. Absent = no jitter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jitter_ms: Option<u64>,
     /// Edge only: caps the edge's `bandwidth` (bytes per second, at least 1, at most the
-    /// edge's own; a whole number or text with a unit like `500KB/s`).
+    /// edge's own; a whole number or text with a unit like `500KB/s`). Absent = the edge keeps its own `bandwidth`.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -95,7 +95,7 @@ pub struct ChaosEntry {
     )]
     #[schemars(schema_with = "crate::schema::rate")]
     pub bandwidth_cap: Option<u64>,
-    /// Hard outage.
+    /// Hard outage. Absent = not down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub down: Option<bool>,
     /// With `down` on a node or replica: when the outage begins, in milliseconds from the start of the

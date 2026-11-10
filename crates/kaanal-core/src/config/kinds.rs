@@ -15,7 +15,7 @@ use crate::balance::Balance;
 pub struct GatewayConfig {
     /// Cosmetic label shown in status output (`nginx`, `envoy`); not a preset.
     pub flavor: Option<String>,
-    /// Processing time per request.
+    /// Processing time per request. Absent = no processing time of its own (0).
     pub proc: Option<DistConfig>,
     /// Most requests this node serves at once, as a number (the rest wait without limit) or a
     /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
@@ -24,7 +24,7 @@ pub struct GatewayConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -62,12 +62,12 @@ pub struct GatewayConfig {
     pub cpu: Option<CpuConfig>,
     /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
     /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
-    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
-    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -81,11 +81,11 @@ pub struct GatewayConfig {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
-    /// `OpenAPI` 3.0 spec file, relative to this config file.
+    /// `OpenAPI` 3.0 spec file, relative to this config file. Absent = no spec routes come from this node.
     pub spec: Option<String>,
-    /// Processing time per request.
+    /// Processing time per request. Absent = no processing time of its own (0).
     pub proc: Option<DistConfig>,
-    /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.
+    /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`. Absent = no named chains.
     #[serde(default)]
     pub chains: IndexMap<String, Vec<StepConfig>>,
     /// Most requests this node serves at once, as a number (the rest wait without limit) or a
@@ -95,7 +95,7 @@ pub struct ServiceConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -133,12 +133,12 @@ pub struct ServiceConfig {
     pub cpu: Option<CpuConfig>,
     /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
     /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
-    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
-    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -154,15 +154,15 @@ pub struct ServiceConfig {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MonolithConfig {
-    /// `OpenAPI` 3.0 spec file, relative to this config file.
+    /// `OpenAPI` 3.0 spec file, relative to this config file. Absent = no spec routes come from this node.
     pub spec: Option<String>,
-    /// Processing time per request.
+    /// Processing time per request. Absent = no processing time of its own (0).
     pub proc: Option<DistConfig>,
-    /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.
+    /// Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`. Absent = no named chains.
     #[serde(default)]
     pub chains: IndexMap<String, Vec<StepConfig>>,
     /// Inline read/write/scan costs; any op left out comes from `flavor`. Used once
-    /// endpoint chains land.
+    /// endpoint chains land. Absent = no inline ops (the node only calls others).
     pub ops: Option<OpsConfig>,
     /// Preset that fills inline ops the user left out (estimates).
     pub flavor: Option<DbFlavor>,
@@ -173,7 +173,7 @@ pub struct MonolithConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -211,12 +211,12 @@ pub struct MonolithConfig {
     pub cpu: Option<CpuConfig>,
     /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
     /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
-    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
-    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -230,13 +230,13 @@ pub struct MonolithConfig {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
-    /// Read/write/scan costs. Required in full unless `flavor` fills the gaps.
+    /// Read/write/scan costs. Required in full unless `flavor` fills the gaps. Absent = the `flavor` preset; with no flavor either the file is refused.
     pub ops: Option<OpsConfig>,
     /// Preset that fills ops the user left out (estimates).
     pub flavor: Option<DbFlavor>,
     /// Connection pool: the slot limit `size`, a wait queue of `queue` and the status
     /// `overflow_status` when it is full; the same as the map form of `concurrency`; set one
-    /// of the two.
+    /// of the two. Absent = no pool limit.
     pub pool: Option<PoolConfig>,
     /// Most requests this node serves at once, as a number (the rest wait without limit) or a
     /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
@@ -245,7 +245,7 @@ pub struct DatabaseConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -278,12 +278,12 @@ pub struct DatabaseConfig {
     pub cpu: Option<CpuConfig>,
     /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
     /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
-    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
-    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level
@@ -297,15 +297,15 @@ pub struct DatabaseConfig {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CacheConfig {
-    /// Preset for `hit_ratio`, `hit` and `miss` (estimates).
+    /// Preset for `hit_ratio`, `hit` and `miss` (estimates). Absent = no preset: `hit_ratio`, `hit` and `miss` are then all required.
     pub flavor: Option<CacheFlavor>,
     /// Share of lookups that hit, 0 to 1.
     #[serde(default, deserialize_with = "ratio")]
     #[schemars(extend("minimum" = 0, "maximum" = 1))]
     pub hit_ratio: Option<f64>,
-    /// Cost of a hit.
+    /// Cost of a hit. Absent = the `flavor` preset (a cache with neither is refused).
     pub hit: Option<DistConfig>,
-    /// Cost of finding out it is a miss.
+    /// Cost of finding out it is a miss. Absent = the `flavor` preset (a cache with neither is refused).
     pub miss: Option<DistConfig>,
     /// Entry lifetime. Accepted and validated; no effect yet.
     #[serde(default, with = "humantime_serde")]
@@ -318,7 +318,7 @@ pub struct CacheConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -349,7 +349,7 @@ pub struct CacheConfig {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalApiConfig {
-    /// Response time of the API.
+    /// Response time of the API. Absent = no processing time of its own (0).
     pub proc: Option<DistConfig>,
     /// Baseline share of failing calls, 0 to 1. Accepted and validated; no effect yet.
     #[serde(default, deserialize_with = "ratio")]
@@ -361,7 +361,7 @@ pub struct ExternalApiConfig {
     pub proxy: Option<String>,
     /// Connection pool: the slot limit `size`, a wait queue of `queue` and the status
     /// `overflow_status` when it is full; the same as the map form of `concurrency`; set one
-    /// of the two.
+    /// of the two. Absent = no pool limit.
     pub pool: Option<PoolConfig>,
     /// Most requests this node serves at once, as a number (the rest wait without limit) or a
     /// map `{ limit, queue, overflow_status }` (the rest wait up to `queue`, then get
@@ -370,7 +370,7 @@ pub struct ExternalApiConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -407,9 +407,9 @@ pub struct ExternalApiConfig {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuthConfig {
-    /// Cost of one login, one JWKS request or one gateway token check.
+    /// Cost of one login, one JWKS request or one gateway token check. Absent = no processing time of its own (0).
     pub proc: Option<DistConfig>,
-    /// Accounts that can log in (synthetic only); usernames are unique, at most 1000 users.
+    /// Accounts that can log in (synthetic only); usernames are unique, at most 1000 users. Absent = no accounts.
     #[serde(default, deserialize_with = "unique_users")]
     pub users: Vec<UserConfig>,
     /// Lifetime of issued tokens: whole seconds, 1s to 1 day (default 1h).
@@ -428,7 +428,7 @@ pub struct AuthConfig {
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,
-    /// at most `burst` at once; beyond it the request fails with 429.
+    /// at most `burst` at once; beyond it the request fails with 429. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work plus everything it calls
     /// downstream. When it passes, the caller gets a 504 (`timeout`) while the work already
@@ -466,12 +466,12 @@ pub struct AuthConfig {
     pub cpu: Option<CpuConfig>,
     /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
     /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
-    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
-    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
     /// Locale pack for the data this node's routes generate, e.g. `en-US`; beats the top-level

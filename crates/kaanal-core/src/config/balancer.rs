@@ -20,7 +20,7 @@ pub struct LoadBalancerConfig {
     #[serde(default)]
     #[schemars(schema_with = "crate::schema::concurrency")]
     pub concurrency: Option<ConcurrencyConfig>,
-    /// Token-bucket limit on how fast calls may reach this node: 429 beyond it.
+    /// Token-bucket limit on how fast calls may reach this node: 429 beyond it. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait, its own work and the chosen component's
     /// answer. `0 < timeout <= 5 min`; absent = no deadline.
@@ -49,7 +49,7 @@ pub struct LoadBalancerConfig {
     /// component has answered, as a connection-limited proxy does.
     #[serde(default)]
     pub hold: Option<Hold>,
-    /// Extra processing time per KB of payload (request and response each, once per body).
+    /// Extra processing time per KB of payload (request and response each, once per body). Absent = no size-dependent cost.
     pub per_kb: Option<DistConfig>,
     /// This node's network card, in bytes per second (at least 1): one number for both
     /// directions or `{ out, in }`. Absent = no limit.
@@ -63,12 +63,12 @@ pub struct LoadBalancerConfig {
     pub cpu: Option<CpuConfig>,
     /// A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills
     /// `cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The
-    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs).
+    /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
-    /// No GC or swap curve is modelled. `limit` may come from `instance`.
+    /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
     /// Locale pack; a balancer generates no data, so this only passes down.

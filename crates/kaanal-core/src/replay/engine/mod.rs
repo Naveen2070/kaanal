@@ -25,6 +25,7 @@ mod finish;
 mod flows;
 mod fluid;
 mod hold;
+mod oom;
 mod reconfig;
 pub use reconfig::Structural;
 mod replicas;
@@ -44,13 +45,25 @@ use state::{
 /// Most breaker state changes the engine keeps.
 pub const BREAKER_LOG_CAP: usize = 10_000;
 
+/// **Private.** The optional features a topology uses (the `has` field of [`Engine`]).
+#[derive(Clone, Copy)]
+struct Has {
+    /// Some node sets `cpu` (step 8).
+    cpu: bool,
+    /// Some node dies of memory, `on_limit: kill` (step 8K).
+    oom: bool,
+    /// Some node sets a GC cost, `memory.gc` (step 8G).
+    gc: bool,
+}
+
 /// The replay engine. Drive it with [`Engine::submit`] and [`Engine::step`] /
 /// [`Engine::advance_to`]; read answers with [`Engine::drain_finished`].
 pub struct Engine {
     units: Units,
     flows: flows::Flows,
-    /// Whether any node sets `cpu`: the only cost of the feature on the path of one that does not.
-    has_cpu: bool,
+    /// Which optional features any node uses: the only cost of each on the path of a topology that
+    /// does not use it (one `bool`).
+    has: Has,
     /// The topology a live engine was built or last reconfigured from (`None` for a batch engine).
     live_topo: Option<Box<Topology>>,
     /// When each unit's pending CPU event fires (ns), by unit index; a stale event is skipped.
@@ -100,7 +113,14 @@ impl Engine {
         let units = Units::new(topo, headroom);
         Engine {
             flows: flows::Flows::new(units.caps().to_vec()),
-            has_cpu: topo.nodes.iter().any(|n| n.cpu.is_some()),
+            has: Has {
+                cpu: topo.nodes.iter().any(|n| n.cpu.is_some()),
+                oom: Engine::any_oom(topo),
+                gc: topo
+                    .nodes
+                    .iter()
+                    .any(|n| state::Gc::of(n.memory.as_ref()).is_some()),
+            },
             live_topo: headroom.then(|| Box::new(topo.clone())),
             cpu_due: std::collections::HashMap::new(),
             cpu_done: Vec::new(),
@@ -278,6 +298,7 @@ impl Engine {
             last_own: None,
             open_top: None,
             hold_top: None,
+            killed: false,
         });
         sc.joins.clear();
         sc.spans.clear();
@@ -541,6 +562,7 @@ impl Engine {
                 last_own: inherited,
                 open_top: None,
                 hold_top: held,
+                killed: false,
             });
             b += 1 + bs;
         }
@@ -597,6 +619,9 @@ impl Engine {
             req.busy += 1;
         } else {
             let (node, rep) = self.units.target(h);
+            if self.oom_down(r, idx, node, rep) {
+                return;
+            }
             // inside a `hold: call` scope the visit's slot (and rate-limit token) is already taken
             let held = self.holds_unit(r, k, node, rep);
             let tok = &mut live(&mut self.reqs, r).tokens[k];
@@ -648,23 +673,7 @@ impl Engine {
                         return;
                     }
                     Admit::Overflow => {
-                        let status = gate.overflow_status();
-                        if counted {
-                            self.count(node, rep, |c| c.overflowed += 1);
-                        }
-                        self.fail_or_retry(
-                            r,
-                            Failure {
-                                at: now,
-                                idx,
-                                node,
-                                status,
-                                kind: FailKind::Status,
-                                retry_after: None,
-                                refused: counted.then_some((node, rep, false)),
-                                cause: FailCause::Overflow,
-                            },
-                        );
+                        self.refuse_overflow(r, idx, (node, rep), counted);
                         return;
                     }
                 }
@@ -679,7 +688,7 @@ impl Engine {
             self.join_flow(r, k, &x);
             return;
         }
-        let demand = nanos(h.dur);
+        let demand = self.gc_stretch(h, nanos(h.dur));
         if self.cpu_join(r, k, h, demand) {
             return;
         }
@@ -700,7 +709,9 @@ impl Engine {
             (self.units.target(h), h.kind)
         };
         let held = !kind.is_wait() && self.holds_unit(r, k, node, rep);
-        if !kind.is_wait() && !held && self.units.state(node, rep).gate.is_some() {
+        // a hop cut by a kill (step 8K) lost its slot with the copy
+        let killed = std::mem::take(&mut live(&mut self.reqs, r).tokens[k].killed);
+        if !kind.is_wait() && !held && !killed && self.units.state(node, rep).gate.is_some() {
             self.mark(node, now);
             // FIFO hand-over at this instant: the slot never looks free to a later arrival.
             let next = self

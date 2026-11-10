@@ -298,7 +298,8 @@ impl NodeConfig {
         match (own, self.instance()) {
             // an instance fills the side the node leaves out, as it does for `cpu`
             ((None, None), Some(i)) if !matches!(self, NodeConfig::Cache(_)) => {
-                let b = Some(i.net_bytes_per_s());
+                // a type whose source gives no network figure leaves the card unlimited, as absent does
+                let b = i.net_bytes_per_s();
                 (b, b)
             }
             _ => own,
@@ -450,11 +451,11 @@ impl NodeConfig {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpsConfig {
-    /// Cost of reading one row (`GET /users/{id}`).
+    /// Cost of reading one row (`GET /users/{id}`). Absent = the node's `flavor` preset; with no flavor either, the file is refused.
     pub read: Option<DistConfig>,
-    /// Cost of an insert, update or delete.
+    /// Cost of an insert, update or delete. Absent = the node's `flavor` preset; with no flavor either, the file is refused.
     pub write: Option<DistConfig>,
-    /// Cost of a list or search (`GET /users`).
+    /// Cost of a list or search (`GET /users`). Absent = the node's `flavor` preset; with no flavor either, the file is refused.
     pub scan: Option<DistConfig>,
 }
 

@@ -208,12 +208,12 @@ impl JsonSchema for StepConfig {
                     "type": "object",
                     "properties": {
                         "call": { "type": "string", "description": "Node to call; an edge from the running node to it must exist." },
-                        "op": { "type": "string", "enum": ["read", "write", "scan"], "description": "Op for this step (database or monolith with inline ops)." },
+                        "op": { "type": "string", "enum": ["read", "write", "scan"], "description": "Op for this step (database or monolith with inline ops). Absent = the op the endpoint implies (a read, a write or a scan by its method and path)." },
                         "repeat": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Sequential calls; default is the edge's `calls`." },
                         "prob": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "Share of requests that take this call; default is the edge's `prob`. One draw covers every `repeat`." },
-                        "chain": { "type": "array", "items": step, "description": "Inline body for a service or monolith callee." },
-                        "with": { "type": "string", "description": "A named chain of the callee (its `chains:`)." },
-                        "via": { "type": "string", "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op." }
+                        "chain": { "type": "array", "items": step, "description": "Inline body for a service or monolith callee. Absent = the callee's own chain." },
+                        "with": { "type": "string", "description": "A named chain of the callee (its `chains:`). Absent = the callee's endpoint chain." },
+                        "via": { "type": "string", "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op. Absent = the callee as a whole." }
                     },
                     "required": ["call"],
                     "additionalProperties": false
@@ -257,7 +257,7 @@ impl JsonSchema for ErrorMapping {
                     "type": "object",
                     "properties": {
                         "status": { "type": "integer", "minimum": 200, "maximum": 599, "description": "HTTP status to answer with." },
-                        "body": { "description": "Response body, returned verbatim." }
+                        "body": { "description": "Response body, returned verbatim. Absent = no body." }
                     },
                     "required": ["status"],
                     "additionalProperties": false

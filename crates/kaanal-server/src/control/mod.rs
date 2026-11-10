@@ -40,6 +40,7 @@ mod chaos;
 mod doc;
 mod draft;
 mod guard;
+mod instances;
 mod lease;
 #[cfg(test)]
 mod manifest;
@@ -60,6 +61,7 @@ pub use chaos::{clear_keyed, clear_node, get_chaos, set_chaos, set_chaos_keyed, 
 pub use doc::get_demo;
 pub use draft::{apply_draft, get_draft, put_draft, reload_draft, save_draft, validate_draft};
 pub use guard::guard;
+pub use instances::get_instances;
 pub use lease::lease_task;
 pub use payload::{
     delete as delete_payload, list as list_payloads, preview as payload_preview, put as put_payload,

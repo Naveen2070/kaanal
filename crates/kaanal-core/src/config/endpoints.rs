@@ -25,7 +25,7 @@ pub struct EndpointConfig {
     #[serde(rename = "override")]
     pub response: Option<Override>,
     /// Failure → response, looked up by failing node, then status (`504`), then class
-    /// (`5xx`, `4xx`); a value is a status or `{ status, body }`.
+    /// (`5xx`, `4xx`); a value is a status or `{ status, body }`. Absent = a failure answers with its own status.
     #[serde(default)]
     pub error_map: IndexMap<String, ErrorMapping>,
     /// Overrides for the UI states a pin can force, keyed `loading`, `empty`, `error` or
@@ -33,7 +33,7 @@ pub struct EndpointConfig {
     #[serde(default)]
     pub states: IndexMap<String, StateOverrideConfig>,
     /// Name of an in-memory collection this route reads or writes (`GET /x` lists, `GET /x/{id}`
-    /// gets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`.
+    /// gets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`. Absent = the route answers from its chain, `override:` or generated data, not a collection.
     pub collection: Option<String>,
     /// Records a paged list route reports in total, 0 to 10000 (default: seeded per route);
     /// cannot be combined with `override` or `collection`.

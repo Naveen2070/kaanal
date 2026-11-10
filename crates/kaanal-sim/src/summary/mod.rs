@@ -173,6 +173,9 @@ pub struct NodeSummary {
     pub timed_out: u64,
     /// Calls to this node that an open circuit breaker refused without sending (step 7c).
     pub short_circuited: u64,
+    /// Times a copy of this node was killed for lack of memory (`memory: { on_limit: kill }`, step
+    /// 8K); each kill failed what the copy held and kept it down for its `restart`.
+    pub oom_kills: u64,
 }
 
 /// One replica of a node.
@@ -498,6 +501,12 @@ fn warnings(
             n.timed_out, n.name
         ));
     }
+    for n in nodes.iter().filter(|n| n.oom_kills > 0) {
+        warnings.push(format!(
+            "node {} ran out of memory {} time(s) and was killed: what it held failed with a 502 and it refused calls (503) until it restarted",
+            n.name, n.oom_kills
+        ));
+    }
     for n in nodes.iter().filter(|n| n.short_circuited > 0) {
         warnings.push(format!(
             "{} calls to node {} were refused by an open circuit breaker (they failed at once with a 503 and never reached it)",
@@ -645,6 +654,7 @@ pub fn summarize(
                 overflowed: st.overflowed,
                 timed_out: st.timed_out,
                 short_circuited: st.short_circuited,
+                oom_kills: st.oom_kills,
             }
         })
         .collect();

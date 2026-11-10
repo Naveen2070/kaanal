@@ -30,6 +30,7 @@ pub(crate) struct Dropped {
     pub rate_limit: u32,
     pub deadline: u32,
     pub breaker: u32,
+    pub oom: u32,
     pub chaos: u32,
 }
 
@@ -266,6 +267,7 @@ impl Counts {
                     Some(FailCause::RateLimit) => d.rate_limit += 1,
                     Some(FailCause::Deadline) => d.deadline += 1,
                     Some(FailCause::Breaker) => d.breaker += 1,
+                    Some(FailCause::Oom) => d.oom += 1,
                     Some(FailCause::Chaos) | None => d.chaos += 1,
                 }
                 if build {

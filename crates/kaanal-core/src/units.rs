@@ -171,6 +171,7 @@ field_fns! {
     memory_limit, "limit", false;
     memory_per_request, "per_request", false;
     memory_base, "base", false;
+    custom_memory, "memory", false;
 }
 
 #[cfg(test)]

@@ -192,10 +192,10 @@
               "type": "null"
             }
           ],
-          "description": "Edge only: caps the edge's `bandwidth` (bytes per second, at least 1, at most the\nedge's own; a whole number or text with a unit like `500KB/s`)."
+          "description": "Edge only: caps the edge's `bandwidth` (bytes per second, at least 1, at most the\nedge's own; a whole number or text with a unit like `500KB/s`). Absent = the edge keeps its own `bandwidth`."
         },
         "down": {
-          "description": "Hard outage.",
+          "description": "Hard outage. Absent = not down.",
           "type": [
             "boolean",
             "null"
@@ -210,10 +210,10 @@
               "type": "null"
             }
           ],
-          "description": "A link: the edge from one node to another (it must exist). Takes no node, endpoint or\nreplica; sets `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`,\n`down` (a partition) and `bandwidth_cap`."
+          "description": "A link: the edge from one node to another (it must exist). Takes no node, endpoint or\nreplica; sets `latency_ms`, `jitter_ms`, `error_rate` with `error_kind` `reset` or `hang`,\n`down` (a partition) and `bandwidth_cap`. Absent = the entry targets a node, an endpoint or the whole system, not a link."
         },
         "endpoint": {
-          "description": "`METHOD /path`: the front door of that endpoint.",
+          "description": "`METHOD /path`: the front door of that endpoint. Absent = every endpoint.",
           "type": [
             "string",
             "null"
@@ -227,7 +227,7 @@
           ]
         },
         "error_rate": {
-          "description": "Failure probability, 0 to 1.",
+          "description": "Failure probability, 0 to 1. Absent = no extra failures.",
           "format": "double",
           "type": [
             "number",
@@ -254,7 +254,7 @@
           ]
         },
         "jitter_ms": {
-          "description": "Edge only: random extra latency of up to this many milliseconds either way.",
+          "description": "Edge only: random extra latency of up to this many milliseconds either way. Absent = no jitter.",
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -263,7 +263,7 @@
           ]
         },
         "latency_ms": {
-          "description": "Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc\nattribute cannot compute it, so keep the two in step).",
+          "description": "Extra latency in milliseconds (at most 300000, which is `MAX_LATENCY_ADD`; a doc\nattribute cannot compute it, so keep the two in step). Absent = no extra latency.",
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -272,14 +272,14 @@
           ]
         },
         "node": {
-          "description": "A node name. With `endpoint`: only when visited through that endpoint; with `replica`:\none copy of the node.",
+          "description": "A node name. With `endpoint`: only when visited through that endpoint; with `replica`:\none copy of the node. Absent = not tied to a node.",
           "type": [
             "string",
             "null"
           ]
         },
         "replica": {
-          "description": "With `node`: one replica of it (0-based), whatever the endpoint. Needs the node to have\nthat many `replicas`.",
+          "description": "With `node`: one replica of it (0-based), whatever the endpoint. Needs the node to have\nthat many `replicas`. Absent = every copy.",
           "format": "uint16",
           "maximum": 63,
           "minimum": 0,
@@ -301,6 +301,51 @@
           "maximum": 4096,
           "minimum": 0.001,
           "type": "number"
+        }
+      },
+      "required": [
+        "cores"
+      ],
+      "type": "object"
+    },
+    "CustomInstance": {
+      "additionalProperties": false,
+      "description": "A machine you describe yourself (an entry of `instances:`).",
+      "properties": {
+        "bandwidth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeBandwidth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The network card, in bytes per second: one number for both directions or `{ out, in }`, like\na node's `bandwidth`. Absent = the card is not limited."
+        },
+        "cores": {
+          "description": "CPUs, above 0 (at least 0.001) and at most 4096: a number like `16` or `0.5`. Required.",
+          "format": "double",
+          "maximum": 4096,
+          "minimum": 0.001,
+          "type": "number"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Memory in bytes (`64GB`, `512MiB`); a node that sets a `memory:` takes its `limit` from here\nwhen it leaves it out. Absent = the instance gives no memory limit."
         }
       },
       "required": [
@@ -404,7 +449,7 @@
               "type": "null"
             }
           ],
-          "description": "How calls over this edge pick a replica of the callee; overrides the callee's own\n`balance`."
+          "description": "How calls over this edge pick a replica of the callee; overrides the callee's own\n`balance`. Absent = the callee's own `balance` (round-robin when it sets none)."
         },
         "bandwidth": {
           "anyOf": [
@@ -625,7 +670,7 @@
           ]
         },
         "collection": {
-          "description": "Name of an in-memory collection this route reads or writes (`GET /x` lists, `GET /x/{id}`\ngets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`.",
+          "description": "Name of an in-memory collection this route reads or writes (`GET /x` lists, `GET /x/{id}`\ngets, `POST /x` adds, `DELETE /x/{id}` removes); cannot be combined with `override`. Absent = the route answers from its chain, `override:` or generated data, not a collection.",
           "type": [
             "string",
             "null"
@@ -635,7 +680,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/ErrorMapping"
           },
-          "description": "Failure → response, looked up by failing node, then status (`504`), then class\n(`5xx`, `4xx`); a value is a status or `{ status, body }`.",
+          "description": "Failure → response, looked up by failing node, then status (`504`), then class\n(`5xx`, `4xx`); a value is a status or `{ status, body }`. Absent = a failure answers with its own status.",
           "type": "object"
         },
         "op": {
@@ -710,7 +755,7 @@
           "additionalProperties": false,
           "properties": {
             "body": {
-              "description": "Response body, returned verbatim."
+              "description": "Response body, returned verbatim. Absent = no body."
             },
             "status": {
               "description": "HTTP status to answer with.",
@@ -899,6 +944,17 @@
           "default": null,
           "description": "What the process holds with no request (default 0)."
         },
+        "gc": {
+          "default": null,
+          "description": "Garbage-collection cost, off unless set: what collecting costs per byte allocated relative to\nthe node's own work, above 0 and at most 10 (`0.2` = a fifth). Own work then takes\n`1 + gc x u / (1 - u)` times its drawn time, `u` being the share of the memory that is live\nwhen it starts. **An estimate**: the shape is published (Appel 1987; Jones, Hosking and Moss,\n*The Garbage Collection Handbook*, 2011), the weight depends on the runtime and is yours.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "maximum": 10,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "limit": {
           "anyOf": [
             {
@@ -916,6 +972,18 @@
           "default": null,
           "description": "The copy's memory in bytes (`512MiB`, `8GB`); absent = the `instance:`'s."
         },
+        "on_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnLimit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What happens to a request the memory cannot hold: `refuse` (default) turns it away, `kill`\ntakes the whole copy down as the kernel's OOM killer does (step 8K)."
+        },
         "per_request": {
           "anyOf": [
             {
@@ -932,6 +1000,12 @@
           ],
           "default": null,
           "description": "What one request being served holds, in bytes: required."
+        },
+        "restart": {
+          "default": null,
+          "description": "With `on_limit: kill`: how long the copy stays down before it is back, empty (default `10s`,\nabove 0, at most 1h). Refused for `refuse`.",
+          "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
+          "type": "string"
         }
       },
       "type": "object"
@@ -1071,7 +1145,7 @@
             },
             "instance": {
               "default": null,
-              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
               "type": [
                 "string",
                 "null"
@@ -1095,7 +1169,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
             "per_kb": {
               "anyOf": [
@@ -1117,7 +1191,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Processing time per request."
+              "description": "Processing time per request. Absent = no processing time of its own (0)."
             },
             "rate_limit": {
               "anyOf": [
@@ -1128,7 +1202,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -1190,7 +1264,7 @@
                 },
                 "type": "array"
               },
-              "description": "Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.",
+              "description": "Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`. Absent = no named chains.",
               "type": "object"
             },
             "concurrency": {
@@ -1229,7 +1303,7 @@
             },
             "instance": {
               "default": null,
-              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
               "type": [
                 "string",
                 "null"
@@ -1253,7 +1327,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
             "per_kb": {
               "anyOf": [
@@ -1275,7 +1349,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Processing time per request."
+              "description": "Processing time per request. Absent = no processing time of its own (0)."
             },
             "rate_limit": {
               "anyOf": [
@@ -1286,7 +1360,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -1300,7 +1374,7 @@
               ]
             },
             "spec": {
-              "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
+              "description": "`OpenAPI` 3.0 spec file, relative to this config file. Absent = no spec routes come from this node.",
               "type": [
                 "string",
                 "null"
@@ -1355,7 +1429,7 @@
                 },
                 "type": "array"
               },
-              "description": "Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`.",
+              "description": "Named chains (cron jobs, queue consumers) a step reaches with `with: <name>`. Absent = no named chains.",
               "type": "object"
             },
             "concurrency": {
@@ -1405,7 +1479,7 @@
             },
             "instance": {
               "default": null,
-              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
               "type": [
                 "string",
                 "null"
@@ -1429,7 +1503,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
             "ops": {
               "anyOf": [
@@ -1440,7 +1514,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Inline read/write/scan costs; any op left out comes from `flavor`. Used once\nendpoint chains land."
+              "description": "Inline read/write/scan costs; any op left out comes from `flavor`. Used once\nendpoint chains land. Absent = no inline ops (the node only calls others)."
             },
             "per_kb": {
               "anyOf": [
@@ -1462,7 +1536,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Processing time per request."
+              "description": "Processing time per request. Absent = no processing time of its own (0)."
             },
             "rate_limit": {
               "anyOf": [
@@ -1473,7 +1547,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -1487,7 +1561,7 @@
               ]
             },
             "spec": {
-              "description": "`OpenAPI` 3.0 spec file, relative to this config file.",
+              "description": "`OpenAPI` 3.0 spec file, relative to this config file. Absent = no spec routes come from this node.",
               "type": [
                 "string",
                 "null"
@@ -1571,7 +1645,7 @@
             },
             "instance": {
               "default": null,
-              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
               "type": [
                 "string",
                 "null"
@@ -1595,7 +1669,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
             "ops": {
               "anyOf": [
@@ -1606,7 +1680,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Read/write/scan costs. Required in full unless `flavor` fills the gaps."
+              "description": "Read/write/scan costs. Required in full unless `flavor` fills the gaps. Absent = the `flavor` preset; with no flavor either the file is refused."
             },
             "per_kb": {
               "anyOf": [
@@ -1628,7 +1702,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Connection pool: the slot limit `size`, a wait queue of `queue` and the status\n`overflow_status` when it is full; the same as the map form of `concurrency`; set one\nof the two."
+              "description": "Connection pool: the slot limit `size`, a wait queue of `queue` and the status\n`overflow_status` when it is full; the same as the map form of `concurrency`; set one\nof the two. Absent = no pool limit."
             },
             "rate_limit": {
               "anyOf": [
@@ -1639,7 +1713,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -1704,7 +1778,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Preset for `hit_ratio`, `hit` and `miss` (estimates)."
+              "description": "Preset for `hit_ratio`, `hit` and `miss` (estimates). Absent = no preset: `hit_ratio`, `hit` and `miss` are then all required."
             },
             "hit": {
               "anyOf": [
@@ -1715,7 +1789,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cost of a hit."
+              "description": "Cost of a hit. Absent = the `flavor` preset (a cache with neither is refused)."
             },
             "hit_ratio": {
               "default": null,
@@ -1746,7 +1820,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cost of finding out it is a miss."
+              "description": "Cost of finding out it is a miss. Absent = the `flavor` preset (a cache with neither is refused)."
             },
             "per_kb": {
               "anyOf": [
@@ -1768,7 +1842,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -1881,7 +1955,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Connection pool: the slot limit `size`, a wait queue of `queue` and the status\n`overflow_status` when it is full; the same as the map form of `concurrency`; set one\nof the two."
+              "description": "Connection pool: the slot limit `size`, a wait queue of `queue` and the status\n`overflow_status` when it is full; the same as the map form of `concurrency`; set one\nof the two. Absent = no pool limit."
             },
             "proc": {
               "anyOf": [
@@ -1892,7 +1966,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Response time of the API."
+              "description": "Response time of the API. Absent = no processing time of its own (0)."
             },
             "proxy": {
               "default": null,
@@ -1912,7 +1986,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -2016,7 +2090,7 @@
             },
             "instance": {
               "default": null,
-              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
               "type": [
                 "string",
                 "null"
@@ -2040,7 +2114,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
             "per_kb": {
               "anyOf": [
@@ -2062,7 +2136,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cost of one login, one JWKS request or one gateway token check."
+              "description": "Cost of one login, one JWKS request or one gateway token check. Absent = no processing time of its own (0)."
             },
             "rate_limit": {
               "anyOf": [
@@ -2073,7 +2147,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429."
+              "description": "Token-bucket limit on how fast requests may reach this node: `rps` refilled per second,\nat most `burst` at once; beyond it the request fails with 429. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -2103,7 +2177,7 @@
               "type": "string"
             },
             "users": {
-              "description": "Accounts that can log in (synthetic only); usernames are unique, at most 1000 users.",
+              "description": "Accounts that can log in (synthetic only); usernames are unique, at most 1000 users. Absent = no accounts.",
               "items": {
                 "$ref": "#/$defs/UserConfig"
               },
@@ -2183,7 +2257,7 @@
             },
             "instance": {
               "default": null,
-              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs).",
+              "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
               "type": [
                 "string",
                 "null"
@@ -2207,7 +2281,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`."
+              "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
             "per_kb": {
               "anyOf": [
@@ -2218,7 +2292,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Extra processing time per KB of payload (request and response each, once per body)."
+              "description": "Extra processing time per KB of payload (request and response each, once per body). Absent = no size-dependent cost."
             },
             "proc": {
               "anyOf": [
@@ -2240,7 +2314,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast calls may reach this node: 429 beyond it."
+              "description": "Token-bucket limit on how fast calls may reach this node: 429 beyond it. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -2331,7 +2405,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Label only (`s3`, `gcs`, `blob`); it sets no numbers."
+              "description": "Label only (`s3`, `gcs`, `blob`); it sets no numbers. Absent = no label (`s3` shown)."
             },
             "locale": {
               "default": null,
@@ -2351,7 +2425,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Token-bucket limit on how fast calls may reach this node (the store's request rate):\n`rps` refilled per second, at most `burst` at once; beyond it the call fails with 503\n(S3's \"Slow Down\"), not 429 like the other kinds."
+              "description": "Token-bucket limit on how fast calls may reach this node (the store's request rate):\n`rps` refilled per second, at most `burst` at once; beyond it the call fails with 503\n(S3's \"Slow Down\"), not 429 like the other kinds. Absent = no rate limit."
             },
             "replicas": {
               "default": null,
@@ -2399,6 +2473,21 @@
         }
       ]
     },
+    "OnLimit": {
+      "description": "What a node does with a request its memory cannot hold (`memory.on_limit`).",
+      "oneOf": [
+        {
+          "const": "refuse",
+          "description": "Turn the request away (the slot count of the memory, like `concurrency`).",
+          "type": "string"
+        },
+        {
+          "const": "kill",
+          "description": "Kill the copy: everything it is serving or has queued fails with 502, and it refuses work\n(503) until `restart` has passed. The other copies carry on.",
+          "type": "string"
+        }
+      ]
+    },
     "Op": {
       "description": "A database operation. Discriminants index `Node::ops` ([read, write, scan]);\nkeep in sync with the topology.",
       "oneOf": [
@@ -2432,7 +2521,7 @@
               "type": "null"
             }
           ],
-          "description": "Cost of reading one row (`GET /users/{id}`)."
+          "description": "Cost of reading one row (`GET /users/{id}`). Absent = the node's `flavor` preset; with no flavor either, the file is refused."
         },
         "scan": {
           "anyOf": [
@@ -2443,7 +2532,7 @@
               "type": "null"
             }
           ],
-          "description": "Cost of a list or search (`GET /users`)."
+          "description": "Cost of a list or search (`GET /users`). Absent = the node's `flavor` preset; with no flavor either, the file is refused."
         },
         "write": {
           "anyOf": [
@@ -2454,7 +2543,7 @@
               "type": "null"
             }
           ],
-          "description": "Cost of an insert, update or delete."
+          "description": "Cost of an insert, update or delete. Absent = the node's `flavor` preset; with no flavor either, the file is refused."
         }
       },
       "type": "object"
@@ -2465,7 +2554,7 @@
       "properties": {
         "body": {
           "default": null,
-          "description": "Response body, returned verbatim."
+          "description": "Response body, returned verbatim. Absent = no body."
         },
         "content_type": {
           "default": null,
@@ -2511,7 +2600,7 @@
       "description": "A pin as written in a scenario file or sent to the API.",
       "properties": {
         "delay": {
-          "description": "Extra delay before the answer (above 0, at most 5 min).",
+          "description": "Extra delay before the answer (above 0, at most 5 min). Absent = the state's own delay (`loading` +10 s, `slow` +2 s, none otherwise).",
           "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
           "type": "string"
         },
@@ -2524,7 +2613,7 @@
           "description": "The state to force."
         },
         "status": {
-          "description": "Status of the response: 400-599 for `error`, 200-299 for `empty`.",
+          "description": "Status of the response: 400-599 for `error`, 200-299 for `empty`. Absent = 500 for `error`, the endpoint's own success status for `empty`.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -2729,15 +2818,15 @@
       "description": "A `states:` override as written on an `endpoints:` entry.",
       "properties": {
         "body": {
-          "description": "Body for this state, returned verbatim."
+          "description": "Body for this state, returned verbatim. Absent = the generated body."
         },
         "delay": {
-          "description": "Delay for this state (above 0, at most 5 min).",
+          "description": "Delay for this state (above 0, at most 5 min). Absent = the state's own delay (`loading` +10 s, `slow` +2 s, none otherwise).",
           "pattern": "^\\s*([0-9]+(\\.[0-9]+)?\\s*[a-zA-Zµ]+\\s*)+$",
           "type": "string"
         },
         "status": {
-          "description": "Status for this state (400-599 for `error`, 200-299 for `empty`).",
+          "description": "Status for this state (400-599 for `error`, 200-299 for `empty`). Absent = 500 for `error`, the endpoint's own success status for `empty`.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -2764,14 +2853,14 @@
               "type": "string"
             },
             "chain": {
-              "description": "Inline body for a service or monolith callee.",
+              "description": "Inline body for a service or monolith callee. Absent = the callee's own chain.",
               "items": {
                 "$ref": "#/$defs/Step"
               },
               "type": "array"
             },
             "op": {
-              "description": "Op for this step (database or monolith with inline ops).",
+              "description": "Op for this step (database or monolith with inline ops). Absent = the op the endpoint implies (a read, a write or a scan by its method and path).",
               "enum": [
                 "read",
                 "write",
@@ -2792,11 +2881,11 @@
               "type": "integer"
             },
             "via": {
-              "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op.",
+              "description": "One of the callee's endpoints, `\"METHOD /path\"`; uses that endpoint's chain and op. Absent = the callee as a whole.",
               "type": "string"
             },
             "with": {
-              "description": "A named chain of the callee (its `chains:`).",
+              "description": "A named chain of the callee (its `chains:`). Absent = the callee's endpoint chain.",
               "type": "string"
             }
           },
@@ -2969,7 +3058,7 @@
       "description": "`controlled` (default): timings and failures follow `seed`, so a run can be replayed.\n`realistic`: a seed is picked at startup (and printed), so runs differ like a real system."
     },
     "edges": {
-      "description": "Dependency edges, caller → dependency.",
+      "description": "Dependency edges, caller → dependency. Absent = no edges.",
       "items": {
         "$ref": "#/$defs/EdgeConfig"
       },
@@ -2984,7 +3073,7 @@
           "type": "null"
         }
       ],
-      "description": "Per-endpoint chains, overrides and error maps: a path to a YAML file (relative to this\nfile, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `\"METHOD /path\"`."
+      "description": "Per-endpoint chains, overrides and error maps: a path to a YAML file (relative to this\nfile, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `\"METHOD /path\"`. Absent = routes come from the specs, with no overrides."
     },
     "header_bytes": {
       "anyOf": [
@@ -2996,6 +3085,13 @@
         }
       ],
       "description": "Header bytes an HTTP call carries on top of its body: a size for both sides, or\n`{ request, response }`. Default 600 B and 400 B (estimates); `0` is off. Charged on every\nwire transfer and on the per-KB cost of an HTTP node, so only a topology that has a\n`bandwidth`, a `per_kb` or a storage `throughput` is affected."
+    },
+    "instances": {
+      "additionalProperties": {
+        "$ref": "#/$defs/CustomInstance"
+      },
+      "description": "Your own instance types, by name: a machine that is not in the cloud table (a self-hosted\nserver, another provider's size). A node uses one with `instance: name`; it fills the\n`cpu.cores`, `bandwidth` and `memory.limit` the node leaves out. Names have no `/`. Absent =\nnone: nodes can still use the cloud table's `provider/type` names.",
+      "type": "object"
     },
     "locale": {
       "default": null,
@@ -3025,7 +3121,7 @@
       "additionalProperties": {
         "$ref": "#/$defs/ScenarioConfig"
       },
-      "description": "Named chaos scenarios (a list of chaos entries each), switched on and off at runtime.\nMore can live in `scenarios/NAME.yaml` next to this file.",
+      "description": "Named chaos scenarios (a list of chaos entries each), switched on and off at runtime.\nMore can live in `scenarios/NAME.yaml` next to this file. Absent = none (files under `scenarios/` may add them).",
       "type": "object"
     },
     "seed": {
@@ -3047,7 +3143,7 @@
       "additionalProperties": {
         "$ref": "#/$defs/TrafficConfig"
       },
-      "description": "Named load profiles for the simulator: a total rate and a weighted mix of endpoints.",
+      "description": "Named load profiles for the simulator: a total rate and a weighted mix of endpoints. Absent = no load profiles (the simulator needs one to run).",
       "type": "object"
     },
     "version": {

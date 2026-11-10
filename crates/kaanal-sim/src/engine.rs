@@ -140,6 +140,7 @@ pub(crate) fn simulate(
                         FailCause::Overflow => Cause::Overflow,
                         FailCause::Deadline => Cause::Deadline,
                         FailCause::Breaker => Cause::Breaker,
+                        FailCause::Oom => Cause::Oom,
                     }),
                     hops: f.hops.into_iter().map(|h| (h.hop, h.wait)).collect(),
                     holds: f.holds,
@@ -227,6 +228,7 @@ fn report(
             overflowed: c.overflowed,
             timed_out: c.timed_out,
             short_circuited: c.short_circuited,
+            oom_kills: c.oom_kills,
         })
         .collect();
     // measured utilization of each replica and link: busy slot-time inside the window over its

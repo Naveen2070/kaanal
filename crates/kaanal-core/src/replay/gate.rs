@@ -93,6 +93,13 @@ impl Gate {
         started
     }
 
+    /// Empties the gate: every slot free, nobody waiting (the copy was killed, step 8K). The limits
+    /// stay; the caller has failed the waiters and the running hops release nothing.
+    pub fn reset(&mut self) {
+        self.busy = 0;
+        self.queue.clear();
+    }
+
     /// Removes a queued waiter (its request failed); the others keep their order.
     pub fn cancel(&mut self, w: Waiter) {
         self.queue.retain(|&e| e != w);

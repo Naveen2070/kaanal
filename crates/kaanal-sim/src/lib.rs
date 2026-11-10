@@ -169,10 +169,12 @@ pub enum Cause {
     Deadline,
     /// The caller's circuit breaker was open and rejected the call.
     Breaker,
+    /// The copy was killed for lack of memory, or was down from a kill (step 8K).
+    Oom,
 }
 
 impl Cause {
-    /// `chaos|rate_limit|overflow|deadline|breaker`.
+    /// `chaos|rate_limit|overflow|deadline|breaker|oom`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -181,6 +183,7 @@ impl Cause {
             Cause::Overflow => "overflow",
             Cause::Deadline => "deadline",
             Cause::Breaker => "breaker",
+            Cause::Oom => "oom",
         }
     }
 }
@@ -242,6 +245,8 @@ pub struct NodeStats {
     /// Calls to this node that its caller's open circuit breaker refused without sending (step 7c),
     /// over reported requests.
     pub short_circuited: u64,
+    /// Times a copy of this node was killed for lack of memory (step 8K), over reported requests.
+    pub oom_kills: u64,
 }
 
 /// Simulates `cfg` on `topo` under fixed `chaos`. Deterministic: same inputs, same report.

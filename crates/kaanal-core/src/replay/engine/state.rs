@@ -41,6 +41,9 @@ pub enum FailCause {
     Deadline,
     /// The caller's circuit breaker was open and rejected the call (step 7c).
     Breaker,
+    /// The copy was killed for lack of memory while serving or queueing it, or was still down
+    /// from a kill (step 8K).
+    Oom,
 }
 
 /// What a finished request experienced.
@@ -122,6 +125,8 @@ pub struct NodeCounters {
     pub limited: u64,
     /// Hop starts refused by a full queue.
     pub overflowed: u64,
+    /// Times the copy was killed for lack of memory (step 8K), counted for every kill.
+    pub oom_kills: u64,
     /// Requests failed by this node's deadline, counted at the span's node.
     pub timed_out: u64,
     /// Calls the caller's circuit breaker rejected without sending (step 7c), counted at the callee.
@@ -145,6 +150,9 @@ pub(super) struct Token {
     /// Innermost hold this token stands in (`HoldState::parent` chains outward). A branch token
     /// starts with its parent's, which it may look at but never lets go of (`HoldState::owner`).
     pub(super) hold_top: Option<usize>,
+    /// The copy this token was running a hop on was killed for lack of memory (step 8K): the hop
+    /// still ends on its own, but its slot went with the copy, so it releases nothing.
+    pub(super) killed: bool,
 }
 
 /// **Private.** A `parallel` block waiting for its branches.
@@ -340,6 +348,48 @@ pub(super) struct NodeState {
     pub(super) cpu: Option<Box<super::cpu::CpuUnit>>,
     /// Last time `busy` changed (ns); `NodeCounters::area` is integrated up to here.
     pub(super) since: u64,
+    /// How long a kill keeps the copy down (ns); `None` = this node refuses what its memory cannot
+    /// hold instead of dying (step 8K).
+    pub(super) oom: Option<u64>,
+    /// The copy is down until this time (ns); 0 = up.
+    pub(super) down_until: u64,
+    /// What garbage collection costs the copy's own work (step 8G); `None` = nothing.
+    pub(super) gc: Option<Gc>,
+}
+
+/// **Private.** The memory figures that set the slowdown of own work from garbage collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Gc {
+    pub(super) base: u64,
+    pub(super) per_request: u64,
+    pub(super) limit: u64,
+    /// The weight, in thousandths.
+    pub(super) weight: u32,
+}
+
+impl Gc {
+    /// The figures of a node's memory, when it sets a GC cost.
+    pub(super) fn of(m: Option<&crate::config::Memory>) -> Option<Gc> {
+        m.filter(|m| m.gc_permille > 0).map(|m| Gc {
+            base: m.base,
+            per_request: m.per_request,
+            limit: m.limit,
+            weight: m.gc_permille,
+        })
+    }
+
+    /// `demand` ns of own work, stretched for `live` requests being served now: by
+    /// `1 + g x u / (1 - u)` with `u` the live share of the memory, capped at 0.99 (past it the
+    /// process is dying, which is `on_limit`'s business). Integer thousandths throughout.
+    pub(super) fn stretch(&self, live: u64, demand: u64) -> u64 {
+        let used = self
+            .base
+            .saturating_add(live.saturating_mul(self.per_request));
+        let u = (u128::from(used) * 1000 / u128::from(self.limit.max(1))).min(990);
+        let extra = u128::from(self.weight) * u / (1000 - u);
+        let factor = 1000 + extra;
+        u64::try_from(u128::from(demand) * factor / 1000).unwrap_or(u64::MAX)
+    }
 }
 
 /// **Private.** The live request in slot `r`.

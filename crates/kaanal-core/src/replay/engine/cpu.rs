@@ -74,6 +74,15 @@ impl CpuUnit {
         self.busy
     }
 
+    /// The copy was killed (step 8K): everything running on its CPUs stops at once. Returns who was
+    /// running, so the caller can end those hops now instead of when their work would have finished.
+    pub(super) fn kill(&mut self, now: u64) -> Vec<(usize, usize)> {
+        self.settle(now);
+        let who = self.runs.drain().map(|Reverse((_, _, w))| w).collect();
+        self.runs.clear();
+        who
+    }
+
     /// Whether `n` running hops all run at full speed: each has a whole core or more.
     fn full(&self, n: usize) -> bool {
         self.cap >= MILLI * n as u64
@@ -163,7 +172,7 @@ impl Engine {
             let mut unit = CpuUnit::new(cap);
             unit.set_window(self.warmup, self.end);
             self.units.states[i].cpu = Some(Box::new(unit));
-            self.has_cpu = true;
+            self.has.cpu = true;
         } else {
             return;
         }
@@ -177,7 +186,7 @@ impl Engine {
     /// [`Engine::cpu_event`]; returns whether it did (otherwise the caller schedules the end as
     /// always). One `bool` check on the path of a topology with no `cpu`.
     pub(super) fn cpu_join(&mut self, r: usize, k: usize, h: &Hop, demand: u64) -> bool {
-        if !self.has_cpu || demand == 0 || !matches!(h.kind, HopKind::Proc | HopKind::Op(_)) {
+        if !self.has.cpu || demand == 0 || !matches!(h.kind, HopKind::Proc | HopKind::Op(_)) {
             return false;
         }
         let i = self.units.at(h.node, h.replica);

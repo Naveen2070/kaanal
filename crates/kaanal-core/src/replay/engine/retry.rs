@@ -150,6 +150,7 @@ impl Engine {
             last_own: None,
             open_top: t.open_top,
             hold_top: t.hold_top,
+            killed: false,
         };
         req.retries.push(RetryState {
             end: at + 1 + size,

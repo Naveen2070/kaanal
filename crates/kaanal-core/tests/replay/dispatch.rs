@@ -159,3 +159,38 @@ fn the_same_plan_always_gives_the_same_run() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn a_copy_killed_for_memory_is_not_a_candidate_while_it_is_down() {
+    // two requests of room per copy: least-conn would choose the idle copy 0, which is down, so the
+    // busier copy 1 gets the call
+    let t = topo(
+        "version: 1
+nodes:
+  app: { type: service, replicas: 2, memory: { limit: 2GB, per_request: 1GB, on_limit: kill, restart: 1s } }
+",
+    );
+    let app = t.id("app").unwrap();
+    let mut e = Engine::new(&t);
+    for (tag, at) in [(0, 0), (1, 1), (2, 2)] {
+        e.submit(ms(at), plan(vec![on(app, 0, 5)]), tag).unwrap(); // the third kills copy 0
+    }
+    e.submit(ms(3), plan(vec![on(app, 1, 50)]), 4).unwrap(); // copy 1 holds one
+    e.submit(ms(4), plan(visit(app, PickKind::LeastConn, 0b11, 0)), 3)
+        .unwrap();
+    let done = run_all(&mut e);
+    assert_eq!(copy_of(&done, 4), 1);
+    // and with every candidate down the pick still names one (the call is then refused there)
+    let mut e = Engine::new(&t);
+    for rep in [0u16, 1] {
+        for n in 0..3u64 {
+            let at = u64::from(rep) * 10 + n;
+            e.submit(ms(at), plan(vec![on(app, rep, 5)]), u64::from(rep) * 3 + n)
+                .unwrap();
+        }
+    }
+    e.submit(ms(30), plan(visit(app, PickKind::LeastConn, 0b11, 0)), 9)
+        .unwrap();
+    let done = run_all(&mut e);
+    assert_eq!(err_of(fin(&done, 6)).1, 503);
+}

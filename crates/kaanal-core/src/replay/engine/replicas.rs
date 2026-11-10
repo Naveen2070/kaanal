@@ -83,6 +83,9 @@ impl Units {
                         .map(|r| Bucket::new(r).with_status(n.kind.rate_limit_status())),
                     cpu: n.cpu.map(|c| Box::new(super::cpu::CpuUnit::new(c))),
                     since: 0,
+                    oom: n.oom_restart.map(super::state::nanos),
+                    down_until: 0,
+                    gc: super::state::Gc::of(n.memory.as_ref()),
                 });
             }
         }
@@ -100,6 +103,9 @@ impl Units {
                 bucket: None,
                 cpu: None,
                 since: 0,
+                oom: None,
+                down_until: 0,
+                gc: None,
             });
             count.push(1);
             counters.push(vec![NodeCounters::default()]);
@@ -114,6 +120,9 @@ impl Units {
                         bucket: None,
                         cpu: None,
                         since: 0,
+                        oom: None,
+                        down_until: 0,
+                        gc: None,
                     });
                 }
                 count.push(copies(n, headroom));

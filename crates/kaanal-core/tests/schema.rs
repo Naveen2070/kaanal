@@ -252,3 +252,120 @@ fn schema_bounds_prob_like_the_loader() {
     assert!(v.is_valid(&step("0.5")));
     assert!(!v.is_valid(&step("0")) && !v.is_valid(&step("2")));
 }
+
+/// Words a field's description uses to say what happens when it is left out.
+const FALLBACK_WORDS: [&str; 17] = [
+    "default",
+    "absent",
+    "unset",
+    "left out",
+    "none",
+    "off unless",
+    "no limit",
+    "not limited",
+    "when empty",
+    "falls back",
+    "omit",
+    "0 =",
+    "empty =",
+    "optional",
+    "unlimited",
+    "inherit",
+    "own",
+];
+
+/// Every object with `properties` anywhere in the schema (a node kind sits inside `NodeConfig`'s
+/// `oneOf`), with the path it was found at.
+fn objects<'a>(v: &'a Value, path: &str, out: &mut Vec<(String, &'a Value)>) {
+    match v {
+        Value::Object(m) => {
+            if m.contains_key("properties") {
+                out.push((path.to_string(), v));
+            }
+            for (k, x) in m {
+                objects(x, &format!("{path}/{k}"), out);
+            }
+        }
+        Value::Array(a) => {
+            for (i, x) in a.iter().enumerate() {
+                objects(x, &format!("{path}/{i}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every optional field says what it falls back to when it is left out: a schema `default`, or a
+/// description that names the fallback ("Absent = ..."). A field added without one fails here, so
+/// the editor's hover text and the docs never leave a gap. Node kinds are checked too.
+#[test]
+fn every_optional_field_states_its_fallback() {
+    let schema = config_schema();
+    let mut found = Vec::new();
+    objects(&schema, "", &mut found);
+    assert!(found.len() > 20, "the walk found {} objects", found.len());
+    let mut bare = Vec::new();
+    let mut checked = 0;
+    for (path, table) in found {
+        let required: Vec<&str> = table["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        for (field, v) in table["properties"].as_object().into_iter().flatten() {
+            if required.contains(&field.as_str()) {
+                continue;
+            }
+            checked += 1;
+            let text = v["description"].as_str().unwrap_or_default().to_lowercase();
+            if v.get("default").is_none() && !FALLBACK_WORDS.iter().any(|w| text.contains(w)) {
+                bare.push(format!("{path}.{field}"));
+            }
+        }
+    }
+    assert!(checked > 100, "only {checked} optional fields were checked");
+    assert!(
+        bare.is_empty(),
+        "these optional fields do not say what happens when they are left out (add `Absent = ...` to their doc comment): {bare:?}"
+    );
+}
+
+/// The fields added in steps 8 to 8K each carry their fallback in the schema text.
+#[test]
+fn the_memory_and_instance_fields_name_their_defaults() {
+    let schema = config_schema();
+    let text = |def: &str, field: &str| {
+        schema["$defs"][def]["properties"][field]["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+    };
+    assert!(text("MemoryConfig", "base").contains("default 0"));
+    assert!(text("MemoryConfig", "on_limit").contains("default"));
+    assert!(text("MemoryConfig", "restart").contains("default"));
+    assert!(text("MemoryConfig", "gc").contains("off unless"));
+    assert!(text("MemoryConfig", "limit").contains("absent"));
+    assert!(text("Override", "content_type").contains("left out"));
+    assert!(text("Override", "encoding").contains("left out"));
+    // `instance` is a field of every node kind that has `cpu`
+    let mut found = Vec::new();
+    objects(&schema, "", &mut found);
+    let with_instance: Vec<_> = found
+        .iter()
+        .filter_map(|(_, t)| t["properties"].get("instance"))
+        .collect();
+    assert_eq!(
+        with_instance.len(),
+        6,
+        "gateway, service, monolith, database, auth, load-balancer"
+    );
+    for i in with_instance {
+        assert!(
+            i["description"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Absent = none")
+        );
+    }
+}

@@ -29,6 +29,7 @@ mod conn;
 mod endpoints;
 mod kinds;
 mod limits;
+mod machine;
 mod nodes;
 mod retry;
 mod scenario;
@@ -55,13 +56,14 @@ pub use kinds::{
     ServiceConfig,
 };
 pub use limits::{BoundedConcurrency, ConcurrencyConfig, PoolConfig, RateLimitConfig};
+pub use machine::CustomInstance;
 pub use nodes::{CacheFlavor, DbFlavor, Hold, NodeConfig, NodeKind, OpsConfig};
 pub use retry::{Abandon, Budget, DEFAULT_MAX_ATTEMPTS, MAX_ATTEMPTS, RetryConfig};
 pub use scenario::{ChaosEntry, EdgeRef, ScenarioConfig, parse_scenario};
 use shared::MAX_TOKEN_TTL;
 pub use shared::{
     BodyEncoding, CpuConfig, DEFAULT_HEADER_BYTES, DistConfig, EdgeConfig, HeaderBytes,
-    HeaderBytesSplit, Memory, MemoryConfig, NodeBandwidth, NodeBandwidthSplit, Override,
+    HeaderBytesSplit, Memory, MemoryConfig, NodeBandwidth, NodeBandwidthSplit, OnLimit, Override,
     UserConfig,
 };
 pub use storage::{StorageConfig, StorageFlavor};
@@ -86,7 +88,13 @@ pub struct Config {
     /// Nodes by name, in file order (deterministic error messages).
     #[serde(deserialize_with = "unique_nodes")]
     pub nodes: IndexMap<String, NodeConfig>,
-    /// Dependency edges, caller → dependency.
+    /// Your own instance types, by name: a machine that is not in the cloud table (a self-hosted
+    /// server, another provider's size). A node uses one with `instance: name`; it fills the
+    /// `cpu.cores`, `bandwidth` and `memory.limit` the node leaves out. Names have no `/`. Absent =
+    /// none: nodes can still use the cloud table's `provider/type` names.
+    #[serde(default)]
+    pub instances: IndexMap<String, CustomInstance>,
+    /// Dependency edges, caller → dependency. Absent = no edges.
     #[serde(default)]
     pub edges: Vec<EdgeConfig>,
     /// Header bytes an HTTP call carries on top of its body: a size for both sides, or
@@ -100,11 +108,11 @@ pub struct Config {
     #[serde(default)]
     pub determinism: Determinism,
     /// Per-endpoint chains, overrides and error maps: a path to a YAML file (relative to this
-    /// file, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `"METHOD /path"`.
+    /// file, e.g. `kaanal.endpoints.yaml`) or an inline map keyed by `"METHOD /path"`. Absent = routes come from the specs, with no overrides.
     #[serde(default)]
     pub endpoints: Option<EndpointsConfig>,
     /// Named chaos scenarios (a list of chaos entries each), switched on and off at runtime.
-    /// More can live in `scenarios/NAME.yaml` next to this file.
+    /// More can live in `scenarios/NAME.yaml` next to this file. Absent = none (files under `scenarios/` may add them).
     #[serde(default)]
     pub scenarios: IndexMap<String, ScenarioConfig>,
     /// Locale pack for generated data (names, places, phone, currency), e.g. `en-US`. A node's
@@ -120,7 +128,7 @@ pub struct Config {
     /// Static files served next to the mocks, a folder relative to this file.
     #[serde(default)]
     pub site: Option<String>,
-    /// Named load profiles for the simulator: a total rate and a weighted mix of endpoints.
+    /// Named load profiles for the simulator: a total rate and a weighted mix of endpoints. Absent = no load profiles (the simulator needs one to run).
     #[serde(default)]
     pub traffic: IndexMap<String, TrafficConfig>,
     /// **Private.** Phase One's `routes:` key, kept only to explain that it was replaced.
@@ -246,7 +254,7 @@ impl Config {
     /// field (see [`crate::diagnostics`]).
     pub fn from_yaml(src: &str) -> Result<Config, ConfigError> {
         let src = preprocess(src)?;
-        let cfg: Config = serde_yaml_ng::from_str(src).map_err(|e| {
+        let mut cfg: Config = serde_yaml_ng::from_str(src).map_err(|e| {
             // R1.15: serde loses positions inside tagged nodes; recover them (error path only).
             let mut err = crate::diagnostics::explain(src, serde_error(&e));
             // The private `routes` field (kept to explain its removal) must not be offered as valid.
@@ -267,6 +275,8 @@ impl Config {
             )
             .in_source(src));
         }
+        machine::check(&cfg).map_err(|e| e.in_source(src))?;
+        machine::apply(&mut cfg);
         check_auth(&cfg).map_err(|e| e.in_source(src))?;
         check_capacity(&cfg).map_err(|e| e.in_source(src))?;
         check_edges(&cfg).map_err(|e| e.in_source(src))?;

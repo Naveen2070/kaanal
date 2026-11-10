@@ -88,10 +88,10 @@ pub struct PinEntryConfig {
     pub endpoint: String,
     /// The state to force.
     pub state: PinState,
-    /// Status of the response: 400-599 for `error`, 200-299 for `empty`.
+    /// Status of the response: 400-599 for `error`, 200-299 for `empty`. Absent = 500 for `error`, the endpoint's own success status for `empty`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
-    /// Extra delay before the answer (above 0, at most 5 min).
+    /// Extra delay before the answer (above 0, at most 5 min). Absent = the state's own delay (`loading` +10 s, `slow` +2 s, none otherwise).
     #[serde(
         default,
         with = "humantime_serde",
@@ -214,13 +214,13 @@ pub fn validate_entry(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StateOverrideConfig {
-    /// Status for this state (400-599 for `error`, 200-299 for `empty`).
+    /// Status for this state (400-599 for `error`, 200-299 for `empty`). Absent = 500 for `error`, the endpoint's own success status for `empty`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
-    /// Body for this state, returned verbatim.
+    /// Body for this state, returned verbatim. Absent = the generated body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<Value>,
-    /// Delay for this state (above 0, at most 5 min).
+    /// Delay for this state (above 0, at most 5 min). Absent = the state's own delay (`loading` +10 s, `slow` +2 s, none otherwise).
     #[serde(
         default,
         with = "humantime_serde",

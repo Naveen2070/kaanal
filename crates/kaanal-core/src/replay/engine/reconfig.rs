@@ -139,6 +139,17 @@ impl Engine {
                 self.start_queued(qr, qk);
             }
         }
+        if old.memory != new.memory {
+            for r in 0..usize::from(count) {
+                self.units.states[first + r].gc = super::state::Gc::of(new.memory.as_ref());
+            }
+            self.has.gc = self.has.gc || super::state::Gc::of(new.memory.as_ref()).is_some();
+        }
+        if old.oom_restart != new.oom_restart {
+            for r in 0..usize::from(count) {
+                self.units.states[first + r].oom = new.oom_restart.map(super::state::nanos);
+            }
+        }
         if old.rate_limit != new.rate_limit {
             for r in 0..usize::from(count) {
                 let ns = &mut self.units.states[first + r];

@@ -10,6 +10,40 @@ use super::{
 };
 
 impl Engine {
+    /// **Private.** The gate of copy `(node, rep)` refused request `r`'s hop at `idx` (every slot
+    /// busy, the queue full): the node's overflow status, or, on a node that dies of memory, the
+    /// kill of the copy (step 8K).
+    pub(super) fn refuse_overflow(
+        &mut self,
+        r: usize,
+        idx: usize,
+        (node, rep): (NodeId, u16),
+        counted: bool,
+    ) {
+        if self.oom_overflow(r, idx, node, rep) {
+            return;
+        }
+        let at = self.now;
+        let gate = self.units.state(node, rep).gate.as_ref().expect("checked");
+        let status = gate.overflow_status();
+        if counted {
+            self.count(node, rep, |c| c.overflowed += 1);
+        }
+        self.fail_or_retry(
+            r,
+            Failure {
+                at,
+                idx,
+                node,
+                status,
+                kind: FailKind::Status,
+                retry_after: None,
+                refused: counted.then_some((node, rep, false)),
+                cause: FailCause::Overflow,
+            },
+        );
+    }
+
     /// **Private.** A span's deadline passed (Z3, Z4, Z14). Ignored unless the request is still
     /// unanswered and the span still open; then the whole request fails as a timeout through
     /// `fail()`: queued tokens leave their queues, running hops keep their slot until they end.

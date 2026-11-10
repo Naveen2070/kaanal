@@ -22,7 +22,7 @@ fn default_first_byte() -> DistConfig {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Label only (`s3`, `gcs`, `blob`); it sets no numbers.
+    /// Label only (`s3`, `gcs`, `blob`); it sets no numbers. Absent = no label (`s3` shown).
     pub flavor: Option<StorageFlavor>,
     /// Time to the first byte of a call: the node's service time. A duration like `proc`
     /// (`25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`). Absent = 25 ms, a labelled estimate
@@ -42,7 +42,7 @@ pub struct StorageConfig {
     pub concurrency: Option<ConcurrencyConfig>,
     /// Token-bucket limit on how fast calls may reach this node (the store's request rate):
     /// `rps` refilled per second, at most `burst` at once; beyond it the call fails with 503
-    /// (S3's "Slow Down"), not 429 like the other kinds.
+    /// (S3's "Slow Down"), not 429 like the other kinds. Absent = no rate limit.
     pub rate_limit: Option<RateLimitConfig>,
     /// Deadline for a call to this node: queue wait plus its own work. `0 < timeout <= 5 min`;
     /// absent = no deadline.
