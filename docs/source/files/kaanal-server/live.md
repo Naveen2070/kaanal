@@ -1,4 +1,6 @@
-# `crates/kaanal-server/src/live/` (`mod.rs`, `generator.rs`, `hist.rs`, `tick.rs`, `edit.rs`, `stream.rs`)
+# `crates/kaanal-server/src/live/` (`mod.rs`, `generator.rs`, `hist.rs`, `tick.rs`, `edit.rs`, `stream.rs`, `tests.rs`, `tick/tests.rs`)
+
+The unit tests of `mod.rs` and `tick.rs` sit in `tests.rs` and `tick/tests.rs` (moved as they were, to keep both files under the size limit; the test count is unchanged).
 
 The live simulation (step 8L, RULES 105): a generator that feeds the shared engine actor, and the session and routes that tie it to Studio pages.
 
