@@ -13,6 +13,7 @@ import type { Doc, EdgeDoc, NodeDoc } from "../../data/api/types";
 import { BalanceField, NumberField, Section, FieldLabel } from "./Field";
 import { BreakerFields, EdgeDetectField, RetryFields } from "./ResilienceFields";
 import { EffectStrip } from "./EffectStrip";
+import { LiveWire } from "./LiveWire";
 import { Group } from "./groups/Group";
 import { GROUP } from "./groups/ids";
 import { JumpBox } from "./groups/JumpBox";
@@ -102,6 +103,7 @@ export function EdgeControls({ index }: { index: number }) {
         <JumpBox targets={WIRE_TARGETS} />
       </div>
 
+      <LiveWire index={index} />
       <EffectStrip e={e} />
 
       <QuickSetups index={index} e={e} />

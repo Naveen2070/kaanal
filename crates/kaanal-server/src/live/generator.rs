@@ -258,13 +258,15 @@ fn arrive(st: &AppState, mix: &[StreamShare], total: f64, rng: &mut StdRng, n: u
         return;
     };
     let mut x = rng.random::<f64>() * total;
-    let m = mix
+    let last = mix.len() - 1;
+    let (si, m) = mix
         .iter()
-        .find(|m| {
+        .enumerate()
+        .find(|(_, m)| {
             x -= m.share;
             x < 0.0
         })
-        .unwrap_or(&mix[mix.len() - 1]);
+        .unwrap_or((last, &mix[last]));
     let Some(ep) = g.endpoints.get(&m.endpoint_key) else {
         return;
     };
@@ -283,7 +285,7 @@ fn arrive(st: &AppState, mix: &[StreamShare], total: f64, rng: &mut StdRng, n: u
             resp_bytes: m.resp_bytes,
         },
     );
-    engine.submit(Arc::new(plan));
+    engine.submit(Arc::new(plan), u16::try_from(si).unwrap_or(u16::MAX));
     ctl.submitted.fetch_add(1, Ordering::Relaxed);
 }
 

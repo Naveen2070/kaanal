@@ -418,7 +418,7 @@ test("the_open_group_with_every_kind_of_step_has_no_axe_violations", async () =>
   );
   for (const b of screen.getAllByRole("button", { name: /^Edit / })) fireEvent.click(b);
   await expectNoViolations(container);
-});
+}, 20_000); // axe over every kind of step is slow when the machine is busy
 
 test("a_step_the_loader_would_not_accept_is_shown_as_written_and_can_be_deleted_or_moved", async () => {
   await loaded();

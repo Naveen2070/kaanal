@@ -33,7 +33,7 @@ enum Cmd {
         reply: oneshot::Sender<Result<(), String>>,
     },
     /// Run a generated plan: no reply, the finished request goes to the tap.
-    Submit { plan: Arc<Plan> },
+    Submit { plan: Arc<Plan>, stream: u16 },
     /// Where the finished requests of generated plans go (`None` drops them).
     Tap(Option<mpsc::UnboundedSender<Finished>>),
     /// `(running, waiting)` of every node now.
@@ -47,11 +47,21 @@ enum Cmd {
 /// **Private.** Marks the engine tag of a generated plan, so its answer goes to the tap and not to
 /// a waiting handler.
 const GENERATED: u64 = 1 << 63;
+/// **Private.** A generated plan's route (its index in the offered mix) rides in bits 40..56 of its
+/// tag, so the tap can name the endpoint of a sampled journey; the counter keeps the low 40 bits.
+const STREAM_SHIFT: u32 = 40;
+const COUNTER_MASK: u64 = (1 << STREAM_SHIFT) - 1;
 
 /// Whether `f` is a generated request (the live generator's) and not a real mock request.
 #[must_use]
 pub fn is_generated(f: &Finished) -> bool {
     f.tag & GENERATED != 0
+}
+
+/// The route of a generated request: its index in the offered mix; `None` for a real mock request.
+#[must_use]
+pub fn stream_of(f: &Finished) -> Option<u16> {
+    is_generated(f).then(|| u16::try_from((f.tag >> STREAM_SHIFT) & 0xffff).unwrap_or(u16::MAX))
 }
 
 /// A handle to the engine task; clones share it.
@@ -87,8 +97,8 @@ impl EngineHandle {
 
     /// Runs a generated plan without waiting for it (live traffic, step 8L): its finished request
     /// goes to the tap set with [`EngineHandle::tap`].
-    pub fn submit(&self, plan: Arc<Plan>) {
-        let _ = self.tx.send(Cmd::Submit { plan });
+    pub fn submit(&self, plan: Arc<Plan>, stream: u16) {
+        let _ = self.tx.send(Cmd::Submit { plan, stream });
     }
 
     /// `(running, waiting)` of every node at this instant (`None` when the engine has stopped).
@@ -169,9 +179,10 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
                     let _ = reply.send(result);
                     true
                 }
-                Some(Cmd::Submit { plan }) => {
+                Some(Cmd::Submit { plan, stream }) => {
                     next_tag += 1;
-                    engine.submit(now(), plan, GENERATED | next_tag).is_ok()
+                    let tag = GENERATED | (u64::from(stream) << STREAM_SHIFT) | (next_tag & COUNTER_MASK);
+                    engine.submit(now(), plan, tag).is_ok()
                 }
                 Some(Cmd::Loads { reply }) => {
                     let _ = reply.send(engine.node_loads());
@@ -504,8 +515,8 @@ edges:
         let h = spawn(Engine::live(&t));
         let (tx, mut rx) = mpsc::unbounded_channel();
         h.tap(Some(tx));
-        h.submit(Arc::clone(&plans[0]));
-        h.submit(Arc::clone(&plans[1]));
+        h.submit(Arc::clone(&plans[0]), 0);
+        h.submit(Arc::clone(&plans[1]), 0);
         let mock = h.run(Arc::clone(&plans[2])).await.unwrap();
         assert!(mock.done > mock.arrival);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -518,6 +529,25 @@ edges:
         assert_eq!(got.iter().filter(|f| is_generated(f)).count(), 2);
     }
 
+    /// A generated plan's route rides in its tag and comes back; a real request has none.
+    #[tokio::test(start_paused = true)]
+    async fn the_route_of_a_generated_request_comes_back_with_its_answer() {
+        let (t, plans) = plans(3);
+        let h = spawn(Engine::live(&t));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        h.tap(Some(tx));
+        h.submit(Arc::clone(&plans[0]), 7);
+        h.submit(Arc::clone(&plans[1]), 65535);
+        let _ = h.run(Arc::clone(&plans[2])).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut seen: Vec<Option<u16>> = Vec::new();
+        while let Ok(f) = rx.try_recv() {
+            seen.push(stream_of(&f));
+        }
+        seen.sort();
+        assert_eq!(seen, vec![None, Some(7), Some(65535)]);
+    }
+
     /// Step 8A: a real request answers its handler and also reaches the tap, as a copy a live
     /// session reads; a generated plan reaches only the tap.
     #[tokio::test(start_paused = true)]
@@ -526,7 +556,7 @@ edges:
         let h = spawn(Engine::new(&t));
         let (tx, mut rx) = mpsc::unbounded_channel();
         h.tap(Some(tx));
-        h.submit(Arc::clone(&plans[0]));
+        h.submit(Arc::clone(&plans[0]), 0);
         let real = h.run(Arc::clone(&plans[1])).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let mut seen = Vec::new();

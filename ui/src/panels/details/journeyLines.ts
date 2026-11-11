@@ -4,6 +4,7 @@
 
 import type { Journey, Tick } from "../../data/api/liveTypes";
 import type { LogLine } from "../../data/api/types";
+import { KIND_LABEL } from "../../data/store/liveMath";
 
 /** Newest first, at most `max` requests. `nodes` is the stream's component order, `edges` the file's. */
 export function journeyLines(
@@ -11,6 +12,8 @@ export function journeyLines(
   nodes: readonly string[] | undefined,
   edges: readonly { from: unknown }[] | undefined,
   max = 40,
+  /** The routes of the offered mix, from the stream's `hello`. */
+  streams?: readonly string[],
 ): LogLine[] {
   const out: LogLine[] = [];
   let taken = 0;
@@ -18,7 +21,7 @@ export function journeyLines(
     const tick = ticks[i] as Tick;
     // a tick's journeys are in finish order, so the later ones are the newer
     for (let j = tick.journeys.length - 1; j >= 0 && taken < max; j--) {
-      out.push(...oneJourney(tick, tick.journeys[j] as Journey, j, nodes, edges));
+      out.push(...oneJourney(tick, tick.journeys[j] as Journey, j, nodes, edges, streams));
       taken++;
     }
   }
@@ -31,11 +34,14 @@ function oneJourney(
   j: number,
   nodes: readonly string[] | undefined,
   edges: readonly { from: unknown }[] | undefined,
+  streams: readonly string[] | undefined,
 ): LogLine[] {
   // unique per journey: the tick's end time (ms) and its index in the tick
   const request = Math.round(tick.t_ms) * 1000 + j;
   const arrival = tick.t_ms - jr.total_ns / 1e6;
-  const stream = jr.real ? "real" : "live";
+  const stream = jr.real
+    ? "real"
+    : ((jr.stream !== undefined ? streams?.[jr.stream] : undefined) ?? "live");
   const lines: LogLine[] = [];
   for (const [k, h] of jr.hops.entries()) {
     const node = nodes?.[h.node] ?? `#${h.node}`;
@@ -59,7 +65,7 @@ function oneJourney(
         wait_ms: null,
         service_ms: null,
         status: null,
-        note: "dropped here",
+        note: jr.cause ? (KIND_LABEL[jr.cause] ?? jr.cause) : "dropped here",
       });
       break;
     }

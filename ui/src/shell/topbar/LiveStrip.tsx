@@ -15,6 +15,7 @@ import { liveFeed } from "../../canvas/liveFeed";
 import { rpsFromSlider, SLIDER_MAX, sliderFromRps } from "../../canvas/logScale";
 import { openTrafficBuilder } from "../../panels/traffic/store";
 import { fmtMs, twoSignificant } from "../../canvas/metrics";
+import { p99WarningFor } from "../../canvas/p99Warning";
 import { notify } from "../toast/toasts";
 
 const STATE_WORDS: Record<LiveStatus, string> = {
@@ -53,7 +54,17 @@ export function LiveStrip({
     .nodes.filter((n) => n.utilization !== null)
     .sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0))[0];
   const queue = busiest?.series.queue.at(-1) ?? 0;
+  // the nearest limit by the utilization law: an estimate, so it says "about"
+  const firstLimit = liveFeed(ticks, doc, hello?.nodes, src === "real" ? "real" : "all")
+    .nodes.filter((n) => n.saturates_at_req_s !== null)
+    .sort((a, b) => (a.saturates_at_req_s ?? 0) - (b.saturates_at_req_s ?? 0))[0];
   const dropping = fig.droppedPerS > 0;
+  // every tick of the window, not the last second: what failed since the run began
+  const failedTotal = ticks.reduce(
+    (n, t) => n + (src === "real" ? (t.real?.failed ?? 0) : t.failed),
+    0,
+  );
+  const tooSlow = slow.p99Ms === null ? null : p99WarningFor(slow.p99Ms, doc);
   const sentence =
     `${STATE_WORDS[status]}. ${twoSignificant(fig.reqPerS)} requests a second, ` +
     `${twoSignificant(fig.droppedPerS)} dropped a second` +
@@ -112,10 +123,34 @@ export function LiveStrip({
           </dd>
         </div>
         <div className="flex flex-col gap-0.5">
-          <dt className="text-xs text-muted">p50 / p99</dt>
+          <dt className="text-xs text-muted">Goodput</dt>
           <dd className="m-0 font-mono tabular-nums">
+            {twoSignificant(Math.max(0, fig.reqPerS - fig.droppedPerS))} / s
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-xs text-muted">Failed in window</dt>
+          <dd className="m-0 font-mono tabular-nums">{failedTotal.toLocaleString("en-US")}</dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-xs text-muted">p50 / p99</dt>
+          <dd className="m-0 font-mono tabular-nums" title={tooSlow ?? undefined}>
             {slow.p50Ms === null ? "–" : fmtMs(slow.p50Ms)} /{" "}
             {slow.p99Ms === null ? "–" : fmtMs(slow.p99Ms)}
+            {tooSlow !== null ? (
+              <span className="font-sans text-xs text-warn"> · too slow for a client</span>
+            ) : null}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-xs text-muted">Breaks first</dt>
+          <dd
+            className="m-0 font-mono tabular-nums"
+            title="Estimated from how busy it is now (U = X x S): it holds while the mix and settings stay as they are"
+          >
+            {firstLimit
+              ? `${firstLimit.name} at about ${twoSignificant(firstLimit.saturates_at_req_s ?? 0)} / s`
+              : "–"}
           </dd>
         </div>
         <div className="flex flex-col gap-0.5">

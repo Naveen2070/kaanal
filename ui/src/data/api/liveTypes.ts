@@ -23,10 +23,22 @@ export interface NodeTick {
   cpu_load: number | null;
   /** The CPU the work really used over the tick's span, at most 1; null without `cpu` or at first. */
   cpu_utilization?: number | null;
+  /** The work times of the own hops that ran here: occupied `[bucket, count]` pairs, as `Tick.hist`. */
+  hist?: [number, number][];
+  /** Own hops that ran at each copy (index = copy); only for a node that ran on more than one. */
+  replicas?: number[];
 }
 
 export interface WireTick {
   carried: number;
+  /** Time spent waiting to get onto the wire, summed over the crossings in the tick (ns). */
+  wait_ns?: number;
+  /** Time spent on the wire, waiting excluded, summed over the crossings in the tick (ns). */
+  wire_ns?: number;
+  /** Crossings that were a retry (attempt 2 or later). */
+  retries?: number;
+  /** Calls that made at least one retry. */
+  retried?: number;
 }
 
 export interface JourneyHop {
@@ -47,6 +59,10 @@ export interface Journey {
   /** The index in `hops` where it was dropped; null when it was served. */
   dropped_at: number | null;
   total_ns: number;
+  /** The route of a generated request: an index into the session's `streams`. */
+  stream?: number;
+  /** Why a dropped request was dropped: a key of a node's `dropped`. */
+  cause?: string;
   /** A request a real frontend made (step 8A), drawn apart from the generated ones. */
   real?: boolean;
 }
@@ -106,6 +122,8 @@ export interface LiveHello {
   system_ms: number | null;
   /** The components in the order of every tick's `nodes` (file order; the draft JSON is alphabetical). */
   nodes?: string[];
+  /** The routes of the offered mix, in the order a journey's `stream` indexes. */
+  streams?: string[];
 }
 
 export type LiveEvent =

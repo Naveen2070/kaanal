@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useMode } from "../../data/store/mode";
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import type { DraftView, RunRecord, Series, Summary } from "../../data/api/types";
@@ -77,6 +78,7 @@ function mount() {
 }
 
 beforeEach(() => {
+  useMode.setState({ mode: "batch" });
   useGroups.setState({ open: {} });
   useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null });
   useDraft.setState({ view: null });

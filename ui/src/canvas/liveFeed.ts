@@ -8,6 +8,7 @@ import type { Doc, NodeDoc, NodeSummary, Series } from "../data/api/types";
 import type { Tick } from "../data/api/liveTypes";
 import { slotsOf } from "../panels/details/fields";
 import { EMPTY_FEED, type StatsFeed } from "./feed";
+import { quantileMs, nodeHeat, nodeHist } from "../data/store/liveMath";
 import { replicasOf } from "./metrics";
 
 /** Ticks the per-second figures are read over (5 seconds at four a second). */
@@ -44,16 +45,45 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
   const dropped =
     drop("overflow") + drop("rate_limit") + drop("deadline") + drop("breaker") + drop("oom");
   const util = fullness(last, i, slots, copies);
+  // The utilization law (Denning & Buzen, 1978): U = X x S, so a node that is U busy at a system
+  // rate X is busy 1 at X / U, if its work per request stays as it is. Read over the last minute
+  // (the instant a tick samples is noisy at light load) and only from 1% busy up; an estimate that
+  // holds while the mix and the settings stay as they are.
+  const minute = ticks.slice(-SERIES_TICKS);
+  const meanFull =
+    minute.reduce((a, t) => a + (fullness(t, i, slots, copies) ?? 0), 0) /
+    Math.max(minute.length, 1);
+  const sysPerS = sum(minute.map((t) => t.requests)) / Math.max(minute.length * TICK_S, TICK_S);
+  const saturatesAt = meanFull >= 0.01 && sysPerS > 0 ? sysPerS / meanFull : null;
   const queue = last?.nodes[i]?.queue ?? 0;
   const series: Series = {
     window_s: TICK_S,
     busy: ticks.slice(-SERIES_TICKS).map((t) => fullness(t, i, slots, copies) ?? 0),
     queue: ticks.slice(-SERIES_TICKS).map((t) => at(t)?.queue ?? 0),
-    latency: [],
+    // per-node work times: a minute of them as windows (the heatmap), none with an older server
+    latency: nodeHeat(ticks.slice(-SERIES_TICKS), i),
   };
+  const hist = nodeHist(w, i);
+  // each copy's own hops over the window; padded to the copies the node has, so a lane that has
+  // not run yet still shows as idle
+  const perCopy = w.reduce<number[]>((acc, t) => {
+    (t.nodes[i]?.replicas ?? []).forEach((n, r) => (acc[r] = (acc[r] ?? 0) + n));
+    return acc;
+  }, []);
+  const replicas =
+    perCopy.length === 0
+      ? []
+      : Array.from({ length: Math.max(copies, perCopy.length) }, (_, r) => ({
+          replica: r,
+          visits: perCopy[r] ?? 0,
+          visits_per_s: (perCopy[r] ?? 0) / secs,
+          mean_wait_ms: 0,
+          offered_load: null,
+          utilization: null,
+        }));
   return {
     name,
-    replicas: [],
+    replicas,
     visits_per_s: arrived / secs,
     expected_visits_per_s: arrived / secs,
     mean_wait_ms: 0,
@@ -62,10 +92,10 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
     saturated: dropped > 0 || queue > 0 || (util !== null && util >= 0.95),
     max_queue: Math.max(0, ...w.map((t) => at(t)?.queue ?? 0)),
     capacity_per_s: null,
-    saturates_at_req_s: null,
+    saturates_at_req_s: saturatesAt,
     headroom: util === null ? null : Math.max(0, 1 - util),
-    p50_ms: null,
-    p99_ms: null,
+    p50_ms: quantileMs(hist, 0.5),
+    p99_ms: quantileMs(hist, 0.99),
     series,
     limited: drop("rate_limit"),
     overflowed: drop("overflow"),

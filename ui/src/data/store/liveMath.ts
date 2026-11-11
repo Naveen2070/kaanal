@@ -156,3 +156,124 @@ export function timelineSeries(ticks: readonly Tick[], points = 240): Point[] {
   }
   return out;
 }
+
+/** The live window as the charts band reads it: one value per point, as rates a second. */
+export interface LiveSeries {
+  /** Seconds one point stands for. */
+  window_s: number;
+  p99_ms: number[];
+  /** Served a second (requests that finished minus the failed). */
+  done: number[];
+  failed: number[];
+}
+
+export function liveSeries(ticks: readonly Tick[]): LiveSeries | undefined {
+  const pts = timelineSeries(ticks);
+  if (pts.length < 2) return undefined;
+  return {
+    window_s: (ticks.length * 0.25) / pts.length,
+    p99_ms: pts.map((p) => p.p99Ms ?? 0),
+    done: pts.map((p) => Math.max(0, p.reqPerS - p.droppedPerS)),
+    failed: pts.map((p) => p.droppedPerS),
+  };
+}
+
+export const KIND_LABEL: Record<string, string> = {
+  overflow: "queue full",
+  rate_limit: "rate limited",
+  deadline: "timed out",
+  breaker: "breaker open",
+  oom: "out of memory",
+  chaos: "chaos",
+};
+
+/** Failures over the window by cause, most first; the node drops of every tick added up. */
+export function errorKinds(ticks: readonly Tick[]): [string, number][] {
+  // fixed keys, no per-tick object walk: this runs on every tick over a window of up to 7,200
+  const keys = Object.keys(KIND_LABEL) as (keyof Tick["nodes"][number]["dropped"])[];
+  const total = Array.from({ length: keys.length }, () => 0);
+  for (const t of ticks)
+    for (const n of t.nodes)
+      keys.forEach((k, i) => (total[i] = (total[i] ?? 0) + (n.dropped[k] ?? 0)));
+  return keys
+    .map((k, i): [string, number] => [KIND_LABEL[k] ?? k, total[i] ?? 0])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+}
+
+/** How a wire did over the last `ms`: crossings a second, the mean time on it and the mean wait to get on. */
+export interface WireFigures {
+  perS: number;
+  meanWireMs: number | null;
+  meanWaitMs: number | null;
+  /** Calls over the wire that were first tries, and the shares that were retried and retried again. */
+  retriedPct: number | null;
+  retriesPerCall: number | null;
+}
+
+export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): WireFigures {
+  const w = recent(ticks, ms);
+  let carried = 0;
+  let wire = 0;
+  let wait = 0;
+  let retries = 0;
+  let retried = 0;
+  for (const t of w) {
+    const x = t.wires[edge];
+    if (!x) continue;
+    carried += x.carried;
+    wire += x.wire_ns ?? 0;
+    wait += x.wait_ns ?? 0;
+    retries += x.retries ?? 0;
+    retried += x.retried ?? 0;
+  }
+  // a retry runs where the first try did, so it is not a call of its own: calls = carried - retries
+  const calls = carried - retries;
+  return {
+    perS: carried / Math.max(w.length * 0.25, 0.25),
+    meanWireMs: carried > 0 ? wire / carried / 1e6 : null,
+    meanWaitMs: carried > 0 ? wait / carried / 1e6 : null,
+    retriedPct: retries > 0 && calls > 0 ? (retried / calls) * 100 : null,
+    retriesPerCall: retries > 0 && calls > 0 ? retries / calls : null,
+  };
+}
+
+/** The heatmap's rows for the live window: `<= 0.25 ms`, doubling up to about 33 s, then "slower". */
+export const LIVE_BUCKETS: { le_ms: number | null; count: number }[] = [
+  ...Array.from({ length: 18 }, (_, k) => ({ le_ms: 0.25 * 2 ** k, count: 0 })),
+  { le_ms: null, count: 0 },
+];
+
+/** The row of a work time: the first bucket at least as long as it. */
+function heatRow(ms: number): number {
+  const k = Math.ceil(Math.log2(Math.max(ms, 1e-9) / 0.25));
+  return Math.min(Math.max(k, 0), LIVE_BUCKETS.length - 1);
+}
+
+/** One node's work times over `ticks` as a `bucket -> count` map (from the per-node histograms). */
+export function nodeHist(ticks: readonly Tick[], node: number): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const t of ticks)
+    for (const [b, c] of t.nodes[node]?.hist ?? []) out.set(b, (out.get(b) ?? 0) + c);
+  return out;
+}
+
+/**
+ * A node's latency over the window for the heatmap: `windows` columns of `LIVE_BUCKETS` rows, the
+ * node's own hops that finished in each stretch of ticks. Empty with no per-node histogram.
+ */
+export function nodeHeat(ticks: readonly Tick[], node: number, windows = 60): number[][] {
+  if (ticks.length === 0) return [];
+  const per = Math.max(1, Math.ceil(ticks.length / windows));
+  const out: number[][] = [];
+  for (let i = 0; i < ticks.length; i += per) {
+    const col = Array.from({ length: LIVE_BUCKETS.length }, () => 0);
+    for (const t of ticks.slice(i, i + per))
+      for (const [b, c] of t.nodes[node]?.hist ?? []) {
+        const r = heatRow(bucketNs(b) / 1e6);
+        col[r] = (col[r] ?? 0) + c;
+      }
+    out.push(col);
+  }
+  return out;
+}

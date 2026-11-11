@@ -17,18 +17,35 @@ const OPEN_FIRST = 3;
 export function LiveTrace() {
   const edges = useDraft((s) => s.view?.doc?.edges);
   const nodes = useLive((s) => s.hello?.nodes);
+  const streams = useLive((s) => s.hello?.streams);
   const [frozen, setFrozen] = useState(false);
-  const [lines, setLines] = useState(() => journeyLines(useLive.getState().ticks, nodes, edges));
+  const [lines, setLines] = useState(() =>
+    journeyLines(useLive.getState().ticks, nodes, edges, 40, streams),
+  );
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (frozen) return;
-    const take = () => setLines(journeyLines(useLive.getState().ticks, nodes, edges));
+    const take = () => setLines(journeyLines(useLive.getState().ticks, nodes, edges, 40, streams));
     take();
     const t = setInterval(take, REFRESH_MS);
     return () => clearInterval(t);
-  }, [frozen, nodes, edges]);
+  }, [frozen, nodes, edges, streams]);
   const depths = useMemo(() => callDepths(edges), [edges]);
-  const groups = useMemo(() => groupRequests("live", lines), [lines]);
+  const [errorsOnly, setErrorsOnly] = useState(false);
+  const [component, setComponent] = useState("");
+  const [reqText, setReqText] = useState("");
+  const [endpoint, setEndpoint] = useState("");
+  const all = useMemo(() => groupRequests("live", lines), [lines]);
+  const names = useMemo(() => [...new Set(lines.map((l) => l.node))].sort(), [lines]);
+  const digits = reqText.replace(/\D/g, "");
+  const groups = all.filter(
+    (g) =>
+      (!errorsOnly || g.failure !== null) &&
+      (component === "" || g.lines.some((l) => l.node === component)) &&
+      (endpoint === "" || g.stream === endpoint) &&
+      (digits === "" || String(g.request).includes(digits)),
+  );
+  const filtered = errorsOnly || component !== "" || endpoint !== "" || digits !== "";
   const finding = sampleFinding(groups);
   return (
     <div className="p-3 text-sm">
@@ -43,6 +60,51 @@ export function LiveTrace() {
           {frozen ? "Unfreeze" : "Freeze"}
         </button>
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={errorsOnly}
+            onChange={(e) => setErrorsOnly(e.currentTarget.checked)}
+          />
+          Errors only
+        </label>
+        <select
+          aria-label="Component"
+          value={component}
+          onChange={(e) => setComponent(e.currentTarget.value)}
+          className="h-7 rounded border border-control bg-sheet px-1"
+        >
+          <option value="">Any component</option>
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        {streams && streams.length > 1 ? (
+          <select
+            aria-label="Endpoint"
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.currentTarget.value)}
+            className="h-7 max-w-40 rounded border border-control bg-sheet px-1"
+          >
+            <option value="">Any endpoint</option>
+            {streams.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <input
+          aria-label="Request number"
+          placeholder="Request no."
+          value={reqText}
+          onChange={(e) => setReqText(e.currentTarget.value)}
+          className="h-7 w-24 rounded border border-control bg-sheet px-1"
+        />
+      </div>
       {finding ? <p className="mt-1 text-sm font-medium">{finding}</p> : null}
       <p className="mt-1 mb-2 text-xs text-muted">
         A sample of the last few seconds, not every request. Simulated trace events, not process
@@ -51,7 +113,11 @@ export function LiveTrace() {
       {groups.length > 0 ? <Legend /> : null}
       <div className="@container min-h-40 overflow-hidden rounded-lg border border-border">
         {groups.length === 0 ? (
-          <p className="p-3 text-muted">No request finished yet. Raise the offered load or wait.</p>
+          <p className="p-3 text-muted">
+            {filtered
+              ? "No sampled request matches. Clear the filters to see more."
+              : "No request finished yet. Raise the offered load or wait."}
+          </p>
         ) : (
           <>
             <ColumnHeads />

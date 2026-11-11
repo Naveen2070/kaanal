@@ -143,3 +143,37 @@ test("the_real_source_reads_arrivals_and_drops_from_tick_real_and_keeps_the_engi
   const none = liveFeed([t], doc, undefined, "real").node("app");
   expect(none?.visits_per_s).toBe(0);
 });
+
+test("the_limit_is_the_rate_over_the_busy_share_by_the_utilization_law", () => {
+  // app: 4 slots x 2 copies, 2 in use = 25% busy at 40 requests a second: busy 1 at 160 a second
+  const ticks = [250, 500, 750, 1000].map((t) => tick(t, { busy: 2 }));
+  const f = liveFeed(ticks, doc);
+  expect(f.node("app")?.saturates_at_req_s).toBeCloseTo(160);
+  // a node with nothing running gives no figure, rather than an infinite one
+  expect(f.node("gw")?.saturates_at_req_s).toBeNull();
+});
+
+test("a_node_reads_its_work_times_and_its_copies_from_the_ticks", () => {
+  const bucket = (ms: number) => Math.floor(Math.log((ms * 1e6) / 1e4) / Math.log(1.0201)) + 1;
+  const withData = (t: Tick): Tick => {
+    const app = t.nodes[1] as Tick["nodes"][number];
+    return {
+      ...t,
+      nodes: [
+        t.nodes[0] as Tick["nodes"][number],
+        { ...app, hist: [[bucket(8), 10]], replicas: [7, 3] },
+        t.nodes[2] as Tick["nodes"][number],
+      ],
+    };
+  };
+  const ticks = [250, 500, 750, 1000].map((t) => withData(tick(t, { busy: 2 })));
+  const app = liveFeed(ticks, doc).node("app");
+  // 40 hops at 8 ms: the median and the 99th both read 8 ms, to a bucket's 1%
+  expect(app?.p50_ms).toBeCloseTo(8, 0);
+  expect(app?.p99_ms).toBeCloseTo(8, 0);
+  // two copies, 28 and 12 hops over 1 s: 28/s and 12/s
+  expect(app?.replicas.map((r) => Math.round(r.visits_per_s))).toEqual([28, 12]);
+  expect(app?.series.latency.length).toBeGreaterThan(0);
+  // a node with no histogram has no latency to read
+  expect(liveFeed(ticks, doc).node("gw")?.p99_ms).toBeNull();
+});

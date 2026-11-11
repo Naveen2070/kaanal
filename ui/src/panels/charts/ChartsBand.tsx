@@ -7,6 +7,10 @@ import { useState } from "react";
 import { PanelBottomClose, PanelBottomOpen } from "lucide-react";
 import { useDraft } from "../../data/store/draft";
 import { useRun } from "../../data/store/run";
+import { useLive } from "../../data/store/live";
+import { liveSeries } from "../../data/store/liveMath";
+import { isLive, useMode } from "../../data/store/mode";
+import { useSlo } from "../details/slo";
 import { runLine, systemCounts } from "./counts";
 import { linePoints, niceTicks, smooth } from "./line";
 
@@ -28,6 +32,7 @@ function Chart({
   stroke,
   windowS,
   trend = false,
+  target,
 }: {
   title: string;
   unit: string;
@@ -37,9 +42,12 @@ function Chart({
   windowS?: number;
   /** Draw a moving average (p99 steps between histogram buckets). */
   trend?: boolean;
+  /** A goal drawn as a dashed line, in the chart's unit (the p99 target). */
+  target?: number | null;
 }) {
   const drawn = trend ? smooth(values) : values;
-  const max = Math.max(0, ...drawn.filter(Number.isFinite));
+  // the goal is kept in view even when the line is far under it
+  const max = Math.max(0, target ?? 0, ...drawn.filter(Number.isFinite));
   const ticks = niceTicks(max, 3);
   const top = ticks[ticks.length - 1] as number;
   const last = values.length > 0 ? (values[values.length - 1] as number) : 0;
@@ -81,6 +89,20 @@ function Chart({
               vectorEffect="non-scaling-stroke"
             />
           ))}
+          {target != null ? (
+            <line
+              x1="0"
+              x2="300"
+              y1={120 - (target / top) * 120}
+              y2={120 - (target / top) * 120}
+              className="stroke-negative"
+              strokeDasharray="4 3"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>{`Goal: ${nf(target)} ${unit}`}</title>
+            </line>
+          ) : null}
           <polyline
             points={linePoints(drawn, top, 300, 120)}
             fill="none"
@@ -107,6 +129,7 @@ function StatsPill() {
   const windowS = useRun((s) => s.latest?.summary?.window_s);
   const status = useRun((s) => s.status);
   const latest = useRun((s) => s.latest);
+  const live = isLive(useMode((m) => m.mode));
   const c = systemCounts(doc);
   const parts = [
     c.traffic > 0 && `${c.traffic} traffic`,
@@ -120,7 +143,9 @@ function StatsPill() {
     `${c.connections} ${c.connections === 1 ? "connection" : "connections"}`,
     // the re-run time (the spec's status line) stands in for the simulated time, which is in the
     // tooltip: both together are wider than the room beside the zoom pill
-    runLine(status, latest) ?? (windowS ? `${Number(windowS.toPrecision(3))} s simulated` : null),
+    (live ? "live" : null) ??
+      runLine(status, latest) ??
+      (windowS ? `${Number(windowS.toPrecision(3))} s simulated` : null),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -140,8 +165,14 @@ function StatsPill() {
 }
 
 export function ChartsBand() {
-  const series = useRun((s) => s.latest?.summary?.series);
+  const live = isLive(useMode((m) => m.mode));
+  const batchSeries = useRun((s) => s.latest?.summary?.series);
+  const ticks = useLive((s) => s.ticks);
+  const goal = useSlo((s) => s.targetMs);
   const [open, setOpen] = useState(open0);
+  // live: the window's own points, a second at a time; only worked out while the band is open
+  const series = live ? (open ? liveSeries(ticks) : undefined) : batchSeries;
+  const per = live ? "second" : null;
   const toggle = () => {
     setOpen(!open);
     try {
@@ -183,24 +214,29 @@ export function ChartsBand() {
               stroke="stroke-accent"
               windowS={series.window_s}
               trend
+              target={goal}
             />
             <Chart
-              title={`Goodput, done per ${win} window`}
-              unit="requests"
+              title={per ? "Goodput, served a second" : `Goodput, done per ${win} window`}
+              unit={per ? "requests/s" : "requests"}
               values={series.done}
               stroke="stroke-positive"
               windowS={series.window_s}
             />
             <Chart
-              title={`Failures, failed per ${win} window`}
-              unit="requests"
+              title={per ? "Failures, failed a second" : `Failures, failed per ${win} window`}
+              unit={per ? "requests/s" : "requests"}
               values={series.failed}
               stroke="stroke-negative"
               windowS={series.window_s}
             />
           </div>
         ) : (
-          <p className="px-3 pb-3 text-xs text-muted">The charts appear after the first run.</p>
+          <p className="px-3 pb-3 text-xs text-muted">
+            {live
+              ? "The charts fill in as the live run goes on."
+              : "The charts appear after the first run."}
+          </p>
         )
       ) : null}
     </section>

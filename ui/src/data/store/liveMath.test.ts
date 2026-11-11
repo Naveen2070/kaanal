@@ -3,11 +3,16 @@ import type { Tick } from "../api/liveTypes";
 import {
   bucketNs,
   bucketOf,
+  errorKinds,
+  liveSeries,
+  nodeHeat,
+  nodeHist,
   quantileMs,
   recent,
   sumHist,
   timelineSeries,
   windowFigures,
+  wireFigures,
 } from "./liveMath";
 
 function tick(t_ms: number, over: Partial<Tick> = {}): Tick {
@@ -100,4 +105,83 @@ test("a_tick_that_arrives_changes_only_the_last_point_and_a_new_session_never_re
   const b = timelineSeries(mk(996, 50), 100);
   expect(b[3]?.reqPerS).toBeCloseTo(200, 5);
   expect(first[3]?.reqPerS).toBeCloseTo(100, 5);
+});
+
+test("errorKinds_adds_every_tick_and_orders_by_count", () => {
+  const n = (d: Partial<Tick["nodes"][number]["dropped"]>) => ({
+    arrived: 0,
+    dropped: { overflow: 0, rate_limit: 0, deadline: 0, breaker: 0, chaos: 0, ...d },
+    queue: 0,
+    busy_slots: 0,
+    cpu_load: null,
+  });
+  const t = (d: Parameters<typeof n>[0]) => ({ nodes: [n(d)] }) as unknown as Tick;
+  expect(errorKinds([t({ overflow: 2 }), t({ overflow: 1, deadline: 5 })])).toEqual([
+    ["timed out", 5],
+    ["queue full", 3],
+  ]);
+});
+
+test("liveSeries_gives_rates_a_second_and_nothing_for_a_short_window", () => {
+  const t = (i: number) =>
+    ({
+      t_ms: i * 250,
+      requests: 25,
+      failed: 5,
+      hist: [],
+      nodes: [],
+      journeys: [],
+    }) as unknown as Tick;
+  expect(liveSeries([t(1)])).toBeUndefined();
+  const s = liveSeries([t(1), t(2), t(3), t(4)]);
+  expect(s?.done.at(-1)).toBeCloseTo(80); // (25 - 5) a tick, four ticks a second
+  expect(s?.failed.at(-1)).toBeCloseTo(20);
+});
+
+test("wireFigures_read_crossings_mean_time_and_mean_wait_per_crossing", () => {
+  const t = (i: number, carried: number, wire_ns: number, wait_ns: number) =>
+    ({ t_ms: i * 250, wires: [{ carried, wire_ns, wait_ns }] }) as unknown as Tick;
+  const f = wireFigures([t(1, 10, 10e6, 5e6), t(2, 10, 30e6, 15e6)], 0);
+  expect(f.perS).toBeCloseTo(40); // 20 crossings in 0.5 s
+  expect(f.meanWireMs).toBeCloseTo(2); // 40 ms over 20 crossings
+  expect(f.meanWaitMs).toBeCloseTo(1);
+  expect(wireFigures([t(1, 0, 0, 0)], 0).meanWireMs).toBeNull();
+});
+
+test("nodeHist_and_nodeHeat_read_one_nodes_work_times", () => {
+  const b = (ms: number) => bucketOf(ms * 1e6);
+  const t = (i: number, hist: [number, number][]) =>
+    ({ t_ms: i * 250, nodes: [{ hist: [] }, { hist }] }) as unknown as Tick;
+  const ticks = [
+    t(1, [[b(1.5), 10]]),
+    t(2, [
+      [b(1.5), 10],
+      [b(40), 1],
+    ]),
+  ];
+  const sum = nodeHist(ticks, 1);
+  expect([...sum.values()].reduce((a, c) => a + c, 0)).toBe(21);
+  // 1.5 ms falls under "<= 2 ms" (row 3: 0.25, 0.5, 1, 2) and 40 ms under "<= 64 ms" (row 8)
+  const heat = nodeHeat(ticks, 1, 2);
+  expect(heat).toHaveLength(2);
+  expect(heat[0]?.[3]).toBe(10);
+  expect(heat[1]?.[8]).toBe(1);
+  expect(
+    nodeHeat(ticks, 0, 2)
+      .flat()
+      .reduce((a, c) => a + c, 0),
+  ).toBe(0);
+});
+
+test("wireFigures_count_a_retry_on_the_wire_its_first_try_came_in_through", () => {
+  const t = (carried: number, retries: number, retried: number) =>
+    ({
+      t_ms: 250,
+      wires: [{ carried, wire_ns: 0, wait_ns: 0, retries, retried }],
+    }) as unknown as Tick;
+  // 12 crossings of which 2 were retries: 10 calls, 2 of them retried once each
+  const f = wireFigures([t(12, 2, 2)], 0);
+  expect(f.retriedPct).toBeCloseTo(20);
+  expect(f.retriesPerCall).toBeCloseTo(0.2);
+  expect(wireFigures([t(5, 0, 0)], 0).retriedPct).toBeNull();
 });

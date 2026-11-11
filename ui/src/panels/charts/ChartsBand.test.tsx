@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useMode } from "../../data/store/mode";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import type { RunRecord } from "../../data/api/types";
 import { useRun } from "../../data/store/run";
@@ -14,6 +15,7 @@ function setRun(done: number[] = [10, 20, 87], p99: number[] = [5, 48, 12]) {
 }
 
 beforeEach(() => {
+  useMode.setState({ mode: "batch" });
   localStorage.clear();
   localStorage.setItem("kaanal.studio.charts.open", "1"); // the band starts closed; most tests want it open
   useRun.setState({ status: "idle", latest: null, dimmed: false, lastError: null });

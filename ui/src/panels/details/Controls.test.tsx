@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useMode } from "../../data/store/mode";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { NodeDoc, RunRecord } from "../../data/api/types";
 import { FeedContext } from "../../canvas/feed";
@@ -11,6 +12,7 @@ import { Controls } from "./Controls";
 import { app, change, edges, show, topology, view } from "./controlsHarness";
 
 beforeEach(() => {
+  useMode.setState({ mode: "batch" });
   useDraft.setState({ view: null, error: null, restarted: false });
   useToasts.setState({ toasts: [] });
 });

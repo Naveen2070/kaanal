@@ -55,3 +55,16 @@ test("newest_first_and_capped_by_requests", () => {
   expect(new Set(lines.map((l) => l.request)).size).toBe(3);
   expect(lines[0]?.request).toBe(500 * 1000 + 1); // the last journey of the last tick
 });
+
+test("a_journey_names_its_route_and_a_drop_its_cause", () => {
+  const j: Journey = {
+    hops: [hop(0, 0, 1e6), hop(1, 1e6, 2e6)],
+    dropped_at: 1,
+    total_ns: 2e6,
+    stream: 1,
+    cause: "deadline",
+  };
+  const lines = journeyLines([tick(500, [j])], ["gw", "app"], edges, 40, ["GET /a", "GET /b"]);
+  expect(lines.map((l) => l.stream)).toEqual(["GET /b", "GET /b"]);
+  expect(lines[1]?.note).toBe("timed out");
+});

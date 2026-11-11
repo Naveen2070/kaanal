@@ -260,6 +260,11 @@ async fn hello_names_the_components_in_the_order_of_every_tick() {
         st.live.status().unwrap()["nodes"],
         serde_json::json!(["nginx", "app", "db"])
     );
+    // the routes of the offered mix, which a sampled journey's `stream` indexes
+    assert_eq!(
+        st.live.status().unwrap()["streams"],
+        serde_json::json!(["GET /users/{id}"])
+    );
     let mut rx = st.live.subscribe().unwrap();
     tokio::time::sleep(Duration::from_millis(600)).await;
     while let Ok(ev) = rx.try_recv() {

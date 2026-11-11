@@ -89,6 +89,8 @@ struct Session {
     /// The components in topology (file) order: the order of every tick's `nodes`. The draft's JSON
     /// is alphabetical, so a page must map by these names, never by position in its own copy.
     node_names: Vec<String>,
+    /// The routes of the offered mix, in the order a journey's `stream` indexes.
+    stream_names: Vec<String>,
     /// The config the engine runs now: the applied system, then each live parameter edit (the
     /// draft's parameters over the running structure, `edit.rs`).
     running: Option<kaanal_core::Config>,
@@ -172,6 +174,7 @@ fn start_session(st: &Arc<AppState>, id: u64, running: Option<kaanal_core::Confi
         // an idle generator keeps the session's shape (pause, rate, stop) uniform
         Err(note) => (Vec::new(), 0.0, None, Some(note)),
     };
+    let stream_names: Vec<String> = mix.iter().map(|m| m.endpoint_key.clone()).collect();
     let (ftx, frx) = mpsc::unbounded_channel();
     let feed = generator::start(Arc::clone(st), mix, rps, seed, Limits::default(), Some(ftx));
     let (events, _) = broadcast::channel(256);
@@ -193,6 +196,7 @@ fn start_session(st: &Arc<AppState>, id: u64, running: Option<kaanal_core::Confi
             .as_deref()
             .map(|g| g.topo.nodes.iter().map(|n| n.name.clone()).collect())
             .unwrap_or_default(),
+        stream_names,
         running,
         profile,
         note,
@@ -358,6 +362,7 @@ impl LiveSlot {
             "clients": g.clients,
             "system_ms": s.system_started.map(|t| ms_of(t.elapsed())),
             "nodes": s.node_names,
+            "streams": s.stream_names,
         }))
     }
 

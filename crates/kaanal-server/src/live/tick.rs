@@ -79,6 +79,13 @@ pub(crate) struct NodeTick {
     /// The CPU the running work really used over the cores of a node with `cpu`, across this tick's
     /// span, at most 1 (step 8U); `None` without `cpu`, or before there are two readings.
     pub cpu_utilization: Option<f64>,
+    /// How long the own hops that ran here worked (waiting excluded), as occupied `(bucket, count)`
+    /// pairs of [`LatencyHist`]; the same buckets as the tick's `hist`. Empty in a real share.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hist: Vec<(u16, u32)>,
+    /// Own hops that ran at each copy (index = copy), only for a node that ran on more than one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replicas: Vec<u32>,
 }
 
 /// One wire in the tick.
@@ -86,6 +93,16 @@ pub(crate) struct NodeTick {
 pub(crate) struct WireTick {
     /// Calls that crossed it, in requests that finished in this tick.
     pub carried: u32,
+    /// Time requests spent waiting to get onto it (sharing the wire), summed over the hops that
+    /// crossed it in requests that finished in this tick (ns).
+    pub wait_ns: u64,
+    /// Time those hops spent on it, waiting excluded (ns): `wire_ns` over `carried` is the mean
+    /// crossing.
+    pub wire_ns: u64,
+    /// Crossings that were a retry (attempt 2 or later): the calls are `carried - retries`.
+    pub retries: u32,
+    /// Calls that made at least one retry: the second attempts.
+    pub retried: u32,
 }
 
 /// One hop of a sampled journey, offsets from the request's arrival.
@@ -110,6 +127,13 @@ pub(crate) struct Journey {
     /// The index in `hops` where it was dropped; `None` when it was served.
     pub dropped_at: Option<usize>,
     pub total_ns: u64,
+    /// The route of a generated request, as an index into the session's `streams`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<u16>,
+    /// Why a dropped request was dropped: `overflow`, `rate_limit`, `deadline`, `breaker`, `oom` or
+    /// `chaos`, the keys of a node's `dropped`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<&'static str>,
     /// A real mock request (step 8A), drawn apart from the generated ones.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub real: bool,
@@ -176,6 +200,18 @@ fn kind_label(k: HopKind) -> &'static str {
     }
 }
 
+/// The key of a node's `dropped` that a failure counts under.
+fn cause_key(c: FailCause) -> &'static str {
+    match c {
+        FailCause::Overflow => "overflow",
+        FailCause::RateLimit => "rate_limit",
+        FailCause::Deadline => "deadline",
+        FailCause::Breaker => "breaker",
+        FailCause::Oom => "oom",
+        FailCause::Chaos => "chaos",
+    }
+}
+
 fn is_own(k: HopKind) -> bool {
     matches!(
         k,
@@ -190,6 +226,8 @@ fn nanos(d: Duration) -> u64 {
 /// What a set of finished requests adds up to: counts per node and wire and a latency histogram.
 struct Counts {
     nodes: Vec<NodeTick>,
+    /// The work time of each node's own hops; empty where it is not wanted (the real share).
+    node_hist: Vec<LatencyHist>,
     wires: Vec<WireTick>,
     hist: LatencyHist,
     requests: u32,
@@ -203,11 +241,18 @@ impl Counts {
     fn new(nodes: usize, wires: usize) -> Counts {
         Counts {
             nodes: vec![NodeTick::default(); nodes],
+            node_hist: Vec::new(),
             wires: vec![WireTick::default(); wires],
             hist: LatencyHist::new(),
             requests: 0,
             failed: 0,
         }
+    }
+
+    /// Keeps each node's own-hop work times too (the total does; the real share does not).
+    fn with_node_hist(mut self) -> Counts {
+        self.node_hist = vec![LatencyHist::new(); self.nodes.len()];
+        self
     }
 
     /// Adds one finished request; with `build`, also returns its journey. `None` for a request of
@@ -223,25 +268,53 @@ impl Counts {
         self.requests += 1;
         let total = f.done.saturating_sub(f.arrival);
         let mut prev_own: Option<usize> = None;
+        // the node and wire of the last own hop that crossed a wire
+        let mut last_in: Option<(usize, usize)> = None;
         let mut hops = Vec::new();
         for h in &f.hops {
             let kind = h.hop.kind;
             let mut edge = None;
             if is_own(kind) {
                 self.nodes[h.hop.node].arrived += 1;
+                if !self.node_hist.is_empty() {
+                    self.node_hist[h.hop.node].record(nanos(h.hop.dur));
+                }
+                let r = usize::from(h.hop.replica);
+                let copies = &mut self.nodes[h.hop.node].replicas;
+                if copies.len() <= r {
+                    copies.resize(r + 1, 0);
+                }
+                copies[r] += 1;
                 if let Some(p) = prev_own.filter(|p| *p != h.hop.node)
                     && let Some(e) = edge_of[p][h.hop.node]
                 {
                     self.wires[e].carried += 1;
+                    last_in = Some((h.hop.node, e));
                     // the wire this hop was entered through, so a wire with no latency hop of its
                     // own still has something to draw a dot along
                     edge = Some(e);
+                }
+                // a retry runs at the node its first try ran at, so it crosses no wire again: it
+                // counts on the wire that first try came in through
+                if h.attempt > 1
+                    && let Some((_, e)) = last_in.filter(|(n, _)| *n == h.hop.node)
+                {
+                    self.wires[e].retries += 1;
+                    if h.attempt == 2 {
+                        self.wires[e].retried += 1;
+                    }
                 }
                 prev_own = Some(h.hop.node);
             } else if let HopKind::Link { edge: e, .. } = kind {
                 edge = Some(usize::from(e));
             } else if matches!(kind, HopKind::Net) {
                 edge = prev_own.and_then(|p| edge_of[p][h.hop.node]);
+            }
+            if !is_own(kind)
+                && let Some(e) = edge
+            {
+                self.wires[e].wait_ns += nanos(h.wait);
+                self.wires[e].wire_ns += nanos(h.hop.dur);
             }
             if build {
                 hops.push(JourneyHop {
@@ -309,7 +382,7 @@ impl Aggregator {
             edge_of[e.from][e.to] = Some(i);
         }
         Aggregator {
-            total: Counts::new(n, topo.edges.len()),
+            total: Counts::new(n, topo.edges.len()).with_node_hist(),
             real: Counts::new(n, topo.edges.len()),
             edge_of,
             journeys: Vec::new(),
@@ -350,6 +423,12 @@ impl Aggregator {
                 hops,
                 dropped_at,
                 total_ns,
+                stream: if real {
+                    None
+                } else {
+                    crate::actor::stream_of(f)
+                },
+                cause: dropped_at.and(f.cause.map(cause_key)),
                 real,
             });
         }
@@ -366,9 +445,14 @@ impl Aggregator {
         status: TickStatus,
     ) -> Tick {
         let (n, w) = (topo.nodes.len(), topo.edges.len());
-        let mut total = std::mem::replace(&mut self.total, Counts::new(n, w));
-        let real = std::mem::replace(&mut self.real, Counts::new(n, w));
+        let mut total = std::mem::replace(&mut self.total, Counts::new(n, w).with_node_hist());
+        let mut real = std::mem::replace(&mut self.real, Counts::new(n, w));
         for (i, node) in total.nodes.iter_mut().enumerate() {
+            node.hist = total
+                .node_hist
+                .get(i)
+                .map(LatencyHist::sparse)
+                .unwrap_or_default();
             let (busy, queued) = loads.get(i).copied().unwrap_or((0, 0));
             node.busy_slots = busy;
             node.queue = queued;
@@ -377,6 +461,12 @@ impl Aggregator {
                 let cores = f64::from(mc) / 1000.0 * f64::from(topo.nodes[i].replicas.max(1));
                 f64::from(busy) / cores
             });
+        }
+        // a node that ran on one copy has nothing to split
+        for n in total.nodes.iter_mut().chain(real.nodes.iter_mut()) {
+            if n.replicas.len() <= 1 {
+                n.replicas.clear();
+            }
         }
         let generated = total.requests - real.requests;
         let real_tick = (real.requests > 0).then(|| RealTick {

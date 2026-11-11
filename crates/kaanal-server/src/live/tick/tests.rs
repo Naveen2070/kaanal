@@ -143,9 +143,14 @@ fn a_tick_counts_sum_to_the_requests_the_engine_finished() {
         tick.nodes
     );
     assert_eq!(
-        tick.wires,
-        vec![WireTick { carried: 40 }, WireTick { carried: 40 }]
+        tick.wires.iter().map(|w| w.carried).collect::<Vec<_>>(),
+        vec![40, 40]
     );
+    // the oracle: each crossing is the wire's constant 1 ms, and nothing shares a plain wire
+    for w in &tick.wires {
+        assert_eq!(w.wire_ns, u64::from(w.carried) * 1_000_000, "{w:?}");
+        assert_eq!(w.wait_ns, 0, "{w:?}");
+    }
     // the next tick starts empty
     let next = a.take((500, 500), &[], &t, STATUS);
     assert_eq!((next.requests, next.hist.len()), (0, 0));
@@ -178,6 +183,10 @@ fn drops_are_counted_by_cause_at_the_node_that_dropped() {
         tick.journeys.iter().any(|j| j.dropped_at.is_some()),
         "a dropped request is drawn"
     );
+    // a dropped journey says why, and a served one does not
+    for j in &tick.journeys {
+        assert_eq!(j.cause, j.dropped_at.map(|_| "overflow"), "{j:?}");
+    }
 }
 
 #[test]
@@ -268,7 +277,10 @@ fn real_and_generated_add_up_to_the_same_total_node_by_node_and_wire_by_wire() {
         "{:?}",
         real.nodes
     );
-    assert_eq!(real.wires, vec![WireTick { carried: 10 }; 2]);
+    assert_eq!(
+        real.wires.iter().map(|w| w.carried).collect::<Vec<_>>(),
+        vec![10, 10]
+    );
     let served: u32 = real.hist.iter().map(|(_, c)| c).sum();
     assert_eq!(served, 10, "a served real request is in the real histogram");
 }
@@ -350,4 +362,90 @@ edges:
     let tick = a.take((250, 250), &[(0, 0); 2], &small, STATUS);
     assert_eq!(tick.requests, 0);
     assert!(tick.real.is_none());
+}
+
+#[test]
+fn each_nodes_work_times_are_in_its_histogram_at_the_work_it_was_given() {
+    let (t, fin) = finished(CHAIN, 200, 5);
+    let mut a = Aggregator::new(&t);
+    for f in &fin {
+        a.add(f, false);
+    }
+    let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+    for n in &tick.nodes {
+        let recorded: u32 = n.hist.iter().map(|(_, c)| c).sum();
+        assert_eq!(recorded, n.arrived, "one work time per own hop");
+    }
+    // the oracle: the app works a constant 2 ms, so its median is 2 ms, to the bucket's 1%
+    let app = t.id("app").unwrap();
+    let h = LatencyHist::from_sparse(&tick.nodes[app].hist);
+    let p50 = f64::from(u32::try_from(h.quantile(0.5)).unwrap());
+    assert!((p50 / 2e6 - 1.0).abs() < 0.02, "p50 {p50} ns");
+}
+
+#[test]
+fn hops_are_split_by_copy_only_for_a_node_that_has_several() {
+    let yaml = CHAIN.replace(
+        "app: { type: service, proc: 2ms }",
+        "app: { type: service, proc: 2ms, replicas: 3 }",
+    );
+    let (t, fin) = finished(&yaml, 300, 2);
+    let mut a = Aggregator::new(&t);
+    for f in &fin {
+        a.add(f, false);
+    }
+    let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+    let app = &tick.nodes[t.id("app").unwrap()];
+    assert_eq!(
+        app.replicas.iter().sum::<u32>(),
+        app.arrived,
+        "every hop ran on a copy"
+    );
+    assert!(app.replicas.len() > 1, "{:?}", app.replicas);
+    assert!(
+        tick.nodes[t.id("db").unwrap()].replicas.is_empty(),
+        "one copy: nothing to split"
+    );
+}
+
+#[test]
+fn retries_on_a_wire_match_the_retry_hops_the_engine_ran() {
+    // one slot and no queue at the app: simultaneous requests overflow there and the wire retries
+    let yaml = CHAIN
+        .replace(
+            "app: { type: service, proc: 2ms }",
+            "app: { type: service, proc: 20ms, concurrency: { limit: 1, queue: 0 } }",
+        )
+        .replace(
+            "{ from: gw, to: app, net: 1ms }",
+            "{ from: gw, to: app, net: 1ms, retry: { max_attempts: 3 } }",
+        );
+    let (t, fin) = finished(&yaml, 10, 0);
+    let app = t.id("app").unwrap();
+    // the oracle, counted from the engine's own records and not by the aggregator
+    let ran = fin
+        .iter()
+        .flat_map(|f| &f.hops)
+        .filter(|h| h.attempt > 1 && h.hop.node == app && matches!(h.hop.kind, HopKind::Proc))
+        .count();
+    let second = fin
+        .iter()
+        .flat_map(|f| &f.hops)
+        .filter(|h| h.attempt == 2 && h.hop.node == app && matches!(h.hop.kind, HopKind::Proc))
+        .count();
+    assert!(
+        ran > 0 && second > 0,
+        "the fixture must retry, or this proves nothing"
+    );
+    let mut a = Aggregator::new(&t);
+    for f in &fin {
+        a.add(f, false);
+    }
+    let tick = a.take((250, 250), &[(0, 0); 3], &t, STATUS);
+    let w = &tick.wires[0];
+    assert_eq!(
+        (w.retries as usize, w.retried as usize),
+        (ran, second),
+        "{w:?}"
+    );
 }

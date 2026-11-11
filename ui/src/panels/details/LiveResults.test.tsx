@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { NuqsAdapter } from "nuqs/adapters/react";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import type { Marker, Tick } from "../../data/api/liveTypes";
 import type { DraftView } from "../../data/api/types";
@@ -42,7 +43,7 @@ test("live_results_rank_by_peak_over_the_window_and_leave_batch_widgets_out", as
   // gw peaks at 30%, app at 90% earlier in the window though it is calm now
   const ticks = [tick(250, [3, 9]), tick(500, [3, 2]), tick(750, [3, 2])];
   useLive.setState({ ticks });
-  const { container } = render(<LiveResults />);
+  const { container } = render(<LiveResults />, { wrapper: NuqsAdapter });
   const names = [...container.querySelectorAll("ol li span.font-medium")].map((e) => e.textContent);
   expect(names).toEqual(["app", "gw"]);
   expect(container.textContent).toContain("peak 90%");
@@ -66,7 +67,7 @@ test("a_note_from_the_server_is_shown_and_an_empty_run_says_so", () => {
       system_ms: 0,
     },
   });
-  render(<LiveResults />);
+  render(<LiveResults />, { wrapper: NuqsAdapter });
   expect(screen.getByText("the file has no traffic profile")).toBeTruthy();
   expect(screen.getByText("No component has a figure yet.")).toBeTruthy();
 });
@@ -126,4 +127,20 @@ test("the_restart_marker_at_the_start_of_a_run_is_listed", () => {
   expect(screen.getByRole("list", { name: "Changes on the timeline" }).textContent).toContain(
     "Applied: the live run restarted",
   );
+});
+
+test("errors_by_kind_add_the_window_and_measure_is_offered_without_a_run_yet", () => {
+  const t = tick(250, [3, 3]);
+  const node = t.nodes[0] as Tick["nodes"][number];
+  useLive.setState({
+    ticks: [
+      {
+        ...t,
+        nodes: [{ ...node, dropped: { ...node.dropped, overflow: 7 } }, ...t.nodes.slice(1)],
+      },
+    ],
+  });
+  render(<LiveResults />, { wrapper: NuqsAdapter });
+  expect(screen.getByText("queue full").nextSibling?.textContent).toBe("7");
+  expect(screen.getByRole("button", { name: "Measure the draft" })).toBeTruthy();
 });
