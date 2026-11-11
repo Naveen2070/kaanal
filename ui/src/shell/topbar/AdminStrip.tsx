@@ -17,7 +17,7 @@ export function AdminStrip() {
   const seen = ticks.some((t) => t.real !== undefined);
   return (
     <div>
-      <LiveStrip src={realOnly ? "real" : "all"} />
+      <LiveStrip src={realOnly ? "real" : "all"} throttle={false} />
       <section
         aria-label="Real and generated requests"
         className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2 text-sm"

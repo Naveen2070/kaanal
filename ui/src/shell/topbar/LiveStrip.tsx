@@ -4,7 +4,7 @@
 // times a second; a quiet live region says the same in a sentence every few seconds, so a screen
 // reader is not interrupted by every tick.
 
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, Workflow } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../data/api/client";
 import { useDraft } from "../../data/store/draft";
@@ -12,6 +12,8 @@ import { useLive, type LiveStatus } from "../../data/store/live";
 import { windowFigures, type Source } from "../../data/store/liveMath";
 import { pauseLive, resumeLive } from "../../data/store/liveRuntime";
 import { liveFeed } from "../../canvas/liveFeed";
+import { rpsFromSlider, SLIDER_MAX, sliderFromRps } from "../../canvas/logScale";
+import { openTrafficBuilder } from "../../panels/traffic/store";
 import { fmtMs, twoSignificant } from "../../canvas/metrics";
 import { notify } from "../toast/toasts";
 
@@ -25,7 +27,22 @@ const STATE_WORDS: Record<LiveStatus, string> = {
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-export function LiveStrip({ src = "all" }: { src?: Source } = {}) {
+const SLIDER_KEYS = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+]);
+
+/** `throttle` is the offered-load slider; Admin hides it (a real frontend sets the load) but keeps Build traffic. */
+export function LiveStrip({
+  src = "all",
+  throttle = true,
+}: { src?: Source; throttle?: boolean } = {}) {
   const ticks = useLive((s) => s.ticks);
   const status = useLive((s) => s.status);
   const hello = useLive((s) => s.hello);
@@ -53,16 +70,28 @@ export function LiveStrip({ src = "all" }: { src?: Source } = {}) {
   const now = ticks.at(-1)?.status;
   const shownRate = rate !== "" ? rate : String(now?.rate ?? hello?.rate ?? "");
   const overloaded = now?.overloaded ?? hello?.overloaded ?? false;
-  const commitRate = async () => {
-    const n = Number(rate);
-    setRate("");
-    if (rate === "" || !Number.isFinite(n)) return;
+  const send = async (n: number) => {
     try {
       await api.liveRate(n);
     } catch (e) {
       notify.warn(e instanceof Error ? e.message : "The rate was refused", "live-rate");
     }
   };
+  const commitRate = async () => {
+    const n = Number(rate);
+    setRate("");
+    if (rate === "" || !Number.isFinite(n)) return;
+    await send(n);
+  };
+  // the slider position while it is being moved; it commits on release, never on every move
+  const [dragging, setDragging] = useState<number | null>(null);
+  const current = Number(shownRate);
+  const position = dragging ?? sliderFromRps(Number.isFinite(current) ? current : 0);
+  const commitSlider = (v: number) => {
+    setDragging(null);
+    if (v !== sliderFromRps(Number.isFinite(current) ? current : 0)) void send(rpsFromSlider(v));
+  };
+  const hasDoc = useDraft((s) => s.view?.doc != null);
   const paused = status === "paused" || status === "hidden-paused";
   return (
     <section
@@ -100,19 +129,47 @@ export function LiveStrip({ src = "all" }: { src?: Source } = {}) {
       </dl>
       <div className="ml-auto flex items-center gap-2">
         <span className="text-xs text-muted">{STATE_WORDS[status]}</span>
-        <label className="flex items-center gap-1 text-xs text-muted">
-          Offered
-          <input
-            name="live-rate"
-            inputMode="decimal"
-            value={shownRate}
-            onChange={(e) => setRate(e.currentTarget.value)}
-            onBlur={() => void commitRate()}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            className="h-7 w-16 rounded border border-control bg-sheet px-1 text-right font-mono text-text"
-          />
-          / s
-        </label>
+        {throttle ? (
+          <>
+            <label className="flex items-center gap-1 text-xs text-muted">
+              Offered
+              <input
+                name="live-rate"
+                inputMode="decimal"
+                value={shownRate}
+                onChange={(e) => setRate(e.currentTarget.value)}
+                onBlur={() => void commitRate()}
+                onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                className="h-7 w-16 rounded border border-control bg-sheet px-1 text-right font-mono text-text"
+              />
+              / s
+            </label>
+            <input
+              name="live-throttle"
+              type="range"
+              aria-label="Offered load slider"
+              aria-valuetext={`${rpsFromSlider(position)} requests per second`}
+              min={0}
+              max={SLIDER_MAX}
+              step={1}
+              value={position}
+              onChange={(e) => setDragging(Number(e.currentTarget.value))}
+              onPointerUp={(e) => commitSlider(Number(e.currentTarget.value))}
+              onKeyUp={(e) => SLIDER_KEYS.has(e.key) && commitSlider(Number(e.currentTarget.value))}
+              className="w-40 accent-accent"
+            />
+          </>
+        ) : null}
+        <button
+          type="button"
+          disabled={!hasDoc}
+          onClick={openTrafficBuilder}
+          title="Build the traffic: endpoints, payload sizes and which services they reach"
+          className="flex h-8 items-center gap-1.5 rounded-lg border border-control bg-sheet px-2 text-xs font-medium hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+        >
+          <Workflow size={14} aria-hidden />
+          Build traffic
+        </button>
         <button
           type="button"
           disabled={status === "off" || status === "connecting"}

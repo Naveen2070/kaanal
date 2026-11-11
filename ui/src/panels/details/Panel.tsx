@@ -16,6 +16,7 @@ import { Controls } from "./Controls";
 import { EdgeControls } from "./EdgeControls";
 import { Live } from "./Live.lazy";
 import { LogTab } from "./LogTab.lazy";
+import { LiveTrace } from "./LiveTrace.lazy";
 import { useLogDrawer } from "./logDrawer";
 import { Rail } from "./Rail";
 import { LiveResults } from "./LiveResults.lazy";
@@ -101,6 +102,10 @@ export function Panel() {
           log:
             mode === "admin" ? (
               <AdminFeed />
+            ) : isLive(mode) ? (
+              <LazyBoundary fallback={<LogSkeleton />}>
+                <LiveTrace />
+              </LazyBoundary>
             ) : (
               <LazyBoundary fallback={<LogSkeleton />}>
                 <LogTab />

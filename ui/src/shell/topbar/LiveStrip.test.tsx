@@ -133,3 +133,18 @@ test("the_rate_box_and_the_overload_warning_follow_the_latest_tick_not_the_hello
   expect((screen.getByRole("textbox", { name: /Offered/ }) as HTMLInputElement).value).toBe("500");
   expect(screen.getByText(/cannot keep up/)).toBeTruthy();
 });
+
+test("the_slider_sends_the_rate_on_release_and_admin_hides_it_but_keeps_build_traffic", async () => {
+  const send = vi.spyOn(api, "liveRate").mockResolvedValue({});
+  const r = render(<LiveStrip />);
+  const slider = screen.getByRole("slider", { name: /Offered load/ }) as HTMLInputElement;
+  fireEvent.change(slider, { target: { value: "1000" } });
+  expect(send).not.toHaveBeenCalled(); // moving is not committing
+  fireEvent.pointerUp(slider, { target: { value: "1000" } });
+  await vi.waitFor(() => expect(send).toHaveBeenCalledWith(15000));
+  expect(screen.getByRole("button", { name: /Build traffic/ })).toBeTruthy();
+  r.rerender(<LiveStrip throttle={false} />);
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(screen.queryByRole("textbox", { name: /Offered/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /Build traffic/ })).toBeTruthy();
+});
