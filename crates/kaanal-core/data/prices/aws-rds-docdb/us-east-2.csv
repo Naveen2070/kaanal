@@ -1,0 +1,41 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-docdb in region us-east-2.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/db.r4.16xlarge,8864000
+aws/db.r4.2xlarge,1108000
+aws/db.r4.4xlarge,2216000
+aws/db.r4.8xlarge,4432000
+aws/db.r4.large,277000
+aws/db.r4.xlarge,554000
+aws/db.r5.12xlarge,6648000
+aws/db.r5.16xlarge,8862400
+aws/db.r5.24xlarge,13296000
+aws/db.r5.2xlarge,1108000
+aws/db.r5.4xlarge,2216000
+aws/db.r5.8xlarge,4431200
+aws/db.r5.large,277000
+aws/db.r5.xlarge,554000
+aws/db.r6g.12xlarge,6315600
+aws/db.r6g.16xlarge,8419280
+aws/db.r6g.2xlarge,1052600
+aws/db.r6g.4xlarge,2105200
+aws/db.r6g.8xlarge,4209640
+aws/db.r6g.large,263150
+aws/db.r6g.xlarge,526300
+aws/db.r6gd.12xlarge,7705000
+aws/db.r6gd.16xlarge,10271500
+aws/db.r6gd.2xlarge,1284200
+aws/db.r6gd.4xlarge,2568300
+aws/db.r6gd.8xlarge,5135800
+aws/db.r6gd.xlarge,642100
+aws/db.r8g.12xlarge,6625064
+aws/db.r8g.16xlarge,8831825
+aws/db.r8g.24xlarge,13250129
+aws/db.r8g.2xlarge,1104177
+aws/db.r8g.48xlarge,26500258
+aws/db.r8g.4xlarge,2208355
+aws/db.r8g.8xlarge,4415912
+aws/db.r8g.large,276044
+aws/db.r8g.xlarge,552089
+aws/db.t3.medium,78000
+aws/db.t4g.medium,75660

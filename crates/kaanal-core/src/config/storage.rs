@@ -82,6 +82,18 @@ pub struct StorageConfig {
     /// changes no timing.
     #[serde(default)]
     pub location: Option<String>,
+    /// The storage class, for the **cost estimate only**: `standard` (the default), `infrequent` (S3
+    /// Standard-IA, Azure Cool, Google Nearline), `cold` (S3 Glacier Instant Retrieval, Azure Cold,
+    /// Google Coldline) or `archive` (S3 Glacier Flexible Retrieval, Azure Archive, Google Archive).
+    /// A colder class costs less to keep and more to use: higher request prices and a fee per GB
+    /// retrieved. It changes no timing (a colder class's first-byte time is yours to write).
+    #[serde(default)]
+    pub class: Option<StorageClass>,
+    /// Data read back out of the store in a month, as a size (`50GB`), for the **cost estimate
+    /// only**: a colder class bills each GB retrieved (`standard` bills none). Absent = none.
+    #[serde(default, deserialize_with = "crate::units::custom_memory")]
+    #[schemars(schema_with = "crate::schema::memory_size")]
+    pub retrieved: Option<u64>,
     /// Locale pack; a storage node generates no data, so this only passes down.
     #[serde(default)]
     #[schemars(extend("pattern" = LOCALE_PATTERN))]
@@ -97,6 +109,35 @@ impl StorageConfig {
         #[allow(clippy::cast_precision_loss)]
         self.throughput
             .map(|t| DistConfig::Fixed(Duration::from_secs_f64(1024.0 / t.max(1) as f64)))
+    }
+}
+
+/// The storage class of an object store, for its cost (RULES 128): the same four steps on every
+/// cloud, from the one that costs most to keep to the one that costs least.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum StorageClass {
+    /// S3 Standard, Azure Hot, Google Standard. The default.
+    #[default]
+    Standard,
+    /// S3 Standard-IA, Azure Cool, Google Nearline.
+    Infrequent,
+    /// S3 Glacier Instant Retrieval, Azure Cold, Google Coldline.
+    Cold,
+    /// S3 Glacier Flexible Retrieval (standard retrieval), Azure Archive, Google Archive.
+    Archive,
+}
+
+impl StorageClass {
+    /// The word written in the file, which is also the class column of the price file.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            StorageClass::Standard => "standard",
+            StorageClass::Infrequent => "infrequent",
+            StorageClass::Cold => "cold",
+            StorageClass::Archive => "archive",
+        }
     }
 }
 

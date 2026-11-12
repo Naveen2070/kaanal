@@ -8,6 +8,10 @@
 // it carries every price). Run it again when a provider adds families, review the diff, commit.
 // --cache-only redoes just the ElastiCache part from `elasticache.json` in the folder (the folder is then
 // required): the other rows of instances.csv and the other price folders are kept as they are.
+// --azure-net only redoes the network column of the azure rows from scripts/azure-network.csv (which
+// scripts/read-azure-network.mjs fills from Microsoft's size pages); every other cell is kept.
+// --db-extra does the same for Amazon DocumentDB and Amazon Neptune from `docdb.json` and `neptune.json`
+// (AWS's own price lists, AmazonDocDB and AmazonNeptune): a class already in the table gets a price per region.
 //
 // Estimates, labelled in the csv header:
 // - vCPU and memory are the providers' own figures;
@@ -46,6 +50,10 @@ const SOURCES = {
   elasticache: "cache/instances.json",
 };
 const CACHE_ONLY = process.argv.includes("--cache-only");
+const DB_EXTRA = process.argv.includes("--db-extra");
+// a partial run keeps every other row and folder of the last full run
+const AZURE_NET = process.argv.includes("--azure-net");
+const PARTIAL = CACHE_ONLY || DB_EXTRA || AZURE_NET;
 const dir = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? mkdtempSync(join(tmpdir(), "kaanal-instances-"));
 
 function load(provider) {
@@ -64,7 +72,7 @@ const mib = (gib) => Math.round(Number(gib) * 1024);
 const rows = new Map();
 const csvUrl = new URL("../crates/kaanal-core/data/instances.csv", import.meta.url);
 const csvHead = [];
-if (CACHE_ONLY) {
+if (PARTIAL) {
   // keep every other row (and the header) of the file written by the last full run
   for (const l of readFileSync(csvUrl, "utf8").split(/\r?\n/)) {
     if (l.startsWith("#")) csvHead.push(l);
@@ -97,7 +105,7 @@ const awsNet = (text) => {
   const m = /([0-9]+(?:\.[0-9]+)?)\s*Gigabit/i.exec(String(text ?? ""));
   return m ? Number(m[1]) * 1000 : 0;
 };
-for (const x of CACHE_ONLY ? [] : load("aws")) {
+for (const x of PARTIAL ? [] : load("aws")) {
   add(`aws/${x.instance_type}`, x.vCPU, mib(x.memory), awsNet(x.network_performance), micro(x, "us-east-1"));
   noteRegions("aws", `aws/${x.instance_type}`, x);
 }
@@ -117,7 +125,13 @@ const azureNetOf = (name) => {
   const m = constrained.exec(name);
   return m ? Number(azureNet.get(m[1] + m[2]) ?? 0) : 0;
 };
-for (const x of CACHE_ONLY ? [] : load("azure")) {
+if (AZURE_NET) {
+  // the azure rows kept from the last run get the figure the file now has (0 stays 0: no figure)
+  for (const [name, r] of rows) {
+    if (name.startsWith("azure/")) r[3] = azureNetOf(name.slice("azure/".length));
+  }
+}
+for (const x of PARTIAL ? [] : load("azure")) {
   const size = String(x.pretty_name_azure ?? x.pretty_name ?? x.instance_type).replace(/\s+/g, "_");
   const name = `standard_${size}`.toLowerCase();
   add(`azure/${name}`, x.vcpu, mib(x.memory), azureNetOf(name), micro(x, "us-east"));
@@ -125,7 +139,7 @@ for (const x of CACHE_ONLY ? [] : load("azure")) {
 }
 
 // GCP: 2 Gbps per vCPU up to 32 Gbps (E2: up to 16), the documented default egress cap.
-for (const x of CACHE_ONLY ? [] : load("gcp")) {
+for (const x of PARTIAL ? [] : load("gcp")) {
   const cap = x.instance_type.startsWith("e2-") ? 16000 : 32000;
   add(`gcp/${x.instance_type}`, x.vCPU, mib(x.memory), Math.min(2000 * Number(x.vCPU), cap), micro(x, "us-central1"));
   noteRegions("gcp", `gcp/${x.instance_type}`, x);
@@ -144,7 +158,7 @@ const RDS_ENGINES = {
   "aurora-postgresql": "Aurora PostgreSQL",
   "aurora-mysql": "Aurora MySQL",
 };
-for (const x of CACHE_ONLY ? [] : load("rds")) {
+for (const x of PARTIAL ? [] : load("rds")) {
   const n = `aws/${x.instance_type}`.toLowerCase();
   const price = (engine, region) => {
     const v = Number(x.pricing?.[region]?.[RDS_ENGINES[engine]]?.ondemand);
@@ -169,7 +183,7 @@ for (const x of CACHE_ONLY ? [] : load("rds")) {
 // Graviton classes: m8g, r8g, r8gd, c8gn, r7gd). The price column of instances.csv is the Redis price
 // in us-east-1 (Valkey's for a Valkey-only class). A class with no price for any engine is left out.
 const CACHE_ENGINES = { "aws-elasticache": ["Redis", "Memcached"], "aws-elasticache-valkey": ["Valkey"] };
-for (const x of load("elasticache")) {
+for (const x of DB_EXTRA || AZURE_NET ? [] : load("elasticache")) {
   const n = `aws/${x.instance_type}`.toLowerCase();
   const price = (engines, region) => {
     for (const e of engines) {
@@ -188,8 +202,55 @@ for (const x of load("elasticache")) {
   }
 }
 
+// Amazon DocumentDB and Amazon Neptune, the managed engines behind the `mongodb` and `neo4j` flavors
+// (RULES 127): AWS's own price lists (AmazonDocDB, AmazonNeptune), not the mirror. Each engine is a
+// provider of its own in the price files (`aws-rds-docdb`, `aws-rds-neptune`, the same naming as the RDS
+// engines). The price is the standard-storage instance price (the I/O-Optimized one is a different
+// product and dearer) of a class that is already in the table (Neptune's file labels every instance
+// "Multi-AZ", but its price is per instance, $0.348 an hour for db.r5.large in us-east-1): DocumentDB and Neptune sell classes RDS
+// sells (`db.r5.large`), so no size is invented; a class the table lacks is reported and left out.
+const DB_EXTRA_SERVICES = {
+  docdb: {
+    provider: "aws-rds-docdb",
+    url: "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDocDB/current/index.json",
+  },
+  neptune: {
+    provider: "aws-rds-neptune",
+    url: "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonNeptune/current/index.json",
+  },
+};
+function loadOffer(name, url) {
+  const file = join(dir, `${name}.json`);
+  if (!existsSync(file)) {
+    console.error(`downloading ${name} ...`);
+    execFileSync("curl", ["-sS", "-L", "-m", "900", "-o", file, url], { stdio: "inherit" });
+  }
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+for (const [svc, def] of Object.entries(CACHE_ONLY || AZURE_NET ? {} : DB_EXTRA_SERVICES)) {
+  const offer = loadOffer(svc, def.url);
+  const seen = new Set();
+  const left = new Set();
+  for (const p of Object.values(offer.products)) {
+    const a = p.attributes;
+    if (!/(^|-)InstanceUsage:db\./.test(a.usagetype ?? "") || !a.instanceType || !a.regionCode) continue;
+    const n = `aws/${a.instanceType}`.toLowerCase();
+    if (!rows.has(n)) {
+      left.add(a.instanceType);
+      continue;
+    }
+    const dim = Object.values(Object.values(offer.terms.OnDemand[p.sku] ?? {})[0]?.priceDimensions ?? {})[0];
+    const v = Number(dim?.pricePerUnit?.USD);
+    const key = `${def.provider}/${a.regionCode}/${n}`;
+    if (!(v > 0) || seen.has(key)) continue;
+    seen.add(key);
+    ((prices[def.provider] ??= {})[a.regionCode] ??= []).push([n, Math.round(v * 1e6)]);
+  }
+  console.error(`${svc}: ${seen.size} prices; classes not in the table, left out: ${[...left].sort().join(" ") || "none"}`);
+}
+
 const sorted = [...rows.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-const head = CACHE_ONLY ? csvHead : [
+const head = PARTIAL ? csvHead : [
   "# Cloud instance types for `instance: provider/type` (kaanal-core src/instances.rs).",
   `# Generated ${new Date().toISOString().slice(0, 10)} by scripts/gen-instances.mjs; do not edit by hand.`,
   "# name,vcpu,memory_mib,net_mbps,usd_micro_hr. ESTIMATES: an upper bound on capacity (a vCPU is a hardware thread",
@@ -206,7 +267,7 @@ writeFileSync(
 // run time without a network call. Rewritten whole each run.
 const pricesDir = new URL("../crates/kaanal-core/data/prices/", import.meta.url);
 // a full run rewrites every folder; --cache-only only the two cache ones
-for (const d of CACHE_ONLY ? Object.keys(CACHE_ENGINES) : [""]) {
+for (const d of AZURE_NET ? [] : CACHE_ONLY ? Object.keys(CACHE_ENGINES) : DB_EXTRA ? Object.values(DB_EXTRA_SERVICES).map((x) => x.provider) : [""]) {
   rmSync(new URL(d ? `${d}/` : "", pricesDir), { recursive: true, force: true });
 }
 mkdirSync(pricesDir, { recursive: true });
@@ -230,6 +291,7 @@ const ORDER = [
   "aws", "azure", "gcp",
   "aws-rds-postgresql", "aws-rds-mysql", "aws-rds-mariadb", "aws-rds-aurora-mysql", "aws-rds-aurora-postgresql",
   ...Object.keys(CACHE_ENGINES),
+  ...Object.values(DB_EXTRA_SERVICES).map((x) => x.provider),
 ];
 const rank = (p) => (ORDER.includes(p) ? ORDER.indexOf(p) : ORDER.length);
 const index = readdirSync(pricesDir)

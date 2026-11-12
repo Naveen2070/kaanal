@@ -53,3 +53,36 @@ export function locationLabel(location: string): string {
   if (DUAL.has(location)) return `${location} (dual-region)`;
   return location;
 }
+
+/** The storage classes, from the one that costs most to keep to the one that costs least (RULES 128). */
+export const STORAGE_CLASSES = [
+  { id: "standard", label: "Standard (S3 Standard, Azure Hot, Google Standard)" },
+  { id: "infrequent", label: "Infrequent (S3 Standard-IA, Azure Cool, Google Nearline)" },
+  { id: "cold", label: "Cold (S3 Glacier Instant, Azure Cold, Google Coldline)" },
+  { id: "archive", label: "Archive (S3 Glacier Flexible, Azure Archive, Google Archive)" },
+] as const;
+
+/** The class the store is priced in; "standard" when none is written. */
+export const classOf = (config: NodeDoc): string =>
+  typeof config.class === "string" ? config.class : "standard";
+
+/** The patch for the class: `standard` is the default, so it removes the field. */
+export function setClass(name: string, config: NodeDoc, cls: string): Op[] {
+  const path = ["nodes", name, "class"];
+  const present = "class" in config;
+  if (cls === "standard") return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, cls)];
+}
+
+/** The bytes read back in a month (`retrieved: 50GB`); null = none written. */
+export function retrievedOf(config: NodeDoc): number | null {
+  return config.retrieved === undefined ? null : parseBytes(config.retrieved);
+}
+
+/** The patch for the data read back: a size in bytes writes it, 0 or less removes it. */
+export function setRetrieved(name: string, config: NodeDoc, bytes: number): Op[] {
+  const path = ["nodes", name, "retrieved"];
+  const present = "retrieved" in config;
+  if (!(bytes > 0)) return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, Math.round(bytes))];
+}

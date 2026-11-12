@@ -23,14 +23,29 @@ pub async fn get_price_regions() -> Json<Value> {
 }
 
 /// `GET /__kaanal/storage-prices` — `{ rows: [[provider, region, gb_month, write_per_1k, read_per_1k],
-/// ...] }`, micro-USD (RULES 123): what an object store costs in each region; region `*` answers for
-/// every region of that provider.
+/// ...], classes: [[provider, region, class, gb_month, write_per_1k, read_per_1k, retrieval_per_gb],
+/// ...] }`, micro-USD (RULES 123, 128): what an object store costs in each region, Standard in `rows`
+/// and the colder classes in `classes`; region `*` answers for every region of that provider.
 pub async fn get_storage_prices() -> Json<Value> {
     let rows: Vec<Value> = kaanal_core::prices::storage_rows()
         .iter()
         .map(|(p, r, s)| json!([p, r, s.gb_month, s.write_per_1k, s.read_per_1k]))
         .collect();
-    Json(json!({ "rows": rows }))
+    let classes: Vec<Value> = kaanal_core::prices::storage_class_rows()
+        .iter()
+        .map(|(p, r, c, s)| {
+            json!([
+                p,
+                r,
+                c.word(),
+                s.gb_month,
+                s.write_per_1k,
+                s.read_per_1k,
+                s.retrieval_per_gb
+            ])
+        })
+        .collect();
+    Json(json!({ "rows": rows, "classes": classes }))
 }
 
 /// `GET /__kaanal/prices/{provider}/{region}` — `{ provider, region, prices: [[name,

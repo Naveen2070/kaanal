@@ -70,18 +70,18 @@ test("a_kind_with_no_choice_shows_no_hosting_box", () => {
   expect(screen.queryByLabelText("Hosting")).toBeNull();
 });
 
-test("a_cache_offers_self_managed_and_serverless_and_mongodb_says_the_table_has_no_class", () => {
+test("a_cache_offers_self_managed_and_serverless_and_cassandra_says_the_table_has_no_class", () => {
   const { rerender } = render(<HostingField name="c" config={{ type: "cache" } as NodeDoc} />);
   const select = screen.getByLabelText("Hosting") as HTMLSelectElement;
   expect([...select.options].map((o) => o.value)).toEqual(["self", "managed", "serverless"]);
   rerender(
     <HostingField
       name="d"
-      config={{ type: "database", flavor: "mongodb", hosting: "managed" } as NodeDoc}
+      config={{ type: "database", flavor: "cassandra", hosting: "managed" } as NodeDoc}
     />,
   );
   expect(screen.queryByLabelText(/Engine/)).toBeNull();
-  expect(screen.getByText(/no managed class for a mongodb database/)).toBeTruthy();
+  expect(screen.getByText(/no managed class for a cassandra database/)).toBeTruthy();
 });
 
 test("the_engine_choices_follow_the_flavor", () => {

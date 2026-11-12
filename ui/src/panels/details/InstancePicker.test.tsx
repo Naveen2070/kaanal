@@ -243,8 +243,8 @@ test("a_managed_cache_lists_cache_classes_and_choosing_one_writes_the_instance_o
   ]);
 });
 
-test("a_managed_mongodb_database_lists_no_classes", async () => {
-  const mongo = { type: "database", flavor: "mongodb", hosting: "managed" } as NodeDoc;
+test("a_managed_cassandra_database_lists_no_classes", async () => {
+  const mongo = { type: "database", flavor: "cassandra", hosting: "managed" } as NodeDoc;
   draftWith({ nodes: { d: mongo } });
   render(<InstancePicker name="d" config={mongo} />);
   fireEvent.change(screen.getByLabelText("Instance type"), { target: { value: "aws" } });

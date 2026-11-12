@@ -1,11 +1,16 @@
 import { expect, test } from "vite-plus/test";
 import type { NodeDoc } from "../../data/api/types";
 import {
+  classOf,
   locationLabel,
   locationOf,
+  retrievedOf,
+  setClass,
   setLocation,
+  setRetrieved,
   setStored,
   setWriteShare,
+  STORAGE_CLASSES,
   storedOf,
   writeShareOf,
 } from "./storageCost";
@@ -55,4 +60,27 @@ test("the_location_is_written_removed_and_labelled", () => {
   expect(locationLabel("nam4")).toBe("nam4 (dual-region)");
   expect(locationLabel("eu")).toBe("eu (multi-region)");
   expect(locationLabel("us-east-1")).toBe("us-east-1");
+});
+
+test("the_class_is_written_removed_at_standard_and_the_data_read_back_is_a_size", () => {
+  expect(classOf(node({}))).toBe("standard");
+  expect(classOf(node({ class: "cold" }))).toBe("cold");
+  expect(setClass("s", node({}), "infrequent")).toEqual([
+    { op: "insert", path: ["nodes", "s", "class"], value: "infrequent" },
+  ]);
+  expect(setClass("s", node({ class: "cold" }), "archive")).toEqual([
+    { op: "set", path: ["nodes", "s", "class"], value: "archive" },
+  ]);
+  expect(setClass("s", node({ class: "cold" }), "standard")).toEqual([
+    { op: "remove", path: ["nodes", "s", "class"] },
+  ]);
+  expect(setClass("s", node({}), "standard")).toEqual([]);
+  expect(STORAGE_CLASSES.map((c) => c.id)).toEqual(["standard", "infrequent", "cold", "archive"]);
+  expect(retrievedOf(node({ retrieved: "50GB" }))).toBe(50 * 1024 ** 3);
+  expect(setRetrieved("s", node({}), 1024)).toEqual([
+    { op: "insert", path: ["nodes", "s", "retrieved"], value: 1024 },
+  ]);
+  expect(setRetrieved("s", node({ retrieved: "1GB" }), 0)).toEqual([
+    { op: "remove", path: ["nodes", "s", "retrieved"] },
+  ]);
 });

@@ -63,6 +63,12 @@ pub enum DbEngine {
     /// Aurora MySQL.
     #[serde(rename = "aurora-mysql")]
     AuroraMysql,
+    /// Amazon `DocumentDB` (MongoDB compatible), priced from AWS's own price list (RULES 127).
+    #[serde(rename = "docdb")]
+    Docdb,
+    /// Amazon Neptune (graph), priced from AWS's own price list (RULES 127).
+    #[serde(rename = "neptune")]
+    Neptune,
 }
 
 impl DbEngine {
@@ -75,23 +81,27 @@ impl DbEngine {
             DbEngine::Mariadb => "mariadb",
             DbEngine::AuroraPostgresql => "aurora-postgresql",
             DbEngine::AuroraMysql => "aurora-mysql",
+            DbEngine::Docdb => "docdb",
+            DbEngine::Neptune => "neptune",
         }
     }
 }
 
 impl DbFlavor {
-    /// The managed engines whose classes run this flavor (the first is the default): only the
-    /// relational flavors have one in the table (AWS RDS). `MongoDB`, `Neo4j`, `Cassandra` and
-    /// `DynamoDB` have none: Amazon `DocumentDB`, Neptune, Keyspaces and Atlas are not in the public
-    /// catalogue the table is built from, so a managed one is sized and priced by you.
+    /// The managed engines whose classes run this flavor (the first is the default): the relational
+    /// flavors run on AWS RDS, `MongoDB` on Amazon `DocumentDB` and `Neo4j` on Neptune (RULES 127).
+    /// `Cassandra` and `DynamoDB` have none: Keyspaces and `DynamoDB` bill per use (not a class), and
+    /// Atlas and `AuraDB` publish no class prices, so a managed one is sized and priced by you.
     #[must_use]
     pub fn engines(self) -> &'static [DbEngine] {
-        use DbEngine::{AuroraMysql, AuroraPostgresql, Mariadb, Mysql, Postgresql};
+        use DbEngine::{AuroraMysql, AuroraPostgresql, Docdb, Mariadb, Mysql, Neptune, Postgresql};
         match self {
             DbFlavor::Postgres => &[Postgresql, AuroraPostgresql],
             DbFlavor::Mysql => &[Mysql, AuroraMysql],
             DbFlavor::Mariadb => &[Mariadb],
-            DbFlavor::Mongodb | DbFlavor::Neo4j | DbFlavor::Cassandra | DbFlavor::Dynamodb => &[],
+            DbFlavor::Mongodb => &[Docdb],
+            DbFlavor::Neo4j => &[Neptune],
+            DbFlavor::Cassandra | DbFlavor::Dynamodb => &[],
         }
     }
 }

@@ -1,0 +1,44 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-neptune in region sa-east-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/db.r5.12xlarge,17280000
+aws/db.r5.16xlarge,23040000
+aws/db.r5.24xlarge,34560000
+aws/db.r5.2xlarge,2880000
+aws/db.r5.4xlarge,5760000
+aws/db.r5.8xlarge,11520000
+aws/db.r5.large,720000
+aws/db.r5.xlarge,1440000
+aws/db.r5d.12xlarge,19748600
+aws/db.r5d.16xlarge,26331400
+aws/db.r5d.24xlarge,39497100
+aws/db.r5d.2xlarge,3291400
+aws/db.r5d.4xlarge,6582900
+aws/db.r5d.8xlarge,13165700
+aws/db.r5d.large,822900
+aws/db.r5d.xlarge,1645700
+aws/db.r6g.12xlarge,16399200
+aws/db.r6g.16xlarge,21865600
+aws/db.r6g.2xlarge,2720500
+aws/db.r6g.4xlarge,5466200
+aws/db.r6g.8xlarge,10932800
+aws/db.r6g.large,680100
+aws/db.r6g.xlarge,1360200
+aws/db.r6i.12xlarge,17280000
+aws/db.r6i.16xlarge,23040000
+aws/db.r6i.24xlarge,34560000
+aws/db.r6i.2xlarge,2880000
+aws/db.r6i.32xlarge,46080000
+aws/db.r6i.4xlarge,5760000
+aws/db.r6i.8xlarge,11520000
+aws/db.r6i.large,720000
+aws/db.r6i.xlarge,1440000
+aws/db.r7g.12xlarge,13724000
+aws/db.r7g.16xlarge,18298700
+aws/db.r7g.2xlarge,2288300
+aws/db.r7g.4xlarge,4574600
+aws/db.r7g.8xlarge,9149300
+aws/db.r7g.large,571000
+aws/db.r7g.xlarge,1144100
+aws/db.t3.medium,201600
+aws/db.t4g.medium,191400

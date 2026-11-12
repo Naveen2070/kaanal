@@ -24,11 +24,16 @@ import {
 } from "./fields";
 import { storageProvider } from "../cost/cost";
 import {
+  classOf,
   locationLabel,
   locationOf,
+  retrievedOf,
+  setClass,
   setLocation,
+  setRetrieved,
   setStored,
   setWriteShare,
+  STORAGE_CLASSES,
   storedOf,
   writeShareOf,
 } from "./storageCost";
@@ -41,6 +46,7 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
   const patch = useDraft((s) => s.patch);
   const flavorId = useId();
   const locationId = useId();
+  const classId = useId();
   const provider = storageProvider(config);
   const [locations, setLocations] = useState<string[]>([]);
   useEffect(() => {
@@ -188,6 +194,28 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
           and multi-regions here. It changes no timing.
         </p>
       </div>
+      <div className="mb-2">
+        <label htmlFor={classId} className="block text-sm font-medium">
+          Storage class (for the cost)
+        </label>
+        <select
+          id={classId}
+          value={classOf(config)}
+          aria-describedby={`${classId}-hint`}
+          onChange={(e) => void patch(setClass(name, config, e.currentTarget.value))}
+          className="h-7 max-w-full rounded border border-control bg-sheet px-1 text-text"
+        >
+          {STORAGE_CLASSES.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        <p id={`${classId}-hint`} className="text-xs text-muted">
+          A colder class keeps data for less and charges more to use it: dearer requests and a fee
+          for each GB read back. It changes no timing; write a slower first byte yourself.
+        </p>
+      </div>
       <NumberField
         label="Data kept (for the cost)"
         units={BYTE_SIZE_UNITS}
@@ -198,6 +226,18 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
         step="any"
         onCommit={(n) => patch(setStored(name, config, n))}
       />
+      {classOf(config) !== "standard" ? (
+        <NumberField
+          label="Data read back a month (for the cost)"
+          units={BYTE_SIZE_UNITS}
+          hint="How much a colder class hands back each month: each GB is charged its retrieval fee. Empty: none."
+          value={retrievedOf(config)}
+          placeholder="Not set"
+          min={0}
+          step="any"
+          onCommit={(n) => patch(setRetrieved(name, config, n))}
+        />
+      ) : null}
       <NumberField
         label="Share of calls that are writes"
         hint="0 to 1. A write (PUT, COPY, POST, LIST) costs more than a read (GET). Requests are priced from the visits of the last run. Empty: every call is priced as a read."

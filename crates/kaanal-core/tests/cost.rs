@@ -139,3 +139,58 @@ fn the_report_serializes_for_the_run_record() {
     assert_eq!(v["nodes"][0]["unit_micro_usd_hr"], 10_400);
     assert_eq!(v["regions"]["gcp"], "us-central1");
 }
+
+// RULES 127: a managed MongoDB-flavored database is priced as DocumentDB and a managed Neo4j one as
+// Neptune, from the engine the flavor implies.
+#[test]
+fn a_managed_mongodb_or_neo4j_database_is_priced_by_its_own_engine() {
+    let c = estimate(
+        &cfg("  docs: { type: database, flavor: mongodb, hosting: managed, instance: aws/db.r5.large }
+  graph: { type: database, flavor: neo4j, hosting: managed, instance: aws/db.r5.large }
+"),
+        &BTreeMap::new(),
+    );
+    assert_eq!(cost_of(&c, "docs").total_micro_usd_hr, Some(277_000));
+    assert_eq!(cost_of(&c, "graph").total_micro_usd_hr, Some(348_000));
+}
+
+/// RULES 128: a colder class keeps data for less and bills each GB read back. 1 TB in S3 Standard-IA
+/// with 100 GB read back a month is (1,024 x 12,500 + 100 x 10,000) / 730 = 18,904 micro-USD an hour,
+/// against 1,024 x 23,000 / 730 = 32,263 in Standard; a class a region does not sell says so.
+#[test]
+fn a_colder_class_costs_less_to_keep_and_bills_what_is_read_back() {
+    let c = cfg(
+        "  ia: { type: storage, flavor: s3, class: infrequent, stored: 1024GB, retrieved: 100GB }
+  std: { type: storage, flavor: s3, stored: 1024GB }
+",
+    );
+    let r = estimate(&c, &BTreeMap::new());
+    assert_eq!(cost_of(&r, "ia").total_micro_usd_hr, Some(18_904));
+    assert_eq!(cost_of(&r, "std").total_micro_usd_hr, Some(32_263));
+    // an Azure region the archive tier is not sold in has no price for it
+    let region = kaanal_core::prices::storage_rows()
+        .iter()
+        .find(|(p, r, _)| {
+            *p == "azure"
+                && kaanal_core::prices::storage_class_price(
+                    "azure",
+                    r,
+                    kaanal_core::config::StorageClass::Archive,
+                )
+                .is_none()
+        })
+        .map(|(_, r, _)| *r)
+        .expect("an Azure region without the archive tier");
+    let y = format!(
+        "version: 1\nregion: {{ azure: {region} }}\nnodes:\n  a: {{ type: storage, flavor: blob, class: archive, stored: 1024GB }}\n"
+    );
+    let r = estimate(
+        &kaanal_core::Config::from_yaml(&y).unwrap(),
+        &BTreeMap::new(),
+    );
+    let why = cost_of(&r, "a").why.unwrap();
+    assert!(
+        why.contains("archive object-store price") && why.contains(region),
+        "{why}"
+    );
+}

@@ -114,12 +114,21 @@ test("the_price_list_follows_the_hosting_the_kind_and_the_engine", () => {
   expect(priceListKey(node({ type: "service", hosting: "serverless" }), "aws")).toBeNull();
 });
 
-test("the_engines_follow_the_flavor_and_mongodb_neo4j_cassandra_dynamodb_have_none", () => {
+test("the_engines_follow_the_flavor_and_cassandra_dynamodb_have_none", () => {
   const ids = (flavor: string) => enginesFor(node({ type: "database", flavor })).map((e) => e.id);
   expect(ids("postgres")).toEqual(["postgresql", "aurora-postgresql"]);
   expect(ids("mysql")).toEqual(["mysql", "aurora-mysql"]);
   expect(ids("mariadb")).toEqual(["mariadb"]);
-  for (const f of ["mongodb", "neo4j", "cassandra", "dynamodb"]) {
+  // MongoDB runs on DocumentDB and Neo4j on Neptune (RULES 127)
+  expect(ids("mongodb")).toEqual(["docdb"]);
+  expect(ids("neo4j")).toEqual(["neptune"]);
+  expect(
+    priceListKey(node({ type: "database", flavor: "mongodb", hosting: "managed" }), "aws"),
+  ).toBe("aws-rds-docdb");
+  expect(priceListKey(node({ type: "database", flavor: "neo4j", hosting: "managed" }), "aws")).toBe(
+    "aws-rds-neptune",
+  );
+  for (const f of ["cassandra", "dynamodb"]) {
     expect(ids(f)).toEqual([]);
     expect(hasManagedClasses(node({ type: "database", flavor: f }))).toBe(false);
   }

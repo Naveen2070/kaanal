@@ -10,6 +10,8 @@
 
 use std::sync::OnceLock;
 
+use crate::config::StorageClass;
+
 use crate::prices_data::FILES;
 
 /// A default region per provider (what `data/instances.csv` carries): AWS `us-east-1`, Azure
@@ -83,6 +85,8 @@ pub struct StoragePrice {
     pub write_per_1k: u32,
     /// 1,000 read requests (GET).
     pub read_per_1k: u32,
+    /// One GB retrieved: 0 for Standard, the fee of a colder class (RULES 128).
+    pub retrieval_per_gb: u32,
 }
 
 /// One row of the storage price file: `(provider, region, price)`.
@@ -107,11 +111,66 @@ pub fn storage_rows() -> &'static [StorageRow] {
                     gb_month: n(),
                     write_per_1k: n(),
                     read_per_1k: n(),
+                    retrieval_per_gb: 0,
                 };
                 (provider, region, price)
             })
             .collect()
     })
+}
+
+/// One row of the colder-class price file: `(provider, region, class, price)`.
+pub type StorageClassRow = (&'static str, &'static str, StorageClass, StoragePrice);
+
+const STORAGE_CLASS_CSV: &str = include_str!("../data/storage-classes.csv");
+
+/// Every row of the colder-class price file (`data/storage-classes.csv`, RULES 128): `infrequent`,
+/// `cold` and `archive` for each provider and region that sells them. Standard is [`storage_rows`].
+#[must_use]
+pub fn storage_class_rows() -> &'static [StorageClassRow] {
+    static ROWS: OnceLock<Vec<StorageClassRow>> = OnceLock::new();
+    ROWS.get_or_init(|| {
+        STORAGE_CLASS_CSV
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let mut f = l.split(',');
+                let mut next = || f.next().expect("a csv field");
+                let (provider, region, class) = (next(), next(), next());
+                let class = match class {
+                    "infrequent" => StorageClass::Infrequent,
+                    "cold" => StorageClass::Cold,
+                    "archive" => StorageClass::Archive,
+                    other => panic!("storage-classes.csv: unknown class {other}"),
+                };
+                let mut n = || next().parse::<u32>().expect("a number");
+                let price = StoragePrice {
+                    gb_month: n(),
+                    write_per_1k: n(),
+                    read_per_1k: n(),
+                    retrieval_per_gb: n(),
+                };
+                (provider, region, class, price)
+            })
+            .collect()
+    })
+}
+
+/// The object-store price of `class` of `provider` in `region`: [`storage_price`] for Standard, else
+/// the colder-class row; `None` when the cloud does not sell that class there.
+#[must_use]
+pub fn storage_class_price(
+    provider: &str,
+    region: &str,
+    class: StorageClass,
+) -> Option<StoragePrice> {
+    if class == StorageClass::Standard {
+        return storage_price(provider, region);
+    }
+    storage_class_rows()
+        .iter()
+        .find(|(p, r, c, _)| *p == provider && *r == region && *c == class)
+        .map(|(_, _, _, price)| *price)
 }
 
 /// Every location that has an object-store price for `provider`, in file order: its regions and, for

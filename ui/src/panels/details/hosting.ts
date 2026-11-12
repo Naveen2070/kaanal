@@ -91,6 +91,12 @@ export const ENGINES: readonly { id: string; label: string }[] = [
   { id: "aurora-mysql", label: "Aurora MySQL" },
 ];
 
+/** The engines of the non-relational flavors (RULES 127): offered with their flavor, not to a database with none. */
+const DOCUMENT_ENGINES = [
+  { id: "docdb", label: "Amazon DocumentDB" },
+  { id: "neptune", label: "Amazon Neptune" },
+];
+
 export function hostingOf(config: NodeDoc): HostingId {
   const h = config.hosting;
   return h === "managed" || h === "serverless" || h === "external" ? h : "self";
@@ -100,19 +106,21 @@ export function hostingOf(config: NodeDoc): HostingId {
 export const flavorOf = (config: NodeDoc): string =>
   typeof config.flavor === "string" ? config.flavor : "";
 
-/** The managed engines that run a database's flavor, the first its default; every engine when no flavor is written, none for a flavor with no class in the table (MongoDB, Neo4j, Cassandra, DynamoDB). */
+/** The managed engines that run a database's flavor, the first its default; every engine when no flavor is written, DocumentDB for mongodb and Neptune for neo4j, none for a flavor with no class in the table (Cassandra, DynamoDB). */
 export function enginesFor(config: NodeDoc): readonly { id: string; label: string }[] {
   const ids: readonly string[] | null =
     {
       postgres: ["postgresql", "aurora-postgresql"],
       mysql: ["mysql", "aurora-mysql"],
       mariadb: ["mariadb"],
-      mongodb: [],
-      neo4j: [],
+      mongodb: ["docdb"],
+      neo4j: ["neptune"],
       cassandra: [],
       dynamodb: [],
     }[flavorOf(config)] ?? null;
-  return ids === null ? ENGINES : ENGINES.filter((e) => ids.includes(e.id));
+  return ids === null
+    ? ENGINES
+    : [...ENGINES, ...DOCUMENT_ENGINES].filter((e) => ids.includes(e.id));
 }
 
 export function engineOf(config: NodeDoc): string {

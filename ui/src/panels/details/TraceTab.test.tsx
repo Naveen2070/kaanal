@@ -14,7 +14,8 @@ for (const mode of ["live", "admin"] as const) {
   test(`the_${mode}_trace_pops_out_into_the_drawer_and_comes_back`, async () => {
     useMode.setState({ mode });
     const rail = render(<TraceTab />);
-    fireEvent.click(await screen.findByRole("button", { name: /Pop out/ }));
+    // the panel is a lazy chunk: under a full run its first render can take longer than the default 1 s
+    fireEvent.click(await screen.findByRole("button", { name: /Pop out/ }, { timeout: 8000 }));
     expect(useLogDrawer.getState().out).toBe(true);
     // the rail says where the list went; the drawer holds the list and has no Pop out of its own
     expect(await screen.findByText(/open along the bottom/)).toBeTruthy();
@@ -27,5 +28,5 @@ for (const mode of ["live", "admin"] as const) {
     render(<TraceTab />);
     fireEvent.click(await screen.findByRole("button", { name: /Bring it back/ }));
     expect(useLogDrawer.getState().out).toBe(false);
-  });
+  }, 20_000);
 }

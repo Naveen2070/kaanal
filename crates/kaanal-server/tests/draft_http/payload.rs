@@ -414,6 +414,23 @@ async fn object_store_prices_and_the_managed_class_lists_are_served() {
     assert!(rows.contains(&json!(["aws", "us-east-1", 23_000, 5_000, 400])));
     assert!(rows.iter().any(|r| r[0] == "azure" && r[1] == "us-east"));
     assert!(rows.contains(&json!(["gcp", "us-central1", 20_000, 5_000, 400])));
+    // the colder classes ride along (RULES 128): S3 Standard-IA in us-east-1 is $0.0125 a GB-month,
+    // $0.01 per 1,000 writes, $0.001 per 1,000 reads and $0.01 per GB retrieved
+    let classes = v["classes"].as_array().unwrap();
+    assert!(classes.contains(&json!([
+        "aws",
+        "us-east-1",
+        "infrequent",
+        12_500,
+        10_000,
+        1_000,
+        10_000
+    ])));
+    assert!(
+        classes
+            .iter()
+            .any(|c| c[0] == "gcp" && c[1] == "nam4" && c[2] == "archive")
+    );
     // a managed database's list is served like any region's
     let r = s.get("/__kaanal/prices/aws-rds-postgresql/us-east-1").await;
     assert_eq!(r.status(), 200);

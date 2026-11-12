@@ -115,18 +115,30 @@ function storageCost(
   // a store's own `location:` (a region, or Google's dual- or multi-region) beats the globe's region
   const r =
     (typeof config.location === "string" ? config.location : "") || (region[provider] ?? "");
-  const p = prices[`${provider}/${r}`] ?? prices[`${provider}/*`];
-  if (!p) return { micro: null, why: `no object-store price in ${r || "this region"}` };
+  const cls = typeof config.class === "string" ? config.class : "standard";
+  const p =
+    cls === "standard"
+      ? (prices[`${provider}/${r}`] ?? prices[`${provider}/*`])
+      : prices[`${provider}/${r}/${cls}`];
+  if (!p) {
+    const what = cls === "standard" ? "object-store" : `${cls} object-store`;
+    return { micro: null, why: `no ${what} price in ${r || "this region"}` };
+  }
   const bytes = config.stored === undefined ? null : parseBytes(config.stored);
   const gb = (bytes ?? 0) / 1024 ** 3;
   const rate = visits?.[name] ?? 0;
-  if (bytes === null && rate === 0) {
+  const back = config.retrieved === undefined ? null : parseBytes(config.retrieved);
+  if (bytes === null && back === null && rate === 0) {
     return { micro: null, why: "set stored: (the data kept); requests are priced after a run" };
   }
   const w = typeof config.write_share === "number" ? config.write_share : 0;
   const perReq = ((1 - w) * p.readPer1k + w * p.writePer1k) / 1000;
   return {
-    micro: Math.round((gb * p.gbMonth) / HOURS_PER_MONTH + rate * 3600 * perReq),
+    // the data read back in a month, each GB at the class's retrieval fee, spread over the month's hours
+    micro: Math.round(
+      (gb * p.gbMonth + ((back ?? 0) / 1024 ** 3) * p.retrievalPerGb) / HOURS_PER_MONTH +
+        rate * 3600 * perReq,
+    ),
     why: null,
   };
 }

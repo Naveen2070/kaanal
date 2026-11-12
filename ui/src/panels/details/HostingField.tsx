@@ -57,9 +57,9 @@ export function HostingField({ name, config }: { name: string; config: NodeDoc }
       </p>
       {isManagedDb(config) && !hasManagedClasses(config) ? (
         <p className="m-0 mt-1 text-xs text-muted">
-          The table has no managed class for a {flavorOf(config)} database (AWS RDS is relational:
-          PostgreSQL, MySQL, MariaDB). Set cores and memory yourself, or pick Your own instance with
-          a cost per hour.
+          The table has no managed class for a {flavorOf(config)} database: it bills per use or
+          publishes no class prices. Set cores and memory yourself, or pick Your own instance with a
+          cost per hour.
         </p>
       ) : null}
       {type === "cache" && now === "managed" ? (

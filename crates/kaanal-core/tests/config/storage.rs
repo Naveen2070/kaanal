@@ -275,3 +275,24 @@ fn stored_and_write_share_are_cost_inputs_with_checked_values() {
     assert!(load(", write_share: 1.5").is_err());
     assert!(load(", stored: lots").is_err());
 }
+
+/// RULES 128: `class` names a storage class and `retrieved` the data read back, both cost only.
+#[test]
+fn class_and_retrieved_are_cost_inputs_with_checked_values() {
+    let load = |extra: &str| {
+        Config::from_yaml(&format!(
+            "version: 1\nnodes:\n  s: {{ type: storage, flavor: s3{extra} }}\n"
+        ))
+    };
+    for class in ["standard", "infrequent", "cold", "archive"] {
+        assert!(
+            load(&format!(
+                ", class: {class}, stored: 1024GB, retrieved: 50GB"
+            ))
+            .is_ok(),
+            "{class}"
+        );
+    }
+    assert!(load(", class: glacier").is_err());
+    assert!(load(", retrieved: lots").is_err());
+}

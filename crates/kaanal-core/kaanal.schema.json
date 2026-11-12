@@ -396,6 +396,16 @@
           "const": "aurora-mysql",
           "description": "Aurora MySQL.",
           "type": "string"
+        },
+        {
+          "const": "docdb",
+          "description": "Amazon `DocumentDB` (MongoDB compatible), priced from AWS's own price list (RULES 127).",
+          "type": "string"
+        },
+        {
+          "const": "neptune",
+          "description": "Amazon Neptune (graph), priced from AWS's own price list (RULES 127).",
+          "type": "string"
         }
       ]
     },
@@ -2575,6 +2585,17 @@
               ],
               "description": "This node's network card, in bytes per second (at least 1): one number for both\ndirections or `{ out, in }`. Absent = no limit."
             },
+            "class": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StorageClass"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The storage class, for the **cost estimate only**: `standard` (the default), `infrequent` (S3\nStandard-IA, Azure Cool, Google Nearline), `cold` (S3 Glacier Instant Retrieval, Azure Cold,\nGoogle Coldline) or `archive` (S3 Glacier Flexible Retrieval, Azure Archive, Google Archive).\nA colder class costs less to keep and more to use: higher request prices and a fee per GB\nretrieved. It changes no timing (a colder class's first-byte time is yours to write)."
+            },
             "concurrency": {
               "anyOf": [
                 {
@@ -2640,6 +2661,23 @@
                 "integer",
                 "null"
               ]
+            },
+            "retrieved": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Data read back out of the store in a month, as a size (`50GB`), for the **cost estimate\nonly**: a colder class bills each GB retrieved (`standard` bills none). Absent = none."
             },
             "stored": {
               "anyOf": [
@@ -3165,6 +3203,31 @@
             "parallel"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "StorageClass": {
+      "description": "The storage class of an object store, for its cost (RULES 128): the same four steps on every\ncloud, from the one that costs most to keep to the one that costs least.",
+      "oneOf": [
+        {
+          "const": "standard",
+          "description": "S3 Standard, Azure Hot, Google Standard. The default.",
+          "type": "string"
+        },
+        {
+          "const": "infrequent",
+          "description": "S3 Standard-IA, Azure Cool, Google Nearline.",
+          "type": "string"
+        },
+        {
+          "const": "cold",
+          "description": "S3 Glacier Instant Retrieval, Azure Cold, Google Coldline.",
+          "type": "string"
+        },
+        {
+          "const": "archive",
+          "description": "S3 Glacier Flexible Retrieval (standard retrieval), Azure Archive, Google Archive.",
+          "type": "string"
         }
       ]
     },

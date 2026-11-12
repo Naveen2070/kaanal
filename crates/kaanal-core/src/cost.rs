@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::config::{Config, DbEngine, Hosting, NodeConfig, NodeKind, StorageFlavor};
+use crate::config::{Config, DbEngine, Hosting, NodeConfig, NodeKind, StorageClass, StorageFlavor};
 use crate::prices;
 
 /// Hours in a month for turning a GB-month into an hour: a year of 8,760 hours over 12.
@@ -235,21 +235,22 @@ fn storage_cost(
         .as_deref()
         .or_else(|| regions.get(provider).map(String::as_str))
         .unwrap_or_default();
-    let Some(p) = prices::storage_price(provider, place) else {
-        return (
-            None,
-            Some(format!(
-                "no object-store price in {}",
-                if place.is_empty() {
-                    "this region"
-                } else {
-                    place
-                }
-            )),
-        );
+    let class = s.class.unwrap_or_default();
+    let Some(p) = prices::storage_class_price(provider, place, class) else {
+        let what = if class == StorageClass::Standard {
+            "object-store".to_string()
+        } else {
+            format!("{} object-store", class.word())
+        };
+        let at = if place.is_empty() {
+            "this region"
+        } else {
+            place
+        };
+        return (None, Some(format!("no {what} price in {at}")));
     };
     let rate = visits.unwrap_or(0.0);
-    if s.stored.is_none() && rate <= 0.0 {
+    if s.stored.is_none() && s.retrieved.is_none() && rate <= 0.0 {
         return (
             None,
             Some("set stored: (the data kept); requests are priced after a run".into()),
@@ -260,6 +261,11 @@ fn storage_cost(
     let w = s.write_share.unwrap_or(0.0);
     let per_request =
         ((1.0 - w) * f64::from(p.read_per_1k) + w * f64::from(p.write_per_1k)) / 1000.0;
-    let micro = gb * f64::from(p.gb_month) / HOURS_PER_MONTH + rate * 3600.0 * per_request;
+    // the data read back in a month (a colder class bills each GB), spread over the month's hours
+    #[allow(clippy::cast_precision_loss)]
+    let retrieved_gb = s.retrieved.unwrap_or(0) as f64 / (1024.0 * 1024.0 * 1024.0);
+    let micro = (gb * f64::from(p.gb_month) + retrieved_gb * f64::from(p.retrieval_per_gb))
+        / HOURS_PER_MONTH
+        + rate * 3600.0 * per_request;
     (Some(micro_usd_of_micro(micro)), None)
 }

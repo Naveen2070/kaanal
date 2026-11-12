@@ -184,8 +184,18 @@ fn a_managed_class_runs_only_the_flavors_the_table_has_and_the_engine_follows_th
         e.contains("does not run postgres") && e.contains("postgresql or aurora-postgresql"),
         "{e}"
     );
-    // MongoDB, Neo4j, Cassandra and DynamoDB have no class in the table
-    for f in ["mongodb", "neo4j", "cassandra", "dynamodb"] {
+    // MongoDB runs on Amazon DocumentDB and Neo4j on Neptune (RULES 127): the engine follows the flavor
+    let c = flavored("mongodb", ", instance: aws/db.r5.large").unwrap();
+    assert_eq!(c.nodes["d"].engine(), DbEngine::Docdb);
+    let c = flavored("neo4j", ", instance: aws/db.r5.large").unwrap();
+    assert_eq!(c.nodes["d"].engine(), DbEngine::Neptune);
+    let e = flavored("mongodb", ", engine: mysql").unwrap_err();
+    assert!(
+        e.contains("does not run mongodb") && e.contains("docdb"),
+        "{e}"
+    );
+    // Cassandra and DynamoDB bill per use, not by class: no class in the table
+    for f in ["cassandra", "dynamodb"] {
         let e = flavored(f, ", instance: aws/db.m5.large").unwrap_err();
         assert!(
             e.contains(&format!("{f} has no managed class in the table")),

@@ -1,0 +1,12 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-docdb in region ap-east-2.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/db.r6g.12xlarge,6853680
+aws/db.r6g.16xlarge,9145080
+aws/db.r6g.2xlarge,1142280
+aws/db.r6g.4xlarge,2284560
+aws/db.r6g.8xlarge,4572540
+aws/db.r6g.large,285570
+aws/db.r6g.xlarge,571140
+aws/db.t3.medium,107100
+aws/db.t4g.medium,103887

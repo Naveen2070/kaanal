@@ -1,0 +1,28 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-neptune in region ap-southeast-5.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/db.r6g.12xlarge,8116000
+aws/db.r6g.16xlarge,10822000
+aws/db.r6g.2xlarge,1346000
+aws/db.r6g.4xlarge,2705000
+aws/db.r6g.8xlarge,5411000
+aws/db.r6g.large,336000
+aws/db.r6g.xlarge,673000
+aws/db.r6i.12xlarge,8552000
+aws/db.r6i.16xlarge,11403000
+aws/db.r6i.24xlarge,17104000
+aws/db.r6i.2xlarge,1425000
+aws/db.r6i.32xlarge,22806000
+aws/db.r6i.4xlarge,2850000
+aws/db.r6i.8xlarge,5701000
+aws/db.r6i.large,356000
+aws/db.r6i.xlarge,712000
+aws/db.r7g.12xlarge,6780300
+aws/db.r7g.16xlarge,9040400
+aws/db.r7g.2xlarge,1130500
+aws/db.r7g.4xlarge,2260100
+aws/db.r7g.8xlarge,4520200
+aws/db.r7g.large,282100
+aws/db.r7g.xlarge,565200
+aws/db.t3.medium,138000
+aws/db.t4g.medium,131000

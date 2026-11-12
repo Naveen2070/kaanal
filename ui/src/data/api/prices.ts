@@ -42,21 +42,30 @@ export interface StoragePrice {
   gbMonth: number;
   writePer1k: number;
   readPer1k: number;
+  /** One GB retrieved; 0 for Standard (RULES 128). */
+  retrievalPerGb: number;
 }
 
 let storageOnce: Promise<Record<string, StoragePrice>> | null = null;
 
-/** Every object-store price, keyed `provider/region` (region `*` answers for any); fetched once. */
+/**
+ * Every object-store price, keyed `provider/region` for Standard (region `*` answers for any) and
+ * `provider/region/class` for a colder class (`infrequent`, `cold`, `archive`); fetched once.
+ */
 export function loadStoragePrices(): Promise<Record<string, StoragePrice>> {
   storageOnce ??= api
     .getStoragePrices()
     .then((r) =>
-      Object.fromEntries(
-        r.rows.map(([p, g, gbMonth, writePer1k, readPer1k]) => [
+      Object.fromEntries([
+        ...r.rows.map(([p, g, gbMonth, writePer1k, readPer1k]) => [
           `${p}/${g}`,
-          { gbMonth, writePer1k, readPer1k },
+          { gbMonth, writePer1k, readPer1k, retrievalPerGb: 0 },
         ]),
-      ),
+        ...(r.classes ?? []).map(([p, g, c, gbMonth, writePer1k, readPer1k, retrievalPerGb]) => [
+          `${p}/${g}/${c}`,
+          { gbMonth, writePer1k, readPer1k, retrievalPerGb },
+        ]),
+      ]),
     )
     .catch((e: unknown) => {
       storageOnce = null;

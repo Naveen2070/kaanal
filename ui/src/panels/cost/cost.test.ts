@@ -152,7 +152,7 @@ test("a_database_flavor_picks_its_engines_list_when_no_engine_is_written", () =>
 });
 
 const GB = 1024 ** 3;
-const s3 = { gbMonth: 23_000, writePer1k: 5_000, readPer1k: 400 };
+const s3 = { gbMonth: 23_000, writePer1k: 5_000, readPer1k: 400, retrievalPerGb: 0 };
 
 test("an_object_store_costs_its_data_over_a_month_plus_its_requests_at_the_last_runs_rate", () => {
   const d = doc({ files: { type: "storage", flavor: "s3", stored: 500 * GB, replicas: 3 } });
@@ -179,7 +179,7 @@ test("a_write_share_moves_requests_to_the_write_price_and_a_store_with_nothing_s
 
 test("a_store_is_priced_in_the_cloud_its_flavor_names_and_the_region_picked", () => {
   const prices = {
-    "azure/us-east": { gbMonth: 20_800, writePer1k: 5_000, readPer1k: 400 },
+    "azure/us-east": { gbMonth: 20_800, writePer1k: 5_000, readPer1k: 400, retrievalPerGb: 0 },
     "gcp/europe-west1": s3,
   };
   const d = doc({
@@ -198,8 +198,8 @@ test("a_store_is_priced_in_the_cloud_its_flavor_names_and_the_region_picked", ()
 
 test("a_store_location_beats_the_globes_region_and_a_multi_region_is_priced_as_listed", () => {
   const prices = {
-    "gcp/us-central1": { gbMonth: 20_000, writePer1k: 5_000, readPer1k: 400 },
-    "gcp/nam4": { gbMonth: 44_000, writePer1k: 10_000, readPer1k: 400 },
+    "gcp/us-central1": { gbMonth: 20_000, writePer1k: 5_000, readPer1k: 400, retrievalPerGb: 0 },
+    "gcp/nam4": { gbMonth: 44_000, writePer1k: 10_000, readPer1k: 400, retrievalPerGb: 0 },
   };
   const d = doc({
     a: { type: "storage", flavor: "gcs", stored: GB },
@@ -229,4 +229,32 @@ test("multi_az_doubles_a_managed_database_but_not_aurora_and_matches_the_rust_fi
   expect([c[0]?.totalMicro, c[1]?.totalMicro]).toEqual([18_000, 36_000]);
   expect(multiAzFactor({ type: "database", engine: "aurora-mysql", multi_az: true })).toBe(1);
   expect(multiAzFactor({ type: "cache", multi_az: true })).toBe(1);
+});
+
+test("a_colder_class_keeps_data_for_less_and_bills_what_is_read_back_as_the_rust_figures_do", () => {
+  // the same figures as crates/kaanal-core/tests/cost.rs: 1 TB in S3 Standard-IA with 100 GB read back
+  const prices = {
+    "aws/us-east-1": { gbMonth: 23_000, writePer1k: 5_000, readPer1k: 400, retrievalPerGb: 0 },
+    "aws/us-east-1/infrequent": {
+      gbMonth: 12_500,
+      writePer1k: 10_000,
+      readPer1k: 1_000,
+      retrievalPerGb: 10_000,
+    },
+  };
+  const d = doc({
+    ia: {
+      type: "storage",
+      flavor: "s3",
+      class: "infrequent",
+      stored: 1024 * GB,
+      retrieved: 100 * GB,
+    },
+    std: { type: "storage", flavor: "s3", stored: 1024 * GB },
+    gone: { type: "storage", flavor: "s3", class: "archive", stored: GB },
+  });
+  const c = nodeCosts(d, {}, region, { prices });
+  expect(c[0]?.totalMicro).toBe(18_904);
+  expect(c[1]?.totalMicro).toBe(32_263);
+  expect(c[2]?.why).toMatch(/no archive object-store price in us-east-1/);
 });
