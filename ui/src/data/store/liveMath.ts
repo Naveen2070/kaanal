@@ -214,6 +214,9 @@ export interface WireFigures {
   funnel: { calls: number; retried: number; recovered: number; gaveUp: number } | null;
   /** How full the wire was over the window (0 to 1), for a wire with a `bandwidth`; null otherwise. */
   load: number | null;
+  /** Time a request spent crossing the wire (wait included), over the window; null without a figure. */
+  p50Ms: number | null;
+  p99Ms: number | null;
 }
 
 export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): WireFigures {
@@ -226,9 +229,11 @@ export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): Wi
   const fn = { calls: 0, retried: 0, recovered: 0 };
   let loadSum = 0;
   let loadN = 0;
+  const hist = new Map<number, number>();
   for (const t of w) {
     const x = t.wires[edge];
     if (!x) continue;
+    for (const [b, c] of x.hist ?? []) hist.set(b, (hist.get(b) ?? 0) + c);
     if (x.funnel) {
       fn.calls += x.funnel.calls;
       fn.retried += x.funnel.retried;
@@ -255,6 +260,8 @@ export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): Wi
     // retried minus recovered is the calls that gave up, plus the few still retrying
     funnel: fn.retried > 0 ? { ...fn, gaveUp: Math.max(0, fn.retried - fn.recovered) } : null,
     load: loadN > 0 ? Math.min(1, loadSum / loadN) : null,
+    p50Ms: quantileMs(hist, 0.5),
+    p99Ms: quantileMs(hist, 0.99),
   };
 }
 

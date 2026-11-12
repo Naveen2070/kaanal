@@ -55,6 +55,8 @@ export interface WireTick {
   funnel?: Funnel;
   /** How busy the wire was over the tick (1 = full the whole time); absent without a `bandwidth`. */
   load?: number;
+  /** How long each request that crossed spent on the wire, wait included: occupied `[bucket, count]` pairs. */
+  hist?: [number, number][];
 }
 
 /** One route of the offered mix in a tick, by index into `hello.streams`. */

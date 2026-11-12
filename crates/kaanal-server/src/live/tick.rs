@@ -134,6 +134,11 @@ pub(crate) struct WireTick {
     /// Absent for a wire with no `bandwidth`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load: Option<f64>,
+    /// How long a request spent crossing this wire, wait included, summed over its hops on it: one
+    /// entry per request that crossed, as occupied `(bucket, count)` pairs of [`LatencyHist`].
+    /// Empty in a real share and for a wire nothing crossed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hist: Vec<(u16, u32)>,
 }
 
 /// One route of the offered mix in the tick, by index into the session's `streams`.
@@ -280,6 +285,12 @@ struct Counts {
     hist: LatencyHist,
     /// Per route (only where `node_hist` is wanted): requests, failures and served latencies.
     streams: Vec<(EndpointTick, LatencyHist)>,
+    /// The crossing time of each wire (empty where it is not wanted, as `node_hist`).
+    wire_hist: Vec<LatencyHist>,
+    /// Time the request being added has spent on each wire so far (ns), all zero between requests,
+    /// and the wires it touched: one entry per request and wire goes into `wire_hist`.
+    wire_scratch: Vec<u64>,
+    wire_touched: Vec<usize>,
     requests: u32,
     failed: u32,
 }
@@ -298,6 +309,9 @@ impl Counts {
             wires: vec![WireTick::default(); wires],
             hist: LatencyHist::new(),
             streams: Vec::new(),
+            wire_hist: Vec::new(),
+            wire_scratch: Vec::new(),
+            wire_touched: Vec::new(),
             requests: 0,
             failed: 0,
         }
@@ -306,6 +320,8 @@ impl Counts {
     /// Keeps each node's own-hop work times too (the total does; the real share does not).
     fn with_node_hist(mut self) -> Counts {
         self.node_hist = vec![LatencyHist::new(); self.nodes.len()];
+        self.wire_hist = vec![LatencyHist::new(); self.wires.len()];
+        self.wire_scratch = vec![0; self.wires.len()];
         self
     }
 
@@ -323,6 +339,34 @@ impl Counts {
         }
         self.streams[s].0.requests += 1;
         Some(s)
+    }
+
+    /// Counts a failed request, in the total and in its route.
+    fn count_failed(&mut self, stream: Option<usize>) {
+        self.failed += 1;
+        if let Some(s) = stream {
+            self.streams[s].0.failed += 1;
+        }
+    }
+
+    /// Adds `ns` to the time the request being added has spent on wire `e`.
+    fn note_wire(&mut self, e: usize, ns: u64) {
+        if self.wire_scratch.is_empty() {
+            return;
+        }
+        if self.wire_scratch[e] == 0 {
+            self.wire_touched.push(e);
+        }
+        // at least 1 ns, so a zero-length hop still marks the wire as touched
+        self.wire_scratch[e] += ns.max(1);
+    }
+
+    /// Records the finished request's time on each wire it touched, one entry per wire.
+    fn flush_wires(&mut self) {
+        for e in self.wire_touched.drain(..) {
+            self.wire_hist[e].record(self.wire_scratch[e]);
+            self.wire_scratch[e] = 0;
+        }
     }
 
     /// Counts a drop at `node` under its cause.
@@ -398,6 +442,7 @@ impl Counts {
             {
                 self.wires[e].wait_ns += nanos(h.wait);
                 self.wires[e].wire_ns += nanos(h.hop.dur);
+                self.note_wire(e, nanos(h.hop.dur) + nanos(h.wait));
             }
             if build {
                 hops.push(JourneyHop {
@@ -412,14 +457,12 @@ impl Counts {
                 });
             }
         }
+        self.flush_wires();
         let mut dropped_at = None;
         let stream = self.count_route(f);
         match &f.result {
             ChainResult::Ok if pinned_ok(f) => {
-                self.failed += 1;
-                if let Some(s) = stream {
-                    self.streams[s].0.failed += 1;
-                }
+                self.count_failed(stream);
                 // the entry component is where the chain began
                 let entry = f.hops.first().map_or(0, |h| h.hop.node);
                 self.nodes[entry].dropped.pinned += 1;
@@ -434,10 +477,7 @@ impl Counts {
                 }
             }
             ChainResult::Err { node, .. } => {
-                self.failed += 1;
-                if let Some(s) = stream {
-                    self.streams[s].0.failed += 1;
-                }
+                self.count_failed(stream);
                 self.count_drop(*node, f.cause);
                 if build {
                     dropped_at = Some(
@@ -577,6 +617,11 @@ impl Aggregator {
             }
         }
         for (i, wire) in total.wires.iter_mut().enumerate() {
+            wire.hist = total
+                .wire_hist
+                .get(i)
+                .map(LatencyHist::sparse)
+                .unwrap_or_default();
             wire.funnel = engine.funnel.get(i).copied().unwrap_or_default();
             wire.load = engine.link_load.get(i).copied().flatten();
         }

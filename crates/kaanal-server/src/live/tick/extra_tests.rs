@@ -219,3 +219,45 @@ fn a_request_to_a_pinned_error_route_is_failed_at_its_entry_after_the_chain_ran(
 fn kaanal_server_stream(f: &Finished) -> u16 {
     crate::actor::stream_of(f).unwrap()
 }
+
+#[test]
+fn a_wire_keeps_how_long_each_request_spent_crossing_it_wait_included() {
+    // identical requests, nothing sharing the wire: each one's crossing time is the wire's summed
+    // hop time and wait over its requests (counted apart, by `wire_ns` and `wait_ns`), divided by 30
+    let (t, fin) = two_routes(30);
+    let mut a = Aggregator::new(&t);
+    for f in &fin {
+        a.add(f, false);
+    }
+    let tick = a.take((250, 250), &[(0, 0), (0, 0)], &t, STATUS);
+    let h = &tick.wires[0].hist;
+    assert_eq!(counts(h), 30, "one entry per request that crossed");
+    let hist = crate::live::hist::LatencyHist::from_sparse(h);
+    let each = (tick.wires[0].wire_ns + tick.wires[0].wait_ns) / 30;
+    for q in [0.5, 0.99] {
+        // within 2%: the histogram's buckets are about 1% wide
+        assert!(
+            hist.quantile(q).abs_diff(each) * 50 < each,
+            "p{q}: {} vs {each} ns",
+            hist.quantile(q)
+        );
+    }
+    // the next tick starts empty, and a real share carries none
+    let next = a.take((500, 500), &[], &t, STATUS);
+    assert_eq!(next.wires[0].hist.len(), 0);
+    let json = serde_json::to_value(&next).unwrap();
+    assert!(json["wires"][0].get("hist").is_none());
+}
+
+#[test]
+fn a_request_that_crosses_a_wire_twice_is_one_entry_with_both_crossings_added() {
+    let (t, fin) = two_routes(4);
+    let mut a = Aggregator::new(&t);
+    for f in &fin {
+        // the same request replayed twice in the tick is two entries, not four hops
+        a.add(f, false);
+        a.add(f, false);
+    }
+    let tick = a.take((250, 250), &[(0, 0), (0, 0)], &t, STATUS);
+    assert_eq!(counts(&tick.wires[0].hist), 8);
+}

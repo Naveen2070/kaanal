@@ -71,6 +71,9 @@ export function LiveWire({ index }: { index: number }) {
           <Chip label="Crossings" value={`${twoSignificant(f.perS)}/s`} />
           <Chip label="On the wire" value={fmtMs(f.meanWireMs)} />
           <Chip label="Waited to get on" value={fmtMs(f.meanWaitMs ?? 0)} />
+          {f.p50Ms !== null && f.p99Ms !== null ? (
+            <Chip label="Crossing p50 / p99" value={`${fmtMs(f.p50Ms)} / ${fmtMs(f.p99Ms)}`} />
+          ) : null}
           {f.load !== null ? <Chip label="Wire full" value={percent(f.load)} /> : null}
           {f.funnel ? (
             <>
@@ -87,7 +90,7 @@ export function LiveWire({ index }: { index: number }) {
         <BreakerBar key={b.replica} band={b} />
       ))}
       <p className="m-0 mt-1 text-[11px] text-muted">
-        Live: the last 5 seconds, a mean per crossing
+        Live: the last 5 seconds, a mean per crossing; p50 and p99 are per request (wait included)
         {f.funnel ? "; gave up is retried minus recovered, so a call still retrying counts" : ""}.
       </p>
     </section>

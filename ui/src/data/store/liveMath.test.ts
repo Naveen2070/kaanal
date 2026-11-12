@@ -248,3 +248,27 @@ test("breakerBands_follow_each_breaker_of_a_wire_tick_by_tick", () => {
   // a wire with no breaker has no band
   expect(breakerBands([at(250, "open")], 9)).toEqual([]);
 });
+
+test("wireFigures_read_p50_and_p99_of_the_crossing_time_from_the_wire_histograms", () => {
+  const b1 = bucketOf(1e6);
+  const b2 = bucketOf(50e6);
+  const t = (ms: number) =>
+    tick(ms, {
+      wires: [
+        {
+          carried: 10,
+          hist: [
+            [b1, 9],
+            [b2, 1],
+          ],
+        },
+      ],
+    });
+  const f = wireFigures([t(250), t(500)], 0);
+  // 18 requests near 1 ms and 2 near 50 ms: p50 is the 1 ms bucket, p99 the 50 ms one
+  expect(Math.abs((f.p50Ms ?? 0) - 1)).toBeLessThan(0.02);
+  expect(Math.abs((f.p99Ms ?? 0) - 50)).toBeLessThan(1);
+  // an older server sends no histogram: no figure
+  const old = wireFigures([tick(250, { wires: [{ carried: 3 }] })], 0);
+  expect([old.p50Ms, old.p99Ms]).toEqual([null, null]);
+});
