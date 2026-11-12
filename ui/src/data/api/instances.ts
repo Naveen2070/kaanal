@@ -12,6 +12,8 @@ export interface InstanceRow {
   memMib: number;
   /** Peak network, Mbit/s; 0 = no figure. */
   netMbps: number;
+  /** On-demand Linux price an hour in micro-USD in the provider's default region; 0 = none. */
+  priceMicro: number;
 }
 
 export const PROVIDERS: readonly { id: string; label: string }[] = [
@@ -26,7 +28,15 @@ let cached: Promise<InstanceRow[]> | null = null;
 export function loadInstances(): Promise<InstanceRow[]> {
   cached ??= api
     .getInstances()
-    .then((r) => r.types.map(([name, vcpu, memMib, netMbps]) => ({ name, vcpu, memMib, netMbps })))
+    .then((r) =>
+      r.types.map(([name, vcpu, memMib, netMbps, priceMicro]) => ({
+        name,
+        vcpu,
+        memMib,
+        netMbps,
+        priceMicro,
+      })),
+    )
     .catch((e: unknown) => {
       cached = null;
       throw e;

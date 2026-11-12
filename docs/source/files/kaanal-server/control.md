@@ -107,3 +107,7 @@ A handler that needs the system (chaos, scenarios, pins, topology, `scenarios/sa
 A handler that resolved something against its generation (a scenario or pin against the topology, a chaos key against the node list) takes the control lock with `lock_gen(st, g)` instead of `lock(st)`. It answers 409 `the system changed while this request ran; retry` when an Apply put another generation in force since the handler took `g`. Apply swaps under the same lock, so once `lock_gen` succeeds the generation cannot change before the lock is released. The reads that pair the control state with the generation (`get_chaos`, `get_active`, `get_scenario`) use `locked(st)` instead: lock first, then read the generation, so they answer from whichever generation is in force and never refuse a swap (409 only when there is no system at all).
 
 **`put_draft` and the live run (step 8L).** After the draft text changed, `put_draft` calls `live::edit::apply_params` (outside the draft lock) and adds its outcome to the reply as `live`. See [live.md](live.md) and the control API reference.
+
+## `prices.rs` (RULES 121)
+
+`GET /__kaanal/prices` answers `{ defaults, regions }` and `GET /__kaanal/prices/{provider}/{region}` answers `{ provider, region, prices: [[name, usd_micro_hr]] }` (404 for an unknown provider or region), both from `kaanal_core::prices`. `GET /__kaanal/instances` rows now end with the default-region price: `[name, vcpu, memory_mib, net_mbps, usd_micro_hr]`.

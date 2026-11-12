@@ -344,6 +344,8 @@ fn router(st: Arc<state::AppState>) -> Router {
                 .delete(control::delete_payload),
         )
         .route("/__kaanal/instances", get(control::get_instances))
+        .route("/__kaanal/prices", get(control::get_price_regions))
+        .route("/__kaanal/prices/{provider}/{region}", get(control::get_prices))
         .route("/__kaanal/payload/stage-file", post(control::stage_file))
         .route(
             "/__kaanal/payload/preview",

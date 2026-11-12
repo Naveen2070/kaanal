@@ -330,6 +330,17 @@
           "minimum": 0.001,
           "type": "number"
         },
+        "cost_per_hour": {
+          "default": null,
+          "description": "What one hour of this machine costs, in US dollars (0 to 1,000,000), for the cost estimate.\nAbsent = no price: the estimate leaves it out and says so.",
+          "format": "double",
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "memory": {
           "anyOf": [
             {

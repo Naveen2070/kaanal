@@ -1,0 +1,36 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws in region eu-central-1-ath-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/c7i.12xlarge,2688960
+aws/c7i.16xlarge,3585280
+aws/c7i.24xlarge,5377920
+aws/c7i.2xlarge,448160
+aws/c7i.48xlarge,10755840
+aws/c7i.4xlarge,896320
+aws/c7i.8xlarge,1792640
+aws/c7i.large,112040
+aws/c7i.metal-24xl,5377920
+aws/c7i.metal-48xl,10755840
+aws/c7i.xlarge,224080
+aws/m7i.12xlarge,3187680
+aws/m7i.16xlarge,4250240
+aws/m7i.24xlarge,6375360
+aws/m7i.2xlarge,531280
+aws/m7i.48xlarge,12750720
+aws/m7i.4xlarge,1062560
+aws/m7i.8xlarge,2125120
+aws/m7i.large,132820
+aws/m7i.metal-24xl,6375360
+aws/m7i.metal-48xl,12750720
+aws/m7i.xlarge,265640
+aws/r7i.12xlarge,4213440
+aws/r7i.16xlarge,5617920
+aws/r7i.24xlarge,8426880
+aws/r7i.2xlarge,702240
+aws/r7i.48xlarge,16853760
+aws/r7i.4xlarge,1404480
+aws/r7i.8xlarge,2808960
+aws/r7i.large,175560
+aws/r7i.metal-24xl,8426880
+aws/r7i.metal-48xl,16853760
+aws/r7i.xlarge,351120

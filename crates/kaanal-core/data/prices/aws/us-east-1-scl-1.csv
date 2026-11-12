@@ -1,0 +1,18 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws in region us-east-1-scl-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/c5.12xlarge,3301000
+aws/c5.24xlarge,6602000
+aws/c5.2xlarge,550000
+aws/c5.4xlarge,1100000
+aws/g4dn.2xlarge,1470000
+aws/m5.12xlarge,3856000
+aws/m5.24xlarge,7711000
+aws/m5.2xlarge,643000
+aws/m5.4xlarge,1285000
+aws/m5.8xlarge,2570000
+aws/r5.24xlarge,10130000
+aws/r5.2xlarge,844000
+aws/r5.4xlarge,1688000
+aws/t3.medium,70600
+aws/t3.xlarge,282200

@@ -15,6 +15,7 @@ import {
 } from "../../data/api/instances";
 import type { NodeDoc } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
+import { regionOf, useRegion, useRegionTable } from "../../data/store/region";
 import { FieldLabel, NumberField } from "./Field";
 import {
   CUSTOM_NAME,
@@ -158,7 +159,16 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
     await patch(setCores(name, config, cores));
   };
 
-  const options = rows && PROVIDERS.some((p) => p.id === mode) ? matching(rows, mode, query) : [];
+  // only the types the picked region has (a type with a price there is offered there); every type
+  // when the region's list could not be loaded
+  const provider = PROVIDERS.some((p) => p.id === mode) ? mode : null;
+  const offered = useRegionTable(provider);
+  const region = useRegion((s) => (provider === null ? undefined : regionOf(s, provider)));
+  const options = (rows && provider !== null ? matching(rows, provider, query) : []).filter(
+    (o) => !offered || offered.has(o.name),
+  );
+  const missingHere =
+    offered && now !== null && now.startsWith(`${mode}/`) && !offered.has(now.toLowerCase());
 
   return (
     <div className="mb-2">
@@ -189,6 +199,19 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
             onChange={(e) => pick(e.currentTarget.value)}
             className={`${INPUT} w-64 max-w-full font-mono`}
           />
+          <p className="m-0 mt-1 text-xs text-muted">
+            Region {region ?? "…"} (the globe at the top right changes it):{" "}
+            {offered
+              ? `${offered.size.toLocaleString("en-US")} types offered here`
+              : "loading the types offered here"}
+            .
+          </p>
+          {missingHere ? (
+            <p className="m-0 mt-1 text-xs text-warn">
+              {now} has no price listed in {region}: it may not be offered there. Pick another type
+              or region.
+            </p>
+          ) : null}
           <datalist id={`${id}-types`}>
             {options.map((o) => (
               <option key={o.name} value={o.name}>
@@ -273,6 +296,15 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
             placeholder="Not limited"
             step="any"
             onCommit={(n) => patch(setCustomInstance(doc, now, "bandwidth", n * 1024))}
+          />
+          <NumberField
+            label={`${now}: cost per hour (USD)`}
+            hint="What one hour of this machine costs, for the cost estimate under the node list. Empty = no price: the estimate leaves it out and says so."
+            value={custom.cost}
+            placeholder="No price"
+            min={0}
+            step="any"
+            onCommit={(n) => patch(setCustomInstance(doc, now, "cost_per_hour", n))}
           />
           <button
             type="button"

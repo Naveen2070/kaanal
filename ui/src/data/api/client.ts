@@ -150,9 +150,29 @@ export const api = {
       seed === undefined ? { endpoint } : { endpoint, seed },
       o,
     ),
-  /** Every cloud instance type the loader knows: `[name, vcpu, memory MiB, network Mbit/s]`. */
+  /**
+   * Every cloud instance type the loader knows: `[name, vcpu, memory MiB, network Mbit/s, price]`,
+   * the price being the on-demand Linux price an hour in micro-USD in the provider's default region
+   * (0 = none).
+   */
   getInstances: (o: Opts = {}) =>
-    call<{ types: [string, number, number, number][] }>("GET", "/instances", undefined, o),
+    call<{ types: [string, number, number, number, number][] }>("GET", "/instances", undefined, o),
+  /** The regions the cost estimate can price in, by provider, and the default of each. */
+  getPriceRegions: (o: Opts = {}) =>
+    call<{ defaults: Record<string, string>; regions: Record<string, string[]> }>(
+      "GET",
+      "/prices",
+      undefined,
+      o,
+    ),
+  /** One region's prices: `[name, micro-USD an hour]` for every type that has one there. */
+  getPrices: (provider: string, region: string, o: Opts = {}) =>
+    call<{ provider: string; region: string; prices: [string, number][] }>(
+      "GET",
+      `/prices/${encodeURIComponent(provider)}/${encodeURIComponent(region)}`,
+      undefined,
+      o,
+    ),
   getTopology: (o: Opts = {}) => call<Topology>("GET", "/topology", undefined, o),
   /** The live response edits (step 8A). */
   getPayloads: (o: Opts = {}) => call<{ edits: PayloadEdit[] }>("GET", "/payload", undefined, o),

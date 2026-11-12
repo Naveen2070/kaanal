@@ -26,6 +26,10 @@ pub struct Instance {
     pub memory_mib: u32,
     /// Peak network rate in megabits per second; 0 = the source gives none (not limited).
     pub net_mbps: u32,
+    /// On-demand Linux price of one hour in micro-USD (1,000,000 = 1 dollar), in the provider's one
+    /// default region (AWS us-east-1, Azure East US, GCP us-central1); 0 = no price. An integer on
+    /// purpose: money is added up here and a float would drift. An estimate, never a quote.
+    pub price_micro_usd_hr: u32,
 }
 
 impl Instance {
@@ -46,7 +50,8 @@ impl Instance {
     }
 }
 
-/// The csv as generated (`name,vcpu,memory_mib,net_mbps`, sorted by name, `#` lines are comments).
+/// The csv as generated (`name,vcpu,memory_mib,net_mbps,usd_micro_hr`, sorted by name, `#` lines are
+/// comments).
 const CSV: &str = include_str!("../data/instances.csv");
 
 /// The table, parsed once.
@@ -59,12 +64,13 @@ fn table() -> &'static [Instance] {
                 let mut f = l.split(',');
                 let mut next = || f.next().expect("a csv field");
                 let name = next();
-                let (vcpu, memory_mib, net_mbps) = (next(), next(), next());
+                let (vcpu, memory_mib, net_mbps, price) = (next(), next(), next(), next());
                 Instance {
                     name,
                     vcpu: vcpu.parse().expect("vcpu is a number"),
                     memory_mib: memory_mib.parse().expect("memory is a number"),
                     net_mbps: net_mbps.parse().expect("network is a number"),
+                    price_micro_usd_hr: price.parse().expect("price is a number"),
                 }
             })
             .collect()

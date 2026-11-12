@@ -11,6 +11,7 @@ import { FirstRun } from "./overlays/first-run/FirstRun";
 import { Loading } from "./overlays/first-run/Loading";
 import { FeedContext, type StatsFeed } from "./canvas/feed";
 import { Palette } from "./canvas/Palette";
+import { CostCard } from "./panels/cost/CostCard";
 import { ReadonlyNodes } from "./shell/layout/ReadonlyNodes";
 import { Shell } from "./shell/layout/Shell";
 import { GuideHost } from "./overlays/guide/GuideHost";
@@ -88,7 +89,12 @@ export function App() {
           topRight={<TopTools />}
           zoom={<ZoomPill />}
           toasts={<ToastHost />}
-          palette={<Palette onAdd={addNode} />}
+          palette={
+            <div className="flex max-h-full min-h-0 flex-col gap-2">
+              <Palette onAdd={addNode} />
+              <CostCard />
+            </div>
+          }
           canvas={<Canvas />}
           dock={<ControlDock />}
           bottom={

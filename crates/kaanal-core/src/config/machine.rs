@@ -27,6 +27,11 @@ pub struct CustomInstance {
     /// a node's `bandwidth`. Absent = the card is not limited.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// What one hour of this machine costs, in US dollars (0 to 1,000,000), for the cost estimate.
+    /// Absent = no price: the estimate leaves it out and says so.
+    #[serde(default)]
+    #[schemars(extend("minimum" = 0, "maximum" = 1_000_000))]
+    pub cost_per_hour: Option<f64>,
 }
 
 /// Most characters in a custom instance's name.
@@ -62,6 +67,16 @@ pub(super) fn check(cfg: &Config) -> Result<(), Located> {
                 format!(
                     "instance '{name}': cores must be a number from 0.001 to 4096 (got {})",
                     c.cores
+                ),
+            ));
+        }
+        if let Some(price) = c.cost_per_hour
+            && !(0.0..=1_000_000.0).contains(&price)
+        {
+            return Err(Located::at_value(
+                keys(&["instances", name.as_str(), "cost_per_hour"]),
+                format!(
+                    "instance '{name}': cost_per_hour must be a number of dollars from 0 to 1000000 (got {price})"
                 ),
             ));
         }

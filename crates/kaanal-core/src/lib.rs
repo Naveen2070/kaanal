@@ -25,6 +25,8 @@ pub mod exec;
 pub mod instances;
 pub mod pin;
 pub mod presets;
+pub mod prices;
+mod prices_data;
 pub mod replay;
 pub mod rng;
 pub mod scenario;

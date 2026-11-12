@@ -133,7 +133,12 @@ test("custom_instances_are_added_edited_and_deleted_as_patches_of_the_instances_
   ]);
   expect(Object.keys(customInstancesOf(doc))).toEqual(["box", "rack"]);
   // a size the file wrote as text reads as none here and is kept when another box changes
-  expect(customInstancesOf(doc).box).toEqual({ cores: 8, memory: null, bandwidth: null });
+  expect(customInstancesOf(doc).box).toEqual({
+    cores: 8,
+    memory: null,
+    bandwidth: null,
+    cost: null,
+  });
   expect(setCustomInstance(doc, "box", "bandwidth", 1048576)).toEqual([
     {
       op: "set",

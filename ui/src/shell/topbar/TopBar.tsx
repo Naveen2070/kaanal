@@ -11,6 +11,7 @@ import { useDraft } from "../../data/store/draft";
 import { useLive } from "../../data/store/live";
 import { isLive, useMode, type Mode } from "../../data/store/mode";
 import { useRun } from "../../data/store/run";
+import { RegionMenu } from "./RegionMenu";
 import { SaveFlow } from "./SaveFlow";
 import { ThemeToggle } from "./ThemeToggle";
 import { UndoRedo } from "./UndoRedo";
@@ -107,6 +108,7 @@ export function TopBar({ onRun }: { onRun: () => void }) {
 export function TopTools() {
   return (
     <div className="flex items-center gap-1 p-1.5">
+      <RegionMenu />
       <ThemeToggle />
       <MenuButton />
     </div>

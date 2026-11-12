@@ -155,3 +155,44 @@ test("the_estimate_warning_stays_while_the_size_per_request_is_the_estimated_one
   rerender(<InstancePicker name="app" config={own} />);
   expect(screen.queryByText(/an estimate, not a measured value/)).toBeNull();
 });
+
+test("only_the_types_the_picked_region_has_are_listed_and_a_missing_one_is_said", async () => {
+  const { api } = await import("../../data/api/client");
+  const { resetPrices } = await import("../../data/api/prices");
+  const { useRegion } = await import("../../data/store/region");
+  resetPrices();
+  useRegion.setState({ picked: {}, defaults: {}, regions: {}, ready: false });
+  vi.spyOn(api, "getPriceRegions").mockResolvedValue({
+    defaults: { aws: "us-east-1" },
+    regions: { aws: ["us-east-1", "eu-west-1"] },
+  });
+  // eu-west-1 has m5.large but not c6i.large
+  vi.spyOn(api, "getPrices").mockImplementation((_p: string, region: string) =>
+    Promise.resolve({
+      provider: "aws",
+      region,
+      prices:
+        region === "eu-west-1"
+          ? [["aws/m5.large", 107000]]
+          : [
+              ["aws/c6i.large", 85000],
+              ["aws/m5.large", 96000],
+            ],
+    }),
+  );
+  const config = app({ instance: "aws/c6i.large" });
+  draftWith({ nodes: { app: config } });
+  render(<InstancePicker name="app" config={config} />);
+  fireEvent.change(screen.getByLabelText("Instance type"), { target: { value: "aws" } });
+  const names = async () =>
+    [...document.querySelectorAll("datalist option")].map((o) => (o as HTMLOptionElement).value);
+  await waitFor(async () => expect(await names()).toEqual(["aws/c6i.large", "aws/m5.large"]));
+  expect(screen.queryByText(/may not be offered there/)).toBeNull();
+  // the browser picks another region: the list narrows and the node's own type is flagged
+  useRegion.getState().pick("aws", "eu-west-1");
+  await waitFor(async () => expect(await names()).toEqual(["aws/m5.large"]));
+  expect(await screen.findByText(/aws\/c6i\.large has no price listed in eu-west-1/)).toBeTruthy();
+  vi.restoreAllMocks();
+  useRegion.setState({ picked: {}, defaults: {}, regions: {}, ready: false });
+  resetPrices();
+});

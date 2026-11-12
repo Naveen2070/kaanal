@@ -76,6 +76,8 @@ export interface CustomInstance {
   memory: number | null;
   /** Bytes a second, both ways; null = not limited (or written as `{ out, in }`). */
   bandwidth: number | null;
+  /** US dollars an hour, for the cost estimate; null = no price. */
+  cost: number | null;
 }
 
 /** The names a custom instance may take: no `/` (the cloud table is `provider/type`). */
@@ -88,7 +90,12 @@ export function customInstancesOf(doc: Doc | null | undefined): Record<string, C
   const out: Record<string, CustomInstance> = {};
   for (const [name, v] of Object.entries(raw)) {
     const e = isObject(v) ? v : {};
-    out[name] = { cores: num(e.cores), memory: num(e.memory), bandwidth: num(e.bandwidth) };
+    out[name] = {
+      cores: num(e.cores),
+      memory: num(e.memory),
+      bandwidth: num(e.bandwidth),
+      cost: num(e.cost_per_hour),
+    };
   }
   return out;
 }
@@ -109,7 +116,7 @@ export function addCustomInstance(doc: Doc | null, name: string, cores: number):
 export function setCustomInstance(
   doc: Doc | null,
   name: string,
-  key: "cores" | "memory" | "bandwidth",
+  key: "cores" | "memory" | "bandwidth" | "cost_per_hour",
   value: number | null,
 ): Op[] {
   const all = doc?.instances;
@@ -120,7 +127,8 @@ export function setCustomInstance(
     if (key === "cores") return [];
     delete next[key];
   } else {
-    next[key] = key === "cores" ? value : Math.round(value);
+    // cores and dollars are decimal numbers; memory and bandwidth are whole bytes
+    next[key] = key === "cores" || key === "cost_per_hour" ? value : Math.round(value);
   }
   return [{ op: "set", path: ["instances", name], value: next }];
 }

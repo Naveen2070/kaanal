@@ -367,7 +367,35 @@ async fn the_instance_table_is_served_whole_and_sorted() {
     assert!(types.len() > 3000, "{} types", types.len());
     assert_eq!(types.len(), kaanal_core::instances::all().len());
     let m5 = types.iter().find(|t| t[0] == "aws/m5.large").unwrap();
-    assert_eq!(m5, &json!(["aws/m5.large", 2, 8192, 10000]));
+    assert_eq!(m5, &json!(["aws/m5.large", 2, 8192, 10000, 96_000]));
     let names: Vec<&str> = types.iter().map(|t| t[0].as_str().unwrap()).collect();
     assert!(names.windows(2).all(|w| w[0] < w[1]));
+}
+
+#[tokio::test]
+async fn price_regions_and_one_regions_prices_are_served() {
+    let s = start(&system("1ms")).await;
+    let v: Value = s.get("/__kaanal/prices").await.json().await.unwrap();
+    assert_eq!(
+        v["defaults"],
+        json!({ "aws": "us-east-1", "azure": "us-east", "gcp": "us-central1" })
+    );
+    for p in ["aws", "azure", "gcp"] {
+        assert!(v["regions"][p].as_array().unwrap().len() >= 20, "{p}");
+    }
+    let r = s.get("/__kaanal/prices/aws/eu-west-1").await;
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    let m5 = v["prices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t[0] == "aws/m5.large")
+        .unwrap();
+    assert_eq!(m5, &json!(["aws/m5.large", 107_000]));
+    assert_eq!(s.get("/__kaanal/prices/aws/nowhere").await.status(), 404);
+    assert_eq!(
+        s.get("/__kaanal/prices/oracle/us-east-1").await.status(),
+        404
+    );
 }
