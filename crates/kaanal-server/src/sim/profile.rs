@@ -80,6 +80,12 @@ pub(crate) struct Planned {
 }
 
 impl Planned {
+    /// Whether stream `i` left `resp_bytes` out, so its size is a sampled one (and a live edit
+    /// of its route may stand in for it).
+    pub(crate) fn resp_is_sampled(&self, i: usize) -> bool {
+        self.fill.iter().any(|(k, _)| *k == i)
+    }
+
     /// Sets each omitted `resp_bytes` to the size of one generated body of its route.
     pub(crate) fn fill_sizes(&mut self, g: &Generation) {
         for (i, key) in &self.fill {

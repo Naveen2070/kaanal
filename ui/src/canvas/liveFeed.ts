@@ -40,8 +40,9 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
   const last = ticks.at(-1);
   const at = (t: Tick) => t.nodes[i];
   const arrived = sum(w.map((t) => at(t)?.arrived ?? 0));
-  const drop = (k: "overflow" | "rate_limit" | "deadline" | "breaker" | "oom" | "chaos") =>
-    sum(w.map((t) => at(t)?.dropped[k] ?? 0));
+  const drop = (
+    k: "overflow" | "rate_limit" | "deadline" | "breaker" | "oom" | "chaos" | "pinned",
+  ) => sum(w.map((t) => at(t)?.dropped[k] ?? 0));
   const dropped =
     drop("overflow") + drop("rate_limit") + drop("deadline") + drop("breaker") + drop("oom");
   const util = fullness(last, i, slots, copies);
@@ -97,6 +98,8 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
     p50_ms: quantileMs(hist, 0.5),
     p99_ms: quantileMs(hist, 0.99),
     series,
+    // failures that are not capacity (a node taken down, a pinned error): the card says so
+    failed_per_s: (drop("chaos") + drop("pinned")) / secs,
     limited: drop("rate_limit"),
     overflowed: drop("overflow"),
     timed_out: drop("deadline"),
@@ -107,7 +110,15 @@ function nodeSummary(name: string, i: number, cfg: NodeDoc, ticks: readonly Tick
   };
 }
 
-const NO_DROPS = { overflow: 0, rate_limit: 0, deadline: 0, breaker: 0, oom: 0, chaos: 0 };
+const NO_DROPS = {
+  overflow: 0,
+  rate_limit: 0,
+  deadline: 0,
+  breaker: 0,
+  oom: 0,
+  chaos: 0,
+  pinned: 0,
+};
 
 /**
  * The ticks as if only the real (frontend) requests had been counted: arrivals, drops and totals

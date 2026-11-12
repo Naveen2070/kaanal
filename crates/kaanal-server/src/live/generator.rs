@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use kaanal_core::replay::Finished;
-use kaanal_core::{ChainRequest, sample_plan};
+use kaanal_core::{ChainRequest, PinState, resolve, sample_plan};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use tokio::sync::mpsc;
@@ -56,6 +56,20 @@ pub struct StreamShare {
     pub share: f64,
     pub req_bytes: u64,
     pub resp_bytes: u64,
+    /// The profile left `resp_bytes` out, so `resp_bytes` is a sampled body's size and an edit of
+    /// the route's payload sets the size instead (RULES 117). An explicit `resp_bytes` always wins.
+    pub resp_sampled: bool,
+}
+
+/// The response size a generated request carries: an explicit `resp_bytes` of the profile always;
+/// otherwise the size of the route's edited payload when it has one (the edit is the sample), else
+/// the size of a generated sample body.
+fn resp_size(m: &StreamShare, edited: Option<u64>) -> u64 {
+    if m.resp_sampled {
+        edited.unwrap_or(m.resp_bytes)
+    } else {
+        m.resp_bytes
+    }
 }
 
 /// A rate the generator refuses, with the reason for the client.
@@ -271,6 +285,21 @@ fn arrive(st: &AppState, mix: &[StreamShare], total: f64, rng: &mut StdRng, n: u
         return;
     };
     let chaos = st.snapshot();
+    // a pinned route answers the pin: its delay is part of the request, and an error state fails it
+    // after the chain has run (the same as the mock, which still runs the chain)
+    let pin = (!chaos.pins.is_empty())
+        .then(|| {
+            let key = if ep.synthesized {
+                ep.key.replacen("HEAD ", "GET ", 1)
+            } else {
+                ep.key.clone()
+            };
+            chaos.pins.get(&key).map(|p| resolve(&p.entry, &ep.states))
+        })
+        .flatten();
+    let pinned = pin
+        .as_ref()
+        .is_some_and(|o| o.state == PinState::Error || o.status.is_some_and(|s| s >= 400));
     let (plan, _) = sample_plan(
         &g.topo,
         &chaos.chaos,
@@ -280,12 +309,21 @@ fn arrive(st: &AppState, mix: &[StreamShare], total: f64, rng: &mut StdRng, n: u
             at: g.started.elapsed(),
             n,
             seed: g.chain_seed,
-            pin_delay: Duration::ZERO,
+            pin_delay: pin.as_ref().map_or(Duration::ZERO, |o| o.delay),
             req_bytes: m.req_bytes,
-            resp_bytes: m.resp_bytes,
+            resp_bytes: resp_size(
+                m,
+                m.resp_sampled
+                    .then(|| st.payloads().get_for(ep).map(|e| e.body.len() as u64))
+                    .flatten(),
+            ),
         },
     );
-    engine.submit(Arc::new(plan), u16::try_from(si).unwrap_or(u16::MAX));
+    engine.submit(
+        Arc::new(plan),
+        u16::try_from(si).unwrap_or(u16::MAX),
+        pinned,
+    );
     ctl.submitted.fetch_add(1, Ordering::Relaxed);
 }
 
@@ -333,7 +371,24 @@ endpoints:
             share: 1.0,
             req_bytes: 0,
             resp_bytes: 0,
+            resp_sampled: false,
         }]
+    }
+
+    #[test]
+    fn an_edit_sets_the_response_size_only_where_the_profile_left_it_out() {
+        let share = |bytes, sampled| StreamShare {
+            endpoint_key: "GET /x".into(),
+            share: 1.0,
+            req_bytes: 0,
+            resp_bytes: bytes,
+            resp_sampled: sampled,
+        };
+        // omitted in the profile: the sample's size, or the edited payload's when there is one
+        assert_eq!(resp_size(&share(500, true), None), 500);
+        assert_eq!(resp_size(&share(500, true), Some(2_000)), 2_000);
+        // written in the profile: that, whatever the edit
+        assert_eq!(resp_size(&share(500, false), Some(2_000)), 500);
     }
 
     #[tokio::test(start_paused = true)]

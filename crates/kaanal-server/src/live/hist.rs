@@ -69,8 +69,17 @@ impl LatencyHist {
 
     /// Records one latency, nanoseconds.
     pub(crate) fn record(&mut self, ns: u64) {
-        let i = index(ns);
-        self.counts[i] = self.counts[i].saturating_add(1);
+        self.record_in(Self::bucket(ns));
+    }
+
+    /// The bucket of `ns`, for a latency that goes into several histograms (one `ln`, not one each).
+    pub(crate) fn bucket(ns: u64) -> usize {
+        index(ns)
+    }
+
+    /// Records one latency whose bucket [`LatencyHist::bucket`] already found.
+    pub(crate) fn record_in(&mut self, bucket: usize) {
+        self.counts[bucket] = self.counts[bucket].saturating_add(1);
         self.total += 1;
     }
 

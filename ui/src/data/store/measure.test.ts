@@ -30,3 +30,26 @@ test("a_failed_run_or_no_profile_is_a_message_and_keeps_the_last_numbers", async
   expect(useRun.getState().latest?.id).toBe("s1");
   expect(useRun.getState().dimmed).toBe(true);
 });
+
+test("measureDraft_runs_the_profile_at_the_given_rate_and_keeps_its_mix", async () => {
+  const { api } = await import("../api/client");
+  const { useDraft } = await import("./draft");
+  const { measureDraft } = await import("./measure");
+  const journeys = [{ endpoint: "GET /x", weight: 2 }];
+  useDraft.setState({
+    view: { doc: { traffic: { p: { rps: 100, journeys } } }, rev: 1, boot: "b" } as never,
+  });
+  const start = vi.spyOn(api, "startRun").mockResolvedValue({ kind: "started", id: "s9" } as never);
+  vi.spyOn(api, "getRun").mockResolvedValue(rec("done"));
+  await measureDraft(500);
+  expect(start).toHaveBeenLastCalledWith({
+    profile: { rps: 500, journeys },
+    source: "draft",
+  });
+  // no rate, or one the server would refuse: the profile by name, as before
+  await measureDraft();
+  expect(start).toHaveBeenLastCalledWith({ profile: "p", source: "draft" });
+  await measureDraft(2e6);
+  expect(start).toHaveBeenLastCalledWith({ profile: "p", source: "draft" });
+  vi.restoreAllMocks();
+});

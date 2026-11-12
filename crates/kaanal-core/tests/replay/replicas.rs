@@ -146,3 +146,21 @@ fn a_failed_request_leaves_the_queue_of_its_replica() {
     assert_eq!(done[2].hops[0].wait, Duration::ZERO);
     assert_eq!(e.replica_counters()[app][1].max_queue, 1);
 }
+
+#[test]
+fn copy_loads_split_a_nodes_slots_and_queue_by_copy() {
+    let t = topo(TWO);
+    let app = t.id("app").unwrap();
+    let mut e = Engine::new(&t);
+    // one slot a copy: copy 0 runs one hop and queues a second, copy 1 runs one
+    for (tag, r) in [0u16, 0, 1].into_iter().enumerate() {
+        e.submit(0, plan(vec![on(app, r, HopKind::Proc, 10)]), tag as u64)
+            .unwrap();
+    }
+    e.advance_to(5 * MS).unwrap();
+    assert_eq!(e.copy_loads(), vec![vec![(1, 1), (1, 0)]]);
+    // the node's own figure is their sum
+    assert_eq!(e.node_loads(), vec![(2, 1)]);
+    run_all(&mut e);
+    assert_eq!(e.copy_loads(), vec![vec![(0, 0), (0, 0)]]);
+}

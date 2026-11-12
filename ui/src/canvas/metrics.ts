@@ -18,6 +18,8 @@ export interface Figures {
   /** "saturates near 120 req/s"; null without a capacity. */
   headroomText: string | null;
   saturated: boolean;
+  /** Requests are failing here for a reason that is not capacity: chaos took it down, or a pinned error (Live). */
+  failing: boolean;
   /** Copies of the node (1 when the config says nothing). */
   replicas: number;
   /** True once a run has given any figure for this node. */
@@ -66,6 +68,7 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
       waiting: null,
       headroomText: null,
       saturated: false,
+      failing: false,
       replicas,
       hasRun: false,
       peakWaiting: 0,
@@ -89,6 +92,7 @@ export function nodeFigures(node: NodeSummary | undefined, config: NodeDoc | und
     waiting: node.max_queue,
     headroomText: req !== null && req > 0 ? `saturates near ${twoSignificant(req)} req/s` : null,
     saturated: node.saturated,
+    failing: (node.failed_per_s ?? 0) > 0,
     replicas,
     hasRun: true,
     peakWaiting,
@@ -127,6 +131,10 @@ const finiteOrNull = (x: number | null | undefined): number | null =>
 
 /** "78% busy · up to 12 waiting". The words carry the state; colour only repeats it. */
 function sentenceOf(node: NodeSummary, peakWaiting: number, arriving: number | null): string {
+  // taken down by chaos or answering a pinned error: say so before the capacity words, since a
+  // node that fails everything is not busy
+  const failed = node.failed_per_s ?? 0;
+  if (failed > 0 && !node.saturated) return `Failing · ${twoSignificant(failed)} failed / s`;
   if (node.utilization === null) return "No slot limit · never saturates";
   const waiting =
     peakWaiting > 0 ? `up to ${peakWaiting.toLocaleString("en-US")} waiting` : "nothing waiting";
@@ -135,7 +143,8 @@ function sentenceOf(node: NodeSummary, peakWaiting: number, arriving: number | n
   if (turning && node.utilization < 0.9) {
     return `${percent(node.utilization)} busy · turning requests away`;
   }
-  if (node.saturated) return `Saturated · ${waiting}${turning ? " · turning requests away" : ""}`;
+  // the Turned away row and the pile on the card say the rest; the line stays short enough to read
+  if (node.saturated) return `Saturated · ${waiting}`;
   if (arriving === 0 && node.utilization === 0) return "Idle";
   return `${percent(node.utilization)} busy · ${waiting}`;
 }
@@ -223,6 +232,7 @@ export function stateWords(f: Figures): string {
   if (!f.hasRun) return "no run yet";
   if (f.busy === null) return "no slot limit";
   if (f.saturated) return "saturated";
+  if (f.failing) return "failing requests";
   if (f.arrivingPerS === 0 && f.busy === 0) return "idle";
   return `${Math.round(f.busy * 100)} percent busy`;
 }

@@ -208,13 +208,33 @@ pub(crate) struct Applied {
 /// rebuilds from disk, so it also picks up edited spec, data and scenario files, even when the
 /// draft text did not change.
 pub(crate) async fn apply(st: &Arc<AppState>, timeout: Duration) -> Result<Applied, ApplyError> {
+    apply_from(st, timeout, false).await
+}
+
+/// Rebuilds the **running** system from the applied text, not the draft: a fresh engine with
+/// empty queues and a fresh live timeline, the draft untouched (the live Reset). Chaos, scenarios
+/// and pins are kept as in an Apply. The caller checks that something has been applied.
+pub(crate) async fn reset(st: &Arc<AppState>, timeout: Duration) -> Result<Applied, ApplyError> {
+    apply_from(st, timeout, true).await
+}
+
+async fn apply_from(
+    st: &Arc<AppState>,
+    timeout: Duration,
+    from_applied: bool,
+) -> Result<Applied, ApplyError> {
     let _one_at_a_time = st.apply_lock.lock().await;
-    let text = st
-        .draft
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .text
-        .clone();
+    let text = {
+        let d = st
+            .draft
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if from_applied {
+            d.applied.clone()
+        } else {
+            d.text.clone()
+        }
+    };
     let (dir, seed) = (st.dir.clone(), st.drawn_seed);
     let (key, port, source) = (st.auth_key.clone(), st.port, text.clone());
     // reads spec and data files, so off the async threads

@@ -5,6 +5,7 @@
 
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -12,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tokio_stream::{Stream, StreamExt};
@@ -109,6 +110,36 @@ pub async fn resume(State(st): State<Arc<AppState>>) -> axum::response::Response
     answer(st.live.resume(), &st)
 }
 
+/// `POST /__kaanal/live/reset`: rebuilds the running system from what was last applied (empty
+/// queues, a fresh timeline, the draft untouched), so a run that was driven into overload starts
+/// clean without applying unapplied edits. 409 when nothing has been applied or the requests in
+/// flight did not drain in 10 seconds.
+pub async fn reset(State(st): State<Arc<AppState>>) -> axum::response::Response {
+    use crate::draft::apply::{ApplyError, reset as rebuild};
+    let applied = !st
+        .draft
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .applied
+        .trim()
+        .is_empty();
+    if !applied {
+        return reject(StatusCode::CONFLICT, "nothing is running yet: Apply first").into_response();
+    }
+    match rebuild(&st, Duration::from_secs(10)).await {
+        Ok(a) => Json(json!({ "ok": true, "generation": a.generation })).into_response(),
+        Err(ApplyError::Timeout) => reject(
+            StatusCode::CONFLICT,
+            "drain timed out; the system keeps running",
+        )
+        .into_response(),
+        Err(ApplyError::Invalid(d)) => reject(StatusCode::BAD_REQUEST, &d.message).into_response(),
+        Err(ApplyError::Internal(m)) => {
+            reject(StatusCode::INTERNAL_SERVER_ERROR, &m).into_response()
+        }
+    }
+}
+
 /// The body of `PUT /__kaanal/live/rate`.
 #[derive(Deserialize)]
 pub struct RateBody {
@@ -138,6 +169,8 @@ mod tests {
             nodes: Vec::new(),
             wires: Vec::new(),
             hist: Vec::new(),
+            endpoints: Vec::new(),
+            breakers: Vec::new(),
             journeys: Vec::new(),
             status: TickStatus {
                 rate: 1.0,

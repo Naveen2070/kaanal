@@ -3,6 +3,8 @@ import type { Tick } from "../api/liveTypes";
 import {
   bucketNs,
   bucketOf,
+  breakerBands,
+  endpointFigures,
   errorKinds,
   liveSeries,
   nodeHeat,
@@ -184,4 +186,65 @@ test("wireFigures_count_a_retry_on_the_wire_its_first_try_came_in_through", () =
   expect(f.retriedPct).toBeCloseTo(20);
   expect(f.retriesPerCall).toBeCloseTo(0.2);
   expect(wireFigures([t(5, 0, 0)], 0).retriedPct).toBeNull();
+});
+
+test("wireFigures_add_the_engines_retry_funnel_and_average_the_wire_load", () => {
+  const t = (ms: number, retried: number, recovered: number, load?: number) =>
+    tick(ms, {
+      wires: [
+        {
+          carried: 10,
+          funnel: { calls: 10, retried, recovered, failed: retried - recovered },
+          ...(load === undefined ? {} : { load }),
+        },
+      ],
+    });
+  const f = wireFigures([t(250, 4, 3, 0.2), t(500, 6, 2, 0.6)], 0);
+  // 10 retried, 5 recovered: 5 gave up (or are still retrying)
+  expect(f.funnel).toEqual({ calls: 20, retried: 10, recovered: 5, gaveUp: 5 });
+  expect(f.load).toBeCloseTo(0.4, 12);
+  // no retry scope and no bandwidth: nothing to show
+  const plain = wireFigures([tick(250, { wires: [{ carried: 3 }] })], 0);
+  expect([plain.funnel, plain.load]).toEqual([null, null]);
+  // recovered can run ahead of retried across a tick edge: never a negative count
+  expect(wireFigures([t(250, 1, 3)], 0).funnel?.gaveUp).toBe(0);
+});
+
+test("endpointFigures_read_one_route_over_the_window", () => {
+  const b = bucketOf(20e6);
+  const t = (ms: number) =>
+    tick(ms, {
+      endpoints: [
+        { requests: 5, failed: 1, hist: [[b, 4]] },
+        { requests: 2, failed: 0, hist: [[bucketOf(300e6), 2]] },
+      ],
+    });
+  const w = [t(250), t(500), t(750), t(1000)];
+  const first = endpointFigures(w, 0);
+  expect(first.reqPerS).toBe(20); // 20 requests in a second
+  expect(first.failedPerS).toBe(4);
+  expect(Math.abs((first.p99Ms ?? 0) - 20)).toBeLessThan(0.3);
+  expect(Math.abs((endpointFigures(w, 1).p50Ms ?? 0) - 300)).toBeLessThan(4);
+  // a route that nothing finished on
+  expect(endpointFigures(w, 5)).toEqual({ reqPerS: 0, failedPerS: 0, p50Ms: null, p99Ms: null });
+});
+
+test("breakerBands_follow_each_breaker_of_a_wire_tick_by_tick", () => {
+  const at = (ms: number, state: "closed" | "open" | "half_open") =>
+    tick(ms, {
+      breakers: [
+        { edge: 2, replica: 0, state },
+        { edge: 3, replica: 0, state: "open" },
+      ],
+    });
+  const bands = breakerBands(
+    [at(250, "closed"), at(500, "open"), at(750, "open"), at(1000, "half_open")],
+    2,
+  );
+  expect(bands).toHaveLength(1);
+  expect(bands[0]?.phases).toEqual(["closed", "open", "open", "half_open"]);
+  expect(bands[0]?.openS).toBe(0.75);
+  expect(bands[0]?.now).toBe("half_open");
+  // a wire with no breaker has no band
+  expect(breakerBands([at(250, "open")], 9)).toEqual([]);
 });

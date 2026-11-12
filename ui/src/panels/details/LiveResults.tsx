@@ -2,11 +2,11 @@
 // and the notes. Compare with the last run, plan for a rate, share and the heatmap belong to a
 // finished run and stay in Batch.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
 import { useLive } from "../../data/store/live";
-import { errorKinds, LIVE_BUCKETS } from "../../data/store/liveMath";
+import { endpointFigures, errorKinds, LIVE_BUCKETS } from "../../data/store/liveMath";
 import { measureDraft } from "../../data/store/measure";
 import { useRun } from "../../data/store/run";
 import { useSelected } from "../../data/store/view";
@@ -14,7 +14,7 @@ import { BusyChart } from "./BusyChart";
 import { Heatmap } from "./Heatmap";
 import { Results } from "./Results.lazy";
 import { liveFeed } from "../../canvas/liveFeed";
-import { twoSignificant } from "../../canvas/metrics";
+import { breaksFirst, fmtMs, twoSignificant } from "../../canvas/metrics";
 import { Section } from "./Field";
 import { LiveTimeline } from "./LiveTimeline";
 
@@ -31,7 +31,23 @@ export function LiveResults() {
   const status = useRun((x) => x.status);
   const [problem, setProblem] = useState<string | null>(null);
   const measuring = status === "running";
-  const measure = async () => setProblem(await measureDraft());
+  // the rate on offer now: the measured run is made at it, so it compares with the live figures
+  const offered = ticks.at(-1)?.status.rate ?? hello?.rate ?? 0;
+  const measure = async () => setProblem(await measureDraft(offered > 0 ? offered : undefined));
+  // optionally measure again a few seconds after the draft changes, so "measured" follows the edits
+  const [auto, setAuto] = useState(false);
+  const rev = useDraft((s) => s.view?.rev ?? -1);
+  useEffect(() => {
+    if (!auto) return;
+    const t = setTimeout(() => void measureDraft(offered > 0 ? offered : undefined), 3000);
+    return () => clearTimeout(t);
+    // the offered rate is read when the timer fires; only a new draft revision restarts it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, rev]);
+  const measuredLimit = breaksFirst(run?.summary ?? undefined);
+  const routes = hello?.streams ?? [];
+  const routeFigures = routes.map((name, i) => ({ name, ...endpointFigures(ticks, i) }));
+  const order = hello?.nodes ?? Object.keys(doc?.nodes ?? {});
   // the busiest each component got in the window, not just now
   const peaks = nodes
     .filter((n) => n.utilization !== null)
@@ -108,13 +124,52 @@ export function LiveResults() {
               <tr className="text-left">
                 <th>Instance</th>
                 <th>Visits/s</th>
+                <th>Running</th>
+                <th>Waiting</th>
               </tr>
             </thead>
             <tbody>
-              {picked.replicas.map((r) => (
-                <tr key={r.replica}>
-                  <td>{r.replica}</td>
-                  <td className="tabular-nums">{twoSignificant(r.visits_per_s)}</td>
+              {picked.replicas.map((r) => {
+                const load =
+                  ticks.at(-1)?.nodes[order.indexOf(picked.name)]?.copy_load?.[r.replica];
+                return (
+                  <tr key={r.replica}>
+                    <td>{r.replica}</td>
+                    <td className="tabular-nums">{twoSignificant(r.visits_per_s)}</td>
+                    <td className="tabular-nums">{load ? load[0] : "–"}</td>
+                    <td className="tabular-nums">{load ? load[1] : "–"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="mt-1 text-[11px] text-muted">
+            Running and waiting are the slots of each copy at this instant.
+          </p>
+        </Section>
+      ) : null}
+      {routeFigures.length > 1 ? (
+        <Section title="By route (last 10 seconds)">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left">
+                <th>Route</th>
+                <th>Req/s</th>
+                <th>Failed/s</th>
+                <th>p50</th>
+                <th>p99</th>
+              </tr>
+            </thead>
+            <tbody>
+              {routeFigures.map((r) => (
+                <tr key={r.name}>
+                  <td className="max-w-32 truncate" title={r.name}>
+                    {r.name}
+                  </td>
+                  <td className="tabular-nums">{twoSignificant(r.reqPerS)}</td>
+                  <td className="tabular-nums">{twoSignificant(r.failedPerS)}</td>
+                  <td className="tabular-nums">{r.p50Ms === null ? "–" : fmtMs(r.p50Ms)}</td>
+                  <td className="tabular-nums">{r.p99Ms === null ? "–" : fmtMs(r.p99Ms)}</td>
                 </tr>
               ))}
             </tbody>
@@ -140,9 +195,20 @@ export function LiveResults() {
       </Section>
       <Section title="Measure">
         <p className="mb-2 text-xs text-muted">
-          One finished, repeatable run of the draft at the rate in its traffic profile: the verdict,
-          heatmap, compare, plan and share, as in Batch. It does not change the live run.
+          One finished, repeatable run of the draft{" "}
+          {offered > 0
+            ? `at the rate on offer now (${twoSignificant(offered)} / s)`
+            : "at the rate in its traffic profile"}
+          : the verdict, heatmap, compare, plan and share, as in Batch. It does not change the live
+          run.
         </p>
+        {measuredLimit ? (
+          <p className="mb-2 text-xs">
+            Measured limit: <strong>{measuredLimit.node}</strong> at about{" "}
+            {twoSignificant(measuredLimit.atReqS)} / s (from the run below, so it follows the
+            settings it was run with).
+          </p>
+        ) : null}
         <button
           type="button"
           disabled={measuring || doc?.nodes === undefined}
@@ -151,6 +217,14 @@ export function LiveResults() {
         >
           {measuring ? "Measuring..." : run ? "Measure again" : "Measure the draft"}
         </button>
+        <label className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => setAuto(e.currentTarget.checked)}
+          />
+          Measure again 3 seconds after each change, while this tab is open
+        </label>
         {problem ? <p className="mt-2 text-xs text-warn">{problem}</p> : null}
       </Section>
       {run ? (

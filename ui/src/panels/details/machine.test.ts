@@ -156,3 +156,18 @@ test("custom_instances_are_added_edited_and_deleted_as_patches_of_the_instances_
   expect(CUSTOM_NAME.test("aws/m5")).toBe(false);
   expect(CUSTOM_NAME.test("")).toBe(false);
 });
+
+test("estimatePerRequest_is_memory_minus_base_over_slots_and_never_invents_one", async () => {
+  const { estimatePerRequest } = await import("./fields.machine");
+  const GiB = 1024 ** 3;
+  expect(estimatePerRequest(8 * GiB, 0, 8)).toBe(GiB);
+  // the base is held before any request: 1 GiB base leaves 7 GiB for 7 slots
+  expect(estimatePerRequest(8 * GiB, GiB, 7)).toBe(GiB);
+  // slots times the estimate never exceeds what is left (memory binds no earlier than slots)
+  const m = estimatePerRequest(1000, 0, 3) ?? 0;
+  expect(3 * m).toBeLessThanOrEqual(1000);
+  // no slots, or a base that fills the limit: no figure
+  expect(estimatePerRequest(GiB, 0, null)).toBeNull();
+  expect(estimatePerRequest(GiB, GiB, 4)).toBeNull();
+  expect(estimatePerRequest(10, 0, 100)).toBe(1); // at least a byte
+});

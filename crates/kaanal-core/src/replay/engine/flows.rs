@@ -9,7 +9,7 @@ use std::cmp::Reverse;
 use super::fluid::Fluid;
 use super::state::live;
 use super::{Engine, PlanItem, nanos};
-use crate::exec::Xfer;
+use crate::exec::{Pipe, Xfer};
 
 /// **Private.** The solver and who is waiting on each flow.
 pub(super) struct Flows {
@@ -135,6 +135,23 @@ impl Engine {
         let seq = self.stamp();
         self.heap
             .push(Reverse((t, seq, usize::MAX, self.flows.epoch)));
+    }
+
+    /// Busy time of each link up to `now` (ns at full rate: the bytes it carried over its rate), for
+    /// a live engine read between events; [`Engine::link_counters`] holds the same figure but only
+    /// settles it when a transfer ends. Two readings and their difference over the time between
+    /// them is the load of that span (1 = the wire was full the whole time); zero for a wire with
+    /// no `bandwidth`.
+    pub fn link_busy_at(&mut self, now: u64) -> Vec<u128> {
+        self.flows.fluid.settle(now);
+        // only a wire that has carried something has a figure to bring up to date
+        let pipes: Vec<usize> = (0..self.units.edges)
+            .filter_map(|e| u16::try_from(e).ok())
+            .map(|edge| self.units.pipe_unit(Pipe::Wire { edge }))
+            .filter(|&p| self.flows.fluid.moved(p) > 0)
+            .collect();
+        self.sync_pipes(&pipes);
+        self.link_counters().iter().map(|c| c.area).collect()
     }
 
     /// **Private.** Sets the busy area of the given pipes to what they carried: the nano-bytes

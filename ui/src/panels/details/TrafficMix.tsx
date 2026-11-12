@@ -7,12 +7,16 @@ import { useDraft } from "../../data/store/draft";
 import { activeProfile, mixOf, setWeight } from "../traffic/model";
 import { NumberField } from "./Field";
 import { twoSignificant } from "../../canvas/metrics";
+import { useMode } from "../../data/store/mode";
+import { EditResponse, useEditedRoutes } from "./EditResponse";
 
 export function TrafficMix() {
   const doc = useDraft((s) => s.view?.doc);
   const patch = useDraft((s) => s.patch);
   const profile = activeProfile(doc);
   const rows = mixOf(doc, profile);
+  const admin = useMode((s) => s.mode === "admin");
+  const { edited, reload } = useEditedRoutes(admin);
   if (rows.length === 0) return null;
   return (
     <section className="mt-4 border-t border-rule pt-3" aria-label="Traffic mix">
@@ -34,7 +38,10 @@ export function TrafficMix() {
                 />
                 <span className="min-w-0 truncate font-medium">{r.key}</span>
               </span>
-              <span className="shrink-0 tabular-nums">{twoSignificant(r.share * 100)}%</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="tabular-nums">{twoSignificant(r.share * 100)}%</span>
+                <EditResponse route={r.key} edited={edited.has(r.key)} onClose={reload} />
+              </span>
             </div>
             <NumberField
               label={`Weight of ${r.key}`}

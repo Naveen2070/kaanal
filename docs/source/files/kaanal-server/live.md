@@ -1,4 +1,4 @@
-# `crates/kaanal-server/src/live/` (`mod.rs`, `generator.rs`, `hist.rs`, `tick.rs`, `edit.rs`, `stream.rs`, `tests.rs`, `tick/tests.rs`)
+# `crates/kaanal-server/src/live/` (`mod.rs`, `generator.rs`, `hist.rs`, `tick.rs`, `tick/probe.rs`, `edit.rs`, `stream.rs`, `tests.rs`, `tick/tests.rs`, `tick/extra_tests.rs`)
 
 The unit tests of `mod.rs` and `tick.rs` sit in `tests.rs` and `tick/tests.rs` (moved as they were, to keep both files under the size limit; the test count is unchanged).
 
@@ -14,11 +14,11 @@ The live simulation (step 8L, RULES 105): a generator that feeds the shared engi
 
 ## `stream.rs`
 
-`GET /__kaanal/live[?fresh=1][&token=...]`: server-sent events, a `hello` event (the session status) and a keep-alive comment every 2 s; the stream holds the client guard and ends when the server shuts down. `POST /__kaanal/live/pause`, `POST /__kaanal/live/resume`, `PUT /__kaanal/live/rate` with `{ "rps": N }` answer with the status (409 when no page is connected, 400 for a refused rate). The token may be given as `?token=` on the stream only (`control/guard.rs`), as on `/events`; the commands need the header.
+`GET /__kaanal/live[?fresh=1][&token=...]`: server-sent events, a `hello` event (the session status) and a keep-alive comment every 2 s; the stream holds the client guard and ends when the server shuts down. `POST /__kaanal/live/pause`, `POST /__kaanal/live/resume`, `POST /__kaanal/live/reset` (rebuilds the running system from the **applied** text through `draft::apply::reset`: a fresh engine with empty queues and a new generation, chaos kept as in an Apply, the draft untouched; 409 when nothing has been applied or the drain times out), `PUT /__kaanal/live/rate` with `{ "rps": N }` answer with the status (409 when no page is connected, 400 for a refused rate). The token may be given as `?token=` on the stream only (`control/guard.rs`), as on `/events`; the commands need the header.
 
 ## `hist.rs`
 
-`LatencyHist`: counts of latencies by geometric bucket (ratio 1.0201, 10 microseconds to 1,000 seconds, about 1,000 buckets; one bucket under the range and one at the top), so any value is within about 1% of its bucket's middle (two significant digits, as `HdrHistogram`). `record(ns)`, `sparse()` (the occupied buckets, for the wire); `merge`, `count`, `quantile(q)` exist for tests and mirror what the page does with the ticks of its window (the server keeps no history). A quantile read from the buckets is within 1% of the exact one (tested on 100,000 lognormal latencies).
+`LatencyHist`: counts of latencies by geometric bucket (ratio 1.0201, 10 microseconds to 1,000 seconds, about 1,000 buckets; one bucket under the range and one at the top), so any value is within about 1% of its bucket's middle (two significant digits, as `HdrHistogram`). `record(ns)` (or `bucket(ns)` once and `record_in(bucket)` for a latency that goes into several histograms: one `ln`, not one each), `sparse()` (the occupied buckets, for the wire); `merge`, `count`, `quantile(q)` exist for tests and mirror what the page does with the ticks of its window (the server keeps no history). A quantile read from the buckets is within 1% of the exact one (tested on 100,000 lognormal latencies).
 
 ## `tick.rs`
 
@@ -31,3 +31,19 @@ The live simulation (step 8L, RULES 105): a generator that feeds the shared engi
 **The clock.** `Generation::started` is when the running system started; the mock (`mock::plan_of`) and the generator plan every request with `ChainRequest::at = started.elapsed()`, so `from_ms` outages and `detect` mean the same for real and generated traffic. The `hello` status and each tick carry it as `system_ms`. `edit.rs` copies the old `started` into a rebuilt generation (a parameter edit is not a restart); an Apply builds a new one.
 
 **Real requests (step 8A).** `Aggregator::add(&Finished, real)`: every request adds to the tick's own counts, and a real one (a mock request that reached the tap) adds to a second set as well, so `Tick.real` (absent in a tick with no real request) carries `{ requests, failed, nodes, wires, hist }` for the real ones; the tick's own figures include them, so the page shows the generated share as the difference. Queue, busy slots and CPU load are engine snapshots and stay on the tick. A real journey is always sampled (up to `MAX_REAL_JOURNEYS` a tick, apart from the generated cap) and carries `real: true`, drawn as a ring. The per-hop counting is `Counts::add`, run once for the total (building the journey) and once more for the real set. A request of another topology is ignored by both sets.
+
+## `tick/probe.rs` and the engine's readings (RULES 115)
+
+Some figures the finished requests cannot give, so each tick the loop asks the engine actor for a `Probe` (`EngineHandle::probe`) and `readings(topo, before, after, span_ns)` turns two probes into the tick's figures; `Aggregator::set_readings` hands them to `take`.
+
+- **Per copy:** `NodeTick.copy_load`, `(running, waiting)` of each copy at the instant of the tick, only for a node with several copies.
+- **Retry funnel:** `WireTick.funnel` is `{ calls, retried, recovered, failed }`, the change in the engine's own `WireCounters` over the span, so a call is counted in the tick it ends in. `retried - recovered` over a window is the calls that gave up plus the few still retrying (the page says so). Left out when all zero.
+- **Wire load:** `WireTick.load` is the change in `Engine::link_busy_at` over the span: bytes carried over the wire's rate (1 = full the whole time), only for a wire with a `bandwidth`.
+- **Breakers:** `Tick.breakers` is `[{ edge, replica, state }]`, every breaker that exists, `closed`, `half_open` or `open`, at the instant of the tick. The page builds the timeline from the states of successive ticks, so the engine's capped change log (`BREAKER_LOG_CAP`) is not used.
+- **Per route:** `Tick.endpoints` is one `{ requests, failed, hist }` per route of the offered mix (the index into `hello.streams`), for generated requests only, in the total and not the real share; routes past `MAX_STREAMS` (256) are ignored. The bucket of a served request is found once and written into the tick's histogram and the route's.
+
+All are additive: a field with nothing to say is left out of the JSON. Tests (`tick/extra_tests.rs`): a route's histogram holds exactly its requests and the routes add up to the tick; the funnel is the change in the counts and the load is busy time over the span (half a second in one second is 0.5); the readings belong to one tick.
+
+**Response size of generated traffic (RULES 117).** `StreamShare.resp_sampled` is true when the profile left `resp_bytes` out (`Planned::resp_is_sampled`). `generator::resp_size` then uses the size of the route's live payload edit (`AppState::payloads().get_for`, read at each arrival) when there is one, else the sampled body size; an explicit `resp_bytes` always wins. Batch runs are not affected.
+
+**Pins on generated traffic (RULES 118).** `generator::arrive` resolves the route's pin from the effective pins (`resolve(&entry, &ep.states)`): `pin_delay` is the outcome's delay, and `EngineHandle::submit(plan, stream, pinned)` marks an error pin by `PIN_ERROR` (bit 62) in the tag (`actor::is_pinned_error`). `Counts::add` counts such a request that the engine served as failed at its first hop's node (`Dropped.pinned`), not in the latency histograms, with journey cause `pinned`. Checked against a running instance: a pin on `GET /users` failed every request at the gateway with cause `pinned` and stopped when removed.

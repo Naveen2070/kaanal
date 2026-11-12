@@ -121,7 +121,7 @@ impl Fluid {
     }
 
     /// Brings every flow's bytes left up to `now` at the rates they ran at since the last change.
-    fn settle(&mut self, now: u64) {
+    pub(super) fn settle(&mut self, now: u64) {
         let dt = u128::from(now.saturating_sub(self.at));
         if dt > 0 {
             let inside = u128::from(now.min(self.hi).saturating_sub(self.at.max(self.lo)));

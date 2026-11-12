@@ -169,6 +169,35 @@ export function setMemory(
   return [put(path, present, next)];
 }
 
+/**
+ * What one request may hold so that memory never binds before the slots do: with a limit `M`, a
+ * base `B` and `N` slots, `N` requests fit while `B + N x m <= M`, so `m = (M - B) / N` (the
+ * memory in use is `B` plus what the `N` requests in flight hold, Little's law applied to memory).
+ * An upper bound on a request's size for that instance, **not** a measurement. Null without slots or
+ * when the base alone fills the limit.
+ */
+export function estimatePerRequest(
+  limit: number,
+  base: number,
+  slots: number | null,
+): number | null {
+  if (slots === null || !(slots > 0) || !(limit > base)) return null;
+  return Math.max(1, Math.floor((limit - base) / slots));
+}
+
+/** The patch that sets several memory sizes at once (bytes), keeping the rest of the map. */
+export function setMemoryFields(
+  name: string,
+  config: NodeDoc,
+  fields: Partial<Record<MemoryKey, number>>,
+): Op[] {
+  const path = ["nodes", name, "memory"];
+  const present = "memory" in config;
+  const next: Record<string, unknown> = isObject(config.memory) ? { ...config.memory } : {};
+  for (const [k, v] of Object.entries(fields)) next[k] = Math.round(v);
+  return [put(path, present, next)];
+}
+
 /** The garbage-collection weight of `memory.gc`, or null when none is set. */
 export function gcOf(config: NodeDoc): number | null {
   const v = isObject(config.memory) ? config.memory.gc : null;

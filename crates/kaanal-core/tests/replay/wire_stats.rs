@@ -181,3 +181,32 @@ fn a_hop_outside_any_retry_is_attempt_one() {
         vec![1]
     );
 }
+
+#[test]
+fn breaker_phases_read_what_each_breaker_is_doing_now() {
+    let t = topo(YAML);
+    let app = t.id("app").unwrap();
+    assert!(
+        go(&t, 0, vec![]).breaker_phases().is_empty(),
+        "no call, no breaker"
+    );
+    // four failed calls open it and nothing has asked since
+    let open = go(
+        &t,
+        0,
+        (0..4)
+            .map(|i| (i * SEC, call(app, 1, 1, 503, true)))
+            .collect(),
+    );
+    assert_eq!(open.breaker_phases(), [(0, 0, BreakerState::Open)]);
+    // the same plus two good probes after open_for: closed again
+    let mut calls: Vec<_> = (0..4)
+        .map(|i| (i * SEC, call(app, 1, 1, 503, true)))
+        .collect();
+    calls.push((14 * SEC, call(app, 1, 0, 503, true)));
+    calls.push((14 * SEC + 10 * MS, call(app, 1, 0, 503, true)));
+    assert_eq!(
+        go(&t, 0, calls).breaker_phases(),
+        [(0, 0, BreakerState::Closed)]
+    );
+}

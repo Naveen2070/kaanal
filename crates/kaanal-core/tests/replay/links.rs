@@ -203,3 +203,16 @@ fn a_node_pipe_is_shared_by_every_wire_out_of_it_and_each_copy_has_its_own() {
         "the receive pipe is idle"
     );
 }
+
+#[test]
+fn link_busy_reads_a_links_busy_time_up_to_now() {
+    let t = topo(NET);
+    let (a, edge) = (t.id("a").unwrap(), 0);
+    let mut e = kaanal_core::replay::Engine::new(&t);
+    e.submit(0, one(link(a, edge, false, 10)), 0).unwrap();
+    e.advance_to(ms(4)).unwrap();
+    // mid-transfer: busy since 0, so 4 ms of one transfer; the other wires are idle
+    assert_eq!(e.link_busy_at(ms(4)), vec![u128::from(ms(4)), 0, 0]);
+    run_all(&mut e);
+    assert_eq!(e.link_busy_at(ms(100))[0], u128::from(ms(10)));
+}

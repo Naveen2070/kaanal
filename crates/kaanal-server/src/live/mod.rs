@@ -141,11 +141,13 @@ fn mix_of(g: &Generation) -> Result<(String, Vec<StreamShare>, f64), String> {
         .cfg
         .streams
         .iter()
-        .map(|s| StreamShare {
+        .enumerate()
+        .map(|(i, s)| StreamShare {
             endpoint_key: s.endpoint_key.clone(),
             share: s.rate_per_s,
             req_bytes: s.req_bytes,
             resp_bytes: s.resp_bytes,
+            resp_sampled: planned.resp_is_sampled(i),
         })
         .collect();
     Ok((name, mix, rps))
@@ -230,6 +232,8 @@ async fn tick_loop(
     let tapped = st.generation().map(|g| g.id);
     // the last reading of the engine's CPU busy area and when it was taken
     let mut cpu_seen: Option<(Instant, Vec<u128>)> = None;
+    // the last probe of the engine (retry counts, link busy time) and when it was taken
+    let mut probe_seen: Option<(Instant, crate::actor::Probe)> = None;
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -240,6 +244,7 @@ async fn tick_loop(
                 if agg.as_ref().is_none_or(|(id, _)| *id != g.id) {
                     agg = Some((g.id, Aggregator::new(&g.topo)));
                     cpu_seen = None;
+                    probe_seen = None;
                 }
                 let a = &mut agg.as_mut().expect("just set").1;
                 drain_finished(a, &mut finished, tapped == Some(g.id));
@@ -262,6 +267,22 @@ async fn tick_loop(
                         }
                         cpu_seen = Some((at, now_busy));
                     }
+                }
+                // the engine's own readings: per-copy load, retry funnel, link load, breakers
+                if let Some(p) = match &g.engine {
+                    Some(e) => e.probe().await,
+                    None => None,
+                } {
+                    let at = Instant::now();
+                    let (was, span) = match &probe_seen {
+                        Some((was_at, was)) => (
+                            Some(was),
+                            u64::try_from(at.duration_since(*was_at).as_nanos()).unwrap_or(u64::MAX),
+                        ),
+                        None => (None, 0),
+                    };
+                    a.set_readings(tick::readings(&g.topo, was, &p, span));
+                    probe_seen = Some((at, p));
                 }
                 let s = feed.stats();
                 let status = TickStatus {

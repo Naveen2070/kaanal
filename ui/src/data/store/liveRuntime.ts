@@ -116,6 +116,11 @@ let current: LiveController | null = null;
 
 /** The pause button. */
 export const pauseLive = (): Promise<void> => current?.pause() ?? Promise.resolve();
+/** The reset button: the server rebuilds the running system, and the page drops its window. */
+export const resetLive = async (): Promise<void> => {
+  await api.liveReset();
+  useLive.getState().reset();
+};
 /** The resume button. */
 export const resumeLive = (): Promise<void> => current?.resume() ?? Promise.resolve();
 

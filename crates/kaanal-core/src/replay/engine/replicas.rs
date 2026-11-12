@@ -5,7 +5,7 @@
 //! replicas (what `NodeStats` reports and R1.48(5) froze), and per replica for the Studio report.
 //! A deadline belongs to a call, not a replica, so `timed_out` is per node only.
 
-use super::state::{NodeCounters, NodeState};
+use super::state::{BreakerState, NodeCounters, NodeState};
 use super::{Bucket, Engine, Gate, NodeId, Topology};
 use crate::exec::Pipe;
 use crate::exec::{Hop, HopKind};
@@ -226,6 +226,43 @@ impl Engine {
     /// [`Engine::node_counters`] (their sum, `max_queue` the longest queue of any replica).
     pub fn replica_counters(&self) -> &[Vec<NodeCounters>] {
         &self.units.counters[..self.units.nodes]
+    }
+
+    /// `(running, waiting)` of each copy of each node, `[node][copy]` (a live read; the node's
+    /// own figure is [`Engine::node_loads`], their sum).
+    #[must_use]
+    pub fn copy_loads(&self) -> Vec<Vec<(u32, usize)>> {
+        (0..self.units.nodes)
+            .map(|n| {
+                (0..usize::from(self.units.count[n]))
+                    .map(|r| {
+                        self.units.states[self.units.first[n] + r]
+                            .gate
+                            .as_ref()
+                            .map_or((0, 0), |g| (g.busy(), g.queued()))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// What every circuit breaker that exists is doing now, as `(edge, caller copy, state)` in
+    /// that order. A breaker exists from its first call; one that never was asked is absent.
+    #[must_use]
+    pub fn breaker_phases(&self) -> Vec<(u16, u16, BreakerState)> {
+        let mut out: Vec<_> = self
+            .breakers
+            .iter()
+            .map(|(k, b)| {
+                (
+                    u16::try_from(k >> 16).unwrap_or(u16::MAX),
+                    u16::try_from(k & 0xffff).unwrap_or(u16::MAX),
+                    b.phase(),
+                )
+            })
+            .collect();
+        out.sort_by_key(|(e, r, _)| (*e, *r));
+        out
     }
 
     /// Counters of each bandwidth-limited link, indexed by [`crate::EdgeId`]: `completed` is

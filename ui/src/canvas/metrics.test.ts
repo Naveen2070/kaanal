@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { nodeSummary } from "../test/summary";
 import {
+  stateWords,
   capacityLine,
   fmtMs,
   nodeFigures,
@@ -226,7 +227,7 @@ test("a_node_that_turns_requests_away_says_so_and_gives_a_rate", () => {
   expect(f.turnedAwayPerS).toBeCloseTo(64, 5); // 102/s admitted x 64 refused / 102 visits
   // slots truly full as well: both are said
   expect(sentence({ ...over, utilization: 0.97 })).toContain("Saturated");
-  expect(sentence({ ...over, utilization: 0.97 })).toContain("turning requests away");
+  expect(sentence({ ...over, utilization: 0.97 })).toMatch(/^Saturated/); // the Turned away row says the rest
   // nobody turned away: no figure
   const none = nodeFigures(nodeSummary({ overflowed: 0, limited: 0 }), { type: "service" });
   expect(none.turnedAway).toBe(0);
@@ -279,4 +280,20 @@ test("a_component_with_cores_and_no_slots_is_ranked_by_its_cpu_load_and_labelled
     pipes: [],
   } as unknown as Summary;
   expect(rankedByPeak(s)).toEqual([{ name: "app", peak: 1, saturatesAtReqS: 90, cpuBound: true }]);
+});
+
+test("a_node_failing_requests_for_chaos_or_a_pin_says_so_and_is_marked_failing", () => {
+  const down = nodeSummary({ failed_per_s: 40, utilization: 0, saturated: false });
+  const f = nodeFigures(down, { type: "service" });
+  expect(f.failing).toBe(true);
+  expect(f.sentence).toBe("Failing · 40 failed / s");
+  expect(stateWords(f)).toBe("failing requests");
+  // saturation keeps its own words; nothing failing is not marked
+  expect(
+    nodeFigures(nodeSummary({ failed_per_s: 40, saturated: true, utilization: 1 }), {
+      type: "service",
+    }).sentence,
+  ).toMatch(/^Saturated/);
+  expect(nodeFigures(nodeSummary({ failed_per_s: 0 }), { type: "service" }).failing).toBe(false);
+  expect(nodeFigures(nodeSummary({}), { type: "service" }).failing).toBe(false);
 });

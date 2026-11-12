@@ -2,7 +2,7 @@
 // layout mirrors `kaanal-server/src/live/hist.rs` (geometric, ratio 1.0201, 10 microseconds up),
 // so a quantile read here is within about 1% of the exact one. Everything is a sum over ticks.
 
-import type { Tick } from "../api/liveTypes";
+import type { BreakerTick, Tick } from "../api/liveTypes";
 
 const MIN_NS = 10_000;
 const RATIO = 1.0201;
@@ -185,6 +185,7 @@ export const KIND_LABEL: Record<string, string> = {
   breaker: "breaker open",
   oom: "out of memory",
   chaos: "chaos",
+  pinned: "pinned error",
 };
 
 /** Failures over the window by cause, most first; the node drops of every tick added up. */
@@ -209,6 +210,10 @@ export interface WireFigures {
   /** Calls over the wire that were first tries, and the shares that were retried and retried again. */
   retriedPct: number | null;
   retriesPerCall: number | null;
+  /** The engine's own retry counts over the window: calls, those retried, and how they ended. */
+  funnel: { calls: number; retried: number; recovered: number; gaveUp: number } | null;
+  /** How full the wire was over the window (0 to 1), for a wire with a `bandwidth`; null otherwise. */
+  load: number | null;
 }
 
 export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): WireFigures {
@@ -218,9 +223,21 @@ export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): Wi
   let wait = 0;
   let retries = 0;
   let retried = 0;
+  const fn = { calls: 0, retried: 0, recovered: 0 };
+  let loadSum = 0;
+  let loadN = 0;
   for (const t of w) {
     const x = t.wires[edge];
     if (!x) continue;
+    if (x.funnel) {
+      fn.calls += x.funnel.calls;
+      fn.retried += x.funnel.retried;
+      fn.recovered += x.funnel.recovered;
+    }
+    if (typeof x.load === "number") {
+      loadSum += x.load;
+      loadN++;
+    }
     carried += x.carried;
     wire += x.wire_ns ?? 0;
     wait += x.wait_ns ?? 0;
@@ -235,7 +252,75 @@ export function wireFigures(ticks: readonly Tick[], edge: number, ms = 5000): Wi
     meanWaitMs: carried > 0 ? wait / carried / 1e6 : null,
     retriedPct: retries > 0 && calls > 0 ? (retried / calls) * 100 : null,
     retriesPerCall: retries > 0 && calls > 0 ? retries / calls : null,
+    // retried minus recovered is the calls that gave up, plus the few still retrying
+    funnel: fn.retried > 0 ? { ...fn, gaveUp: Math.max(0, fn.retried - fn.recovered) } : null,
+    load: loadN > 0 ? Math.min(1, loadSum / loadN) : null,
   };
+}
+
+/** What one route of the offered mix did over the last `ms`. */
+export interface EndpointFigures {
+  reqPerS: number;
+  failedPerS: number;
+  p50Ms: number | null;
+  p99Ms: number | null;
+}
+
+export function endpointFigures(
+  ticks: readonly Tick[],
+  stream: number,
+  ms = 10_000,
+): EndpointFigures {
+  const w = recent(ticks, ms);
+  const seconds = Math.max(w.length * 0.25, 0.25);
+  let requests = 0;
+  let failed = 0;
+  const hist = new Map<number, number>();
+  for (const t of w) {
+    const e = t.endpoints?.[stream];
+    if (!e) continue;
+    requests += e.requests;
+    failed += e.failed;
+    for (const [b, c] of e.hist) hist.set(b, (hist.get(b) ?? 0) + c);
+  }
+  return {
+    reqPerS: requests / seconds,
+    failedPerS: failed / seconds,
+    p50Ms: quantileMs(hist, 0.5),
+    p99Ms: quantileMs(hist, 0.99),
+  };
+}
+
+export type BreakerPhase = BreakerTick["state"];
+
+/** One breaker over the window: its state at the end of each tick, oldest first. */
+export interface BreakerBand {
+  replica: number;
+  phases: BreakerPhase[];
+  /** Seconds it was open (or half open) in the window, and the state now. */
+  openS: number;
+  now: BreakerPhase;
+}
+
+/** The breakers of wire `edge` over the last `ms`, from the state each tick reported. */
+export function breakerBands(ticks: readonly Tick[], edge: number, ms = 60_000): BreakerBand[] {
+  const w = recent(ticks, ms);
+  const replicas = new Set<number>();
+  for (const t of w) for (const b of t.breakers ?? []) if (b.edge === edge) replicas.add(b.replica);
+  return [...replicas]
+    .sort((a, b) => a - b)
+    .map((replica) => {
+      const phases = w.map(
+        (t): BreakerPhase =>
+          t.breakers?.find((b) => b.edge === edge && b.replica === replica)?.state ?? "closed",
+      );
+      return {
+        replica,
+        phases,
+        openS: phases.filter((p) => p !== "closed").length * 0.25,
+        now: phases.at(-1) ?? "closed",
+      };
+    });
 }
 
 /** The heatmap's rows for the live window: `<= 0.25 ms`, doubling up to about 33 s, then "slower". */

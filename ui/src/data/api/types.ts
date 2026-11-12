@@ -170,6 +170,8 @@ export interface ReplicaSummary {
 
 export interface NodeSummary {
   name: string;
+  /** Requests a second that failed here by chaos or a pinned error (Live only; absent in a batch run). */
+  failed_per_s?: number;
   replicas: ReplicaSummary[];
   visits_per_s: number;
   expected_visits_per_s: number;

@@ -17,6 +17,9 @@ use serde::Serialize;
 
 use super::hist::LatencyHist;
 
+mod probe;
+pub(crate) use probe::{BreakerTick, Funnel, Readings, readings};
+
 /// Most journeys one tick carries (40 a second at four ticks a second).
 pub(crate) const MAX_JOURNEYS: usize = 10;
 
@@ -32,6 +35,23 @@ pub(crate) struct Dropped {
     pub breaker: u32,
     pub oom: u32,
     pub chaos: u32,
+    /// Requests to a route whose pin answers an error: the chain ran, the answer is the pin's.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub pinned: u32,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if hands a reference"
+)]
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// A generated request the engine served but whose route is pinned to an error: it counts as
+/// failed at its entry component, with cause `pinned`.
+fn pinned_ok(f: &Finished) -> bool {
+    matches!(f.result, ChainResult::Ok) && crate::actor::is_pinned_error(f)
 }
 
 /// **Private.** The CPU each node really used between two readings of its busy area: busy
@@ -86,10 +106,13 @@ pub(crate) struct NodeTick {
     /// Own hops that ran at each copy (index = copy), only for a node that ran on more than one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub replicas: Vec<u32>,
+    /// `(running, waiting)` of each copy at the instant of the tick, only for a node with several.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub copy_load: Vec<(u32, usize)>,
 }
 
 /// One wire in the tick.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub(crate) struct WireTick {
     /// Calls that crossed it, in requests that finished in this tick.
     pub carried: u32,
@@ -103,6 +126,25 @@ pub(crate) struct WireTick {
     pub retries: u32,
     /// Calls that made at least one retry: the second attempts.
     pub retried: u32,
+    /// What the engine counted for the wire's retry scopes in the span: the funnel from calls to
+    /// recovered. Absent for a wire with no retry scope or in a real share.
+    #[serde(skip_serializing_if = "Funnel::is_empty")]
+    pub funnel: Funnel,
+    /// How busy the wire was over the span (1 = full the whole time): bytes carried over its rate.
+    /// Absent for a wire with no `bandwidth`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load: Option<f64>,
+}
+
+/// One route of the offered mix in the tick, by index into the session's `streams`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct EndpointTick {
+    /// Generated requests of this route that finished.
+    pub requests: u32,
+    /// Of those, dropped.
+    pub failed: u32,
+    /// Latency of the served ones, as occupied `(bucket, count)` pairs of [`LatencyHist`].
+    pub hist: Vec<(u16, u32)>,
 }
 
 /// One hop of a sampled journey, offsets from the request's arrival.
@@ -176,6 +218,12 @@ pub(crate) struct Tick {
     pub wires: Vec<WireTick>,
     /// Latency of the served requests, as occupied `(bucket, count)` pairs of [`LatencyHist`].
     pub hist: Vec<(u16, u32)>,
+    /// Per route of the offered mix (generated requests only); empty when none finished.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<EndpointTick>,
+    /// What each circuit breaker is doing at the instant of the tick; empty when there is none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub breakers: Vec<BreakerTick>,
     pub journeys: Vec<Journey>,
     pub status: TickStatus,
     /// Present only in a tick that had a real request.
@@ -230,9 +278,14 @@ struct Counts {
     node_hist: Vec<LatencyHist>,
     wires: Vec<WireTick>,
     hist: LatencyHist,
+    /// Per route (only where `node_hist` is wanted): requests, failures and served latencies.
+    streams: Vec<(EndpointTick, LatencyHist)>,
     requests: u32,
     failed: u32,
 }
+
+/// Most routes the per-route figures follow (the mix is small; a tag that claims more is ignored).
+const MAX_STREAMS: usize = 256;
 
 /// A request's journey, built once: its hops, where it was dropped, its total time.
 type Built = (Vec<JourneyHop>, Option<usize>, u64);
@@ -244,6 +297,7 @@ impl Counts {
             node_hist: Vec::new(),
             wires: vec![WireTick::default(); wires],
             hist: LatencyHist::new(),
+            streams: Vec::new(),
             requests: 0,
             failed: 0,
         }
@@ -253,6 +307,35 @@ impl Counts {
     fn with_node_hist(mut self) -> Counts {
         self.node_hist = vec![LatencyHist::new(); self.nodes.len()];
         self
+    }
+
+    /// Counts a request against its route when per-route figures are wanted (the total, not the
+    /// real share) and the route is a generated one; the route's index in `streams`.
+    fn count_route(&mut self, f: &Finished) -> Option<usize> {
+        let s = (!self.node_hist.is_empty())
+            .then(|| crate::actor::stream_of(f))
+            .flatten()
+            .map(usize::from)
+            .filter(|s| *s < MAX_STREAMS)?;
+        if self.streams.len() <= s {
+            self.streams
+                .resize_with(s + 1, || (EndpointTick::default(), LatencyHist::new()));
+        }
+        self.streams[s].0.requests += 1;
+        Some(s)
+    }
+
+    /// Counts a drop at `node` under its cause.
+    fn count_drop(&mut self, node: usize, cause: Option<FailCause>) {
+        let d = &mut self.nodes[node].dropped;
+        match cause {
+            Some(FailCause::Overflow) => d.overflow += 1,
+            Some(FailCause::RateLimit) => d.rate_limit += 1,
+            Some(FailCause::Deadline) => d.deadline += 1,
+            Some(FailCause::Breaker) => d.breaker += 1,
+            Some(FailCause::Oom) => d.oom += 1,
+            Some(FailCause::Chaos) | None => d.chaos += 1,
+        }
     }
 
     /// Adds one finished request; with `build`, also returns its journey. `None` for a request of
@@ -330,19 +413,32 @@ impl Counts {
             }
         }
         let mut dropped_at = None;
+        let stream = self.count_route(f);
         match &f.result {
-            ChainResult::Ok => self.hist.record(total),
+            ChainResult::Ok if pinned_ok(f) => {
+                self.failed += 1;
+                if let Some(s) = stream {
+                    self.streams[s].0.failed += 1;
+                }
+                // the entry component is where the chain began
+                let entry = f.hops.first().map_or(0, |h| h.hop.node);
+                self.nodes[entry].dropped.pinned += 1;
+                dropped_at = (build && !hops.is_empty()).then_some(0);
+            }
+            ChainResult::Ok => {
+                // one `ln` for the tick's histogram and the route's
+                let b = LatencyHist::bucket(total);
+                self.hist.record_in(b);
+                if let Some(s) = stream {
+                    self.streams[s].1.record_in(b);
+                }
+            }
             ChainResult::Err { node, .. } => {
                 self.failed += 1;
-                let d = &mut self.nodes[*node].dropped;
-                match f.cause {
-                    Some(FailCause::Overflow) => d.overflow += 1,
-                    Some(FailCause::RateLimit) => d.rate_limit += 1,
-                    Some(FailCause::Deadline) => d.deadline += 1,
-                    Some(FailCause::Breaker) => d.breaker += 1,
-                    Some(FailCause::Oom) => d.oom += 1,
-                    Some(FailCause::Chaos) | None => d.chaos += 1,
+                if let Some(s) = stream {
+                    self.streams[s].0.failed += 1;
                 }
+                self.count_drop(*node, f.cause);
                 if build {
                     dropped_at = Some(
                         hops.iter()
@@ -372,6 +468,8 @@ pub(crate) struct Aggregator {
     stride: u64,
     /// The measured CPU use of each node over the coming tick, set by [`Aggregator::set_cpu_use`].
     cpu_use: Vec<Option<f64>>,
+    /// The engine's own figures for the coming tick, set by [`Aggregator::set_readings`].
+    readings: Readings,
 }
 
 impl Aggregator {
@@ -390,7 +488,13 @@ impl Aggregator {
             seen: 0,
             stride: 1,
             cpu_use: Vec::new(),
+            readings: Readings::default(),
         }
+    }
+
+    /// Sets what the engine says about the tick about to be taken (see [`readings`]).
+    pub(crate) fn set_readings(&mut self, r: Readings) {
+        self.readings = r;
     }
 
     /// Sets the measured CPU use of each node over the tick about to be taken (see [`cpu_use`]).
@@ -428,7 +532,11 @@ impl Aggregator {
                 } else {
                     crate::actor::stream_of(f)
                 },
-                cause: dropped_at.and(f.cause.map(cause_key)),
+                cause: dropped_at.and(if pinned_ok(f) {
+                    Some("pinned")
+                } else {
+                    f.cause.map(cause_key)
+                }),
                 real,
             });
         }
@@ -462,6 +570,16 @@ impl Aggregator {
                 f64::from(busy) / cores
             });
         }
+        let engine = std::mem::take(&mut self.readings);
+        for (i, node) in total.nodes.iter_mut().enumerate() {
+            if let Some(c) = engine.copies.get(i).filter(|c| c.len() > 1) {
+                node.copy_load.clone_from(c);
+            }
+        }
+        for (i, wire) in total.wires.iter_mut().enumerate() {
+            wire.funnel = engine.funnel.get(i).copied().unwrap_or_default();
+            wire.load = engine.link_load.get(i).copied().flatten();
+        }
         // a node that ran on one copy has nothing to split
         for n in total.nodes.iter_mut().chain(real.nodes.iter_mut()) {
             if n.replicas.len() <= 1 {
@@ -484,6 +602,15 @@ impl Aggregator {
             nodes: total.nodes,
             wires: total.wires,
             hist: total.hist.sparse(),
+            endpoints: total
+                .streams
+                .into_iter()
+                .map(|(mut e, h)| {
+                    e.hist = h.sparse();
+                    e
+                })
+                .collect(),
+            breakers: engine.breakers,
             journeys: std::mem::take(&mut self.journeys),
             status,
             real: real_tick,
@@ -497,3 +624,6 @@ impl Aggregator {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod extra_tests;

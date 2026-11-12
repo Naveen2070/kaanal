@@ -21,15 +21,18 @@ export function LivePile({ name }: { name: string }) {
   const dropped = d.overflow + d.rate_limit + d.deadline + d.breaker + d.chaos;
   if (waiting === 0 && dropped === 0) return null;
   return (
-    <div className="flex h-4 items-center gap-1 text-[11px] text-muted" data-part="live">
+    <div
+      className="flex h-5 items-center gap-2 border-t border-border pt-1.5 text-[11px] whitespace-nowrap text-muted"
+      data-part="live"
+    >
       {waiting > 0 ? (
         <>
-          <span aria-hidden className="flex gap-0.5" data-pile>
+          <span aria-hidden className="flex min-w-0 shrink gap-0.5 overflow-hidden" data-pile>
             {Array.from({ length: pileSize(waiting) }, (_, k) => (
               <span key={k} className="size-1.5 rounded-full bg-muted" />
             ))}
           </span>
-          <span>{waiting} waiting</span>
+          <span className="shrink-0 font-mono tabular-nums">{waiting} waiting</span>
         </>
       ) : null}
       {dropped > 0 ? (
@@ -37,7 +40,7 @@ export function LivePile({ name }: { name: string }) {
           // the tick is the key, so a new drop restarts the flash
           key={tick?.t_ms}
           data-flash
-          className={`font-semibold text-negative ${still ? "" : "kaanal-flash"}`}
+          className={`ml-auto shrink-0 font-mono font-semibold tabular-nums text-negative ${still ? "" : "kaanal-flash"}`}
         >
           <span aria-hidden>×</span> {dropped} turned away
         </span>

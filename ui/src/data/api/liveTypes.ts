@@ -9,6 +9,8 @@ export interface Dropped {
   breaker: number;
   oom?: number;
   chaos: number;
+  /** Requests to a route whose pin answers an error: the chain ran, the answer is the pin's. */
+  pinned?: number;
 }
 
 export interface NodeTick {
@@ -27,6 +29,16 @@ export interface NodeTick {
   hist?: [number, number][];
   /** Own hops that ran at each copy (index = copy); only for a node that ran on more than one. */
   replicas?: number[];
+  /** `[running, waiting]` of each copy at the instant of the tick; only for a node with several. */
+  copy_load?: [number, number][];
+}
+
+/** What the engine counted for a wire's retry scopes in a tick (calls ended in that tick). */
+export interface Funnel {
+  calls: number;
+  retried: number;
+  recovered: number;
+  failed: number;
 }
 
 export interface WireTick {
@@ -39,6 +51,25 @@ export interface WireTick {
   retries?: number;
   /** Calls that made at least one retry. */
   retried?: number;
+  /** The engine's retry counts for the wire in the tick; absent without a retry scope. */
+  funnel?: Funnel;
+  /** How busy the wire was over the tick (1 = full the whole time); absent without a `bandwidth`. */
+  load?: number;
+}
+
+/** One route of the offered mix in a tick, by index into `hello.streams`. */
+export interface EndpointTick {
+  requests: number;
+  failed: number;
+  /** Latency of the served ones: occupied `[bucket, count]` pairs, as `Tick.hist`. */
+  hist: [number, number][];
+}
+
+/** A circuit breaker (a wire and the caller copy holding it) at the instant of a tick. */
+export interface BreakerTick {
+  edge: number;
+  replica: number;
+  state: "closed" | "half_open" | "open";
 }
 
 export interface JourneyHop {
@@ -94,6 +125,10 @@ export interface Tick {
   wires: WireTick[];
   /** Occupied buckets of the latency histogram of the served requests: `[bucket, count]`. */
   hist: [number, number][];
+  /** Per route of the offered mix (generated requests); absent when none finished. */
+  endpoints?: EndpointTick[];
+  /** Every circuit breaker at the instant of the tick; absent when there is none. */
+  breakers?: BreakerTick[];
   journeys: Journey[];
   status: TickStatus;
   /** Only in a tick that had a real request (step 8A). */

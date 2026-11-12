@@ -4,6 +4,7 @@
 #                    on them (one integration-test binary when only that test's files changed)
 #   UI changed    -> vp check, then the tests related to the changed files (all of them when a config, the
 #                    lockfile or anything outside ui/src changed)
+#   Rust or UI    -> scripts/check-file-size.sh
 #   Markdown      -> dprint check
 #   Both          -> both, each limited the same way
 # The CI always runs everything. To run the whole thing here too: KAANAL_HOOK_FULL=1 git commit ...
@@ -57,6 +58,12 @@ if [ "$(field rust)" = yes ]; then
     done || exit 1
 else
     say "no Rust files staged: skipping fmt, clippy and cargo test"
+fi
+
+# ---- file size (the gate is not part of cargo or vp, so run it here)
+if [ "$(field rust)" = yes ] || [ "$(field ui)" != none ]; then
+    say "file size gate"
+    bash scripts/check-file-size.sh || { echo "file size gate failed: split the file (AGENTS.md, Code layout)"; exit 1; }
 fi
 
 # ---- markdown

@@ -33,7 +33,11 @@ enum Cmd {
         reply: oneshot::Sender<Result<(), String>>,
     },
     /// Run a generated plan: no reply, the finished request goes to the tap.
-    Submit { plan: Arc<Plan>, stream: u16 },
+    Submit {
+        plan: Arc<Plan>,
+        stream: u16,
+        pinned: bool,
+    },
     /// Where the finished requests of generated plans go (`None` drops them).
     Tap(Option<mpsc::UnboundedSender<Finished>>),
     /// `(running, waiting)` of every node now.
@@ -42,15 +46,40 @@ enum Cmd {
     },
     /// Busy CPU millicore-nanoseconds of every node up to now (step 8U, live).
     CpuBusy { reply: oneshot::Sender<Vec<u128>> },
+    /// What the live tick reads besides the finished requests (see [`Probe`]).
+    Probe { reply: oneshot::Sender<Probe> },
+}
+
+/// What the live tick reads from the engine at one instant: the load of each copy, the retry
+/// counts of each wire, how long each wire has been busy and what each breaker is doing. The
+/// counts and the busy time only grow, so two probes and their difference are one tick's figures.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Probe {
+    /// `(running, waiting)` of each copy of each node, `[node][copy]`.
+    pub copies: Vec<Vec<(u32, usize)>>,
+    /// Retry counts per wire, by edge (cumulative).
+    pub wires: Vec<kaanal_core::replay::WireCounters>,
+    /// Busy time of each link, ns at full rate (cumulative).
+    pub link_busy: Vec<u128>,
+    /// `(edge, caller copy, state)` of every breaker that exists.
+    pub breakers: Vec<(u16, u16, kaanal_core::replay::BreakerState)>,
 }
 
 /// **Private.** Marks the engine tag of a generated plan, so its answer goes to the tap and not to
 /// a waiting handler.
 const GENERATED: u64 = 1 << 63;
+/// **Private.** Set on a generated request to a route whose pin answers an error.
+const PIN_ERROR: u64 = 1 << 62;
 /// **Private.** A generated plan's route (its index in the offered mix) rides in bits 40..56 of its
 /// tag, so the tap can name the endpoint of a sampled journey; the counter keeps the low 40 bits.
 const STREAM_SHIFT: u32 = 40;
 const COUNTER_MASK: u64 = (1 << STREAM_SHIFT) - 1;
+
+/// Whether `f` was sent to a route whose pin answers an error (live traffic only).
+#[must_use]
+pub fn is_pinned_error(f: &Finished) -> bool {
+    f.tag & GENERATED != 0 && f.tag & PIN_ERROR != 0
+}
 
 /// Whether `f` is a generated request (the live generator's) and not a real mock request.
 #[must_use]
@@ -97,8 +126,16 @@ impl EngineHandle {
 
     /// Runs a generated plan without waiting for it (live traffic, step 8L): its finished request
     /// goes to the tap set with [`EngineHandle::tap`].
-    pub fn submit(&self, plan: Arc<Plan>, stream: u16) {
-        let _ = self.tx.send(Cmd::Submit { plan, stream });
+    ///
+    /// `pinned` marks a request to a route whose pin answers an error: the chain runs as for any
+    /// request (the backends see the load), and the live tick counts it failed at the entry
+    /// component with cause `pinned` (RULES 118).
+    pub fn submit(&self, plan: Arc<Plan>, stream: u16, pinned: bool) {
+        let _ = self.tx.send(Cmd::Submit {
+            plan,
+            stream,
+            pinned,
+        });
     }
 
     /// `(running, waiting)` of every node at this instant (`None` when the engine has stopped).
@@ -113,6 +150,14 @@ impl EngineHandle {
     pub async fn cpu_busy(&self) -> Option<Vec<u128>> {
         let (reply, rx) = oneshot::channel();
         self.tx.send(Cmd::CpuBusy { reply }).ok()?;
+        rx.await.ok()
+    }
+
+    /// The engine's per-copy loads, wire counts, link busy time and breaker states at this instant
+    /// (`None` when the engine has stopped).
+    pub async fn probe(&self) -> Option<Probe> {
+        let (reply, rx) = oneshot::channel();
+        self.tx.send(Cmd::Probe { reply }).ok()?;
         rx.await.ok()
     }
 
@@ -179,9 +224,16 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
                     let _ = reply.send(result);
                     true
                 }
-                Some(Cmd::Submit { plan, stream }) => {
+                Some(Cmd::Submit {
+                    plan,
+                    stream,
+                    pinned,
+                }) => {
                     next_tag += 1;
-                    let tag = GENERATED | (u64::from(stream) << STREAM_SHIFT) | (next_tag & COUNTER_MASK);
+                    let tag = GENERATED
+                        | if pinned { PIN_ERROR } else { 0 }
+                        | (u64::from(stream) << STREAM_SHIFT)
+                        | (next_tag & COUNTER_MASK);
                     engine.submit(now(), plan, tag).is_ok()
                 }
                 Some(Cmd::Loads { reply }) => {
@@ -191,6 +243,16 @@ async fn drive(mut engine: Engine, mut rx: mpsc::UnboundedReceiver<Cmd>) {
                 Some(Cmd::CpuBusy { reply }) => {
                     let ok = engine.advance_to(now()).is_ok();
                     let _ = reply.send(engine.cpu_busy_at(now()));
+                    ok
+                }
+                Some(Cmd::Probe { reply }) => {
+                    let ok = engine.advance_to(now()).is_ok();
+                    let _ = reply.send(Probe {
+                        copies: engine.copy_loads(),
+                        wires: engine.wire_counters().to_vec(),
+                        link_busy: engine.link_busy_at(now()),
+                        breakers: engine.breaker_phases(),
+                    });
                     ok
                 }
                 Some(Cmd::Tap(to)) => {
@@ -515,8 +577,8 @@ edges:
         let h = spawn(Engine::live(&t));
         let (tx, mut rx) = mpsc::unbounded_channel();
         h.tap(Some(tx));
-        h.submit(Arc::clone(&plans[0]), 0);
-        h.submit(Arc::clone(&plans[1]), 0);
+        h.submit(Arc::clone(&plans[0]), 0, false);
+        h.submit(Arc::clone(&plans[1]), 0, false);
         let mock = h.run(Arc::clone(&plans[2])).await.unwrap();
         assert!(mock.done > mock.arrival);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -536,8 +598,8 @@ edges:
         let h = spawn(Engine::live(&t));
         let (tx, mut rx) = mpsc::unbounded_channel();
         h.tap(Some(tx));
-        h.submit(Arc::clone(&plans[0]), 7);
-        h.submit(Arc::clone(&plans[1]), 65535);
+        h.submit(Arc::clone(&plans[0]), 7, false);
+        h.submit(Arc::clone(&plans[1]), 65535, false);
         let _ = h.run(Arc::clone(&plans[2])).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let mut seen: Vec<Option<u16>> = Vec::new();
@@ -556,7 +618,7 @@ edges:
         let h = spawn(Engine::new(&t));
         let (tx, mut rx) = mpsc::unbounded_channel();
         h.tap(Some(tx));
-        h.submit(Arc::clone(&plans[0]), 0);
+        h.submit(Arc::clone(&plans[0]), 0, false);
         let real = h.run(Arc::clone(&plans[1])).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let mut seen = Vec::new();

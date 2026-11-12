@@ -98,6 +98,8 @@ export const api = {
   /** Stops the live generator (the engine keeps serving and draining). */
   livePause: (o: Opts = {}) => call<unknown>("POST", "/live/pause", undefined, o),
   liveResume: (o: Opts = {}) => call<unknown>("POST", "/live/resume", undefined, o),
+  /** Starts the live run over from what was last applied: empty queues, a fresh timeline; the draft is untouched. */
+  liveReset: (o: Opts = {}) => call<unknown>("POST", "/live/reset", undefined, o),
   /** The offered rate of the live run, requests a second (at most 20,000). */
   liveRate: (rps: number, o: Opts = {}) => call<unknown>("PUT", "/live/rate", { rps }, o),
   getDraft: (o: Opts = {}) => call<DraftView>("GET", "/draft", undefined, o),

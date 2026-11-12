@@ -22,11 +22,24 @@ import {
   customInstancesOf,
   instanceOf,
   removeCustomInstance,
+  setCores,
   setCustomInstance,
   setInstance,
+  estimatePerRequest,
+  memoryOf,
+  setMemoryFields,
+  slotsOf,
   usersOfInstance,
 } from "./fields";
+import { notify } from "../../shell/toast/toasts";
 import { BYTE_SIZE_UNITS, RATE_UNITS } from "./units";
+
+/** "128 MiB", "1 GiB": a size in bytes for a sentence. */
+function bytesText(b: number): string {
+  const gib = b / 1024 ** 3;
+  if (gib >= 1) return `${Number(gib.toFixed(2))} GiB`;
+  return `${Number((b / 1024 ** 2).toFixed(1))} MiB`;
+}
 
 /** `""` none, `custom` your own, or a provider id. */
 type Mode = string;
@@ -76,12 +89,53 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
     if (m === "") void patch(setInstance(name, config, null));
   };
 
+  // choosing a type writes it, fills Cores with its vCPUs and the memory limit with its memory.
+  // A limit alone is refused ("memory: per_request is required"), so when the node has no
+  // per-request size one is estimated: (memory - base) / slots, the size at which memory and
+  // slots run out together. It is said to be an estimate, here and in a notice; a size you set
+  // yourself is never replaced.
+  // the warning is read from the draft, not remembered: it shows for as long as the size per
+  // request is the one this rule gives, so a reload or another panel does not lose it
+  const mem0 = memoryOf(config);
+  const slots0 = slotsOf(config).value;
+  const estimated =
+    now !== null &&
+    mem0.limit !== null &&
+    mem0.per_request !== null &&
+    mem0.per_request === estimatePerRequest(mem0.limit, mem0.base ?? 0, slots0);
+  const choose = async (inst: string, cores: number, memBytes: number | null) => {
+    const mem = memoryOf(config);
+    const slots = slotsOf(config).value;
+    const guess =
+      memBytes && mem.per_request === null
+        ? estimatePerRequest(memBytes, mem.base ?? 0, slots)
+        : null;
+    const fields =
+      memBytes && (mem.per_request !== null || guess !== null)
+        ? setMemoryFields(name, config, {
+            limit: memBytes,
+            ...(guess !== null && { per_request: guess }),
+          })
+        : [];
+    const ok = await patch([
+      ...setInstance(name, config, inst),
+      ...setCores(name, config, cores),
+      ...fields,
+    ]);
+    if (ok && guess !== null && memBytes) {
+      notify.warn(
+        `Memory per request was set to ${bytesText(guess)}, an estimate and not a measurement: (${bytesText(memBytes)} - base) / ${slots} slots. Change it to what a request really holds.`,
+        "memory-estimate",
+      );
+    }
+  };
+
   const pick = (text: string) => {
     setQuery(text);
     const hit = rows
       ? findInstance(rows, text.includes("/") ? text : `${mode}/${text}`)
       : undefined;
-    if (hit) void patch(setInstance(name, config, hit.name));
+    if (hit) void choose(hit.name, hit.vcpu, hit.memMib * 1024 * 1024);
   };
 
   const create = async () => {
@@ -101,6 +155,7 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
     setNewName("");
     setNewCores("");
     await patch(setInstance(name, config, n));
+    await patch(setCores(name, config, cores));
   };
 
   const options = rows && PROVIDERS.some((p) => p.id === mode) ? matching(rows, mode, query) : [];
@@ -148,7 +203,12 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
           <select
             aria-label="Your instance types"
             value={custom ? (now ?? "") : ""}
-            onChange={(e) => void patch(setInstance(name, config, e.currentTarget.value || null))}
+            onChange={(e) => {
+              const n = e.currentTarget.value;
+              const c = mine[n];
+              if (!n || !c) return void patch(setInstance(name, config, null));
+              void choose(n, c.cores ?? 1, c.memory);
+            }}
             className={SELECT}
           >
             <option value="">Choose one of yours ({Object.keys(mine).length})</option>
@@ -229,12 +289,21 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
           </button>
         </div>
       ) : null}
+      {estimated && mem0.limit !== null && mem0.per_request !== null ? (
+        <output className="mt-1 block rounded border border-warn px-2 py-1.5 text-xs text-warn">
+          <strong>Memory per request is an estimate, not a measured value.</strong> Studio set it to{" "}
+          {bytesText(mem0.per_request)} = (memory {bytesText(mem0.limit)} - base) / {slots0} slots:
+          the size at which memory and slots run out together, so memory never limits you before the
+          slots do. A limit needs a size per request, so Studio fills one to keep the draft valid.
+          Real services hold more or less: set Memory per request to what yours holds.
+        </output>
+      ) : null}
       <p id={`${id}-hint`} className="mt-1 text-xs text-muted">
         {row
-          ? `${instanceLine(row)}. Fills what you leave empty; what you set wins. Estimates: a vCPU counts as a full core, so this is an upper bound on capacity, not on speed.`
+          ? `${instanceLine(row)}. Fills Cores and the memory limit (change them if you like); with no memory per request set, one is estimated from the memory and the slots. Estimates: a vCPU counts as a full core, so this is an upper bound on capacity, not on speed.`
           : custom
-            ? "Your own instance: fills the cores, network card and memory limit you leave empty."
-            : "Fills the cores, the network card and the memory limit you leave empty: a cloud instance type (AWS, Azure, Google Cloud; estimates) or one you define yourself."}
+            ? "Your own instance: fills Cores and the memory limit (with an estimated size per request when none is set), and the network card when you leave it empty."
+            : "Fills Cores and the memory limit, with an estimated size per request when none is set: a cloud instance type (AWS, Azure, Google Cloud; estimates) or one you define yourself."}
       </p>
     </div>
   );

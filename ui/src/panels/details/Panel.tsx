@@ -11,18 +11,16 @@ import { usePickedWire } from "../../canvas/picked";
 import { useEffect } from "react";
 import { PanelBottomClose } from "lucide-react";
 import { createPortal } from "react-dom";
-import { AdminFeed } from "./AdminFeed";
 import { Controls } from "./Controls";
 import { EdgeControls } from "./EdgeControls";
 import { Live } from "./Live.lazy";
-import { LogTab } from "./LogTab.lazy";
-import { LiveTrace } from "./LiveTrace.lazy";
+import { TraceTab } from "./TraceTab";
 import { useLogDrawer } from "./logDrawer";
 import { Rail } from "./Rail";
 import { LiveResults } from "./LiveResults.lazy";
 import { Results } from "./Results.lazy";
 import { SystemSummary } from "./SystemSummary";
-import { LiveSkeleton, LogSkeleton, ResultsSkeleton } from "./Skeletons";
+import { LiveSkeleton, ResultsSkeleton } from "./Skeletons";
 
 export function Panel() {
   const view = useDraft((s) => s.view);
@@ -58,11 +56,11 @@ export function Panel() {
       {out
         ? createPortal(
             <section
-              aria-label="Log"
+              aria-label={mode === "batch" ? "Log" : "Trace"}
               className="fixed inset-x-4 bottom-4 z-30 mx-auto flex h-[44vh] max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-sheet shadow-float"
             >
               <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
-                <h2 className="m-0 text-sm font-semibold">Log</h2>
+                <h2 className="m-0 text-sm font-semibold">{mode === "batch" ? "Log" : "Trace"}</h2>
                 <button
                   type="button"
                   onClick={() => setOut(false)}
@@ -73,9 +71,7 @@ export function Panel() {
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
-                <LazyBoundary fallback={<LogSkeleton />}>
-                  <LogTab drawer />
-                </LazyBoundary>
+                <TraceTab drawer />
               </div>
             </section>,
             document.body,
@@ -99,18 +95,7 @@ export function Panel() {
             ) : (
               <SystemSummary />
             ),
-          log:
-            mode === "admin" ? (
-              <AdminFeed />
-            ) : isLive(mode) ? (
-              <LazyBoundary fallback={<LogSkeleton />}>
-                <LiveTrace />
-              </LazyBoundary>
-            ) : (
-              <LazyBoundary fallback={<LogSkeleton />}>
-                <LogTab />
-              </LazyBoundary>
-            ),
+          log: <TraceTab />,
           live: (
             <LazyBoundary fallback={<LiveSkeleton />}>
               <Live />

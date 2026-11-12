@@ -12,7 +12,12 @@ import { LiveStrip } from "./LiveStrip";
 
 const pause = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const resume = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("../../data/store/liveRuntime", () => ({ pauseLive: pause, resumeLive: resume }));
+const reset = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("../../data/store/liveRuntime", () => ({
+  pauseLive: pause,
+  resumeLive: resume,
+  resetLive: reset,
+}));
 
 const none = { overflow: 0, rate_limit: 0, deadline: 0, breaker: 0, chaos: 0 };
 const tick = (t_ms: number, failed = 0): Tick => ({
@@ -64,7 +69,7 @@ test("the_strip_shows_what_arrives_what_drops_the_percentiles_and_the_busiest", 
   render(<LiveStrip />);
   const text = document.body.textContent ?? "";
   expect(text).toContain("100 / s"); // 25 a tick, four ticks a second
-  expect(screen.getByText("Dropped this second").nextSibling?.textContent).toBe("8");
+  expect(screen.getByText("Dropped / s").nextSibling?.textContent).toBe("8");
   expect(text).toContain("app 100%, 3 waiting");
   expect(text).toContain("Running at real speed");
 });
@@ -134,17 +139,26 @@ test("the_rate_box_and_the_overload_warning_follow_the_latest_tick_not_the_hello
   expect(screen.getByText(/cannot keep up/)).toBeTruthy();
 });
 
-test("the_slider_sends_the_rate_on_release_and_admin_hides_it_but_keeps_build_traffic", async () => {
+test("the_slider_shows_and_sends_the_rate_as_it_moves_and_admin_hides_it_but_keeps_build_traffic", async () => {
   const send = vi.spyOn(api, "liveRate").mockResolvedValue({});
   const r = render(<LiveStrip />);
   const slider = screen.getByRole("slider", { name: /Offered load/ }) as HTMLInputElement;
   fireEvent.change(slider, { target: { value: "1000" } });
-  expect(send).not.toHaveBeenCalled(); // moving is not committing
-  fireEvent.pointerUp(slider, { target: { value: "1000" } });
+  // the box follows the hand at once, and the first move is sent without waiting
+  expect((screen.getByRole("textbox", { name: /Offered/ }) as HTMLInputElement).value).toBe(
+    "15000",
+  );
   await vi.waitFor(() => expect(send).toHaveBeenCalledWith(15000));
   expect(screen.getByRole("button", { name: /Build traffic/ })).toBeTruthy();
   r.rerender(<LiveStrip throttle={false} />);
   expect(screen.queryByRole("slider")).toBeNull();
   expect(screen.queryByRole("textbox", { name: /Offered/ })).toBeNull();
   expect(screen.getByRole("button", { name: /Build traffic/ })).toBeTruthy();
+});
+
+test("the_reset_button_asks_for_a_fresh_run", async () => {
+  useLive.setState({ ticks: [tick(250)], status: "running" });
+  render(<LiveStrip />);
+  fireEvent.click(screen.getByRole("button", { name: /Reset/ }));
+  await vi.waitFor(() => expect(reset).toHaveBeenCalledTimes(1));
 });

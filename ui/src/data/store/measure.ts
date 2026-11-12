@@ -50,8 +50,21 @@ export async function measure(
   }
 }
 
-/** Measures the draft as it is now. */
-export const measureDraft = (): Promise<string | null> => {
+/** Fewest and most requests a second a profile may ask for (`traffic:`, config/traffic.rs). */
+const RPS_RANGE = [1e-6, 1e6] as const;
+
+/**
+ * Measures the draft as it is now; with `rate`, at that many requests a second instead of the
+ * profile's own (the live offered rate), the profile's mix kept.
+ */
+export const measureDraft = (rate?: number): Promise<string | null> => {
   const view = useDraft.getState().view;
-  return measure(view?.doc ? draftBody(view) : null);
+  const body = view?.doc ? draftBody(view) : null;
+  if (body && typeof body.profile === "string" && rate !== undefined) {
+    const own = (view?.doc?.traffic as Record<string, unknown> | undefined)?.[body.profile];
+    if (rate >= RPS_RANGE[0] && rate <= RPS_RANGE[1] && own && typeof own === "object") {
+      body.profile = { ...own, rps: rate };
+    }
+  }
+  return measure(body);
 };

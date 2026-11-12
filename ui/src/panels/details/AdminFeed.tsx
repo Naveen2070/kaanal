@@ -1,6 +1,6 @@
 // The request feed of Admin mode (step 8A): what the mock served a real frontend, newest first, with
 // the status it got and whether a response edit answered it. Polled while this tab is open and the
-// page is visible. "Edit response" opens the editor on the row's route.
+// page is visible. "Edit" opens the editor on the row's route.
 
 import { useEffect, useState } from "react";
 import { startFeed, type FeedRow } from "../../data/api/logFeed";
@@ -59,9 +59,10 @@ export function AdminFeed({ onEdit }: { onEdit?: (row: FeedRow) => void }) {
                     disabled={r.endpoint === null || Boolean(r.rejected)}
                     aria-label={`Edit response of ${r.method} ${r.path}`}
                     onClick={() => open(r)}
-                    className="h-7 rounded-md border border-control bg-sheet px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+                    title="Edit the response of this route"
+                    className="h-7 rounded-md border border-control bg-sheet px-2 text-xs whitespace-nowrap hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
                   >
-                    Edit response
+                    Edit
                   </button>
                 </td>
               </tr>

@@ -23,6 +23,8 @@ import {
 } from "./model";
 import { UnitInput } from "../details/Field";
 import { SIZE_UNITS } from "../details/units";
+import { useMode } from "../../data/store/mode";
+import { EditResponse, useEditedRoutes } from "../details/EditResponse";
 import { ServicePicker } from "./ServicePicker";
 import { closeTrafficBuilder } from "./store";
 
@@ -41,6 +43,8 @@ function summary(r: Row, all: string[]): string {
 }
 
 export function TrafficBuilder() {
+  const admin = useMode((s) => s.mode === "admin");
+  const { edited, reload } = useEditedRoutes(admin);
   const box = useRef<HTMLDialogElement>(null);
   const doc = useDraft((s) => s.view?.doc ?? null);
   const patch = useDraft((s) => s.patch);
@@ -187,6 +191,18 @@ export function TrafficBuilder() {
                       className={`${field} text-right tabular-nums`}
                     />
                   </span>
+                  {admin ? (
+                    <span className="flex items-center gap-1">
+                      <EditResponse
+                        route={`${r.method} ${r.path}`}
+                        edited={edited.has(`${r.method} ${r.path}`)}
+                        onClose={reload}
+                      />
+                      {Number.isNaN(r.respKb) && edited.has(`${r.method} ${r.path}`) ? (
+                        <span>response size follows the edit</span>
+                      ) : null}
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     aria-expanded={open === i}

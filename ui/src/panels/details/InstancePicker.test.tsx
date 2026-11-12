@@ -43,8 +43,11 @@ test("a_cloud_type_is_found_by_provider_and_search_and_written_as_the_nodes_inst
   fireEvent.change(box, { target: { value: "m5.lar" } });
   expect(patch).not.toHaveBeenCalled(); // not a whole name yet
   fireEvent.change(box, { target: { value: "m5.large" } });
+  // the type is written and Cores is filled; with no request size set there is no memory limit to fill
+  // (a limit alone is refused: "memory: per_request is required")
   expect(patch).toHaveBeenCalledWith([
     { op: "insert", path: ["nodes", "app", "instance"], value: "aws/m5.large" },
+    { op: "insert", path: ["nodes", "app", "cpu"], value: { cores: 2 } },
   ]);
 });
 
@@ -70,12 +73,15 @@ test("your_own_instance_is_added_with_a_name_and_cores_and_then_chosen_for_the_n
   fireEvent.change(screen.getByLabelText("New instance name"), { target: { value: "build-box" } });
   fireEvent.change(screen.getByLabelText("New instance cores"), { target: { value: "16" } });
   fireEvent.click(screen.getByRole("button", { name: "Add instance" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(patch).toHaveBeenCalledTimes(3));
   expect(patch).toHaveBeenNthCalledWith(1, [
     { op: "insert", path: ["instances"], value: { "build-box": { cores: 16 } } },
   ]);
   expect(patch).toHaveBeenNthCalledWith(2, [
     { op: "insert", path: ["nodes", "app", "instance"], value: "build-box" },
+  ]);
+  expect(patch).toHaveBeenNthCalledWith(3, [
+    { op: "insert", path: ["nodes", "app", "cpu"], value: { cores: 16 } },
   ]);
 });
 
@@ -111,4 +117,41 @@ test("your_own_instance_shows_its_boxes_and_cannot_be_deleted_while_a_node_uses_
 test("has_no_axe_violations", async () => {
   const { container } = render(<InstancePicker name="app" config={app()} />);
   await expectNoViolations(container);
+});
+
+test("a_type_also_fills_the_memory_limit_once_a_request_size_is_set", async () => {
+  const config = app({ memory: { per_request: 1048576 } });
+  draftWith({ nodes: { app: config } });
+  render(<InstancePicker name="app" config={config} />);
+  fireEvent.change(screen.getByLabelText("Instance type"), { target: { value: "aws" } });
+  const box = await screen.findByLabelText("Search instance types");
+  await waitFor(() => expect((box as HTMLInputElement).disabled).toBe(false));
+  fireEvent.change(box, { target: { value: "m5.large" } });
+  expect(patch).toHaveBeenCalledWith([
+    { op: "insert", path: ["nodes", "app", "instance"], value: "aws/m5.large" },
+    { op: "insert", path: ["nodes", "app", "cpu"], value: { cores: 2 } },
+    {
+      op: "set",
+      path: ["nodes", "app", "memory"],
+      value: { per_request: 1048576, limit: 8 * 1024 ** 3 },
+    },
+  ]);
+});
+
+test("the_estimate_warning_stays_while_the_size_per_request_is_the_estimated_one", async () => {
+  const GiB = 1024 ** 3;
+  const config = app({
+    concurrency: 8,
+    instance: "aws/m5.large",
+    memory: { limit: 8 * GiB, per_request: GiB },
+  });
+  draftWith({ nodes: { app: config } });
+  const { rerender } = render(<InstancePicker name="app" config={config} />);
+  expect((await screen.findByRole("status")).textContent).toMatch(
+    /an estimate, not a measured value.*1 GiB = \(memory 8 GiB/s,
+  );
+  // a size the person typed is theirs: no warning
+  const own = { ...config, memory: { limit: 8 * GiB, per_request: 3 * 1024 ** 2 } };
+  rerender(<InstancePicker name="app" config={own} />);
+  expect(screen.queryByText(/an estimate, not a measured value/)).toBeNull();
 });

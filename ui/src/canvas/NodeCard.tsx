@@ -39,7 +39,8 @@ export function NodeCard({ data, selected }: NodeProps) {
   const Icon = info?.icon;
   const label = info?.label ?? kind;
   const hue = catColour(kind);
-  const border = f.saturated ? "border-negative" : selected ? "border-accent" : "border-border";
+  const border =
+    f.saturated || f.failing ? "border-negative" : selected ? "border-accent" : "border-border";
   // a setting of this node is mid-edit: the meter says "updating" until a run starts or lands
   // (the loop re-runs a result older than the edit, R1.99). Without figures there is nothing to
   // mark, so a draft that never runs cannot leave "updating" stuck on.

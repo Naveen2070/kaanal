@@ -290,3 +290,23 @@ async fn reordering_components_waits_for_apply_and_leaves_the_engine_alone() {
     assert_eq!(v["live"]["structure_pending"], true, "{v}");
     assert_ne!(v["live"]["live"], "invalid", "{v}");
 }
+
+#[tokio::test]
+async fn live_reset_rebuilds_the_applied_system_and_leaves_the_draft_alone() {
+    const DRAFT: &str = "/__kaanal/draft";
+    let s = start(&system("1ms")).await;
+    let before: Value = s.get(DRAFT).await.json().await.unwrap();
+    let g0 = before["generation"].as_u64().unwrap();
+    // an unapplied edit: a reset must not apply it
+    let edited = system("2ms");
+    assert_eq!(s.put(DRAFT, json!({ "text": edited })).await.status(), 200);
+    let r = s
+        .send(reqwest::Method::POST, "/__kaanal/live/reset", None)
+        .await;
+    assert_eq!(r.status(), 200);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(body["generation"].as_u64().unwrap(), g0 + 1);
+    let after: Value = s.get(DRAFT).await.json().await.unwrap();
+    assert_eq!(after["text"], json!(edited), "the draft is untouched");
+    assert_eq!(after["dirty"], json!(true), "and still not applied");
+}

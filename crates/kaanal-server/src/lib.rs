@@ -380,6 +380,7 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/live", get(live::stream::live))
         .route("/__kaanal/live/pause", post(live::stream::pause))
         .route("/__kaanal/live/resume", post(live::stream::resume))
+        .route("/__kaanal/live/reset", post(live::stream::reset))
         .route("/__kaanal/live/rate", put(live::stream::rate))
         .route("/__kaanal/ui", get(control::ui))
         .route("/__kaanal/studio", get(control::studio))
