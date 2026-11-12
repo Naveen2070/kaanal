@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde_json::{Map, Value};
 

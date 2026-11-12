@@ -26,10 +26,8 @@ use std::path::PathBuf;
 use jsonschema::error::ValidationErrorKind;
 use jsonschema::paths::LocationSegment;
 use jsonschema::{ValidationError, Validator};
-use saphyr::{
-    AnnotatedMappingOwned, LoadableYamlNode, MarkedYamlOwned, ScalarOwned, YamlDataOwned,
-};
-use saphyr_parser::{Event, Parser, Span};
+use saphyr::{AnnotatedMappingOwned, MarkedYamlOwned, ScalarOwned, YamlDataOwned, YamlLoader};
+use saphyr_parser::{BufferedInput, Event, Parser, Span};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
@@ -649,7 +647,14 @@ fn resolve<'a>(schema: &'a Value, mut s: &'a Value) -> &'a Value {
 /// **Private.** The first YAML document of `src` as a tree with spans (BOM stripped).
 fn tree(src: &str) -> Option<MarkedYamlOwned> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-    MarkedYamlOwned::load_from_str(src).ok()?.into_iter().next()
+    // saphyr 0.2 and later refuse a mapping with a repeated key; this tree is only read to place a
+    // diagnostic, and `duplicate_error` finds the repeat itself from the parser events, so the
+    // loader must let it through (as saphyr 0.1 did, keeping one of the two)
+    let mut loader = YamlLoader::<MarkedYamlOwned>::default();
+    loader.allow_duplicate_keys(true);
+    let mut parser = Parser::new(BufferedInput::new(src.chars()));
+    parser.load(&mut loader, true).ok()?;
+    loader.into_documents().into_iter().next()
 }
 
 /// **Private.** A scalar key as serde reads it: `true:` names the node "true".

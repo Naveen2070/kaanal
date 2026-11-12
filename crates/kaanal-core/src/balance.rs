@@ -3,7 +3,7 @@
 //! The config side only: [`Balance`] and the replica cap. The pick itself is a pure function
 //! next to it (added with the executor change), so the simulator and the mocks choose alike.
 
-use rand::Rng;
+use rand::RngExt;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 

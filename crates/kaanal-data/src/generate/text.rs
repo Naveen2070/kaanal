@@ -3,8 +3,8 @@
 use super::dist::{bands, money, pick_weighted, recency_secs};
 use super::{
     BASE_EPOCH, ChaCha8Rng, Gen, IndexedRandom, IntDist, MAX_MIN_LENGTH, Name, NameOrder, Pack,
-    Place, Rng, SeedableRng, TextKind, Value, count, digit_count, entry_range, fill, int_for, json,
-    norm, number_for, numeric, stable_hash, template_key, value_fits, words,
+    Place, RngExt, SeedableRng, TextKind, Value, count, digit_count, entry_range, fill, int_for,
+    json, norm, number_for, numeric, stable_hash, template_key, value_fits, words,
 };
 
 /// **Private.** Runs one dictionary generator for field `f` of scalar type `ty` (it fits).

@@ -26,7 +26,7 @@ pub(crate) fn reference(arrivals: &[(u64, u64)], d: u64) -> Vec<(u8, u64)> {
 
 #[test]
 fn engine_matches_the_reference_queue_with_patience() {
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     let t = topo(
         "version: 1\nnodes:\n  gw: { type: gateway }\n  db: { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms }, pool: { size: 1, queue: 100000 } }\n",
     );

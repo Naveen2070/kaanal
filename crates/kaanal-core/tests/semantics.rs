@@ -7,7 +7,7 @@ use kaanal_core::{
     ChainOutcome, ChainRequest, ChainResult, ChaosState, Config, Dist, Endpoints, FailKind,
     HopKind, NodeChaos, Plan, Topology, execute, resolve_error, stable_hash,
 };
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::time::Duration;
 
 /// 20 lines; tests append entries under `endpoints:`.

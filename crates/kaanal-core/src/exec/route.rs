@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 
 use super::retry::{backoff, jitter, retryable};
 use super::walk::{Flow, Walk, draw_rng, step_path, takes_branch};

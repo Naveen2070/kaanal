@@ -17,7 +17,7 @@ use std::time::Duration;
 use kaanal_core::replay::Finished;
 use kaanal_core::{ChainRequest, PinState, resolve, sample_plan};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until};
 

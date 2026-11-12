@@ -2,8 +2,8 @@
 
 use super::text::DEFAULT_DAYS;
 use super::{
-    ChaCha8Rng, Dictionary, Gen, Pack, Rng, Value, base64, date_time, email, fit_length, int_for,
-    json, number_for, run, uuid, words,
+    ChaCha8Rng, Dictionary, Gen, Pack, RngExt, Value, base64, date_time, email, fit_length,
+    int_for, json, number_for, run, uuid, words,
 };
 
 /// **Private.** A value for a known string `format`; `None` for an unknown one,

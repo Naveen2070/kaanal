@@ -30,7 +30,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 

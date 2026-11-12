@@ -2,7 +2,7 @@
 
 use super::{PageSpec, Style};
 use crate::generate::child_seed;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde_json::{Value, json};
 

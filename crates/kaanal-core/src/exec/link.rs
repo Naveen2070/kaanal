@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 
 use super::conn;
 use super::walk::{Walk, draw_rng};

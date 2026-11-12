@@ -16,16 +16,16 @@ rust-version = "1.99"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml_ng = "0.10"
-indexmap = { version = "2", features = ["serde"] }
-humantime = "2"
-humantime-serde = "1.1"
-rand = "0.9"
-rand_chacha = "0.9"
-rand_distr = "0.5"
-tokio = { version = "1", features = [
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_yaml_ng = "0.10.0"
+indexmap = { version = "2.14.2", features = ["serde"] }
+humantime = "2.4.0"
+humantime-serde = "1.1.1"
+rand = "0.10.3"
+rand_chacha = "0.10.0"
+rand_distr = "0.6.0"
+tokio = { version = "1.54.1", features = [
     "macros",
     "rt-multi-thread",
     "net",
@@ -33,29 +33,31 @@ tokio = { version = "1", features = [
     "signal",
     "sync",
 ] }
-axum = "0.8"
-matchit = "0.8"
-percent-encoding = "2"
-tokio-stream = { version = "0.1", features = ["sync"] }
-clap = { version = "4", features = ["derive"] }
+axum = "0.8.9"
+matchit = "0.8.4"
+percent-encoding = "2.3.2"
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+clap = { version = "4.6.7", features = ["derive"] }
 clap_complete = "=4.6.11"
-ureq = { version = "3", default-features = false, features = ["json"] }
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
-jsonschema = { version = "0.58", default-features = false }
-regex-syntax = "0.8"
-schemars = { version = "1.2", features = ["indexmap2"] }
-saphyr = { version = "0.1", default-features = false }
-saphyr-parser = "0.1"
-# Auth. rsa 0.9 signs with digest 0.10, so sha2 stays on 0.10; the sha2
-# feature turns on sha2/oid, which pkcs1v15::SigningKey<Sha256> needs.
-rsa = { version = "0.9.10", features = ["sha2"] }
-sha2 = "0.10"
-base64 = "0.22"
-dirs = "6"
-serde_urlencoded = "0.7"
-url = "2"
+ureq = { version = "3.5.1", default-features = false, features = ["json"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
+jsonschema = { version = "0.61.2", default-features = false }
+regex-syntax = "0.8.11"
+schemars = { version = "1.2.3", features = ["indexmap2"] }
+saphyr = { version = "0.3.4", default-features = false }
+saphyr-parser = "0.3.4"
+# Auth. rsa 0.10 signs with digest 0.11, so sha2 stays on 0.11 with it (move them together);
+# rsa 0.10 needs the `pkcs1v15` feature for SigningKey<Sha256>, and getrandom 0.4 (the one rsa
+# uses) gives the OS random source for key generation.
+rsa = { version = "0.10.0", features = ["pkcs1v15"] }
+sha2 = "0.11.1"
+base64 = "0.23.1"
+getrandom = { version = "0.4.3", features = ["sys_rng"] }
+dirs = "7.0.0"
+serde_urlencoded = "0.7.1"
+url = "2.5.8"
 # Dev-only independent verifier for our hand-rolled RS256 (pure Rust backend, same rsa/sha2).
-jsonwebtoken = { version = "11.1", default-features = false, features = [
+jsonwebtoken = { version = "11.1.0", default-features = false, features = [
     "rust_crypto",
 ] }
 kaanal-core = { path = "crates/kaanal-core" }

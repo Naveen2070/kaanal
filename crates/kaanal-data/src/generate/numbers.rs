@@ -2,7 +2,7 @@
 //! `uniqueItems` is `unique.rs`).
 
 use super::{
-    ChaCha8Rng, MAX_RANDOM_ITEMS, Options, Rng, Value, child_seed, json, unique, value_for,
+    ChaCha8Rng, MAX_RANDOM_ITEMS, Options, RngExt, Value, child_seed, json, unique, value_for,
 };
 
 /// **Private.** Integer value: a default range `(lo, hi)` (from a dictionary entry, else

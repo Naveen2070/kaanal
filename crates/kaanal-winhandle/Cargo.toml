@@ -7,7 +7,7 @@ license.workspace = true
 description = "Kaanal: the one unsafe call (SetHandleInformation) that keeps `up -d` daemons off the caller's pipes"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_System_Console"] }
 
 # RULES R1.46: the only crate allowed `unsafe`. Everything else matches [workspace.lints]
 # (copied, because a crate cannot both inherit the workspace table and override one lint).

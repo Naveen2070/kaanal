@@ -110,7 +110,7 @@ fn number_bounds_are_honoured_at_the_edges() {
 
 #[test]
 fn lat_lng_get_bounds_and_unbounded_output_is_unchanged() {
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     let round6 = |v: f64| (v * 1e6).round() / 1e6;
     for seed in 0..50 {
         // Bit-identical to the old fixed-range code: same draw, same rounding.

@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use rand::Rng;
+use rand::RngExt;
 use rand_chacha::ChaCha8Rng;
 use serde_json::{Value, json};
 

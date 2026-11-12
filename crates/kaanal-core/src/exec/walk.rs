@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use super::link::MAX_HOP;
 use super::{DYN_BASE, Hop, HopKind, Op, PickKind, Plan, PlanItem, fail_of, hang_cap};

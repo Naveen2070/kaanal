@@ -21,11 +21,11 @@ use indexmap::IndexMap;
 use kaanal_core::config::{NodeConfig, UserConfig};
 use kaanal_core::diagnostics::Located;
 use kaanal_core::{Config, Responder};
+use rsa::PrivateKey as RsaPrivateKey;
 use rsa::pkcs1v15::SigningKey;
 use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
 use rsa::signature::{SignatureEncoding, Signer};
 use rsa::traits::PublicKeyParts;
-use rsa::{BigUint, RsaPrivateKey};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -58,7 +58,7 @@ impl AuthKey {
     /// # Errors
     /// The OS random source failed.
     pub fn generate() -> Result<AuthKey, String> {
-        RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048)
+        RsaPrivateKey::new(&mut getrandom::SysRng, 2048)
             .map(AuthKey::from_private)
             .map_err(|e| format!("cannot generate a signing key: {e}"))
     }
@@ -102,8 +102,11 @@ impl AuthKey {
 
     /// **Private.** Derives the `kid` and the public JWK once.
     fn from_private(private: RsaPrivateKey) -> AuthKey {
-        let b64 = |x: &BigUint| URL_SAFE_NO_PAD.encode(x.to_bytes_be());
-        let (n, e) = (b64(private.n()), b64(private.e()));
+        // minimal big-endian bytes, as a JWK writes `n` and `e` (RFC 7518 6.3.1)
+        let (n, e) = (
+            URL_SAFE_NO_PAD.encode(private.n_bytes()),
+            URL_SAFE_NO_PAD.encode(private.e_bytes()),
+        );
         let kid = thumbprint(&n, &e);
         let jwk = json!({ "kty": "RSA", "use": "sig", "alg": "RS256", "kid": kid, "n": n, "e": e });
         AuthKey { private, kid, jwk }

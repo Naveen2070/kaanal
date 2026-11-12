@@ -2,7 +2,7 @@
 //!
 //! Names, places and streets live in the locale packs (`data/locales/*.yaml`).
 
-use rand::Rng;
+use rand::RngExt;
 use rand_chacha::ChaCha8Rng;
 
 /// Lorem words for fallback strings, descriptions and URI paths.

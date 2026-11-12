@@ -8,6 +8,7 @@
 //! so the final name never holds half a key, and two `up`s racing on one project adopt one key.
 
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -79,7 +80,13 @@ fn key_id(config: &Path) -> Result<String, Fail> {
     let canon = std::fs::canonicalize(dir).map_err(|e| err(format!("{}: {e}", dir.display())))?;
     let text = canon.to_string_lossy();
     let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
-    Ok(format!("{:x}", Sha256::digest(text.as_bytes()))[..16].to_string())
+    Ok(Sha256::digest(text.as_bytes())
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })[..16]
+        .to_string())
 }
 
 /// **Private.** Puts `pem` at `file` without ever exposing half a key (X15): a unique temp
@@ -320,7 +327,15 @@ mod tests {
         let canon = std::fs::canonicalize(&d).unwrap();
         let text = canon.to_string_lossy();
         let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
-        assert_eq!(a, format!("{:x}", Sha256::digest(text.as_bytes()))[..16]);
+        assert_eq!(
+            a,
+            Sha256::digest(text.as_bytes())
+                .iter()
+                .fold(String::new(), |mut s, b| {
+                    let _ = write!(s, "{b:02x}");
+                    s
+                })[..16]
+        );
         assert_ne!(
             key_id(&d.join("sub").join("kaanal.yaml")).ok().unwrap(),
             a,

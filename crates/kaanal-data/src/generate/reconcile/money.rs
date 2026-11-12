@@ -9,7 +9,7 @@
 //! half-even. Mixed schema types or an overflow skip the object. Never rescaled. Everything is
 //! worked out before anything is written, so an object is reconciled whole or not at all.
 
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde_json::{Map, Number, Value, json};
 

@@ -9,7 +9,7 @@
 //! (rule R4.4).
 
 use rand::seq::IndexedRandom;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde_json::{Map, Value, json};
 

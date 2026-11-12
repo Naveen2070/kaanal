@@ -1,6 +1,7 @@
 //! Shared helpers: the binary, project folders, the `Up` child process, the HTTP agent.
 
 use crate::demo;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -65,7 +66,12 @@ fn key_path(cfg: &Path, project: &Path) -> PathBuf {
     let canon = std::fs::canonicalize(project).unwrap();
     let text = canon.to_string_lossy();
     let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
-    let id = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+    let id = sha2::Sha256::digest(text.as_bytes())
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
     cfg.join("kaanal")
         .join("keys")
         .join(format!("{}.pem", &id[..16]))
