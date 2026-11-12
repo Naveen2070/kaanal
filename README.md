@@ -170,7 +170,7 @@ endpoints:               # Optional per-endpoint overrides
   - `gateway`: Optional proxy in front (at most one); every request pays its `proc` first.
   - `service`: Backend microservice hosting an OpenAPI 3.0 `spec`; the entry point when there is no gateway.
   - `monolith`: A service that can also run its own `ops` (an inline database).
-  - `database`: Data store with configured costs for `read`, `write`, and `scan` operations; `flavor: postgres | mysql | mongodb` fills the ones you leave out (estimates).
+  - `database`: Data store with configured costs for `read`, `write`, and `scan` operations; `flavor: postgres | mysql | mariadb | mongodb | neo4j | cassandra | dynamodb` fills the ones you leave out (estimates).
   - `cache`: Hit ratio plus hit and miss costs; `flavor: redis | memcached`.
   - `external-api`: A third-party HTTP API with its own response time.
   - `auth`: An identity provider: `POST /login` returns a signed RS256 JWT for its test users, `GET /.well-known/jwks.json` serves the key (see [auth.md](docs/web/auth.md)). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).

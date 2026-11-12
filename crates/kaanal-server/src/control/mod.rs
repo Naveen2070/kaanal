@@ -67,7 +67,7 @@ pub use lease::lease_task;
 pub use payload::{
     delete as delete_payload, list as list_payloads, preview as payload_preview, put as put_payload,
 };
-pub use prices::{get_price_regions, get_prices};
+pub use prices::{get_price_regions, get_prices, get_storage_prices};
 pub use save::save_scenario;
 pub use sim::{get_run, get_run_log, list_runs, post_run, post_sample};
 pub use skeleton::get_skeleton;

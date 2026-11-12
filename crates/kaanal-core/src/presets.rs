@@ -22,8 +22,20 @@ const fn pct(p50_us: u64, p99_us: u64) -> DistConfig {
 pub fn db_ops(flavor: DbFlavor) -> [DistConfig; 3] {
     match flavor {
         DbFlavor::Postgres => [pct(300, 2_000), pct(1_000, 8_000), pct(3_000, 25_000)],
-        DbFlavor::Mysql => [pct(300, 2_500), pct(1_200, 10_000), pct(3_000, 30_000)],
+        // MariaDB is InnoDB underneath, like MySQL: the same figures
+        DbFlavor::Mysql | DbFlavor::Mariadb => {
+            [pct(300, 2_500), pct(1_200, 10_000), pct(3_000, 30_000)]
+        }
         DbFlavor::Mongodb => [pct(400, 3_000), pct(800, 6_000), pct(4_000, 35_000)],
+        // estimates, no published figure: an indexed node lookup, a transaction commit (fsync), a
+        // traversal of about 100 nodes
+        DbFlavor::Neo4j => [pct(500, 4_000), pct(2_000, 15_000), pct(6_000, 50_000)],
+        // estimates, no published figure: an LSM write is the cheap one, a read may touch several
+        // SSTables, a scan is a partition slice
+        DbFlavor::Cassandra => [pct(1_000, 8_000), pct(500, 4_000), pct(8_000, 60_000)],
+        // AWS states "single-digit millisecond" latency for reads and writes; the p50 and p99 here
+        // are inside that statement (a GetItem, a PutItem, a Query of about 100 items)
+        DbFlavor::Dynamodb => [pct(3_000, 9_000), pct(5_000, 15_000), pct(10_000, 40_000)],
     }
 }
 

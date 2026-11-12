@@ -21,7 +21,8 @@ import {
   setThroughput,
   throughputKb,
 } from "./fields";
-import { RATE_UNITS, TIME_UNITS } from "./units";
+import { setStored, setWriteShare, storedOf, writeShareOf } from "./storageCost";
+import { BYTE_SIZE_UNITS, RATE_UNITS, TIME_UNITS } from "./units";
 
 const REMOVE =
   "mb-2 min-h-6 rounded-md border border-control px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent";
@@ -130,6 +131,26 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
           Remove the throughput
         </button>
       ) : null}
+      <NumberField
+        label="Data kept (for the cost)"
+        units={BYTE_SIZE_UNITS}
+        hint="How much the store holds, priced per GB-month in the region you pick at the globe (S3 Standard, Azure Blob Hot, Google Cloud Storage as a placeholder). It changes no timing. Empty: only the requests are priced."
+        value={storedOf(config)}
+        placeholder="Not set"
+        min={0}
+        step="any"
+        onCommit={(n) => patch(setStored(name, config, n))}
+      />
+      <NumberField
+        label="Share of calls that are writes"
+        hint="0 to 1. A write (PUT, COPY, POST, LIST) costs more than a read (GET). Requests are priced from the visits of the last run. Empty: every call is priced as a read."
+        value={writeShareOf(config)}
+        placeholder="0 (all reads)"
+        min={0}
+        max={1}
+        step="any"
+        onCommit={(n) => patch(setWriteShare(name, config, n))}
+      />
       {carriesEstimates(config) ? (
         <p className="mb-2 text-xs text-muted">
           These numbers are placeholders, not published figures. Providers publish request limits

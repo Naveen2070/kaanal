@@ -27,6 +27,7 @@ mod breaker;
 mod checks;
 mod conn;
 mod endpoints;
+mod hosting;
 mod kinds;
 mod limits;
 mod machine;
@@ -51,6 +52,7 @@ use endpoints::default_calls;
 pub use endpoints::{
     Branch, CallStep, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig, parse_endpoints,
 };
+pub use hosting::{DbEngine, Hosting};
 pub use kinds::{
     AuthConfig, CacheConfig, DatabaseConfig, ExternalApiConfig, GatewayConfig, MonolithConfig,
     ServiceConfig,
@@ -276,6 +278,7 @@ impl Config {
             .in_source(src));
         }
         machine::check(&cfg).map_err(|e| e.in_source(src))?;
+        hosting::check(&cfg).map_err(|e| e.in_source(src))?;
         machine::apply(&mut cfg);
         check_auth(&cfg).map_err(|e| e.in_source(src))?;
         check_capacity(&cfg).map_err(|e| e.in_source(src))?;

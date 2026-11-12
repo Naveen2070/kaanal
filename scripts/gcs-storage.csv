@@ -1,0 +1,53 @@
+# Google Cloud Storage, Standard storage, single regions: the price the page states per gibibyte hour
+# (USD), read from https://cloud.google.com/storage/pricing on 2026-11-12 in a browser (the page draws
+# its tables with script, so a plain fetch cannot read it). Kept by hand, like azure-network.csv; the
+# monthly price the page shows is this x 730.
+# Operations, single region, Standard: Class A (writes) $0.005 and Class B (reads) $0.0004 per 1,000
+# (flat namespace), from the same page; the same in every single region.
+# region,usd_per_gib_hour
+africa-south1,0.000027397
+asia-east1,0.000027397
+asia-east2,0.000031507
+asia-northeast1,0.000031507
+asia-northeast2,0.000027397
+asia-northeast3,0.000031507
+asia-south1,0.000027397
+asia-south2,0.000031507
+asia-southeast1,0.000027397
+asia-southeast2,0.000031507
+asia-southeast3,0.000028767
+asia-southeast4,0.000028767
+australia-southeast1,0.000031507
+australia-southeast2,0.000031507
+europe-central2,0.000031507
+europe-north1,0.000027397
+europe-north2,0.000031507
+europe-southwest1,0.000031507
+europe-west1,0.000027397
+europe-west10,0.000034247
+europe-west12,0.000031507
+europe-west2,0.000031507
+europe-west3,0.000031507
+europe-west4,0.000027397
+europe-west6,0.000034247
+europe-west8,0.000031507
+europe-west9,0.000031507
+me-central1,0.000031507
+me-central2,0.000041096
+me-west1,0.000028767
+northamerica-northeast1,0.000031507
+northamerica-northeast2,0.000031507
+northamerica-south1,0.000035616
+southamerica-east1,0.000047945
+southamerica-west1,0.000041096
+us-central1,0.000027397
+us-east1,0.000027397
+us-east4,0.000031507
+us-east5,0.000027397
+us-east7,0.000027397
+us-south1,0.000027397
+us-west1,0.000027397
+us-west2,0.000031507
+us-west3,0.000031507
+us-west4,0.000031507
+us-west8,0.000027397

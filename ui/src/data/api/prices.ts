@@ -37,8 +37,37 @@ export function loadPrices(provider: string, region: string): Promise<ReadonlyMa
   return t;
 }
 
+/** What an object store costs in one region, micro-USD (RULES 123). */
+export interface StoragePrice {
+  gbMonth: number;
+  writePer1k: number;
+  readPer1k: number;
+}
+
+let storageOnce: Promise<Record<string, StoragePrice>> | null = null;
+
+/** Every object-store price, keyed `provider/region` (region `*` answers for any); fetched once. */
+export function loadStoragePrices(): Promise<Record<string, StoragePrice>> {
+  storageOnce ??= api
+    .getStoragePrices()
+    .then((r) =>
+      Object.fromEntries(
+        r.rows.map(([p, g, gbMonth, writePer1k, readPer1k]) => [
+          `${p}/${g}`,
+          { gbMonth, writePer1k, readPer1k },
+        ]),
+      ),
+    )
+    .catch((e: unknown) => {
+      storageOnce = null;
+      throw e;
+    });
+  return storageOnce;
+}
+
 /** Forgets everything fetched (tests). */
 export function resetPrices(): void {
   regionsOnce = null;
+  storageOnce = null;
   tables.clear();
 }

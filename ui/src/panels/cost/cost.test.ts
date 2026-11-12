@@ -5,6 +5,7 @@ import {
   dollarsFor,
   nodeCosts,
   perThousandRequests,
+  priceKeysUsed,
   providersUsed,
   totals,
   usd,
@@ -68,4 +69,115 @@ test("money_and_days_are_shown_and_read_sensibly", () => {
   expect(daysFrom("", 30)).toBe(30);
   expect(daysFrom("0", 30)).toBe(30);
   expect(daysFrom("99999", 30)).toBe(3650);
+});
+
+test("a_managed_database_is_priced_from_its_engines_list_in_the_aws_region", () => {
+  const d = doc({
+    db: {
+      type: "database",
+      hosting: "managed",
+      engine: "mysql",
+      instance: "aws/db.m5.large",
+      replicas: 2,
+    },
+    pg: { type: "database", hosting: "managed", instance: "aws/db.m5.large" },
+  });
+  expect(priceKeysUsed(d)).toEqual([
+    { key: "aws-rds-mysql", provider: "aws" },
+    { key: "aws-rds-postgresql", provider: "aws" },
+  ]);
+  expect(providersUsed(d)).toEqual(["aws"]);
+  const tables = {
+    "aws-rds-mysql": new Map([["aws/db.m5.large", 171_000]]),
+    "aws-rds-postgresql": new Map([["aws/db.m5.large", 178_000]]),
+  };
+  const c = nodeCosts(d, tables, region);
+  expect(c[0]).toMatchObject({ unitMicro: 171_000, totalMicro: 342_000 });
+  expect(c[1]).toMatchObject({ unitMicro: 178_000 });
+  // the VM price list is never read for a class
+  expect(nodeCosts(d, { aws: new Map([["aws/db.m5.large", 1]]) }, region)[0]?.why).toBe(
+    "prices are loading",
+  );
+});
+
+test("serverless_external_and_a_managed_gateway_have_no_machine_to_price_and_say_why", () => {
+  const d = doc({
+    fn: { type: "service", hosting: "serverless" },
+    idp: { type: "auth", hosting: "external" },
+    gw: { type: "gateway", hosting: "managed" },
+    db: { type: "database", hosting: "managed" },
+  });
+  const c = nodeCosts(d, {}, region);
+  expect(c.map((x) => x.why)).toEqual([
+    "serverless: priced per use, not estimated",
+    "run by someone else: not estimated",
+    "managed: priced by use, not estimated",
+    "pick a managed database class",
+  ]);
+  expect(priceKeysUsed(d)).toEqual([]);
+});
+
+test("a_managed_cache_is_priced_from_the_elasticache_list_and_a_serverless_one_is_left_out", () => {
+  const d = doc({
+    c: { type: "cache", hosting: "managed", instance: "aws/cache.m5.large", replicas: 2 },
+    s: { type: "cache", hosting: "serverless" },
+    e: { type: "cache", hosting: "managed" },
+  });
+  expect(priceKeysUsed(d)).toEqual([{ key: "aws-elasticache", provider: "aws" }]);
+  const c = nodeCosts(d, { "aws-elasticache": new Map([["aws/cache.m5.large", 156_000]]) }, region);
+  expect(c[0]).toMatchObject({ unitMicro: 156_000, totalMicro: 312_000 });
+  expect(c[1]?.why).toBe("serverless: priced per use, not estimated");
+  expect(c[2]?.why).toBe("pick a managed cache class");
+});
+
+test("a_database_flavor_picks_its_engines_list_when_no_engine_is_written", () => {
+  const d = doc({
+    m: { type: "database", flavor: "mysql", hosting: "managed", instance: "aws/db.m5.large" },
+  });
+  expect(priceKeysUsed(d)).toEqual([{ key: "aws-rds-mysql", provider: "aws" }]);
+});
+
+const GB = 1024 ** 3;
+const s3 = { gbMonth: 23_000, writePer1k: 5_000, readPer1k: 400 };
+
+test("an_object_store_costs_its_data_over_a_month_plus_its_requests_at_the_last_runs_rate", () => {
+  const d = doc({ files: { type: "storage", flavor: "s3", stored: 500 * GB, replicas: 3 } });
+  const prices = { "aws/us-east-1": s3 };
+  // 500 GB x $0.023 a GB-month over 730 hours = $0.015753... an hour; replicas do not multiply it
+  const only = nodeCosts(d, {}, region, { prices })[0];
+  expect(only?.copies).toBe(1);
+  expect(only?.totalMicro).toBe(Math.round((500 * 23_000) / 730));
+  // 100 visits a second, all reads: 360,000 requests an hour at $0.0004 per 1,000 = $0.144 an hour
+  const run = nodeCosts(d, {}, region, { prices, visits: { files: 100 } })[0];
+  expect(run?.totalMicro).toBe(Math.round((500 * 23_000) / 730 + 100 * 3600 * (400 / 1000)));
+});
+
+test("a_write_share_moves_requests_to_the_write_price_and_a_store_with_nothing_set_says_so", () => {
+  const prices = { "aws/us-east-1": s3 };
+  const half = doc({ f: { type: "storage", stored: GB, write_share: 0.5 } });
+  // 1 visit a second, half writes: 3,600 requests an hour at (0.5 x 5000 + 0.5 x 400) / 1000 micro each
+  const c = nodeCosts(half, {}, region, { prices, visits: { f: 1 } })[0];
+  expect(c?.totalMicro).toBe(Math.round(23_000 / 730 + 3600 * ((0.5 * 5_000 + 0.5 * 400) / 1000)));
+  const none = doc({ f: { type: "storage" } });
+  expect(nodeCosts(none, {}, region, { prices })[0]?.why).toMatch(/set stored/);
+  expect(nodeCosts(none, {}, region)[0]?.why).toBe("prices are loading");
+});
+
+test("a_store_is_priced_in_the_cloud_its_flavor_names_and_the_region_picked", () => {
+  const prices = {
+    "azure/us-east": { gbMonth: 20_800, writePer1k: 5_000, readPer1k: 400 },
+    "gcp/europe-west1": s3,
+  };
+  const d = doc({
+    b: { type: "storage", flavor: "blob", stored: GB },
+    g: { type: "storage", flavor: "gcs", stored: GB },
+    x: { type: "storage", flavor: "blob", stored: GB },
+  });
+  expect(providersUsed(d)).toEqual(["aws", "azure", "gcp"].filter((p) => p !== "aws"));
+  const c = nodeCosts(d, {}, { azure: "us-east", gcp: "europe-west1" }, { prices });
+  expect(c[0]?.totalMicro).toBe(Math.round(20_800 / 730));
+  expect(c[1]?.totalMicro).toBe(Math.round(23_000 / 730));
+  expect(
+    nodeCosts(d, {}, { azure: "nowhere" }, { prices: { "azure/us-east": s3 } })[2]?.why,
+  ).toMatch(/no object-store price in nowhere/);
 });

@@ -176,11 +176,14 @@ export function limitSummary(c: NodeDoc): string {
 export function cpuSummary(c: NodeDoc): string {
   const n = coresOf(c);
   const parts: string[] = [];
+  const h = c.hosting;
+  if (h === "managed" || h === "serverless" || h === "external") parts.push(h);
   if (n !== null) parts.push(`${n} core${n === 1 ? "" : "s"}`);
   else if ("cpu" in c) parts.push("set in kaanal.yaml");
   const inst = instanceOf(c);
   if (inst !== null) parts.push(inst);
   if ("memory" in c) parts.push("memory limit");
+  if (parts.length === 0 && c.type === "cache") return "self-hosted";
   return parts.length > 0 ? parts.join(" · ") : "not limited";
 }
 

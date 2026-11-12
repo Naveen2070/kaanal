@@ -22,6 +22,17 @@ pub async fn get_price_regions() -> Json<Value> {
     Json(json!({ "defaults": defaults, "regions": regions }))
 }
 
+/// `GET /__kaanal/storage-prices` — `{ rows: [[provider, region, gb_month, write_per_1k, read_per_1k],
+/// ...] }`, micro-USD (RULES 123): what an object store costs in each region; region `*` answers for
+/// every region of that provider.
+pub async fn get_storage_prices() -> Json<Value> {
+    let rows: Vec<Value> = kaanal_core::prices::storage_rows()
+        .iter()
+        .map(|(p, r, s)| json!([p, r, s.gb_month, s.write_per_1k, s.read_per_1k]))
+        .collect();
+    Json(json!({ "rows": rows }))
+}
+
 /// `GET /__kaanal/prices/{provider}/{region}` — `{ provider, region, prices: [[name,
 /// usd_micro_hr], ...] }` sorted by name: the on-demand Linux price an hour in micro-USD of every
 /// type that has one there.

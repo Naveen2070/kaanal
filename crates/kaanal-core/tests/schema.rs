@@ -357,8 +357,8 @@ fn the_memory_and_instance_fields_name_their_defaults() {
         .collect();
     assert_eq!(
         with_instance.len(),
-        6,
-        "gateway, service, monolith, database, auth, load-balancer"
+        7,
+        "gateway, service, monolith, database, cache, auth, load-balancer"
     );
     for i in with_instance {
         assert!(

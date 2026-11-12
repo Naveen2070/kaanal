@@ -399,3 +399,37 @@ async fn price_regions_and_one_regions_prices_are_served() {
         404
     );
 }
+
+#[tokio::test]
+async fn object_store_prices_and_the_managed_class_lists_are_served() {
+    let s = start(&system("1ms")).await;
+    let v: Value = s
+        .get("/__kaanal/storage-prices")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let rows = v["rows"].as_array().unwrap();
+    // S3 Standard in us-east-1: $0.023 a GB-month, $0.005 per 1,000 writes, $0.0004 per 1,000 reads
+    assert!(rows.contains(&json!(["aws", "us-east-1", 23_000, 5_000, 400])));
+    assert!(rows.iter().any(|r| r[0] == "azure" && r[1] == "us-east"));
+    assert!(rows.contains(&json!(["gcp", "us-central1", 20_000, 5_000, 400])));
+    // a managed database's list is served like any region's
+    let r = s.get("/__kaanal/prices/aws-rds-postgresql/us-east-1").await;
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    assert!(
+        v["prices"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(["aws/db.m5.large", 178_000]))
+    );
+    let r = s.get("/__kaanal/prices/aws-elasticache/us-east-1").await;
+    let v: Value = r.json().await.unwrap();
+    assert!(
+        v["prices"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(["aws/cache.m5.large", 156_000]))
+    );
+}

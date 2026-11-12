@@ -93,6 +93,33 @@ pub fn lookup(name: &str) -> Option<&'static Instance> {
         .map(|k| &t[k])
 }
 
+/// The type part of `provider/type`, lower case.
+fn type_part(name: &str) -> Option<String> {
+    name.trim()
+        .to_ascii_lowercase()
+        .split_once('/')
+        .map(|(_, t)| t.to_string())
+}
+
+/// Whether `name` is a managed database class (`aws/db.m5.large`, from AWS RDS). The table holds
+/// these with the VM types; a class's type part starts with `db.`, which no VM type does.
+#[must_use]
+pub fn is_db_class(name: &str) -> bool {
+    type_part(name).is_some_and(|t| t.starts_with("db."))
+}
+
+/// Whether `name` is a managed cache class (`aws/cache.m5.large`, from AWS `ElastiCache`).
+#[must_use]
+pub fn is_cache_class(name: &str) -> bool {
+    type_part(name).is_some_and(|t| t.starts_with("cache."))
+}
+
+/// Whether `name` is a managed class of either kind and not a VM type.
+#[must_use]
+pub fn is_managed_class(name: &str) -> bool {
+    is_db_class(name) || is_cache_class(name)
+}
+
 /// A hint for an unknown name: how many types that provider has and a few of its names that start
 /// like the one written, or the providers when it names none.
 #[must_use]

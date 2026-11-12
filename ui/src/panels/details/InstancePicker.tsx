@@ -16,6 +16,13 @@ import {
 import type { NodeDoc } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { regionOf, useRegion, useRegionTable } from "../../data/store/region";
+import {
+  hasManagedClasses,
+  isManagedClass,
+  isManagedService,
+  isOwnClass,
+  priceListKey,
+} from "./hosting";
 import { FieldLabel, NumberField } from "./Field";
 import {
   CUSTOM_NAME,
@@ -105,6 +112,11 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
     mem0.per_request !== null &&
     mem0.per_request === estimatePerRequest(mem0.limit, mem0.base ?? 0, slots0);
   const choose = async (inst: string, cores: number, memBytes: number | null) => {
+    // a cache's hits are fixed times: its instance is a price and a size note, so no cores or memory limit
+    if (config.type === "cache") {
+      await patch(setInstance(name, config, inst));
+      return;
+    }
     const mem = memoryOf(config);
     const slots = slotsOf(config).value;
     const guess =
@@ -162,11 +174,22 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
   // only the types the picked region has (a type with a price there is offered there); every type
   // when the region's list could not be loaded
   const provider = PROVIDERS.some((p) => p.id === mode) ? mode : null;
-  const offered = useRegionTable(provider);
-  const region = useRegion((s) => (provider === null ? undefined : regionOf(s, provider)));
-  const options = (rows && provider !== null ? matching(rows, provider, query) : []).filter(
-    (o) => !offered || offered.has(o.name),
+  // a managed database lists the provider's database classes (priced per engine), every other
+  // node its VM types
+  const classes = isManagedService(config);
+  const offered = useRegionTable(
+    provider,
+    provider === null ? null : priceListKey(config, provider),
   );
+  const region = useRegion((s) => (provider === null ? undefined : regionOf(s, provider)));
+  const options = (rows && provider !== null ? matching(rows, provider, query, 2000) : [])
+    .filter((o) =>
+      classes
+        ? hasManagedClasses(config) && isOwnClass(config.type, o.name)
+        : !isManagedClass(o.name),
+    )
+    .filter((o) => !offered || offered.has(o.name))
+    .slice(0, 200);
   const missingHere =
     offered && now !== null && now.startsWith(`${mode}/`) && !offered.has(now.toLowerCase());
 
@@ -181,9 +204,11 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
         className={SELECT}
       >
         <option value="">None</option>
-        {PROVIDERS.map((p) => (
+        {PROVIDERS.filter((p) => !classes || p.id === "aws").map((p) => (
           <option key={p.id} value={p.id}>
-            {p.label}
+            {classes
+              ? `${p.label} (managed ${config.type === "cache" ? "cache" : "database"} classes)`
+              : p.label}
           </option>
         ))}
         <option value="custom">Your own</option>
@@ -194,7 +219,15 @@ export function InstancePicker({ name, config }: { name: string; config: NodeDoc
             aria-label="Search instance types"
             list={`${id}-types`}
             value={query || (now !== null && now.startsWith(`${mode}/`) ? now : "")}
-            placeholder={failed ? "The table did not load" : "m5.large, n2-standard-4, d4s_v5 ..."}
+            placeholder={
+              failed
+                ? "The table did not load"
+                : classes
+                  ? config.type === "cache"
+                    ? "cache.m5.large, cache.r6g.large ..."
+                    : "db.m5.large, db.r6g.xlarge ..."
+                  : "m5.large, n2-standard-4, d4s_v5 ..."
+            }
             disabled={rows === null}
             onChange={(e) => pick(e.currentTarget.value)}
             className={`${INPUT} w-64 max-w-full font-mono`}

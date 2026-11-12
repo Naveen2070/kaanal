@@ -271,10 +271,13 @@ impl NodeConfig {
     /// The node's CPUs (`cpu:`); `None` = no sharing. Only the kinds whose compute the user sizes
     /// have the field: gateway, service, monolith, database, auth and load balancer.
     pub fn cpu(&self) -> Option<CpuConfig> {
+        // a cache's instance is a size note and a price: its hits are not CPU-shared, so it fills no cores
         self.own_cpu().or_else(|| {
-            self.instance().map(|i| CpuConfig {
-                cores: f64::from(i.vcpu),
-            })
+            self.instance()
+                .filter(|_| !matches!(self, NodeConfig::Cache(_)))
+                .map(|i| CpuConfig {
+                    cores: f64::from(i.vcpu),
+                })
         })
     }
 
@@ -338,8 +341,52 @@ impl NodeConfig {
             NodeConfig::Database(n) => n.instance.as_deref(),
             NodeConfig::Auth(n) => n.instance.as_deref(),
             NodeConfig::LoadBalancer(n) => n.instance.as_deref(),
-            NodeConfig::Cache(_) | NodeConfig::ExternalApi(_) | NodeConfig::Storage(_) => None,
+            NodeConfig::Cache(n) => n.instance.as_deref(),
+            NodeConfig::ExternalApi(_) | NodeConfig::Storage(_) => None,
         }
+    }
+
+    /// The `hosting:` as written; only the kinds with a machine to choose have the field.
+    pub fn hosting_written(&self) -> Option<crate::config::Hosting> {
+        match self {
+            NodeConfig::Gateway(n) => n.hosting,
+            NodeConfig::Service(n) => n.hosting,
+            NodeConfig::Monolith(n) => n.hosting,
+            NodeConfig::Database(n) => n.hosting,
+            NodeConfig::Auth(n) => n.hosting,
+            NodeConfig::LoadBalancer(n) => n.hosting,
+            NodeConfig::Cache(n) => n.hosting,
+            NodeConfig::ExternalApi(_) | NodeConfig::Storage(_) => None,
+        }
+    }
+
+    /// Where the node runs: the `hosting:` it writes, else `self`.
+    pub fn hosting(&self) -> crate::config::Hosting {
+        self.hosting_written().unwrap_or_default()
+    }
+
+    /// The database's `engine:` as written; `None` for every other kind.
+    pub fn engine_written(&self) -> Option<crate::config::DbEngine> {
+        match self {
+            NodeConfig::Database(n) => n.engine,
+            _ => None,
+        }
+    }
+
+    /// The database's `flavor:`, when it names one.
+    pub fn db_flavor(&self) -> Option<DbFlavor> {
+        match self {
+            NodeConfig::Database(n) => n.flavor,
+            _ => None,
+        }
+    }
+
+    /// The engine of a managed database: the `engine:` it writes, else the first engine that runs
+    /// its `flavor:`, else PostgreSQL.
+    pub fn engine(&self) -> crate::config::DbEngine {
+        self.engine_written()
+            .or_else(|| self.db_flavor().and_then(|f| f.engines().first().copied()))
+            .unwrap_or_default()
     }
 
     /// The node's `memory:` as written (the `limit` may still be missing: see
@@ -469,6 +516,16 @@ pub enum DbFlavor {
     Mysql,
     /// `MongoDB`.
     Mongodb,
+    /// `MariaDB` (`InnoDB`): the same costs as `MySQL`.
+    Mariadb,
+    /// `Neo4j`, a graph database: a read is an indexed node lookup with a hop, a scan is a
+    /// traversal.
+    Neo4j,
+    /// `Apache Cassandra`: cheap writes (commit log and memtable), reads that may touch several
+    /// `SSTables`, no efficient scan across partitions.
+    Cassandra,
+    /// `Amazon DynamoDB`: AWS states single-digit-millisecond latency at any scale.
+    Dynamodb,
 }
 
 impl DbFlavor {
@@ -478,6 +535,10 @@ impl DbFlavor {
             DbFlavor::Postgres => "postgres",
             DbFlavor::Mysql => "mysql",
             DbFlavor::Mongodb => "mongodb",
+            DbFlavor::Mariadb => "mariadb",
+            DbFlavor::Neo4j => "neo4j",
+            DbFlavor::Cassandra => "cassandra",
+            DbFlavor::Dynamodb => "dynamodb",
         }
     }
 }

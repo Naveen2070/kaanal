@@ -9,6 +9,8 @@ const table = vi.hoisted(() => ({
   rows: [
     { name: "aws/c6i.large", vcpu: 2, memMib: 4096, netMbps: 12500 },
     { name: "aws/m5.large", vcpu: 2, memMib: 8192, netMbps: 10000 },
+    { name: "aws/db.m5.large", vcpu: 2, memMib: 8192, netMbps: 10000 },
+    { name: "aws/cache.m5.large", vcpu: 2, memMib: 6533, netMbps: 10000 },
     { name: "azure/standard_d2s_v5", vcpu: 2, memMib: 8192, netMbps: 0 },
     { name: "gcp/n2-standard-2", vcpu: 2, memMib: 8192, netMbps: 10000 },
   ],
@@ -195,4 +197,58 @@ test("only_the_types_the_picked_region_has_are_listed_and_a_missing_one_is_said"
   vi.restoreAllMocks();
   useRegion.setState({ picked: {}, defaults: {}, regions: {}, ready: false });
   resetPrices();
+});
+
+test("a_managed_database_lists_only_database_classes_and_a_vm_node_never_lists_them", async () => {
+  const db = { type: "database", hosting: "managed" } as NodeDoc;
+  draftWith({ nodes: { d: db } });
+  const { rerender } = render(<InstancePicker name="d" config={db} />);
+  // only AWS has database classes in the table
+  const select = screen.getByLabelText("Instance type") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.value)).toEqual(["", "aws", "custom"]);
+  fireEvent.change(select, { target: { value: "aws" } });
+  const box = await screen.findByLabelText("Search instance types");
+  await waitFor(() => expect((box as HTMLInputElement).disabled).toBe(false));
+  const names = () =>
+    [...document.querySelectorAll("datalist option")].map((o) => (o as HTMLOptionElement).value);
+  await waitFor(() => expect(names()).toEqual(["aws/db.m5.large"]));
+  // choosing one writes it and fills the cores, as a VM type does
+  fireEvent.change(box, { target: { value: "aws/db.m5.large" } });
+  expect(patch).toHaveBeenCalledWith([
+    { op: "insert", path: ["nodes", "d", "instance"], value: "aws/db.m5.large" },
+    { op: "insert", path: ["nodes", "d", "cpu"], value: { cores: 2 } },
+  ]);
+  // a self-hosted node lists the VM types and not the classes
+  const vm = { type: "database" } as NodeDoc;
+  draftWith({ nodes: { d: vm } });
+  rerender(<InstancePicker name="d" config={vm} />);
+  fireEvent.change(screen.getByLabelText("Instance type"), { target: { value: "aws" } });
+  await waitFor(() => expect(names()).toEqual(["aws/c6i.large", "aws/m5.large"]));
+});
+
+test("a_managed_cache_lists_cache_classes_and_choosing_one_writes_the_instance_only", async () => {
+  const cache = { type: "cache", hosting: "managed" } as NodeDoc;
+  draftWith({ nodes: { c: cache } });
+  render(<InstancePicker name="c" config={cache} />);
+  fireEvent.change(screen.getByLabelText("Instance type"), { target: { value: "aws" } });
+  const box = await screen.findByLabelText("Search instance types");
+  await waitFor(() => expect((box as HTMLInputElement).disabled).toBe(false));
+  const names = () =>
+    [...document.querySelectorAll("datalist option")].map((o) => (o as HTMLOptionElement).value);
+  await waitFor(() => expect(names()).toEqual(["aws/cache.m5.large"]));
+  fireEvent.change(box, { target: { value: "aws/cache.m5.large" } });
+  // a cache's hits are fixed times: no cores and no memory limit are written, only the instance
+  expect(patch).toHaveBeenCalledWith([
+    { op: "insert", path: ["nodes", "c", "instance"], value: "aws/cache.m5.large" },
+  ]);
+});
+
+test("a_managed_mongodb_database_lists_no_classes", async () => {
+  const mongo = { type: "database", flavor: "mongodb", hosting: "managed" } as NodeDoc;
+  draftWith({ nodes: { d: mongo } });
+  render(<InstancePicker name="d" config={mongo} />);
+  fireEvent.change(screen.getByLabelText("Instance type"), { target: { value: "aws" } });
+  const box = await screen.findByLabelText("Search instance types");
+  await waitFor(() => expect((box as HTMLInputElement).disabled).toBe(false));
+  expect(document.querySelectorAll("datalist option").length).toBe(0);
 });

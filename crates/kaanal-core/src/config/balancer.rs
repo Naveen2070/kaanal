@@ -1,6 +1,7 @@
 //! The `load-balancer` node's config struct, split out of `nodes.rs` (R3.8: that file passed 800
 //! lines). It is one cohesive type; the kind itself and its accessors stay in `nodes.rs`.
 
+use super::Hosting;
 use super::{
     ConcurrencyConfig, CpuConfig, Deserialize, DistConfig, Duration, Hold, JsonSchema,
     LOCALE_PATTERN, MemoryConfig, NodeBandwidth, RateLimitConfig, call_timeout, detect_window,
@@ -66,6 +67,12 @@ pub struct LoadBalancerConfig {
     /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
+    /// Where this component runs (default `self`): `self` is a machine you run, so `instance:` is
+    /// a VM type; `managed`, `serverless` and `external` are the provider's or someone else's
+    /// service (see `hosting` in the node docs for what each kind allows). It decides which
+    /// `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.

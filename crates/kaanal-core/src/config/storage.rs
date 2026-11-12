@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::{
     ConcurrencyConfig, Deserialize, DistConfig, JsonSchema, LOCALE_PATTERN, NodeBandwidth,
-    RateLimitConfig, call_timeout,
+    RateLimitConfig, call_timeout, ratio,
 };
 use crate::balance::Balance;
 
@@ -62,6 +62,18 @@ pub struct StorageConfig {
     /// directions or `{ out, in }`. Absent = no limit.
     #[serde(default)]
     pub bandwidth: Option<NodeBandwidth>,
+    /// Data kept in the store, as a size (`500GB`, `2TB`... units B, KB, MB, GB), for the **cost
+    /// estimate only**: it prices the storage per GB-month. Absent = nothing stored, so only
+    /// requests are priced. It changes no timing.
+    #[serde(default, deserialize_with = "crate::units::custom_memory")]
+    #[schemars(schema_with = "crate::schema::memory_size")]
+    pub stored: Option<u64>,
+    /// Share of the calls that are writes (PUT, COPY, POST, LIST), 0 to 1, for the **cost estimate
+    /// only**: a write costs more than a read in every object store. Absent = 0, every call priced
+    /// as a read (GET), the cheaper side. It changes no timing.
+    #[serde(default, deserialize_with = "ratio")]
+    #[schemars(extend("minimum" = 0, "maximum" = 1))]
+    pub write_share: Option<f64>,
     /// Locale pack; a storage node generates no data, so this only passes down.
     #[serde(default)]
     #[schemars(extend("pattern" = LOCALE_PATTERN))]

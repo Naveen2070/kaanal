@@ -364,6 +364,36 @@
       ],
       "type": "object"
     },
+    "DbEngine": {
+      "description": "The engine of a managed database (`engine:`): its price depends on it.",
+      "oneOf": [
+        {
+          "const": "postgresql",
+          "description": "PostgreSQL (RDS). The default.",
+          "type": "string"
+        },
+        {
+          "const": "mysql",
+          "description": "MySQL (RDS).",
+          "type": "string"
+        },
+        {
+          "const": "mariadb",
+          "description": "MariaDB (RDS).",
+          "type": "string"
+        },
+        {
+          "const": "aurora-postgresql",
+          "description": "Aurora PostgreSQL.",
+          "type": "string"
+        },
+        {
+          "const": "aurora-mysql",
+          "description": "Aurora MySQL.",
+          "type": "string"
+        }
+      ]
+    },
     "DbFlavor": {
       "description": "Database flavors with preset op costs (estimates, see [`crate::presets`]).",
       "oneOf": [
@@ -380,6 +410,26 @@
         {
           "const": "mongodb",
           "description": "`MongoDB`.",
+          "type": "string"
+        },
+        {
+          "const": "mariadb",
+          "description": "`MariaDB` (`InnoDB`): the same costs as `MySQL`.",
+          "type": "string"
+        },
+        {
+          "const": "neo4j",
+          "description": "`Neo4j`, a graph database: a read is an indexed node lookup with a hop, a scan is a\ntraversal.",
+          "type": "string"
+        },
+        {
+          "const": "cassandra",
+          "description": "`Apache Cassandra`: cheap writes (commit log and memtable), reads that may touch several\n`SSTables`, no efficient scan across partitions.",
+          "type": "string"
+        },
+        {
+          "const": "dynamodb",
+          "description": "`Amazon DynamoDB`: AWS states single-digit-millisecond latency at any scale.",
           "type": "string"
         }
       ]
@@ -860,6 +910,31 @@
         }
       ]
     },
+    "Hosting": {
+      "description": "Where the component runs (`hosting:`).",
+      "oneOf": [
+        {
+          "const": "self",
+          "description": "A machine you run (a VM, a container host, a server of your own). `instance:` names its VM\ntype. The default.",
+          "type": "string"
+        },
+        {
+          "const": "managed",
+          "description": "The provider runs it and you pick a size: a managed database (`aws/db.m5.large`), or a\nmanaged gateway or load balancer (no size to pick).",
+          "type": "string"
+        },
+        {
+          "const": "serverless",
+          "description": "A pay-per-use service with no machine to pick (Lambda, Cloud Run, `DynamoDB`, Aurora\nServerless).",
+          "type": "string"
+        },
+        {
+          "const": "external",
+          "description": "Run by someone else (a hosted identity provider, a third-party database): only its latency\nand limits are yours.",
+          "type": "string"
+        }
+      ]
+    },
     "Jitter": {
       "description": "How a wait is randomised.",
       "oneOf": [
@@ -1154,6 +1229,17 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this component runs (default `self`): `self` is a machine you run, so `instance:` is\na VM type; `managed`, `serverless` and `external` are the provider's or someone else's\nservice (see `hosting` in the node docs for what each kind allows). It decides which\n`instance:` is allowed and how the cost estimate prices the node."
+            },
             "instance": {
               "default": null,
               "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
@@ -1311,6 +1397,17 @@
                 }
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
+            },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this component runs (default `self`): `self` is a machine you run, so `instance:` is\na VM type; `managed`, `serverless` and `external` are the provider's or someone else's\nservice (see `hosting` in the node docs for what each kind allows). It decides which\n`instance:` is allowed and how the cost estimate prices the node."
             },
             "instance": {
               "default": null,
@@ -1488,6 +1585,17 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this component runs (default `self`): `self` is a machine you run, so `instance:` is\na VM type; `managed`, `serverless` and `external` are the provider's or someone else's\nservice (see `hosting` in the node docs for what each kind allows). It decides which\n`instance:` is allowed and how the cost estimate prices the node."
+            },
             "instance": {
               "default": null,
               "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
@@ -1643,6 +1751,17 @@
               ],
               "description": "CPUs this copy's own work (`proc` and database ops) shares: `{ cores: N }`, N above 0 and at most\n4096, fractions like `0.5` allowed (a container's CPU limit). More work running at once than\ncores slows each piece down (processor sharing); `concurrency` still caps how many run. Each\ncopy has its own cores. Absent = no sharing, every call takes its drawn time."
             },
+            "engine": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DbEngine"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The engine of a managed database (default `postgresql`): its price depends on it. Only with\n`hosting: managed`."
+            },
             "flavor": {
               "anyOf": [
                 {
@@ -1653,6 +1772,17 @@
                 }
               ],
               "description": "Preset that fills ops the user left out (estimates)."
+            },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this component runs (default `self`): `self` is a machine you run, so `instance:` is\na VM type; `managed`, `serverless` and `external` are the provider's or someone else's\nservice (see `hosting` in the node docs for what each kind allows). It decides which\n`instance:` is allowed and how the cost estimate prices the node."
             },
             "instance": {
               "default": null,
@@ -1810,6 +1940,25 @@
               "minimum": 0,
               "type": [
                 "number",
+                "null"
+              ]
+            },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this cache runs (default `self`): `self` is Redis or Memcached on a machine you run,\n`managed` a provider's cache service (`ElastiCache`, Memorystore), `serverless` a pay-per-use\none. Decides which `instance:` is allowed and how the cost estimate prices the node."
+            },
+            "instance": {
+              "default": null,
+              "description": "A cloud instance type: a VM type (`aws/m5.large`) with `self`, a managed cache class\n(`aws/cache.m5.large`) with `hosting: managed`, or your own. **For the cost estimate and\nas a size note only:** a cache's hits and misses are fixed times, so its cores and memory\ndo not change them (the model has no CPU sharing or memory limit for a cache yet). Absent = none.",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -2099,6 +2248,17 @@
               ],
               "description": "What a slot of this node covers (default `own`): `own` holds a slot only while the node\ndoes its own work; `call` holds it until everything the node calls has answered, as a\nthread-per-request server does, so a slow dependency fills this node's slots too."
             },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this component runs (default `self`): `self` is a machine you run, so `instance:` is\na VM type; `managed`, `serverless` and `external` are the provider's or someone else's\nservice (see `hosting` in the node docs for what each kind allows). It decides which\n`instance:` is allowed and how the cost estimate prices the node."
+            },
             "instance": {
               "default": null,
               "description": "A cloud instance type, `provider/type` like `aws/m5.large` (`gcp/...`, `azure/...`): fills\n`cpu.cores`, `bandwidth` and the `memory.limit` you leave out. A value you write wins. The\nfigures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.",
@@ -2265,6 +2425,17 @@
                 }
               ],
               "description": "What a slot of this node covers (default `own`); with `call` it is held until the chosen\ncomponent has answered, as a connection-limited proxy does."
+            },
+            "hosting": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Hosting"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where this component runs (default `self`): `self` is a machine you run, so `instance:` is\na VM type; `managed`, `serverless` and `external` are the provider's or someone else's\nservice (see `hosting` in the node docs for what each kind allows). It decides which\n`instance:` is allowed and how the cost estimate prices the node."
             },
             "instance": {
               "default": null,
@@ -2449,6 +2620,23 @@
                 "null"
               ]
             },
+            "stored": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^\\s*[0-9]+(\\.[0-9]+)?\\s*([kKmMgG][iI]?)?[bB]\\s*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Data kept in the store, as a size (`500GB`, `2TB`... units B, KB, MB, GB), for the **cost\nestimate only**: it prices the storage per GB-month. Absent = nothing stored, so only\nrequests are priced. It changes no timing."
+            },
             "throughput": {
               "anyOf": [
                 {
@@ -2475,6 +2663,17 @@
             "type": {
               "const": "storage",
               "type": "string"
+            },
+            "write_share": {
+              "default": null,
+              "description": "Share of the calls that are writes (PUT, COPY, POST, LIST), 0 to 1, for the **cost estimate\nonly**: a write costs more than a read in every object store. Absent = 0, every call priced\nas a read (GET), the cheaper side. It changes no timing.",
+              "format": "double",
+              "maximum": 1,
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
             }
           },
           "required": [

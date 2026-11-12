@@ -4,15 +4,21 @@ Flavor presets (rule R1.25).
 
 ## What it does
 
-Supplies default op costs for database flavors (`postgres`, `mysql`, `mongodb`, also usable on a `monolith`) and a default hit ratio and hit/miss costs for cache flavors (`redis`, `memcached`). **All numbers are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`). Precedence is user value > preset > error: any value the user writes wins, and [topology.md](topology.md) raises `MissingOps` when something is still missing.
+Supplies default op costs for database flavors (`postgres`, `mysql`, `mariadb`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`, also usable on a `monolith`) and a default hit ratio and hit/miss costs for cache flavors (`redis`, `memcached`). **All numbers are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`). Precedence is user value > preset > error: any value the user writes wins, and [topology.md](topology.md) raises `MissingOps` when something is still missing.
 
 ## Values (estimates)
 
-| Flavor     | read (PK lookup) p50 / p99 | write (single-row commit) p50 / p99 | scan (indexed list, ~100 rows) p50 / p99 |
-| ---------- | -------------------------- | ----------------------------------- | ---------------------------------------- |
-| `postgres` | 0.3 ms / 2 ms              | 1 ms / 8 ms                         | 3 ms / 25 ms                             |
-| `mysql`    | 0.3 ms / 2.5 ms            | 1.2 ms / 10 ms                      | 3 ms / 30 ms                             |
-| `mongodb`  | 0.4 ms / 3 ms              | 0.8 ms / 6 ms                       | 4 ms / 35 ms                             |
+| Flavor      | read (PK lookup) p50 / p99 | write (single-row commit) p50 / p99 | scan (indexed list, ~100 rows) p50 / p99 |
+| ----------- | -------------------------- | ----------------------------------- | ---------------------------------------- |
+| `postgres`  | 0.3 ms / 2 ms              | 1 ms / 8 ms                         | 3 ms / 25 ms                             |
+| `mysql`     | 0.3 ms / 2.5 ms            | 1.2 ms / 10 ms                      | 3 ms / 30 ms                             |
+| `mongodb`   | 0.4 ms / 3 ms              | 0.8 ms / 6 ms                       | 4 ms / 35 ms                             |
+| `mariadb`   | 0.3 ms / 2.5 ms            | 1.2 ms / 10 ms                      | 3 ms / 30 ms                             |
+| `neo4j`     | 0.5 ms / 4 ms              | 2 ms / 15 ms                        | 6 ms / 50 ms                             |
+| `cassandra` | 1 ms / 8 ms                | 0.5 ms / 4 ms                       | 8 ms / 60 ms                             |
+| `dynamodb`  | 3 ms / 9 ms                | 5 ms / 15 ms                        | 10 ms / 40 ms                            |
+
+`mariadb` uses the `mysql` figures (InnoDB underneath). `neo4j` (a node lookup with a hop, a commit, a traversal of about 100 nodes) and `cassandra` (a cheap log-structured write, a read that may touch several SSTables, a partition slice) are **placeholders from typical ranges, not published figures**: no vendor states them, so measure yours and write `read`, `write` and `scan`. `dynamodb` sits inside AWS's "single-digit millisecond" statement. Not preset yet: SQL Server, Oracle, CockroachDB, Elasticsearch.
 
 | Flavor      | `hit_ratio` | hit p50 / p99    | miss p50 / p99   |
 | ----------- | ----------- | ---------------- | ---------------- |

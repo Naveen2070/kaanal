@@ -35,7 +35,13 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const BASE = "https://instances.vantage.sh";
-const SOURCES = { aws: "instances.json", azure: "azure/instances.json", gcp: "gcp/instances.json" };
+const SOURCES = {
+  aws: "instances.json",
+  azure: "azure/instances.json",
+  gcp: "gcp/instances.json",
+  rds: "rds/instances.json",
+  elasticache: "cache/instances.json",
+};
 const dir = process.argv[2] ?? mkdtempSync(join(tmpdir(), "kaanal-instances-"));
 
 function load(provider) {
@@ -110,6 +116,55 @@ for (const x of load("gcp")) {
   const cap = x.instance_type.startsWith("e2-") ? 16000 : 32000;
   add(`gcp/${x.instance_type}`, x.vCPU, mib(x.memory), Math.min(2000 * Number(x.vCPU), cap), micro(x, "us-central1"));
   noteRegions("gcp", `gcp/${x.instance_type}`, x);
+}
+
+// AWS RDS, the managed database classes (RULES 122): `aws/db.m5.large` has the class's own vCPU,
+// memory and network figure, and a price per engine and region. The price of a class depends on the
+// engine, so each engine is a provider of its own in the price files (`aws-rds-postgresql`, ...)
+// and the price column of instances.csv is the PostgreSQL price in us-east-1 (MySQL when a class has
+// no PostgreSQL price). Single-AZ, on-demand; Multi-AZ is not here. Oracle and SQL Server carry a
+// licence price and are left out. Azure and Google Cloud have no public catalogue of this kind.
+const RDS_ENGINES = {
+  postgresql: "PostgreSQL",
+  mysql: "MySQL",
+  mariadb: "MariaDB",
+  "aurora-postgresql": "Aurora PostgreSQL",
+  "aurora-mysql": "Aurora MySQL",
+};
+for (const x of load("rds")) {
+  const n = `aws/${x.instance_type}`.toLowerCase();
+  const price = (engine, region) => {
+    const v = Number(x.pricing?.[region]?.[RDS_ENGINES[engine]]?.ondemand);
+    return Number.isFinite(v) && v > 0 ? Math.round(v * 1e6) : 0;
+  };
+  const any = Object.keys(RDS_ENGINES).some((e) => Object.keys(x.pricing ?? {}).some((r) => price(e, r) > 0));
+  if (!any) continue;
+  add(n, Number(x.vcpu), mib(x.memory), awsNet(x.network_performance), price("postgresql", "us-east-1") || price("mysql", "us-east-1"));
+  if (!rows.has(n)) continue;
+  for (const engine of Object.keys(RDS_ENGINES)) {
+    for (const region of Object.keys(x.pricing ?? {})) {
+      const m = price(engine, region);
+      if (m > 0) ((prices[`aws-rds-${engine}`] ??= {})[region] ??= []).push([n, m]);
+    }
+  }
+}
+
+// AWS ElastiCache, the managed cache classes (RULES 122): `aws/cache.m5.large`. One price per class and
+// region: Redis OSS (Memcached is the same price wherever both are listed; Valkey is about 20%
+// cheaper and is not here). The default-region price column is us-east-1. A class with no Redis or
+// Memcached price anywhere is left out. Provider key `aws-elasticache` in the price files.
+for (const x of load("elasticache")) {
+  const n = `aws/${x.instance_type}`.toLowerCase();
+  const price = (region) => {
+    const p = x.pricing?.[region];
+    const v = Number(p?.Redis?.ondemand ?? p?.Memcached?.ondemand);
+    return Number.isFinite(v) && v > 0 ? Math.round(v * 1e6) : 0;
+  };
+  const regions = Object.keys(x.pricing ?? {}).filter((r) => price(r) > 0);
+  if (regions.length === 0) continue;
+  add(n, Number(x.vcpu), mib(x.memory), awsNet(x.network_performance), price("us-east-1"));
+  if (!rows.has(n)) continue;
+  for (const region of regions) ((prices["aws-elasticache"] ??= {})[region] ??= []).push([n, price(region)]);
 }
 
 const sorted = [...rows.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));

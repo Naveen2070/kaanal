@@ -1,5 +1,6 @@
 //! The per-kind config structs of the seven original node kinds (gateway, service, monolith, database, cache, external API, auth); split out of `nodes.rs`, which reached 800 lines.
 
+use super::hosting::{DbEngine, Hosting};
 use super::nodes::{CacheFlavor, DbFlavor, Hold, OpsConfig};
 use super::{
     ConcurrencyConfig, CpuConfig, Deserialize, DistConfig, Duration, IndexMap, JsonSchema,
@@ -65,6 +66,12 @@ pub struct GatewayConfig {
     /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
+    /// Where this component runs (default `self`): `self` is a machine you run, so `instance:` is
+    /// a VM type; `managed`, `serverless` and `external` are the provider's or someone else's
+    /// service (see `hosting` in the node docs for what each kind allows). It decides which
+    /// `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
@@ -136,6 +143,12 @@ pub struct ServiceConfig {
     /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
+    /// Where this component runs (default `self`): `self` is a machine you run, so `instance:` is
+    /// a VM type; `managed`, `serverless` and `external` are the provider's or someone else's
+    /// service (see `hosting` in the node docs for what each kind allows). It decides which
+    /// `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
@@ -214,6 +227,12 @@ pub struct MonolithConfig {
     /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
+    /// Where this component runs (default `self`): `self` is a machine you run, so `instance:` is
+    /// a VM type; `managed`, `serverless` and `external` are the provider's or someone else's
+    /// service (see `hosting` in the node docs for what each kind allows). It decides which
+    /// `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
@@ -281,6 +300,16 @@ pub struct DatabaseConfig {
     /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
+    /// Where this component runs (default `self`): `self` is a machine you run, so `instance:` is
+    /// a VM type; `managed`, `serverless` and `external` are the provider's or someone else's
+    /// service (see `hosting` in the node docs for what each kind allows). It decides which
+    /// `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
+    /// The engine of a managed database (default `postgresql`): its price depends on it. Only with
+    /// `hosting: managed`.
+    #[serde(default)]
+    pub engine: Option<DbEngine>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
@@ -307,6 +336,17 @@ pub struct CacheConfig {
     pub hit: Option<DistConfig>,
     /// Cost of finding out it is a miss. Absent = the `flavor` preset (a cache with neither is refused).
     pub miss: Option<DistConfig>,
+    /// Where this cache runs (default `self`): `self` is Redis or Memcached on a machine you run,
+    /// `managed` a provider's cache service (`ElastiCache`, Memorystore), `serverless` a pay-per-use
+    /// one. Decides which `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
+    /// A cloud instance type: a VM type (`aws/m5.large`) with `self`, a managed cache class
+    /// (`aws/cache.m5.large`) with `hosting: managed`, or your own. **For the cost estimate and
+    /// as a size note only:** a cache's hits and misses are fixed times, so its cores and memory
+    /// do not change them (the model has no CPU sharing or memory limit for a cache yet). Absent = none.
+    #[serde(default)]
+    pub instance: Option<String>,
     /// Entry lifetime. Accepted and validated; no effect yet.
     #[serde(default, with = "humantime_serde")]
     #[schemars(schema_with = "crate::schema::duration_text")]
@@ -469,6 +509,12 @@ pub struct AuthConfig {
     /// figures are estimates, an upper bound on capacity, not on speed (see the instance docs). Absent = none: `cpu`, `bandwidth` and `memory.limit` are then only what you write.
     #[serde(default)]
     pub instance: Option<String>,
+    /// Where this component runs (default `self`): `self` is a machine you run, so `instance:` is
+    /// a VM type; `managed`, `serverless` and `external` are the provider's or someone else's
+    /// service (see `hosting` in the node docs for what each kind allows). It decides which
+    /// `instance:` is allowed and how the cost estimate prices the node.
+    #[serde(default)]
+    pub hosting: Option<Hosting>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.

@@ -1,0 +1,41 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-aurora-postgresql in region me-central-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/db.r5.12xlarge,10982000
+aws/db.r5.16xlarge,14643000
+aws/db.r5.24xlarge,21965000
+aws/db.r5.2xlarge,1830000
+aws/db.r5.4xlarge,3661000
+aws/db.r5.8xlarge,7322000
+aws/db.r5.large,458000
+aws/db.r5.xlarge,915000
+aws/db.r6g.12xlarge,9775000
+aws/db.r6g.16xlarge,13033000
+aws/db.r6g.2xlarge,1629000
+aws/db.r6g.4xlarge,3258000
+aws/db.r6g.8xlarge,6516000
+aws/db.r6g.large,407000
+aws/db.r6g.xlarge,815000
+aws/db.r6i.12xlarge,10982000
+aws/db.r6i.16xlarge,14643000
+aws/db.r6i.24xlarge,21965000
+aws/db.r6i.2xlarge,1830000
+aws/db.r6i.32xlarge,29286000
+aws/db.r6i.4xlarge,3661000
+aws/db.r6i.8xlarge,7322000
+aws/db.r6i.large,458000
+aws/db.r6i.xlarge,915000
+aws/db.r7g.12xlarge,10392000
+aws/db.r7g.16xlarge,13856000
+aws/db.r7g.2xlarge,1732000
+aws/db.r7g.4xlarge,3464000
+aws/db.r7g.8xlarge,6928000
+aws/db.r7g.large,433000
+aws/db.r7g.xlarge,866000
+aws/db.t3.large,252000
+aws/db.t3.medium,126000
+aws/db.t3.small,64000
+aws/db.t4g.2xlarge,894000
+aws/db.t4g.large,226000
+aws/db.t4g.medium,113000
+aws/db.t4g.xlarge,447000

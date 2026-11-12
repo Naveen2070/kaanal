@@ -1,0 +1,20 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-aurora-postgresql in region il-central-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/db.r5.12xlarge,10483000
+aws/db.r5.16xlarge,13978000
+aws/db.r5.24xlarge,20966000
+aws/db.r5.2xlarge,1747000
+aws/db.r5.4xlarge,3494000
+aws/db.r5.8xlarge,6989000
+aws/db.r5.large,437000
+aws/db.r5.xlarge,874000
+aws/db.r7g.12xlarge,10104000
+aws/db.r7g.16xlarge,13472000
+aws/db.r7g.2xlarge,1684000
+aws/db.r7g.4xlarge,3368000
+aws/db.r7g.8xlarge,6736000
+aws/db.r7g.large,421000
+aws/db.r7g.xlarge,842000
+aws/db.t3.large,240000
+aws/db.t3.medium,120000

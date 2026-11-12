@@ -49,7 +49,15 @@ fn without_flavor_all_three_ops_are_needed() {
 
 #[test]
 fn unknown_or_wrong_family_flavor_lists_valid_names() {
-    let db = &["postgres", "mysql", "mongodb"][..];
+    let db = &[
+        "postgres",
+        "mysql",
+        "mariadb",
+        "mongodb",
+        "neo4j",
+        "cassandra",
+        "dynamodb",
+    ][..];
     let cache = &["redis", "memcached"][..];
     for (node, names) in [
         ("{ type: database, flavor: redis }", db),

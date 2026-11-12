@@ -1,4 +1,4 @@
-# Nodes reference
+| service; monolith; database; cache | database; cache; gateway; load balancer# Nodes reference
 
 Every node kind you can put under `nodes:`, its fields, and what each field does today. Set the kind with `type:`. A field that does not belong to a kind is rejected when the file loads.
 
@@ -53,7 +53,7 @@ core: { type: monolith, spec: openapi.yaml, proc: 3ms, flavor: mysql, ops: { rea
 | `spec`        | OpenAPI 3.0 file, relative to the config file                                                                                                                                                                                                  | none      | active now |
 | `proc`        | Processing time per request, charged wherever a chain reaches the node                                                                                                                                                                         | zero      | active now |
 | `ops`         | Inline `read`, `write`, `scan` costs; any you leave out comes from `flavor`                                                                                                                                                                    | none      | active now |
-| `flavor`      | Preset that fills `ops` you left out: `postgres`, `mysql`, `mongodb`                                                                                                                                                                           | none      | active now |
+| `flavor`      | Preset that fills `ops` you left out: `postgres`, `mysql`, `mariadb`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`                                                                                                                              | none      | active now |
 | `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
 | `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
 | `timeout`     | Deadline for a call to this node: queue wait, its own work and everything it calls. When it passes the caller gets a 504 (`timeout`); work already running keeps its slot until it ends. Above 0, at most `5m`; see [Chaos](concepts.md#chaos) | none      | active now |
@@ -69,7 +69,7 @@ db: { type: database, flavor: postgres, ops: { write: 9ms } }
 | Field         | Meaning                                                                                                                                                                                                                                        | Default   | Status     |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
 | `ops`         | `read`, `write`, `scan` costs; required in full unless `flavor` fills them                                                                                                                                                                     | none      | active now |
-| `flavor`      | Preset for ops you left out: `postgres`, `mysql`, `mongodb`                                                                                                                                                                                    | none      | active now |
+| `flavor`      | Preset for ops you left out: `postgres`, `mysql`, `mariadb`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`                                                                                                                                       | none      | active now |
 | `pool`        | Connection pool: `size` (at least 1), `queue` (default 0), `overflow_status` (500 to 504, default 503)                                                                                                                                         | none      | active now |
 | `concurrency` | A number (most requests served at once), or `{ limit, queue, overflow_status }`                                                                                                                                                                | unlimited | active now |
 | `rate_limit`  | Token bucket: `rps` (above 0, at most 1000000000) and `burst` (at least 1); over it a request fails with 429                                                                                                                                   | none      | active now |
@@ -176,10 +176,21 @@ assets:
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | `first_byte`                                            | Time to the first byte of a call, the node's service time. A duration like `proc`: `25ms`, `{ p50: 20ms, p99: 80ms }` or `{ mean: 25ms }`. **Optional**: absent means 25 ms, a labelled estimate (no provider publishes one), so write your own measurement | none               |
 | `throughput`                                            | Bytes per second the store moves for one call: a whole number or text like `80MB/s`, `250KB/s` (KB = 1024 bytes, see [units](#payload-cost)); at least 1 byte per second. A larger body takes longer                                                        | none: no size term |
-| `flavor`                                                | `s3`, `gcs` or `blob`. A **label only** (shown on the page and in status output); it sets no number                                                                                                                                                         | none               |
+| `stored`, `write_share`                                 | The data kept and the share of writes: inputs of the **cost estimate only** (below). Optional                                                                                                                                                               |                    |
+| `flavor`                                                | `s3`, `gcs` or `blob`. A **label for timing** (it sets no number there); it also picks the cloud the **cost estimate** prices the store in (shown on the page and in status output); it sets no number                                                      | none               |
 | `concurrency`                                           | A number, or `{ limit, queue, overflow_status }`: calls served at once                                                                                                                                                                                      | unlimited          |
 | `rate_limit`                                            | Token bucket: `rps` and `burst`; over it a call fails with **503** (S3's "Slow Down"), not 429 like the other kinds                                                                                                                                         | none               |
 | `timeout`, `replicas`, `balance`, `bandwidth`, `locale` | As on the other nodes                                                                                                                                                                                                                                       |                    |
+
+**What a store costs (the cost estimate, by region).** Two optional fields feed the estimate and change **no timing**: `stored` (the data kept, `500GB`, `2TB`) and `write_share` (the share of calls that are writes, 0 to 1; absent = all reads). The card prices the store the way every object store bills: **the data kept per GB-month** (over 730 hours an hour) **plus the requests**, a `write_share` of them at the write price (PUT, COPY, POST, LIST) and the rest at the read price (GET), at the visit rate of the **last run** (so request cost shows after a run, the data cost at once). Copies do not multiply it: one store, one bill.
+
+| `flavor`     | Priced as                                     | Source                                                                                           | Regions                                                                                                           |
+| ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `s3` or none | AWS S3 Standard, first tier                   | AWS's public price list                                                                          | 36 regions, each its own price (us-east-1: $0.023 a GB-month, $0.005 per 1,000 writes, $0.0004 per 1,000 reads)   |
+| `blob`       | Azure Blob, Hot, LRS                          | Azure's public retail prices API                                                                 | 56 regions (Azure UK, Jio, Saudi Arabia and government regions have no match in the region list and are left out) |
+| `gcs`        | Google Cloud Storage Standard, single regions | Google's pricing page, read in a browser on 2026-11-12 (`scripts/gcs-storage.csv`, kept by hand) | 46 regions, each its own price (us-central1: $0.02 a GB-month, $0.005 per 1,000 writes, $0.0004 per 1,000 reads)  |
+
+The region is the one you pick at the globe, and the price follows it. Left out of the estimate: data transfer out, retrieval fees, other storage classes (Infrequent Access, Glacier, Archive), lifecycle and replication. Refresh with `node scripts/gen-storage-prices.mjs`; the table is `crates/kaanal-core/data/storage-prices.csv`, served at `GET /__kaanal/storage-prices`.
 
 **Cost of one call** is `first_byte + (request bytes + response bytes) / throughput`, with KB = 1024. The bytes are the request and response sizes already in the traffic (a stream's `req_bytes` and `resp_bytes`; the live mock's `Content-Length` and body size), so there is no size field of its own; with no sizes, or no `throughput`, the size term is nothing. Example: `first_byte: 20ms`, `throughput: 100MB/s` and a 5 MB response cost 20 ms + 5 MiB / (100 MiB/s) = 20 ms + 50 ms = 70 ms; a 5 KB object adds under a millisecond. It runs on the same machinery as `proc` and `per_kb`: the node's service time is `first_byte` and the size term is `per_kb` worked out as `1024 / throughput` seconds per KB (held to the nanosecond, so a size term is exact to about 1 part in 10^4 at 100 MB/s). A storage node therefore refuses `proc` and `per_kb` (use `first_byte` and `throughput`), and `ops`, `pool`, `hit_ratio` and `hold` (it calls nothing, and its concurrency is `concurrency`), each as a load error that says so.
 
@@ -377,6 +388,32 @@ nodes:
 
 > **Azure network figures are partial.** About 260 of the 1,337 Azure sizes carry the expected bandwidth Microsoft states on the size's page (the D, E, F, B, L and M families, versions 3 to 6); an Azure size outside them fills cores and memory but leaves the network card **unlimited**, which can make a wire look faster than the VM really is. Set `bandwidth:` on the node yourself if it matters. AWS has no figure for 47 older types and GCP's figures are the documented per-vCPU estimate, so the same advice applies there. The network figure belongs to the type, not the region: a type has the same card wherever it is offered.
 
+### Where it runs: `hosting`
+
+```yaml
+nodes:
+  orders-db: { type: database, flavor: postgres, hosting: managed, engine: postgresql, instance: aws/db.m5.large }
+  report:    { type: service, hosting: serverless, proc: 40ms }
+```
+
+A VM type only fits a machine you run. `hosting:` says what the component is, and so which `instance:` it may name and how the estimate prices it. Leave it out for `self`.
+
+| `hosting`        | Kinds that take it               | `instance:`                                                                                                               | The cost estimate                                                                                         |
+| ---------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `self` (default) | every kind with an instance      | a VM type (`aws/m5.large`) or your own                                                                                    | the VM price                                                                                              |
+| `managed`        | database; gateway; load balancer | a database takes a **managed class** (`aws/db.m5.large`, from AWS RDS) or your own; a gateway or load balancer takes none | a database class is priced per `engine`; a managed gateway or load balancer is left out ("priced by use") |
+| `serverless`     | service; monolith; database      | none                                                                                                                      | left out ("priced per use")                                                                               |
+| `external`       | database; auth                   | none                                                                                                                      | left out ("run by someone else")                                                                          |
+
+- **A managed class fills the same things a VM type does:** `cpu.cores`, the network card and the `memory.limit`, from the class's own figures (`db.m5.large` is 2 vCPU and 8 GiB). Its **price depends on the engine** (`engine:` is `postgresql` (default), `mysql`, `mariadb`, `aurora-postgresql` or `aurora-mysql`), and on the region you pick at the globe: db.m5.large is $0.178 an hour for PostgreSQL in us-east-1 and $0.197 in eu-west-1 (list prices).
+- **A cache** takes `self` (Redis or Memcached on a VM you run), `managed` (ElastiCache or Memorystore: a class like `aws/cache.m5.large`) or `serverless`. Its instance is a **price and a size note only**: a cache's hits and misses are fixed times, so its cores and memory do not change them (the model has no CPU sharing or memory limit for a cache yet). cache.m5.large is $0.156 an hour in us-east-1 and $0.172 in eu-west-1 (Redis OSS list price, Memcached is the same; Valkey is about 20% cheaper and is not in the table).
+- **A gateway or load balancer is `self` when you run nginx, Envoy or HAProxy on a VM, in any cloud** (the VM is the instance); `managed` is the provider's (API Gateway, ALB), which has no size to pick and is left out of the estimate. An external API and a storage node have no hosting choice: the first is someone else's by definition, the second is an object store.
+- **Which databases have a managed class:** the engine follows the flavor. `postgres` takes `postgresql` or `aurora-postgresql`, `mysql` takes `mysql` or `aurora-mysql`, `mariadb` takes `mariadb`. **`mongodb`, `neo4j`, `cassandra` and `dynamodb` have no managed class in the table** (Amazon DocumentDB, Neptune, Keyspaces, Atlas and AuraDB are not in the public catalogue it is built from): a `managed` one of those is refused if it names an `aws/db.*` class, and you size it yourself (`cpu`, `memory`) or use `instance: your-own` with `cost_per_hour`. Self-hosted, every flavor is priced as the VM it runs on.
+- **Only AWS has managed classes in the table** (from AWS RDS, single-AZ, on-demand, about 300 classes). Azure and Google Cloud publish no catalogue like it, so for those set `cores`, `memory` and `bandwidth` yourself. Oracle and SQL Server (licence prices), Multi-AZ, storage and I/O charges are not in it.
+- **`serverless`, `external` and a managed gateway or load balancer take no `instance:`** (the file is refused with the reason). `cpu`, `memory` and `bandwidth` stay yours to write if you model them.
+- **The loader refuses a mismatch with the path**: a managed class on a `self` node, a VM type on a managed database, `engine:` without a managed database, or a hosting the kind does not have.
+- Studio: the **Hosting** box sits at the top of a component's CPUs group. Changing it drops an `instance:` that no longer fits. A managed database lists only the AWS database classes the region offers.
+
 ### What it costs: the cost estimate
 
 Studio shows an **estimate of what the system costs** in a small card under the node picker (the dollar figure on the left). It adds up, for every node that names an instance, the **copies times the price of one hour**, from the on-demand Linux list prices of the table. Click the card for the details: the price of each node, the totals for an hour, a day and **the number of days you type**, and the cost **per 1,000 requests** at the offered rate (the live rate, else the traffic profile's).
@@ -464,11 +501,17 @@ See `examples/gatewayless` in the repository for a complete gateway-less file.
 
 A `flavor` fills the values you do not write; anything you write wins. **All numbers below are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`).
 
-| Flavor     | read (PK lookup) p50 / p99 | write (single-row commit) p50 / p99 | scan (indexed list, ~100 rows) p50 / p99 |
-| ---------- | -------------------------- | ----------------------------------- | ---------------------------------------- |
-| `postgres` | 0.3 ms / 2 ms              | 1 ms / 8 ms                         | 3 ms / 25 ms                             |
-| `mysql`    | 0.3 ms / 2.5 ms            | 1.2 ms / 10 ms                      | 3 ms / 30 ms                             |
-| `mongodb`  | 0.4 ms / 3 ms              | 0.8 ms / 6 ms                       | 4 ms / 35 ms                             |
+| Flavor      | read (PK lookup) p50 / p99 | write (single-row commit) p50 / p99 | scan (indexed list, ~100 rows) p50 / p99 |
+| ----------- | -------------------------- | ----------------------------------- | ---------------------------------------- |
+| `postgres`  | 0.3 ms / 2 ms              | 1 ms / 8 ms                         | 3 ms / 25 ms                             |
+| `mysql`     | 0.3 ms / 2.5 ms            | 1.2 ms / 10 ms                      | 3 ms / 30 ms                             |
+| `mongodb`   | 0.4 ms / 3 ms              | 0.8 ms / 6 ms                       | 4 ms / 35 ms                             |
+| `mariadb`   | 0.3 ms / 2.5 ms            | 1.2 ms / 10 ms                      | 3 ms / 30 ms                             |
+| `neo4j`     | 0.5 ms / 4 ms              | 2 ms / 15 ms                        | 6 ms / 50 ms                             |
+| `cassandra` | 1 ms / 8 ms                | 0.5 ms / 4 ms                       | 8 ms / 60 ms                             |
+| `dynamodb`  | 3 ms / 9 ms                | 5 ms / 15 ms                        | 10 ms / 40 ms                            |
+
+`mariadb` uses the `mysql` figures (InnoDB underneath). `neo4j` (a node lookup with a hop, a commit, a traversal of about 100 nodes) and `cassandra` (a cheap log-structured write, a read that may touch several SSTables, a partition slice) are **placeholders from typical ranges, not published figures**: no vendor states them, so measure yours and write `read`, `write` and `scan`. `dynamodb` sits inside AWS's "single-digit millisecond" statement. Not preset yet: SQL Server, Oracle, CockroachDB, Elasticsearch.
 
 | Flavor      | `hit_ratio` | hit p50 / p99    | miss p50 / p99   |
 | ----------- | ----------- | ---------------- | ---------------- |

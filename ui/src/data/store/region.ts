@@ -66,10 +66,13 @@ export function regionOf(s: RegionState, provider: string): string | undefined {
 /**
  * The types of `provider` that have a price in its region, which is how the table says a type is
  * offered there (name to micro-USD an hour); `undefined` while it loads, and `null` when it could
- * not be loaded (the picker then lists every type, as before).
+ * not be loaded (the picker then lists every type, as before). `list` is the price list read when
+ * it is not the provider's own: a managed database class is priced in `aws-rds-<engine>`, in the
+ * region of AWS.
  */
 export function useRegionTable(
   provider: string | null,
+  list: string | null = provider,
 ): ReadonlyMap<string, number> | undefined | null {
   const region = useRegion((s) => (provider === null ? undefined : regionOf(s, provider)));
   const load = useRegion((s) => s.load);
@@ -83,15 +86,15 @@ export function useRegionTable(
   useEffect(() => {
     if (provider === null || region === undefined) return;
     let gone = false;
-    const key = `${provider}/${region}`;
-    loadPrices(provider, region).then(
+    const key = `${list ?? provider}/${region}`;
+    loadPrices(list ?? provider, region).then(
       (t) => !gone && setTable({ key, t }),
       () => !gone && setTable({ key, t: null }),
     );
     return () => {
       gone = true;
     };
-  }, [provider, region]);
+  }, [provider, list, region]);
   if (provider === null || region === undefined) return undefined;
-  return table?.key === `${provider}/${region}` ? table.t : undefined;
+  return table?.key === `${list ?? provider}/${region}` ? table.t : undefined;
 }

@@ -1,0 +1,18 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-elasticache in region us-west-2-lax-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/cache.m5.12xlarge,4493000
+aws/cache.m5.24xlarge,8986000
+aws/cache.m5.2xlarge,748000
+aws/cache.m5.4xlarge,1494000
+aws/cache.m5.large,187000
+aws/cache.m5.xlarge,373000
+aws/cache.r5.12xlarge,6221000
+aws/cache.r5.24xlarge,12442000
+aws/cache.r5.2xlarge,1034000
+aws/cache.r5.4xlarge,2069000
+aws/cache.r5.large,259000
+aws/cache.r5.xlarge,517000
+aws/cache.t3.medium,82000
+aws/cache.t3.micro,20000
+aws/cache.t3.small,41000

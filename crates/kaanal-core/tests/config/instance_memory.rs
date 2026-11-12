@@ -119,11 +119,22 @@ fn sizes_take_units_above_one_gib_and_refuse_junk() {
 }
 
 #[test]
-fn only_the_kinds_with_a_cpu_take_instance_and_memory() {
-    let cache = Config::from_yaml(
+fn only_the_kinds_with_a_machine_take_an_instance_and_a_cache_takes_it_as_a_note() {
+    // an external API and a storage node have no machine to size
+    for node in [
+        "{ type: external-api, url: \"http://x\", instance: aws/m5.large }",
+        "{ type: storage, flavor: s3, instance: aws/m5.large }",
+    ] {
+        let r = Config::from_yaml(&format!("version: 1\nnodes:\n  n: {node}\n"));
+        assert!(r.is_err(), "{node} has no instance field");
+    }
+    // a cache takes one for its price and size, but a cache's hits are not CPU-shared, so it fills no cores
+    let c = Config::from_yaml(
         "version: 1\nnodes:\n  c: { type: cache, flavor: redis, instance: aws/m5.large }\n",
-    );
-    assert!(cache.is_err(), "a cache has no instance field");
+    )
+    .unwrap();
+    assert!(c.nodes["c"].instance().is_some());
+    assert!(c.nodes["c"].cpu().is_none());
 }
 
 #[test]

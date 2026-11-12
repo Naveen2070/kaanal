@@ -6,7 +6,8 @@
 
 import { CircleDollarSign, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { loadPrices } from "../../data/api/prices";
+import { loadPrices, loadStoragePrices, type StoragePrice } from "../../data/api/prices";
+import { useRun } from "../../data/store/run";
 import { useDraft } from "../../data/store/draft";
 import { useLive } from "../../data/store/live";
 import { isLive, useMode } from "../../data/store/mode";
@@ -19,6 +20,7 @@ import {
   MAX_DAYS,
   nodeCosts,
   perThousandRequests,
+  priceKeysUsed,
   providersUsed,
   totals,
   usd,
@@ -57,6 +59,25 @@ export function CostCard() {
   const regionState = useRegion();
   const [tables, setTables] = useState<Record<string, ReadonlyMap<string, number> | undefined>>({});
   const [problem, setProblem] = useState<string | null>(null);
+  // object stores are priced from one list of every region, and their requests from the last run
+  const [storagePrices, setStoragePrices] = useState<Record<string, StoragePrice> | undefined>();
+  const runNodes = useRun((s) => s.latest?.summary?.nodes);
+  const hasStorage = Object.values(doc?.nodes ?? {}).some((n) => n.type === "storage");
+  useEffect(() => {
+    if (!hasStorage) return;
+    let gone = false;
+    loadStoragePrices().then(
+      (p) => !gone && setStoragePrices(p),
+      () => !gone && setProblem("No object-store prices."),
+    );
+    return () => {
+      gone = true;
+    };
+  }, [hasStorage]);
+  const visits = useMemo(
+    () => Object.fromEntries((runNodes ?? []).map((n) => [n.name, n.visits_per_s])),
+    [runNodes],
+  );
   const button = useRef<HTMLButtonElement>(null);
   const [at, setAt] = useState<{ left: number; bottom: number } | null>(null);
   const id = useId();
@@ -70,15 +91,14 @@ export function CostCard() {
   }, [usedKey, loadRegions]);
 
   const region = (p: string): string | undefined => regionOf(regionState, p);
-  const regionKey = used.map((p) => `${p}/${region(p) ?? ""}`).join(",");
+  // a price list is read in the region of its provider: a managed class (aws-rds-mysql) in the AWS one
+  const keys = priceKeysUsed(doc);
+  const regionKey = keys.map((k) => `${k.key}/${region(k.provider) ?? ""}`).join(",");
   useEffect(() => {
     let gone = false;
-    for (const p of usedKey === "" ? [] : usedKey.split(",")) {
-      const r = regionKey
-        .split(",")
-        .find((x) => x.startsWith(`${p}/`))
-        ?.slice(p.length + 1);
-      if (!r) continue;
+    for (const x of regionKey === "" ? [] : regionKey.split(",")) {
+      const [p, r] = x.split("/");
+      if (!p || !r) continue;
       loadPrices(p, r).then(
         (t) => !gone && setTables((s) => ({ ...s, [p]: t })),
         () => !gone && setProblem(`No prices for ${p} in ${r}.`),
@@ -93,10 +113,10 @@ export function CostCard() {
 
   const regionNow = Object.fromEntries(used.map((p) => [p, region(p) ?? ""]));
   const costs = useMemo(
-    () => nodeCosts(doc, tables as PriceTables, regionNow),
+    () => nodeCosts(doc, tables as PriceTables, regionNow, { prices: storagePrices, visits }),
     // regionNow is derived from regionKey
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, tables, regionKey],
+    [doc, tables, regionKey, storagePrices, visits],
   );
   const sum = totals(costs);
   const profile = activeProfile(doc);

@@ -173,6 +173,14 @@ export const api = {
       undefined,
       o,
     ),
+  /** What an object store costs per region (RULES 123): `[provider, region, gb_month, write_per_1k, read_per_1k]` in micro-USD; region `*` answers for any region of the provider. */
+  getStoragePrices: (o: Opts = {}) =>
+    call<{ rows: [string, string, number, number, number][] }>(
+      "GET",
+      "/storage-prices",
+      undefined,
+      o,
+    ),
   getTopology: (o: Opts = {}) => call<Topology>("GET", "/topology", undefined, o),
   /** The live response edits (step 8A). */
   getPayloads: (o: Opts = {}) => call<{ edits: PayloadEdit[] }>("GET", "/payload", undefined, o),

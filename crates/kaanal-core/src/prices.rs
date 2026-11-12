@@ -72,3 +72,84 @@ pub fn price_micro_usd_hr(region: &str, name: &str) -> Option<u32> {
         .ok()
         .map(|i| table[i].1)
 }
+
+/// What an object store costs in a region (`data/storage-prices.csv`, RULES 123): Standard class,
+/// first tier, in micro-USD (an integer so sums do not drift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoragePrice {
+    /// One GB kept for a month.
+    pub gb_month: u32,
+    /// 1,000 write requests (PUT, COPY, POST, LIST).
+    pub write_per_1k: u32,
+    /// 1,000 read requests (GET).
+    pub read_per_1k: u32,
+}
+
+/// One row of the storage price file: `(provider, region, price)`.
+pub type StorageRow = (&'static str, &'static str, StoragePrice);
+
+const STORAGE_CSV: &str = include_str!("../data/storage-prices.csv");
+
+/// Every row of the storage price file, sorted by provider then region.
+#[must_use]
+pub fn storage_rows() -> &'static [StorageRow] {
+    static ROWS: OnceLock<Vec<StorageRow>> = OnceLock::new();
+    ROWS.get_or_init(|| {
+        STORAGE_CSV
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let mut f = l.split(',');
+                let mut next = || f.next().expect("a csv field");
+                let (provider, region) = (next(), next());
+                let mut n = || next().parse::<u32>().expect("a number");
+                let price = StoragePrice {
+                    gb_month: n(),
+                    write_per_1k: n(),
+                    read_per_1k: n(),
+                };
+                (provider, region, price)
+            })
+            .collect()
+    })
+}
+
+/// The object-store price of `provider` (`aws` S3, `azure` Blob, `gcp` Cloud Storage) in `region`.
+/// A row for region `*` would answer for every region of its provider (none today).
+#[must_use]
+pub fn storage_price(provider: &str, region: &str) -> Option<StoragePrice> {
+    let rows = storage_rows();
+    let hit = |r: &str| rows.iter().find(|(p, g, _)| *p == provider && *g == r);
+    hit(region).or_else(|| hit("*")).map(|(_, _, p)| *p)
+}
+
+/// The price an hour of a managed cache class (`aws/cache.m5.large`, `ElastiCache`) in the AWS
+/// `region`, in micro-USD (on-demand, Redis OSS; Memcached is the same price); `None` when the
+/// class has no price there.
+#[must_use]
+pub fn managed_cache_price_micro_usd_hr(region: &str, name: &str) -> Option<u32> {
+    let key = name.trim().to_ascii_lowercase();
+    let table = region_table("aws-elasticache", region)?;
+    table
+        .binary_search_by(|(n, _)| (*n).cmp(key.as_str()))
+        .ok()
+        .map(|i| table[i].1)
+}
+
+/// The price an hour of a managed database class (`aws/db.m5.large`) running `engine` in the AWS
+/// `region`, in micro-USD (single-AZ, on-demand, RULES 122); `None` when the engine has no price
+/// for that class there. Each engine has its own files (`aws-rds-<engine>`).
+#[must_use]
+pub fn managed_price_micro_usd_hr(
+    engine: crate::config::DbEngine,
+    region: &str,
+    name: &str,
+) -> Option<u32> {
+    let key = name.trim().to_ascii_lowercase();
+    let provider = format!("aws-rds-{}", engine.word());
+    let table = region_table(&provider, region)?;
+    table
+        .binary_search_by(|(n, _)| (*n).cmp(key.as_str()))
+        .ok()
+        .map(|i| table[i].1)
+}

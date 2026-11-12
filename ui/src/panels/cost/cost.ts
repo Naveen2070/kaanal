@@ -5,7 +5,10 @@
 
 import { replicasOf } from "../../canvas/metrics";
 import type { Doc } from "../../data/api/types";
+import type { StoragePrice } from "../../data/api/prices";
+import { parseBytes } from "../details/units";
 import { customInstancesOf } from "../details/fields";
+import { priceListKey } from "../details/hosting";
 
 export const HOURS_PER_DAY = 24;
 /** A day is shown as `days`; at most about ten years. */
@@ -27,24 +30,121 @@ export interface NodeCost {
   why: string | null;
 }
 
-/** The providers a document's nodes name in `instance:` (a custom instance has none). */
-export function providersUsed(doc: Doc | null): string[] {
+/** Where a component runs (`hosting:`, RULES 122); `self` when the file says nothing. */
+export type Hosting = "self" | "managed" | "serverless" | "external";
+
+type Cfg = Readonly<Record<string, unknown>>;
+
+export function hostingOf(config: Cfg): Hosting {
+  const h = config.hosting;
+  return h === "managed" || h === "serverless" || h === "external" ? h : "self";
+}
+
+/** A managed database's engine (`engine:`), PostgreSQL when the file says nothing. */
+export function engineOf(config: Cfg): string {
+  return typeof config.engine === "string" && config.engine !== "" ? config.engine : "postgresql";
+}
+
+/** A price list a node reads: its table key (`aws`, or `aws-rds-mysql` for a managed class) and the provider whose region it is priced in. */
+export interface PriceKey {
+  key: string;
+  provider: string;
+}
+
+/** The list a node's instance is priced from; null when it names none or is your own instance. */
+export function priceKeyOf(config: Cfg, mine: Record<string, unknown>): PriceKey | null {
+  const i = typeof config.instance === "string" ? config.instance.trim() : "";
+  if (i === "" || i in mine) return null;
+  const provider = i.split("/")[0]?.toLowerCase();
+  if (!provider) return null;
+  // a managed class is priced in its own list (per engine for a database), in the provider's region
+  const key = priceListKey(config, provider);
+  return key === null ? null : { key, provider };
+}
+
+/** The price lists a document's nodes read, sorted. */
+export function priceKeysUsed(doc: Doc | null): PriceKey[] {
   const mine = customInstancesOf(doc);
-  const out = new Set<string>();
+  const out = new Map<string, PriceKey>();
   for (const n of Object.values(doc?.nodes ?? {})) {
-    const i = typeof n.instance === "string" ? n.instance.trim() : "";
-    if (i === "" || i in mine) continue;
-    const p = i.split("/")[0]?.toLowerCase();
-    if (p) out.add(p);
+    const k = priceKeyOf(n, mine);
+    if (k) out.set(k.key, k);
   }
+  return [...out.values()].sort((x, y) => (x.key < y.key ? -1 : 1));
+}
+
+/** The cloud an object store is priced as: `gcs` Google, `blob` Azure, `s3` or no flavor AWS. */
+export function storageProvider(config: Cfg): string {
+  return config.flavor === "gcs" ? "gcp" : config.flavor === "blob" ? "azure" : "aws";
+}
+
+/** Hours in a month for turning a GB-month into an hour (a year of 8,760 hours over 12). */
+export const HOURS_PER_MONTH = 730;
+
+/** The providers a document's nodes name in `instance:`, and the cloud of each storage node (a custom instance has none). */
+export function providersUsed(doc: Doc | null): string[] {
+  const out = new Set(priceKeysUsed(doc).map((k) => k.provider));
+  for (const n of Object.values(doc?.nodes ?? {}))
+    if (n.type === "storage") out.add(storageProvider(n));
   return [...out].sort();
 }
 
-/** Each node's price an hour, in node order. */
+/** What the last run saw: visits a second per node name, for pricing an object store's requests. */
+export type VisitRates = Readonly<Record<string, number>>;
+
+/**
+ * An object store's price an hour in micro-USD (RULES 123), S3-style: the data kept (`stored`)
+ * over a month, plus its requests at the last run's visit rate, a `write_share` of them at the
+ * write price and the rest at the read price. Copies do not multiply it: one store, one bill.
+ */
+function storageCost(
+  name: string,
+  config: Cfg,
+  region: Record<string, string>,
+  prices: Readonly<Record<string, StoragePrice>> | undefined,
+  visits: VisitRates | undefined,
+): { micro: number | null; why: string | null } {
+  const provider = storageProvider(config);
+  if (prices === undefined) return { micro: null, why: "prices are loading" };
+  const r = region[provider] ?? "";
+  const p = prices[`${provider}/${r}`] ?? prices[`${provider}/*`];
+  if (!p) return { micro: null, why: `no object-store price in ${r || "this region"}` };
+  const bytes = config.stored === undefined ? null : parseBytes(config.stored);
+  const gb = (bytes ?? 0) / 1024 ** 3;
+  const rate = visits?.[name] ?? 0;
+  if (bytes === null && rate === 0) {
+    return { micro: null, why: "set stored: (the data kept); requests are priced after a run" };
+  }
+  const w = typeof config.write_share === "number" ? config.write_share : 0;
+  const perReq = ((1 - w) * p.readPer1k + w * p.writePer1k) / 1000;
+  return {
+    micro: Math.round((gb * p.gbMonth) / HOURS_PER_MONTH + rate * 3600 * perReq),
+    why: null,
+  };
+}
+
+/** Why a node has no price when its hosting leaves the instance out, or null when it can have one. */
+function hostingWhy(config: Cfg): string | null {
+  switch (hostingOf(config)) {
+    case "serverless":
+      return "serverless: priced per use, not estimated";
+    case "external":
+      return "run by someone else: not estimated";
+    case "managed":
+      return config.type === "database" || config.type === "cache"
+        ? null
+        : "managed: priced by use, not estimated";
+    default:
+      return null;
+  }
+}
+
+/** Each node's price an hour, in node order. `tables` is keyed by price list (`PriceKey.key`). */
 export function nodeCosts(
   doc: Doc | null,
   tables: PriceTables,
   region: Record<string, string>,
+  storage?: { prices?: Readonly<Record<string, StoragePrice>>; visits?: VisitRates },
 ): NodeCost[] {
   const mine = customInstancesOf(doc);
   return Object.entries(doc?.nodes ?? {}).map(([name, config]) => {
@@ -52,21 +152,38 @@ export function nodeCosts(
       typeof config.instance === "string" && config.instance.trim() !== ""
         ? config.instance.trim()
         : null;
+    if (config.type === "storage") {
+      const s = storageCost(name, config, region, storage?.prices, storage?.visits);
+      return {
+        name,
+        instance: null,
+        copies: 1,
+        unitMicro: s.micro,
+        totalMicro: s.micro,
+        why: s.why,
+      };
+    }
     const copies = replicasOf(config);
     let unitMicro: number | null = null;
-    let why: string | null = null;
-    if (instance === null) why = "no instance type";
-    else if (instance in mine) {
+    let why: string | null = hostingWhy(config);
+    if (why !== null) {
+      // the hosting has no machine to price
+    } else if (instance === null) {
+      why =
+        hostingOf(config) === "managed"
+          ? `pick a managed ${config.type === "cache" ? "cache" : "database"} class`
+          : "no instance type";
+    } else if (instance in mine) {
       const c = mine[instance]?.cost ?? null;
       if (c === null) why = "your instance has no cost_per_hour";
       else unitMicro = Math.round(c * 1e6);
     } else {
-      const provider = instance.split("/")[0]?.toLowerCase() ?? "";
-      const table = tables[provider];
+      const k = priceKeyOf(config, mine);
+      const table = k ? tables[k.key] : undefined;
       if (table === undefined) why = "prices are loading";
       else {
         const p = table.get(instance.toLowerCase());
-        if (p === undefined) why = `no price in ${region[provider] ?? "this region"}`;
+        if (p === undefined) why = `no price in ${region[k?.provider ?? ""] ?? "this region"}`;
         else unitMicro = p;
       }
     }

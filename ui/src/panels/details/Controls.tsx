@@ -37,7 +37,9 @@ import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { StepsGroup } from "../steps/StepsGroup.lazy";
 import { anyChain, cacheNodes, callableNodes } from "../steps/describe";
 import { RATE_UNITS, TIME_UNITS } from "./units";
+import { HostingField } from "./HostingField";
 import { InstancePicker } from "./InstancePicker";
+import { takesInstance } from "./hosting";
 import { MemoryFields } from "./MachineFields";
 import {
   balanceOf,
@@ -251,6 +253,25 @@ export function Controls({
         </Group>
       ) : null}
 
+      {config.type === "cache" ? (
+        <Group
+          id={NODE_GROUP.cpu}
+          title="Hosting"
+          summary={cpuSummary(config)}
+          changed={"hosting" in config || "instance" in config}
+          onReset={() =>
+            void patch(
+              ["hosting", "instance"]
+                .filter((k) => k in config)
+                .map((k) => ({ op: "remove" as const, path: ["nodes", name, k] })),
+            )
+          }
+        >
+          <HostingField name={name} config={config} />
+          {takesInstance(config) ? <InstancePicker name={name} config={config} /> : null}
+        </Group>
+      ) : null}
+
       {hasCpu(config.type) ? (
         <Group
           id={NODE_GROUP.cpu}
@@ -270,7 +291,8 @@ export function Controls({
             step="any"
             onCommit={(n) => patch(setCores(name, config, n))}
           />
-          <InstancePicker name={name} config={config} />
+          <HostingField name={name} config={config} />
+          {takesInstance(config) ? <InstancePicker name={name} config={config} /> : null}
           <MemoryFields name={name} config={config} />
           {node && typeof node.cpu_utilization === "number" ? (
             <p className="mb-2 text-xs text-muted">
