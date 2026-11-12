@@ -45,6 +45,12 @@ export function engineOf(config: Cfg): string {
   return typeof config.engine === "string" && config.engine !== "" ? config.engine : "postgresql";
 }
 
+/** What a Multi-AZ standby adds: a second instance, so twice the price (RDS; never Aurora). 1 for everything else. */
+export function multiAzFactor(config: Cfg): number {
+  const aurora = engineOf(config).startsWith("aurora");
+  return config.type === "database" && config.multi_az === true && !aurora ? 2 : 1;
+}
+
 /** A price list a node reads: its table key (`aws`, or `aws-rds-mysql` for a managed class) and the provider whose region it is priced in. */
 export interface PriceKey {
   key: string;
@@ -106,7 +112,9 @@ function storageCost(
 ): { micro: number | null; why: string | null } {
   const provider = storageProvider(config);
   if (prices === undefined) return { micro: null, why: "prices are loading" };
-  const r = region[provider] ?? "";
+  // a store's own `location:` (a region, or Google's dual- or multi-region) beats the globe's region
+  const r =
+    (typeof config.location === "string" ? config.location : "") || (region[provider] ?? "");
   const p = prices[`${provider}/${r}`] ?? prices[`${provider}/*`];
   if (!p) return { micro: null, why: `no object-store price in ${r || "this region"}` };
   const bytes = config.stored === undefined ? null : parseBytes(config.stored);
@@ -184,7 +192,7 @@ export function nodeCosts(
       else {
         const p = table.get(instance.toLowerCase());
         if (p === undefined) why = `no price in ${region[k?.provider ?? ""] ?? "this region"}`;
-        else unitMicro = p;
+        else unitMicro = p * multiAzFactor(config);
       }
     }
     return {

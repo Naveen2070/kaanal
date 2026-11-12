@@ -238,6 +238,18 @@ fn stale_scenarios(
     out
 }
 
+/// The JSON body of a control request that takes optional options: `None` when the body is empty (or
+/// only whitespace), whatever the content type says, which axum's `Json` would refuse; a body that is
+/// not a JSON `T` is a 400. The request carries no content type check: Studio always sends JSON.
+fn json_opt<T: serde::de::DeserializeOwned>(body: &Bytes) -> Result<Option<T>, Reject> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    serde_json::from_slice(body)
+        .map(Some)
+        .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("invalid JSON body: {e}")))
+}
+
 /// `POST /__kaanal/draft/save` — writes the draft text to the config file (atomically) and
 /// answers `{ ok, written, removed }`. The running system is not touched; that is Apply. With
 /// `fix_scenarios: "remove"` the scenario files the saved text no longer resolves against are
@@ -253,11 +265,9 @@ fn stale_scenarios(
 /// draft that does not build; 500 when a write fails (every file is put back).
 pub async fn save_draft(
     State(st): State<Arc<AppState>>,
-    payload: Result<Option<Json<SaveBody>>, JsonRejection>,
+    body: Bytes,
 ) -> Result<Json<Value>, Reject> {
-    let body = payload
-        .map_err(|e| reject(e.status(), &e.body_text()))?
-        .map_or_else(SaveBody::default, |Json(b)| b);
+    let body = json_opt::<SaveBody>(&body)?.unwrap_or_default();
     let (confirm, fix, overwrite) = (body.confirm_loss, body.fix_scenarios, body.overwrite);
     let (dir, seed, key, port) = (st.dir.clone(), st.drawn_seed, st.auth_key.clone(), st.port);
     let st2 = st.clone();
@@ -400,12 +410,11 @@ pub async fn reload_draft(State(st): State<Arc<AppState>>) -> Result<Json<Value>
 /// 400 for a body that is not `{ "text": ... }` or a text over 1 MiB.
 pub async fn validate_draft(
     State(st): State<Arc<AppState>>,
-    payload: Result<Option<Json<DraftBody>>, JsonRejection>,
+    body: Bytes,
 ) -> Result<Json<Value>, Reject> {
-    let body = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let text = match body {
-        Some(Json(b)) if b.text.len() > MAX_DRAFT_BYTES => return Err(too_large(b.text.len())),
-        Some(Json(b)) => b.text,
+    let text = match json_opt::<DraftBody>(&body)? {
+        Some(b) if b.text.len() > MAX_DRAFT_BYTES => return Err(too_large(b.text.len())),
+        Some(b) => b.text,
         None => st
             .draft
             .lock()
@@ -457,12 +466,10 @@ const MAX_DRAIN_MS: u64 = 60_000;
 /// requests did not drain in time (the old system keeps running, nothing changed).
 pub async fn apply_draft(
     State(st): State<Arc<AppState>>,
-    payload: Result<Option<Json<ApplyBody>>, JsonRejection>,
+    body: Bytes,
 ) -> Result<Json<Value>, Reject> {
-    let body = payload.map_err(|e| reject(e.status(), &e.body_text()))?;
-    let ms = body
-        .and_then(|Json(b)| b.timeout_ms)
-        .unwrap_or(DEFAULT_DRAIN_MS);
+    let opts = json_opt::<ApplyBody>(&body)?.unwrap_or_default();
+    let ms = opts.timeout_ms.unwrap_or(DEFAULT_DRAIN_MS);
     if ms > MAX_DRAIN_MS {
         return Err(reject(
             StatusCode::BAD_REQUEST,

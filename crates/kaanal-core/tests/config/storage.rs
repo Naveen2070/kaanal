@@ -232,6 +232,37 @@ fn who_may_call_a_storage_node_and_that_it_calls_nothing() {
     }
 }
 
+/// B20: `location` names a priced location of the store's own cloud: a region, or for Google a
+/// predefined dual-region or multi-region; anything else is refused with the path.
+#[test]
+fn location_must_be_a_priced_location_of_the_stores_cloud() {
+    let load = |flavor: &str, loc: &str| {
+        Config::from_yaml(&format!(
+            "version: 1
+nodes:
+  s: {{ type: storage, flavor: {flavor}, location: {loc} }}
+"
+        ))
+        .map_err(|e| e.to_string())
+    };
+    for (flavor, loc) in [
+        ("gcs", "nam4"),
+        ("gcs", "eu"),
+        ("gcs", "us-central1"),
+        ("s3", "eu-west-1"),
+        ("blob", "us-east"),
+    ] {
+        assert!(load(flavor, loc).is_ok(), "{flavor} {loc}");
+    }
+    // a Google multi-region is not an S3 region, and a made-up one is nobody's
+    let e = load("s3", "nam4").unwrap_err();
+    assert!(
+        e.contains("nam4") && e.contains("aws") && e.contains("location"),
+        "{e}"
+    );
+    assert!(load("gcs", "mars-1").is_err());
+}
+
 #[test]
 fn stored_and_write_share_are_cost_inputs_with_checked_values() {
     let load = |extra: &str| {

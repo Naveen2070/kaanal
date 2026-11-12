@@ -44,6 +44,8 @@ With `"source": "draft"` the run simulates the text of the draft (`GET /draft`) 
 
 ## Reading the report
 
+The record also has **`cost`** (RULES 126): what the system costs an hour, estimated with the same sums as the cost card in Studio: `total_micro_usd_hr` (micro-USD, 1,000,000 = 1 dollar), `priced` and `unpriced` node counts, each node's `unit_micro_usd_hr`, `total_micro_usd_hr`, `copies`, `instance` and a `why` when it has no price (serverless, external, no instance, no price in the region), and the `regions` each cloud was priced in (the file's `region:`, else the default). An object store's requests are priced at this run's visits. `kaanal sim show` prints it as one line. It is an estimate for a what-if, never a quote; the runs list leaves it out like the summary.
+
 `summary` holds:
 
 - **`latency`**: `p50_ms`, `p95_ms`, `p99_ms`, `max_ms` and log2 buckets. Percentiles are exact over the run's requests.
@@ -100,4 +102,4 @@ Two real limits are off unless you turn them on, so a healthy-looking run can be
 - **Seeds.** A run uses the request's `seed`, else the config's `seed:`. Under `determinism: realistic` the live mocks use a seed drawn at startup, so a run is repeatable but its draws do not match what the mocks did.
 - **Waits under timeouts are biased low.** A request that a `timeout:` cancels while it still queues never starts its hop, so it is absent from `mean_wait_ms` and `visits_per_s` on a node that sheds load. Utilization and the saturation flag do not have this bias.
 - **Pins are not part of a run.** A pinned UI state (`kaanal cycle`) changes what the mocks answer, not what the simulator runs; only the chaos does.
-- **Payload sizes follow the mocks, with one difference:** a `HEAD` counts as 0 bytes, as live mode charges it. A `collection:` route and a built-in responder without an `override` also count as 0 here, because a run has no stored items and does not sign a login; the live mocks size a collection route from what it holds right now and the JWKS route from its key set (a login's reply is not sized in either).
+- **Payload sizes follow the mocks, with one difference:** a `HEAD` counts as 0 bytes, as live mode charges it. A `collection:` route and a built-in responder without an `override` also count as 0 here, because a run has no stored items and has no credentials to size a login with; the live mocks size a collection route from what it holds right now, the JWKS route from its key set, and a login from the account's token (measured, not signed).

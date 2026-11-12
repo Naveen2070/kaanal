@@ -171,6 +171,11 @@
           "const": "memcached",
           "description": "Memcached.",
           "type": "string"
+        },
+        {
+          "const": "valkey",
+          "description": "Valkey, the open fork of Redis. Behaves as Redis here (the same preset: no published\nfigure separates them) and is priced as its own engine on a managed cache (20% below Redis OSS).",
+          "type": "string"
         }
       ]
     },
@@ -1812,6 +1817,14 @@
               ],
               "description": "Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most\n`(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.\nNo GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit."
             },
+            "multi_az": {
+              "default": null,
+              "description": "A standby in a second availability zone (`true`), for the **cost estimate only**: a Multi-AZ\nclass costs twice the single-AZ price (AWS's own rule for RDS PostgreSQL, MySQL, MariaDB and\nOracle; the failover itself is not modelled). Only with `hosting: managed`, and not for\nAurora (it keeps its copies with `replicas` and bills each). Absent = `false`.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "ops": {
               "anyOf": [
                 {
@@ -2598,6 +2611,14 @@
                 "null"
               ]
             },
+            "location": {
+              "default": null,
+              "description": "Where the store is, for the **cost estimate only**: a region of the store's cloud with a\nprice (`us-east-1` for S3, `us-east` for Azure Blob, `us-central1` for Google), or for Google\na predefined dual-region (`nam4`, `eur4`, `eur5`, `eur7`, `eur8`, `asia1`) or multi-region\n(`us`, `eu`, `asia`). It replaces the region picked at the globe for this one store, so a\nmulti-region bucket can be priced next to everything else. Absent = the globe's region. It\nchanges no timing.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "rate_limit": {
               "anyOf": [
                 {
@@ -3326,6 +3347,14 @@
       "maximum": 65535,
       "minimum": 0,
       "type": "integer"
+    },
+    "region": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "The cloud region each provider is priced in, for the cost estimate and for which instance\ntypes are offered: `{ aws: eu-west-1, azure: us-east, gcp: us-central1 }`. Keys are `aws`,\n`azure` and `gcp`; a value is a region that provider's price list has. A provider left out\nuses its default (`us-east-1`, `us-east`, `us-central1`) or what Studio's region menu picked.\nIt changes no timing.",
+      "type": "object"
     },
     "scenarios": {
       "additionalProperties": {

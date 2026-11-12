@@ -96,6 +96,12 @@ test("a_cache_has_three_hostings_and_a_managed_cache_names_a_cache_class", () =>
 test("the_price_list_follows_the_hosting_the_kind_and_the_engine", () => {
   expect(priceListKey(node({ type: "service" }), "aws")).toBe("aws");
   expect(priceListKey(node({ type: "cache", hosting: "managed" }), "aws")).toBe("aws-elasticache");
+  expect(priceListKey(node({ type: "cache", hosting: "managed", flavor: "redis" }), "aws")).toBe(
+    "aws-elasticache",
+  );
+  expect(priceListKey(node({ type: "cache", hosting: "managed", flavor: "valkey" }), "aws")).toBe(
+    "aws-elasticache-valkey",
+  );
   expect(priceListKey(node({ type: "database", hosting: "managed" }), "aws")).toBe(
     "aws-rds-postgresql",
   );

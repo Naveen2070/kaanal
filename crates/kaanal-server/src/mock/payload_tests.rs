@@ -163,7 +163,7 @@ async fn an_edit_counts_toward_sizes() {
         query: &[],
     };
     assert_eq!(
-        resp_bytes((&st, &g), route, None, &ask, true),
+        resp_bytes((&st, &g), route, (None, None), &ask, true),
         serde_json::to_vec(&body).unwrap().len() as u64
     );
 }
@@ -241,7 +241,10 @@ async fn a_scoped_request_is_sized_by_the_body_it_gets_not_by_the_edit() {
     let generated = serde_json::to_vec(&reply::success(&g, route, &ask).1)
         .unwrap()
         .len() as u64;
-    assert_eq!(resp_bytes((&st, &g), route, None, &ask, false), generated);
+    assert_eq!(
+        resp_bytes((&st, &g), route, (None, None), &ask, false),
+        generated
+    );
     assert_ne!(generated, serde_json::to_vec(&body).unwrap().len() as u64);
 }
 
@@ -396,4 +399,48 @@ async fn a_file_override_can_be_binary_too() {
         .await
         .unwrap();
     assert_eq!(b.as_ref(), [0, 1, 2]);
+}
+
+/// B9: a login's reply is charged to the link by its real size (it was 0 bytes). Over a 1000 B/s
+/// link a byte takes 1 ms, so the response hop lasts as many milliseconds as the reply has bytes.
+#[tokio::test]
+async fn a_login_reply_is_charged_to_the_link_by_its_size() {
+    let yaml = "version: 1\nheader_bytes: 0\nnodes:\n  nginx: { type: gateway, proc: 1ms }\n  login: { type: auth, users: [ { username: alice, password: pw, scopes: [read] } ] }\nedges:\n  - { from: nginx, to: login, net: 1ms, bandwidth: 1000 }\nendpoints:\n";
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let cfg = kaanal_core::Config::from_yaml(yaml).unwrap();
+    let mut st = crate::state::AppState::build(&cfg, &dir, "t".into(), 0).unwrap();
+    let g = st.gen_mut();
+    g.auth =
+        crate::auth::Issuer::from_config(&cfg, Some(crate::auth::AuthKey::generate().unwrap()), 0)
+            .unwrap();
+    g.engine = Some(crate::actor::spawn(kaanal_core::replay::Engine::live(
+        &g.topo,
+    )));
+    let st = Arc::new(st);
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"username":"alice","password":"pw"}"#,
+        ))
+        .unwrap();
+    let r = handle(axum::extract::State(Arc::clone(&st)), req).await;
+    assert_eq!(r.status(), 200);
+    let reply = axum::body::to_bytes(r.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .len();
+    let e = &entries(&st)[0];
+    let back = e
+        .hops
+        .iter()
+        .find(|h| h.kind == "link-resp")
+        .expect("the reply crosses the link");
+    assert_eq!(
+        back.dur_ms,
+        f64::from(u32::try_from(reply).unwrap()),
+        "{}",
+        e.trace
+    );
 }

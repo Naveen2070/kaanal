@@ -31,3 +31,25 @@ export function setWriteShare(name: string, config: NodeDoc, share: number): Op[
   if (!(share > 0)) return present ? [{ op: "remove", path }] : [];
   return [put(path, present, Math.min(1, share))];
 }
+
+/** Where the store is (`location:`), for its price instead of the globe's region; "" = none written. */
+export const locationOf = (config: NodeDoc): string =>
+  typeof config.location === "string" ? config.location : "";
+
+/** The patch for the location: a name writes it, "" removes it (the store follows the globe's region). */
+export function setLocation(name: string, config: NodeDoc, location: string): Op[] {
+  const path = ["nodes", name, "location"];
+  const present = "location" in config;
+  if (location === "") return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, location)];
+}
+
+const MULTI = new Set(["asia", "eu", "us"]);
+const DUAL = new Set(["asia1", "eur4", "eur5", "eur7", "eur8", "nam4"]);
+
+/** A location as the select shows it: Google's multi- and dual-regions say so, a region is itself. */
+export function locationLabel(location: string): string {
+  if (MULTI.has(location)) return `${location} (multi-region)`;
+  if (DUAL.has(location)) return `${location} (dual-region)`;
+  return location;
+}

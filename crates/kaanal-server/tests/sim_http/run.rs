@@ -80,6 +80,52 @@ async fn a_run_finishes_and_reports_percentiles() {
     assert!(sum["label"].as_str().unwrap().contains("not a prediction"));
 }
 
+/// B4: a finished run carries the estimated cost: the sums of the cost card, here one t3.micro (EC2
+/// list price $0.0104 an hour in us-east-1) with two nodes that name no instance left out, `why`
+/// in each; the runs list leaves it out like the summary.
+#[tokio::test]
+async fn a_finished_run_carries_the_estimated_cost() {
+    let yaml = config().replace(
+        "spec: openapi.yaml, proc: 1ms }",
+        "spec: openapi.yaml, proc: 1ms, instance: aws/t3.micro }",
+    );
+    let s = start(&yaml).await;
+    let v: Value = post(&s, json!({ "profile": "peak", "duration_s": 20 }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let id = v["id"].as_str().unwrap().to_string();
+    let done = finished(&s, &id).await;
+    assert_eq!(done["state"], "done", "{done}");
+    let c = &done["cost"];
+    assert_eq!(c["total_micro_usd_hr"], 10_400, "{c}");
+    assert_eq!(
+        (c["priced"].as_u64(), c["unpriced"].as_u64()),
+        (Some(1), Some(2))
+    );
+    assert_eq!(c["regions"]["aws"], "us-east-1");
+    let app = c["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["name"] == "app")
+        .unwrap();
+    assert_eq!(app["instance"], "aws/t3.micro");
+    assert!(
+        c["nodes"][0]["why"]
+            .as_str()
+            .unwrap()
+            .contains("no instance"),
+        "{c}"
+    );
+    let list: Value = s.get("/__kaanal/sim/runs").await.json().await.unwrap();
+    assert!(
+        list["runs"][0]["cost"].is_null(),
+        "the list leaves the cost out"
+    );
+}
+
 #[tokio::test]
 async fn a_second_run_while_one_runs_is_409() {
     let s = start(&config()).await;

@@ -5,17 +5,22 @@
 import { useId } from "react";
 import type { NodeDoc } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
+import { setFlavor } from "./fields";
 import {
+  CACHE_ENGINES,
+  cacheEngineOf,
   engineOf,
   enginesFor,
   flavorOf,
   hasManagedClasses,
+  hasMultiAz,
   hostingHint,
   hostingLabel,
   hostingOf,
   hostingsFor,
   isManagedDb,
   setEngine,
+  setMultiAz,
   setHosting,
   type HostingId,
 } from "./hosting";
@@ -56,6 +61,38 @@ export function HostingField({ name, config }: { name: string; config: NodeDoc }
           PostgreSQL, MySQL, MariaDB). Set cores and memory yourself, or pick Your own instance with
           a cost per hour.
         </p>
+      ) : null}
+      {type === "cache" && now === "managed" ? (
+        <label className="mt-1 flex flex-col gap-0.5 text-sm font-medium">
+          Engine
+          <select
+            name="engine"
+            value={cacheEngineOf(config)}
+            onChange={(e) => void patch([setFlavor(name, config, e.currentTarget.value)])}
+            className={SELECT}
+          >
+            {CACHE_ENGINES.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs font-normal text-muted">
+            The price of a class depends on the engine. The engine is the cache's flavor, so it also
+            fills the hit ratio and costs you have not written.
+          </span>
+        </label>
+      ) : null}
+      {hasMultiAz(config) ? (
+        <label className="mt-1 flex items-center gap-1.5 text-sm">
+          <input
+            type="checkbox"
+            name="multi_az"
+            checked={config.multi_az === true}
+            onChange={(e) => void patch(setMultiAz(name, config, e.currentTarget.checked))}
+          />
+          Multi-AZ (a standby in a second zone)
+        </label>
       ) : null}
       {isManagedDb(config) && hasManagedClasses(config) ? (
         <label className="mt-1 flex flex-col gap-0.5 text-sm font-medium">

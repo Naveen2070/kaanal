@@ -74,6 +74,14 @@ pub struct StorageConfig {
     #[serde(default, deserialize_with = "ratio")]
     #[schemars(extend("minimum" = 0, "maximum" = 1))]
     pub write_share: Option<f64>,
+    /// Where the store is, for the **cost estimate only**: a region of the store's cloud with a
+    /// price (`us-east-1` for S3, `us-east` for Azure Blob, `us-central1` for Google), or for Google
+    /// a predefined dual-region (`nam4`, `eur4`, `eur5`, `eur7`, `eur8`, `asia1`) or multi-region
+    /// (`us`, `eu`, `asia`). It replaces the region picked at the globe for this one store, so a
+    /// multi-region bucket can be priced next to everything else. Absent = the globe's region. It
+    /// changes no timing.
+    #[serde(default)]
+    pub location: Option<String>,
     /// Locale pack; a storage node generates no data, so this only passes down.
     #[serde(default)]
     #[schemars(extend("pattern" = LOCALE_PATTERN))]
@@ -105,6 +113,16 @@ pub enum StorageFlavor {
 }
 
 impl StorageFlavor {
+    /// The cloud whose price list prices this store (`aws`, `azure`, `gcp`); no flavor is `aws`.
+    #[must_use]
+    pub fn provider(flavor: Option<StorageFlavor>) -> &'static str {
+        match flavor {
+            Some(StorageFlavor::Gcs) => "gcp",
+            Some(StorageFlavor::Blob) => "azure",
+            Some(StorageFlavor::S3) | None => "aws",
+        }
+    }
+
     /// The YAML spelling.
     pub fn as_str(self) -> &'static str {
         match self {

@@ -123,6 +123,23 @@ impl AuthKey {
         let sig = SigningKey::<Sha256>::new(self.private.clone()).sign(input.as_bytes());
         format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig.to_bytes()))
     }
+
+    /// **Private.** The length of [`AuthKey::sign`]'s token for `claims`, without signing: the header
+    /// and the claims are measured as they are written, and a PKCS#1 v1.5 signature is always as long
+    /// as the modulus (RFC 8017 8.2.1), so the three base64url parts and two dots add up exactly.
+    fn sign_len(&self, claims: &Value) -> usize {
+        let header = json!({ "alg": "RS256", "typ": "JWT", "kid": self.kid }).to_string();
+        b64_len(header.len())
+            + 1
+            + b64_len(claims.to_string().len())
+            + 1
+            + b64_len(self.private.size())
+    }
+}
+
+/// **Private.** Unpadded base64url length of `n` bytes: `ceil(4n / 3)`.
+const fn b64_len(n: usize) -> usize {
+    (4 * n).div_ceil(3)
 }
 
 /// RFC 7638 JWK thumbprint of an RSA public key given as base64url `n` and `e`: the SHA-256
@@ -185,25 +202,49 @@ impl Issuer {
             .users
             .iter()
             .find(|u| u.username == username && u.password == password)?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
+        Some(self.reply(user, &self.token(user, unix_now(), rand::random())))
+    }
+
+    /// The size in bytes of the `200` body [`Issuer::login`] would build for these credentials, or of
+    /// the `401` body for an unknown user or a wrong password, with no signing: a login's token has a
+    /// length that depends on the account, which is all the mock needs to charge the link and `per_kb`.
+    pub(crate) fn login_len(&self, username: &str, password: &str) -> u64 {
+        let Some(user) = self
+            .users
+            .iter()
+            .find(|u| u.username == username && u.password == password)
+        else {
+            return json_len(&invalid_credentials());
+        };
+        // jti is 32 hex digits whatever its value, and now has its present digit count
+        let claims = self.claims(user, unix_now(), 0);
+        let token = "x".repeat(self.key.sign_len(&claims));
+        json_len(&self.reply(user, &token))
+    }
+
+    /// **Private.** The `200` body around a token: what [`Issuer::login`] answers.
+    fn reply(&self, user: &UserConfig, token: &str) -> Value {
         let mut body = json!({
-            "access_token": self.token(user, now, rand::random()),
+            "access_token": token,
             "token_type": "Bearer",
             "expires_in": self.ttl.as_secs(),
         });
         if !user.scopes.is_empty() {
             body["scope"] = Value::String(user.scopes.join(" "));
         }
-        Some(body)
+        body
     }
 
     /// **Private.** A signed token for `user` issued at `now` (Unix seconds) with id `jti`.
-    /// Claims: the node's claims, then the user's (which win), then sub, iss, iat, exp, jti,
-    /// roles and scope (only with scopes). The standard claims go last, so they win even
-    /// if a `Config` built without `from_yaml` carries a reserved name (rejected at load, X3).
     fn token(&self, user: &UserConfig, now: u64, jti: u128) -> String {
+        self.key.sign(&self.claims(user, now, jti))
+    }
+
+    /// **Private.** The claims of a token for `user`: the node's claims, then the user's (which win),
+    /// then sub, iss, iat, exp, jti, roles and scope (only with scopes). The standard claims go last,
+    /// so they win even if a `Config` built without `from_yaml` carries a reserved name (rejected at
+    /// load, X3).
+    fn claims(&self, user: &UserConfig, now: u64, jti: u128) -> Value {
         let mut c = Map::new();
         for (k, v) in self.claims.iter().chain(&user.claims) {
             c.insert(k.clone(), v.clone());
@@ -218,8 +259,25 @@ impl Issuer {
         if !user.scopes.is_empty() {
             c.insert("scope".into(), user.scopes.join(" ").into());
         }
-        self.key.sign(&Value::Object(c))
+        Value::Object(c)
     }
+}
+
+/// **Private.** Seconds since the Unix epoch (0 if the clock is before it).
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// **Private.** The serialized length of `v`, as the mock writes it.
+fn json_len(v: &Value) -> u64 {
+    v.to_string().len() as u64
+}
+
+/// **Private.** The `401` body of a login (X8): an unknown user and a wrong password alike.
+fn invalid_credentials() -> Value {
+    json!({ "error": "invalid_credentials" })
 }
 
 /// **Private.** Largest login body Kaanal reads (spec section 5).
@@ -304,10 +362,21 @@ pub(crate) fn respond(
         (Responder::Login, Some(Ok(c))) => match issuer.login(&c.username, &c.password) {
             Some(body) => (200, body),
             // X8: wrong password and unknown user alike, after the full chain latency.
-            None => (401, json!({ "error": "invalid_credentials" })),
+            None => (401, invalid_credentials()),
         },
         (Responder::Login, Some(Err((status, code)))) => (status, json!({ "error": code })),
         (Responder::Login, None) => (500, json!({ "error": "login body not read" })),
+    }
+}
+
+/// The size in bytes of the body [`respond`] gives a login, without signing the token (see
+/// [`Issuer::login_len`]). `login` is what [`read_login`] returned; the arms mirror [`respond`], and
+/// a test holds the two together.
+pub(crate) fn login_reply_len(issuer: Option<&Issuer>, login: &Result<Credentials, Reject>) -> u64 {
+    match (issuer, login) {
+        (None, _) => json_len(&json!({ "error": "no signing key" })),
+        (Some(_), Err((_, code))) => json_len(&json!({ "error": code })),
+        (Some(i), Ok(c)) => i.login_len(&c.username, &c.password),
     }
 }
 
@@ -425,6 +494,56 @@ nodes:
         parts[1] = URL_SAFE_NO_PAD
             .encode(br#"{"sub":"mallory","iss":"http://localhost:8080","exp":9999999999}"#);
         assert!(jsonwebtoken::decode::<Value>(parts.join("."), &dk, &v).is_err());
+    }
+
+    /// B9: the measured size of a login reply is the size of the reply, to the byte, for every
+    /// outcome: the oracle is [`respond`]'s own body, serialized as the mock writes it.
+    #[test]
+    fn a_login_reply_is_sized_exactly_without_signing() {
+        let i = issuer();
+        // `Credentials` is not `Clone`, so each case is built where it is used
+        let case = |n: usize| -> Result<Credentials, Reject> {
+            let (u, p) = [
+                ("alice", "secret"),
+                ("bob", "pw"),
+                ("alice", "nope"),
+                ("mallory", "x"),
+            ][n.min(3)];
+            match n {
+                4 => Err((415, "unsupported_media_type")),
+                5 => Err((400, "invalid_request")),
+                _ => Ok(Credentials {
+                    username: u.into(),
+                    password: p.into(),
+                }),
+            }
+        };
+        let names = [
+            "scopes and claims",
+            "no scopes",
+            "wrong password",
+            "unknown user",
+            "415",
+            "400",
+        ];
+        for (n, what) in names.iter().enumerate() {
+            let (_, body) = respond(Responder::Login, Some(&i), Some(case(n)));
+            assert_eq!(
+                login_reply_len(Some(&i), &case(n)),
+                json_len(&body),
+                "{what}"
+            );
+        }
+        assert_eq!(
+            login_reply_len(None, &case(0)),
+            json_len(&respond(Responder::Login, None, Some(case(0))).1),
+            "no signing key"
+        );
+        // alice's token carries more claims and a scope, so her reply is longer than bob's
+        assert!(
+            i.login_len("alice", "secret") > i.login_len("bob", "pw"),
+            "length follows the account"
+        );
     }
 
     #[test]

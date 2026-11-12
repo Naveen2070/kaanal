@@ -9,6 +9,7 @@ import {
   liveSeries,
   nodeHeat,
   nodeHist,
+  nodeVisitRates,
   quantileMs,
   recent,
   sumHist,
@@ -271,4 +272,16 @@ test("wireFigures_read_p50_and_p99_of_the_crossing_time_from_the_wire_histograms
   // an older server sends no histogram: no figure
   const old = wireFigures([tick(250, { wires: [{ carried: 3 }] })], 0);
   expect([old.p50Ms, old.p99Ms]).toEqual([null, null]);
+});
+
+test("visits_a_second_per_node_are_the_arrivals_over_the_span_the_ticks_cover", () => {
+  const node = (arrived: number) => ({ arrived }) as Tick["nodes"][number];
+  // four ticks of 250 ms (one second): 10 arrivals at node a, 4 at b in each of them
+  const ticks = [250, 500, 750, 1000].map((t) => tick(t, { nodes: [node(10), node(4)] }));
+  expect(nodeVisitRates(ticks, ["a", "b"])).toEqual({ a: 40, b: 16 });
+  // only the last 500 ms count when the window is that short
+  expect(nodeVisitRates(ticks, ["a", "b"], 500)).toEqual({ a: 40, b: 16 });
+  expect(nodeVisitRates([], ["a"])).toEqual({});
+  // a name with no node in the tick is zero, not a crash
+  expect(nodeVisitRates(ticks, ["a", "b", "c"]).c).toBe(0);
 });

@@ -6,7 +6,7 @@
 //! class, and the other hostings take no instance (cores and memory stay yours to write, if you
 //! model them).
 
-use super::{Config, DbFlavor, Deserialize, JsonSchema, NodeKind};
+use super::{Config, DbFlavor, Deserialize, JsonSchema, NodeConfig, NodeKind};
 use crate::diagnostics::{Located, keys};
 
 /// Where the component runs (`hosting:`).
@@ -219,6 +219,7 @@ pub(super) fn check(cfg: &Config) -> Result<(), Located> {
                 return Err(Located::at_value(at("engine"), msg));
             }
         }
+        check_multi_az(node, n, hosting, &at)?;
         if n.engine_written().is_some()
             && !(kind == NodeKind::Database && hosting == Hosting::Managed)
         {
@@ -227,6 +228,37 @@ pub(super) fn check(cfg: &Config) -> Result<(), Located> {
                 format!("node '{node}': engine goes with a database that has hosting: managed"),
             ));
         }
+    }
+    Ok(())
+}
+
+/// **Private.** `multi_az` goes with a managed database that is not Aurora (an Aurora cluster keeps
+/// its copies with `replicas`, each billed), each refusal at the field.
+fn check_multi_az(
+    node: &str,
+    n: &NodeConfig,
+    hosting: Hosting,
+    at: &dyn Fn(&str) -> Vec<crate::diagnostics::PathSeg>,
+) -> Result<(), Located> {
+    if n.multi_az_written().is_none() {
+        return Ok(());
+    }
+    if !(n.kind() == NodeKind::Database && hosting == Hosting::Managed) {
+        return Err(Located::at_value(
+            at("multi_az"),
+            format!("node '{node}': multi_az goes with a database that has hosting: managed"),
+        ));
+    }
+    if matches!(
+        n.engine(),
+        DbEngine::AuroraPostgresql | DbEngine::AuroraMysql
+    ) {
+        return Err(Located::at_value(
+            at("multi_az"),
+            format!(
+                "node '{node}': an Aurora cluster has no Multi-AZ switch: keep its copies with replicas, each billed"
+            ),
+        ));
     }
     Ok(())
 }

@@ -45,7 +45,8 @@ pub use breaker::BreakerConfig;
 pub(crate) use checks::prob_ok;
 pub use checks::valid_locale_tag;
 use checks::{
-    LOCALE_PATTERN, check_auth, check_capacity, check_edges, check_locales, check_replicas,
+    LOCALE_PATTERN, check_auth, check_capacity, check_edges, check_locales, check_region,
+    check_replicas,
 };
 pub use conn::{Conn, DEFAULT_KEEPALIVE, MAX_KEEPALIVE, StreamMode, Tls, compress_permille};
 use endpoints::default_calls;
@@ -96,6 +97,13 @@ pub struct Config {
     /// none: nodes can still use the cloud table's `provider/type` names.
     #[serde(default)]
     pub instances: IndexMap<String, CustomInstance>,
+    /// The cloud region each provider is priced in, for the cost estimate and for which instance
+    /// types are offered: `{ aws: eu-west-1, azure: us-east, gcp: us-central1 }`. Keys are `aws`,
+    /// `azure` and `gcp`; a value is a region that provider's price list has. A provider left out
+    /// uses its default (`us-east-1`, `us-east`, `us-central1`) or what Studio's region menu picked.
+    /// It changes no timing.
+    #[serde(default)]
+    pub region: IndexMap<String, String>,
     /// Dependency edges, caller → dependency. Absent = no edges.
     #[serde(default)]
     pub edges: Vec<EdgeConfig>,
@@ -285,6 +293,7 @@ impl Config {
         check_edges(&cfg).map_err(|e| e.in_source(src))?;
         check_replicas(&cfg).map_err(|e| e.in_source(src))?;
         check_locales(&cfg).map_err(|e| e.in_source(src))?;
+        check_region(&cfg).map_err(|e| e.in_source(src))?;
         traffic::check_traffic(&cfg.traffic).map_err(|e| e.in_source(src))?;
         Ok(cfg)
     }

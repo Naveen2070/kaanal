@@ -114,6 +114,17 @@ pub fn storage_rows() -> &'static [StorageRow] {
     })
 }
 
+/// Every location that has an object-store price for `provider`, in file order: its regions and, for
+/// `gcp`, the predefined dual- and multi-regions. Not the `*` row.
+#[must_use]
+pub fn storage_locations(provider: &str) -> Vec<&'static str> {
+    storage_rows()
+        .iter()
+        .filter(|(p, r, _)| *p == provider && *r != "*")
+        .map(|(_, r, _)| *r)
+        .collect()
+}
+
 /// The object-store price of `provider` (`aws` S3, `azure` Blob, `gcp` Cloud Storage) in `region`.
 /// A row for region `*` would answer for every region of its provider (none today).
 #[must_use]
@@ -124,12 +135,22 @@ pub fn storage_price(provider: &str, region: &str) -> Option<StoragePrice> {
 }
 
 /// The price an hour of a managed cache class (`aws/cache.m5.large`, `ElastiCache`) in the AWS
-/// `region`, in micro-USD (on-demand, Redis OSS; Memcached is the same price); `None` when the
-/// class has no price there.
+/// `region`, in micro-USD (on-demand): Valkey's own price for the `valkey` flavor (20% below Redis
+/// OSS), else Redis OSS's (Memcached is the same price); `None` when the class has no price for
+/// that engine there (the newest Graviton classes are Valkey-only in some regions).
 #[must_use]
-pub fn managed_cache_price_micro_usd_hr(region: &str, name: &str) -> Option<u32> {
+pub fn managed_cache_price_micro_usd_hr(
+    flavor: Option<crate::config::CacheFlavor>,
+    region: &str,
+    name: &str,
+) -> Option<u32> {
     let key = name.trim().to_ascii_lowercase();
-    let table = region_table("aws-elasticache", region)?;
+    let provider = if flavor == Some(crate::config::CacheFlavor::Valkey) {
+        "aws-elasticache-valkey"
+    } else {
+        "aws-elasticache"
+    };
+    let table = region_table(provider, region)?;
     table
         .binary_search_by(|(n, _)| (*n).cmp(key.as_str()))
         .ok()

@@ -10,6 +10,7 @@ import { loadPrices, loadStoragePrices, type StoragePrice } from "../../data/api
 import { useRun } from "../../data/store/run";
 import { useDraft } from "../../data/store/draft";
 import { useLive } from "../../data/store/live";
+import { nodeVisitRates } from "../../data/store/liveMath";
 import { isLive, useMode } from "../../data/store/mode";
 import { regionOf, useRegion } from "../../data/store/region";
 import { useCompactPalette } from "../../shell/layout/useLayout";
@@ -74,10 +75,15 @@ export function CostCard() {
       gone = true;
     };
   }, [hasStorage]);
-  const visits = useMemo(
-    () => Object.fromEntries((runNodes ?? []).map((n) => [n.name, n.visits_per_s])),
-    [runNodes],
-  );
+  // a store's requests are priced at what the live run is doing now (Live and Admin), else at the
+  // last batch run's visits
+  const liveTicks = useLive((s) => s.ticks);
+  const liveNames = useLive((s) => s.hello?.nodes);
+  const visits = useMemo(() => {
+    const live = isLive(mode) ? nodeVisitRates(liveTicks, liveNames ?? []) : {};
+    if (Object.keys(live).length > 0) return live;
+    return Object.fromEntries((runNodes ?? []).map((n) => [n.name, n.visits_per_s]));
+  }, [mode, liveTicks, liveNames, runNodes]);
   const button = useRef<HTMLButtonElement>(null);
   const [at, setAt] = useState<{ left: number; bottom: number } | null>(null);
   const id = useId();

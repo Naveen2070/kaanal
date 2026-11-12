@@ -4,7 +4,7 @@ Flavor presets (rule R1.25).
 
 ## What it does
 
-Supplies default op costs for database flavors (`postgres`, `mysql`, `mariadb`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`, also usable on a `monolith`) and a default hit ratio and hit/miss costs for cache flavors (`redis`, `memcached`). **All numbers are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`). Precedence is user value > preset > error: any value the user writes wins, and [topology.md](topology.md) raises `MissingOps` when something is still missing.
+Supplies default op costs for database flavors (`postgres`, `mysql`, `mariadb`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`, also usable on a `monolith`) and a default hit ratio and hit/miss costs for cache flavors (`redis`, `memcached`, `valkey`). **All numbers are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`). Precedence is user value > preset > error: any value the user writes wins, and [topology.md](topology.md) raises `MissingOps` when something is still missing.
 
 ## Values (estimates)
 
@@ -24,6 +24,9 @@ Supplies default op costs for database flavors (`postgres`, `mysql`, `mariadb`, 
 | ----------- | ----------- | ---------------- | ---------------- |
 | `redis`     | 0.9         | 0.2 ms / 1 ms    | 0.2 ms / 1 ms    |
 | `memcached` | 0.9         | 0.15 ms / 0.8 ms | 0.15 ms / 0.8 ms |
+| `valkey`    | 0.9         | 0.2 ms / 1 ms    | 0.2 ms / 1 ms    |
+
+`valkey` is the `redis` row by decision (a Redis fork with the same protocol; no published figure separates them), held by the test `valkey_takes_the_redis_preset`.
 
 `miss` is the cost of learning it is a miss; the fallback call is the chain's job (A2).
 

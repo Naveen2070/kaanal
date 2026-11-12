@@ -126,6 +126,24 @@ fn a_cache_is_a_vm_you_run_a_managed_service_or_serverless() {
     assert!(cache(", hosting: external").is_err());
 }
 
+/// B19: `flavor: valkey` is a cache flavor; a managed Valkey cache may name a class that only Valkey
+/// sells (`r8gd`), and it carries the Redis preset hit ratio and costs.
+#[test]
+fn a_valkey_cache_may_name_a_valkey_only_class() {
+    use kaanal_core::config::CacheFlavor;
+    let c = load(
+        "  c: { type: cache, flavor: valkey, hosting: managed, instance: aws/cache.r8gd.xlarge }
+",
+    )
+    .unwrap();
+    let kaanal_core::config::NodeConfig::Cache(n) = &c.nodes["c"] else {
+        panic!("a cache")
+    };
+    assert_eq!(n.flavor, Some(CacheFlavor::Valkey));
+    assert_eq!(n.flavor.map(CacheFlavor::as_str), Some("valkey"));
+    assert!(c.nodes["c"].instance().is_some());
+}
+
 #[test]
 fn a_cache_class_and_a_database_class_do_not_cross() {
     let e = cache(", hosting: managed, instance: aws/db.m5.large").unwrap_err();
@@ -190,4 +208,62 @@ fn the_new_database_flavors_fill_the_op_costs() {
 
 fn db_with_flavor(f: &str) -> Result<Config, String> {
     load(&format!("  d: {{ type: database, flavor: {f} }}\n"))
+}
+
+/// B1: a project carries the cloud region each provider is priced in; a provider must be one with
+/// prices and a region one that provider's list has, each error at its value.
+#[test]
+fn a_project_names_its_regions_and_each_must_be_a_priced_region_of_its_cloud() {
+    let y = |region: &str| {
+        Config::from_yaml(&format!(
+            "version: 1
+region: {region}
+nodes:
+  g: {{ type: gateway, proc: 1ms }}
+"
+        ))
+    };
+    let c = y("{ aws: eu-west-1, azure: us-east, gcp: europe-west4 }").unwrap();
+    assert_eq!(c.region["aws"], "eu-west-1");
+    assert_eq!(c.region.len(), 3);
+    assert!(y("{}").is_ok());
+    let e = y("{ aws: mars-1 }").unwrap_err();
+    assert!(
+        e.msg.contains("mars-1") && e.msg.contains("aws region"),
+        "{e}"
+    );
+    assert_eq!(e.line, Some(2), "{e}");
+    let e = y("{ oracle: us-east-1 }").unwrap_err();
+    assert!(
+        e.msg.contains("oracle") && e.msg.contains("provider"),
+        "{e}"
+    );
+    // a Google region is not an AWS one
+    assert!(y("{ aws: us-central1 }").is_err());
+}
+
+/// B12: `multi_az` goes with a managed database that is not Aurora, each refusal at the field.
+#[test]
+fn multi_az_goes_with_a_managed_database_that_is_not_aurora() {
+    let db = |fields: &str| {
+        load(&format!(
+            "  d: {{ type: database, flavor: postgres{fields} }}
+"
+        ))
+    };
+    assert!(db(", hosting: managed, instance: aws/db.m5.large, multi_az: true").is_ok());
+    assert!(db(", hosting: managed, multi_az: false").is_ok());
+    let e = db(", multi_az: true").unwrap_err();
+    assert!(
+        e.contains("multi_az") && e.contains("hosting: managed"),
+        "{e}"
+    );
+    let e = db(", hosting: managed, engine: aurora-postgresql, multi_az: true").unwrap_err();
+    assert!(e.contains("Aurora") && e.contains("replicas"), "{e}");
+    let e = load(
+        "  c: { type: cache, flavor: redis, hosting: managed, multi_az: true }
+",
+    )
+    .unwrap_err();
+    assert!(e.contains("multi_az"), "{e}");
 }

@@ -310,6 +310,12 @@ pub struct DatabaseConfig {
     /// `hosting: managed`.
     #[serde(default)]
     pub engine: Option<DbEngine>,
+    /// A standby in a second availability zone (`true`), for the **cost estimate only**: a Multi-AZ
+    /// class costs twice the single-AZ price (AWS's own rule for RDS PostgreSQL, MySQL, MariaDB and
+    /// Oracle; the failover itself is not modelled). Only with `hosting: managed`, and not for
+    /// Aurora (it keeps its copies with `replicas` and bills each). Absent = `false`.
+    #[serde(default)]
+    pub multi_az: Option<bool>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.

@@ -230,6 +230,32 @@ pub(super) fn check_locales(cfg: &Config) -> Result<(), Located> {
     Ok(())
 }
 
+/// **Private.** Every `region:` key is a provider and every value a region of that provider's price
+/// list, each error at its value.
+pub(super) fn check_region(cfg: &Config) -> Result<(), Located> {
+    for (provider, region) in &cfg.region {
+        let all = crate::prices::regions(provider);
+        if all.is_empty() {
+            return Err(Located::new(
+                keys(&["region", provider.as_str()]),
+                format!("region: '{provider}' is not a provider with prices (aws, azure or gcp)"),
+            ));
+        }
+        if !all.contains(&region.as_str()) {
+            let shown: Vec<&str> = all.iter().take(6).copied().collect();
+            return Err(Located::at_value(
+                keys(&["region", provider.as_str()]),
+                format!(
+                    "region: '{region}' is not a {provider} region (try {}, ... {} regions)",
+                    shown.join(", "),
+                    all.len()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// **Private.** A branch probability: above 0, at most 1.
 pub(crate) fn prob_ok(p: f64) -> bool {
     p > 0.0 && p <= 1.0
@@ -268,6 +294,23 @@ pub(super) fn check_edges(cfg: &Config) -> Result<(), Located> {
                 ],
                 format!("node '{name}': bandwidth must be at least 1 byte per second (got 0)"),
             ));
+        }
+        if let NodeConfig::Storage(s) = n
+            && let Some(loc) = &s.location
+        {
+            let provider = super::StorageFlavor::provider(s.flavor);
+            if !crate::prices::storage_locations(provider).contains(&loc.as_str()) {
+                let all = crate::prices::storage_locations(provider);
+                let shown: Vec<&str> = all.iter().take(6).copied().collect();
+                return Err(Located::at_value(
+                    keys(&["nodes", name.as_str(), "location"]),
+                    format!(
+                        "node '{name}': '{loc}' has no {provider} object-store price (try {}, ... {} locations)",
+                        shown.join(", "),
+                        all.len()
+                    ),
+                ));
+            }
         }
         if matches!(n, NodeConfig::Storage(s) if s.throughput == Some(0)) {
             return Err(Located::at_value(

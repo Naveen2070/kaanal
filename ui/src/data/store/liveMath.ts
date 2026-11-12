@@ -109,6 +109,26 @@ export function windowFigures(
   };
 }
 
+/**
+ * Visits a second at each node over the last `ms` of ticks, by node name (`names` are the hello's,
+ * in the order of each tick's `nodes`): what arrived, retries included, over the span the ticks
+ * cover. Empty before the first tick. The cost card prices a store's requests with it.
+ */
+export function nodeVisitRates(
+  ticks: readonly Tick[],
+  names: readonly string[],
+  ms = 5000,
+): Record<string, number> {
+  const w = recent(ticks, ms);
+  if (w.length === 0) return {};
+  const seconds = w.length * 0.25;
+  const out: Record<string, number> = {};
+  names.forEach((name, i) => {
+    out[name] = w.reduce((a, t) => a + (t.nodes[i]?.arrived ?? 0), 0) / seconds;
+  });
+  return out;
+}
+
 /** One point of the timeline: a few ticks added up. */
 export interface Point {
   /** Milliseconds since the session started, at the end of the point. */

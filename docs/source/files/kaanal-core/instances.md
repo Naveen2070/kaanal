@@ -31,6 +31,8 @@ An unknown name is a load error at `nodes.<name>.instance` (`config/machine.rs`)
 
 ## Managed database classes (RULES 122)
 
+`scripts/gen-instances.mjs --cache-only <dir>` redoes only the ElastiCache rows and the two `aws-elasticache*` price folders from `elasticache.json` in `<dir>`, keeping every other row and folder as the last full run left them (a full run downloads about 300 MB and moves every price).
+
 The same table holds the AWS RDS classes as `aws/db.<class>` (about 300; vCPU, memory and network are the class's own). The price column is the PostgreSQL price in us-east-1 (MySQL when a class has no PostgreSQL price). Per engine and region the prices are in `data/prices/aws-rds-<engine>/<region>.csv` (engines `postgresql`, `mysql`, `mariadb`, `aurora-postgresql`, `aurora-mysql`; single-AZ, on-demand; Oracle and SQL Server are left out), read by `prices::managed_price_micro_usd_hr(engine, region, name)`. `instances::is_managed_class(name)` tells a class from a VM type. `scripts/gen-instances.mjs` writes them from instances.vantage.sh/rds. Tests in `tests/instances_data.rs`: db.m5.large is 2 vCPU and 8 GiB, $0.178 (PostgreSQL) and $0.171 (MySQL) in us-east-1, $0.197 and $0.189 in eu-west-1, and the default PostgreSQL file is the table's price column.
 
 ## Object-store prices (RULES 123)

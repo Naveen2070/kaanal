@@ -205,6 +205,7 @@ fn print_run(v: &Value) {
         }
         println!("{line}");
     }
+    print_cost(&v["cost"]);
     let nodes = s["nodes"].as_array().map_or(&[][..], Vec::as_slice);
     println!("busiest nodes (offered load, utilization):");
     for i in s["bottlenecks"].as_array().into_iter().flatten().take(5) {
@@ -229,6 +230,28 @@ fn print_run(v: &Value) {
     for w in s["warnings"].as_array().into_iter().flatten() {
         println!("warning: {}", clean(w.as_str().unwrap_or("")));
     }
+}
+
+/// **Private.** The estimated cost line of a run: dollars an hour of what has a price, how many
+/// nodes that is, and the region each cloud was priced in. Silent when the record has no cost.
+fn print_cost(c: &Value) {
+    let Some(total) = c["total_micro_usd_hr"].as_u64() else {
+        return;
+    };
+    let regions: Vec<String> = c["regions"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(p, r)| format!("{} {}", clean(p), clean(r.as_str().unwrap_or(""))))
+        .collect();
+    #[allow(clippy::cast_precision_loss)]
+    let usd = total as f64 / 1e6;
+    println!(
+        "estimated cost: ${usd:.4} an hour ({} of {} nodes priced; {}) - an estimate, not a quote",
+        c["priced"],
+        c["priced"].as_u64().unwrap_or(0) + c["unpriced"].as_u64().unwrap_or(0),
+        regions.join(", ")
+    );
 }
 
 /// **Private.** `kaanal sample ROUTE`. Text mode prints the body to stdout, so it can be piped,

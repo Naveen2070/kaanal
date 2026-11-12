@@ -126,7 +126,7 @@ pub async fn handle(State(st): State<Arc<AppState>>, mut req: Request) -> Respon
         (&st, &g),
         route,
         // an edit is only the body of an unscoped request
-        (body_len, body.1.as_ref(), scope.is_none()),
+        (body_len, &body, scope.is_none()),
         (method, path, &params, &query),
     );
     let n = route.counter.fetch_add(1, Ordering::Relaxed);
@@ -424,14 +424,14 @@ type Parts<'a> = (
 /// costs, built before the chain runs: the serialized [`reply::success`] body (pure and seeded, so it
 /// is the body the client will get); for a collection route the body its operation would answer on the
 /// collection as it is now (a preview, which changes nothing, so an add that a later failure drops
-/// leaves no trace); for the JWKS route its key set. A login's reply is not sized: it is a signed
-/// token whose length depends on the account, and signing it here would double the work of a login.
+/// leaves no trace); for the JWKS route its key set; for a login the body it will answer, measured
+/// without signing (the token's length follows from the account; a wrong password is the 401 body).
 /// `call` is the collection operation `read_body` built; `body_len` is the request's size, read
 /// before the body was taken (it needs the headers).
 fn sizes(
     (st, g): (&AppState, &Generation),
     route: &Route,
-    (body_len, call, edits): (u64, Option<&Call>, bool),
+    (body_len, (login, call), edits): (u64, &Read, bool),
     (method, path, params, query): Parts,
 ) -> (u64, u64) {
     // Only a topology with a payload cost looks at sizes at all.
@@ -443,7 +443,7 @@ fn sizes(
         resp_bytes(
             (st, g),
             route,
-            call,
+            (call.as_ref(), login.as_ref()),
             &Ask {
                 method,
                 path,
@@ -459,7 +459,10 @@ fn sizes(
 fn resp_bytes(
     (st, g): (&AppState, &Generation),
     route: &Route,
-    call: Option<&Call>,
+    (call, login): (
+        Option<&Call>,
+        Option<&Result<auth::Credentials, auth::Reject>>,
+    ),
     ask: &Ask,
     edits: bool,
 ) -> u64 {
@@ -473,8 +476,10 @@ fn resp_bytes(
     } else {
         match ep.responder.filter(|_| ep.response.is_none()) {
             Some(Responder::Jwks) => auth::respond(Responder::Jwks, g.auth.as_ref(), None).1,
-            // a login's reply is not sized (see `sizes`)
-            Some(_) => return 0,
+            // measured, not signed: the token's length follows from the account (`login_reply_len`)
+            Some(Responder::Login) => {
+                return login.map_or(0, |l| auth::login_reply_len(g.auth.as_ref(), l));
+            }
             None if ep.collection.is_some() => return 0,
             // a live edit is the body an unscoped request will get (step 8A); a scoped one never
             // sees it, so it is sized by the body it does get

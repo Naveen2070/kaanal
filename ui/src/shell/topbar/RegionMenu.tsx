@@ -4,7 +4,8 @@
 
 import { Globe } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { regionOf, useRegion } from "../../data/store/region";
+import { useDraft } from "../../data/store/draft";
+import { regionOf, regionOp, useFileRegion, useRegion } from "../../data/store/region";
 
 const PROVIDERS: { id: string; label: string }[] = [
   { id: "aws", label: "AWS" },
@@ -14,6 +15,9 @@ const PROVIDERS: { id: string; label: string }[] = [
 
 export function RegionMenu() {
   const state = useRegion();
+  const doc = useDraft((s) => s.view?.doc ?? null);
+  const patch = useDraft((s) => s.patch);
+  useFileRegion();
   const [open, setOpen] = useState(false);
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
@@ -54,8 +58,8 @@ export function RegionMenu() {
         >
           <h2 className="m-0 text-sm font-semibold">Cloud region</h2>
           <p className="m-0 mt-1 mb-2 text-xs text-muted">
-            For the cost estimate and for which instance types are offered. A setting of this
-            browser, not of the file.
+            For the cost estimate and for which instance types are offered. Your choice is written
+            into the file as <code>region:</code>, so the project carries it.
           </p>
           {PROVIDERS.map((p) => (
             <label key={p.id} className="mb-2 flex flex-col gap-0.5 text-xs text-muted last:mb-0">
@@ -64,7 +68,12 @@ export function RegionMenu() {
                 name={`region-${p.id}`}
                 value={regionOf(state, p.id) ?? ""}
                 disabled={!state.ready}
-                onChange={(e) => state.pick(p.id, e.currentTarget.value)}
+                onChange={(e) => {
+                  const region = e.currentTarget.value;
+                  state.pick(p.id, region);
+                  // a draft to write into: the choice is the file's, which wins over this browser's
+                  if (doc !== null) void patch([regionOp(doc, p.id, region)]);
+                }}
                 className="h-8 rounded border border-control bg-sheet px-1 text-sm text-text"
               >
                 {(state.regions[p.id] ?? []).map((r) => (

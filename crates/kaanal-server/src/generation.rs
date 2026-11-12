@@ -100,6 +100,9 @@ pub struct Generation {
     pub auth: Option<crate::auth::Issuer>,
     /// The live replay engine; `None` after `build`, set by `serve` (no runtime in `check`).
     pub engine: Option<crate::actor::EngineHandle>,
+    /// The config this generation was built from, for what needs a node's own fields after the
+    /// build (the cost estimate of a run).
+    pub config: Arc<Config>,
 }
 
 impl Generation {
@@ -270,6 +273,7 @@ impl Generation {
                 flagged,
                 auth: None,
                 engine: None,
+                config: Arc::new(cfg.clone()),
                 started: std::time::Instant::now(),
             },
             scenarios,

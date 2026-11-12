@@ -413,6 +413,12 @@ aws/cache.r7g.4xlarge,16,108349,15000,1745000
 aws/cache.r7g.8xlarge,32,214579,15000,3491000
 aws/cache.r7g.large,2,13384,12500,219000
 aws/cache.r7g.xlarge,4,26952,12500,437000
+aws/cache.r7gd.12xlarge,48,386970,22500,0
+aws/cache.r7gd.16xlarge,64,516628,30000,0
+aws/cache.r7gd.2xlarge,8,62802,15000,0
+aws/cache.r7gd.4xlarge,16,127642,15000,0
+aws/cache.r7gd.8xlarge,32,257300,15000,0
+aws/cache.r7gd.xlarge,4,30392,12500,0
 aws/cache.r8g.12xlarge,48,386970,22500,5266600
 aws/cache.r8g.16xlarge,64,516628,30000,7022100
 aws/cache.r8g.2xlarge,8,62802,15000,877700
@@ -420,6 +426,12 @@ aws/cache.r8g.4xlarge,16,127642,15000,1755500
 aws/cache.r8g.8xlarge,32,257300,15000,3511000
 aws/cache.r8g.large,2,14520,12500,219500
 aws/cache.r8g.xlarge,4,30392,12500,438900
+aws/cache.r8gd.12xlarge,48,386970,22500,0
+aws/cache.r8gd.16xlarge,64,516628,30000,0
+aws/cache.r8gd.2xlarge,8,62802,15000,0
+aws/cache.r8gd.4xlarge,16,127642,15000,0
+aws/cache.r8gd.8xlarge,32,257300,15000,0
+aws/cache.r8gd.xlarge,4,30392,12500,0
 aws/cache.t2.medium,2,3297,0,68000
 aws/cache.t2.micro,1,568,0,17000
 aws/cache.t2.small,1,1587,0,34000

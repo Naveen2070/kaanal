@@ -100,13 +100,31 @@ fn cache_flavor_fills_the_gaps() {
     );
 }
 
+/// B19: Valkey is a Redis fork with the same protocol and no published figure that separates the two,
+/// so it takes the Redis preset (an estimate, like every preset): by decision, not by accident.
+#[test]
+fn valkey_takes_the_redis_preset() {
+    assert_eq!(
+        presets::cache_defaults(CacheFlavor::Valkey),
+        presets::cache_defaults(CacheFlavor::Redis)
+    );
+    assert_ne!(
+        presets::cache_defaults(CacheFlavor::Valkey),
+        presets::cache_defaults(CacheFlavor::Memcached)
+    );
+}
+
 #[test]
 fn presets_are_sane() {
     let mut all: Vec<DistConfig> = [DbFlavor::Postgres, DbFlavor::Mysql, DbFlavor::Mongodb]
         .into_iter()
         .flat_map(presets::db_ops)
         .collect();
-    for f in [CacheFlavor::Redis, CacheFlavor::Memcached] {
+    for f in [
+        CacheFlavor::Redis,
+        CacheFlavor::Memcached,
+        CacheFlavor::Valkey,
+    ] {
         let p = presets::cache_defaults(f);
         assert!((0.0..=1.0).contains(&p.hit_ratio), "{p:?}");
         all.extend([p.hit, p.miss]);

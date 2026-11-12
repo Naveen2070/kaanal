@@ -373,6 +373,14 @@ impl NodeConfig {
         }
     }
 
+    /// The database's `multi_az:` as written; `None` for every other kind.
+    pub fn multi_az_written(&self) -> Option<bool> {
+        match self {
+            NodeConfig::Database(n) => n.multi_az,
+            _ => None,
+        }
+    }
+
     /// The database's `flavor:`, when it names one.
     pub fn db_flavor(&self) -> Option<DbFlavor> {
         match self {
@@ -551,6 +559,9 @@ pub enum CacheFlavor {
     Redis,
     /// Memcached.
     Memcached,
+    /// Valkey, the open fork of Redis. Behaves as Redis here (the same preset: no published
+    /// figure separates them) and is priced as its own engine on a managed cache (20% below Redis OSS).
+    Valkey,
 }
 
 impl CacheFlavor {
@@ -559,6 +570,7 @@ impl CacheFlavor {
         match self {
             CacheFlavor::Redis => "redis",
             CacheFlavor::Memcached => "memcached",
+            CacheFlavor::Valkey => "valkey",
         }
     }
 }

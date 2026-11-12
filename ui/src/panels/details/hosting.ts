@@ -32,7 +32,7 @@ export function hostingLabel(type: string, h: HostingId): string {
           service: "Self-hosted (your VM or container host)",
           monolith: "Self-hosted (your VM or container host)",
           database: "Self-hosted (the database on a machine you run)",
-          cache: "Self-hosted (Redis or Memcached on a machine you run)",
+          cache: "Self-hosted (Redis, Valkey or Memcached on a machine you run)",
           auth: "Self-hosted (Keycloak or similar on a machine you run)",
         }[type] ?? "Self-hosted (a machine you run)"
       );
@@ -66,14 +66,14 @@ export function hostingHint(type: string, h: HostingId): string {
   switch (h) {
     case "self":
       return type === "cache"
-        ? "Redis or Memcached on a VM you run, in any cloud. A VM type is priced as a VM and shown as a size note: a cache's hits are fixed times, so its cores do not change them."
+        ? "Redis, Valkey or Memcached on a VM you run, in any cloud. A VM type is priced as a VM and shown as a size note: a cache's hits are fixed times, so its cores do not change them."
         : "A machine you run in any cloud or on premises, nginx on a VM included. A VM type fills the cores, memory and network card, and the cost estimate prices it as a VM.";
     case "managed":
       if (type === "database") {
         return "Pick a managed class (AWS RDS): it fills the cores, memory and network card, and the estimate prices it per engine. Azure and Google Cloud classes are not in the table yet: set cores and memory yourself.";
       }
       if (type === "cache") {
-        return "Pick a managed class (AWS ElastiCache) for its price and size. Azure and Google Cloud classes are not in the table yet. A cache's hits are fixed times, so the class does not change them.";
+        return "Pick a managed class (AWS ElastiCache) for its price and size; the valkey flavor is priced as ElastiCache for Valkey, 20% below Redis. Azure and Google Cloud classes are not in the table yet. A cache's hits are fixed times, so the class does not change them.";
       }
       return "The provider runs and scales it, so there is no instance to pick. Set cores and memory yourself if you model them. The estimate leaves it out: it is priced by use.";
     case "serverless":
@@ -120,6 +120,28 @@ export function engineOf(config: NodeDoc): string {
   return enginesFor(config)[0]?.id ?? "postgresql";
 }
 
+/** The engines a managed cache runs; each is a cache `flavor`, and the price of a class depends on it. */
+export const CACHE_ENGINES = [
+  { id: "redis", label: "Redis OSS" },
+  { id: "valkey", label: "Valkey (20% cheaper)" },
+  { id: "memcached", label: "Memcached" },
+] as const;
+
+/** The cache's engine: its `flavor:`, Redis when none is written. */
+export const cacheEngineOf = (config: NodeDoc): string => flavorOf(config) || "redis";
+
+/** Whether the node has a Multi-AZ switch: a managed database that is not Aurora (Aurora keeps copies with `replicas`). */
+export const hasMultiAz = (config: NodeDoc): boolean =>
+  isManagedDb(config) && hasManagedClasses(config) && !engineOf(config).startsWith("aurora");
+
+/** The patch for the Multi-AZ switch: on writes `multi_az: true`, off removes it (the default). */
+export function setMultiAz(name: string, config: NodeDoc, on: boolean): Op[] {
+  const path = ["nodes", name, "multi_az"];
+  const present = "multi_az" in config;
+  if (!on) return present ? [{ op: "remove", path }] : [];
+  return [{ op: present ? "set" : "insert", path, value: true }];
+}
+
 /** Whether the table has managed classes for this database (the relational flavors; not MongoDB, Neo4j, Cassandra or DynamoDB). */
 export const hasManagedClasses = (config: NodeDoc): boolean =>
   config.type !== "database" || enginesFor(config).length > 0;
@@ -146,7 +168,8 @@ export const isOwnClass = (type: unknown, instance: string): boolean =>
 
 /**
  * The price list a node's instance is read from, in the region of `provider`: a managed database
- * class per engine (`aws-rds-mysql`), a managed cache class (`aws-elasticache`), else the
+ * class per engine (`aws-rds-mysql`), a managed cache class per engine (`aws-elasticache`, or
+ * `aws-elasticache-valkey` for the valkey flavor, 20% cheaper), else the
  * provider's own list; null when the hosting has no instance to price.
  */
 export function priceListKey(
@@ -157,7 +180,9 @@ export function priceListKey(
   const hosting = h === "managed" || h === "serverless" || h === "external" ? h : "self";
   if (hosting === "serverless" || hosting === "external") return null;
   if (hosting === "managed") {
-    if (config.type === "cache") return `${provider}-elasticache`;
+    if (config.type === "cache") {
+      return `${provider}-elasticache${flavorOf(config as NodeDoc) === "valkey" ? "-valkey" : ""}`;
+    }
     if (config.type === "database") return `${provider}-rds-${engineOf(config as NodeDoc)}`;
     return null;
   }

@@ -19,6 +19,7 @@ pub mod balance;
 pub mod chain;
 pub mod chaos;
 pub mod config;
+pub mod cost;
 pub mod diagnostics;
 pub mod dist;
 pub mod exec;

@@ -1,0 +1,44 @@
+# On-demand Linux price an hour in micro-USD (1000000 = 1 dollar) of aws-elasticache-valkey in region mx-central-1.
+# Generated 2026-11-12 by scripts/gen-instances.mjs from instances.vantage.sh; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a type missing here has no price there.
+aws/cache.m6g.12xlarge,2987880
+aws/cache.m6g.16xlarge,3984120
+aws/cache.m6g.2xlarge,498120
+aws/cache.m6g.4xlarge,996240
+aws/cache.m6g.8xlarge,1992480
+aws/cache.m6g.large,125160
+aws/cache.m6g.xlarge,249480
+aws/cache.m7g.12xlarge,3166800
+aws/cache.m7g.16xlarge,4223520
+aws/cache.m7g.2xlarge,528360
+aws/cache.m7g.4xlarge,1055880
+aws/cache.m7g.8xlarge,2111760
+aws/cache.m7g.large,132720
+aws/cache.m7g.xlarge,264600
+aws/cache.r6g.12xlarge,4137000
+aws/cache.r6g.16xlarge,5516280
+aws/cache.r6g.2xlarge,689640
+aws/cache.r6g.4xlarge,1379280
+aws/cache.r6g.8xlarge,2758560
+aws/cache.r6g.large,173040
+aws/cache.r6g.xlarge,345240
+aws/cache.r7g.12xlarge,4397400
+aws/cache.r7g.16xlarge,5864040
+aws/cache.r7g.2xlarge,733320
+aws/cache.r7g.4xlarge,1465800
+aws/cache.r7g.8xlarge,2932440
+aws/cache.r7g.large,183960
+aws/cache.r7g.xlarge,367080
+aws/cache.r8g.12xlarge,4423500
+aws/cache.r8g.16xlarge,5898000
+aws/cache.r8g.2xlarge,737300
+aws/cache.r8g.4xlarge,1474500
+aws/cache.r8g.8xlarge,2949000
+aws/cache.r8g.large,184300
+aws/cache.r8g.xlarge,368600
+aws/cache.t3.medium,57120
+aws/cache.t3.micro,14280
+aws/cache.t3.small,28560
+aws/cache.t4g.medium,54600
+aws/cache.t4g.micro,13440
+aws/cache.t4g.small,26880

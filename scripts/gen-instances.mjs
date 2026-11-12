@@ -3,9 +3,11 @@
 // instance catalogues of AWS, Azure and GCP kept by instances.vantage.sh (a mirror of each
 // provider's own pages). The csv is what `instance: provider/type` reads (step 8P, RULES 113).
 //
-// Usage: node --max-old-space-size=8192 scripts/gen-instances.mjs [dir-with-aws.json-azure.json-gcp.json]
+// Usage: node --max-old-space-size=8192 scripts/gen-instances.mjs [--cache-only] [dir-with-aws.json-azure.json-gcp.json]
 // With no argument the three files are downloaded to a temp folder (the AWS one is about 300 MB:
 // it carries every price). Run it again when a provider adds families, review the diff, commit.
+// --cache-only redoes just the ElastiCache part from `elasticache.json` in the folder (the folder is then
+// required): the other rows of instances.csv and the other price folders are kept as they are.
 //
 // Estimates, labelled in the csv header:
 // - vCPU and memory are the providers' own figures;
@@ -26,6 +28,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
   existsSync,
@@ -42,7 +45,8 @@ const SOURCES = {
   rds: "rds/instances.json",
   elasticache: "cache/instances.json",
 };
-const dir = process.argv[2] ?? mkdtempSync(join(tmpdir(), "kaanal-instances-"));
+const CACHE_ONLY = process.argv.includes("--cache-only");
+const dir = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? mkdtempSync(join(tmpdir(), "kaanal-instances-"));
 
 function load(provider) {
   const file = join(dir, `${provider}.json`);
@@ -58,6 +62,15 @@ function load(provider) {
 
 const mib = (gib) => Math.round(Number(gib) * 1024);
 const rows = new Map();
+const csvUrl = new URL("../crates/kaanal-core/data/instances.csv", import.meta.url);
+const csvHead = [];
+if (CACHE_ONLY) {
+  // keep every other row (and the header) of the file written by the last full run
+  for (const l of readFileSync(csvUrl, "utf8").split(/\r?\n/)) {
+    if (l.startsWith("#")) csvHead.push(l);
+    else if (l) rows.set(l.split(",")[0], l.split(",").map((f, i) => (i === 0 || isNaN(f) ? f : Number(f))));
+  }
+}
 // the on-demand Linux price of one region, in micro-USD an hour (0 when there is none)
 const micro = (x, region) => {
   const v = Number(x.pricing?.[region]?.linux?.ondemand);
@@ -84,7 +97,7 @@ const awsNet = (text) => {
   const m = /([0-9]+(?:\.[0-9]+)?)\s*Gigabit/i.exec(String(text ?? ""));
   return m ? Number(m[1]) * 1000 : 0;
 };
-for (const x of load("aws")) {
+for (const x of CACHE_ONLY ? [] : load("aws")) {
   add(`aws/${x.instance_type}`, x.vCPU, mib(x.memory), awsNet(x.network_performance), micro(x, "us-east-1"));
   noteRegions("aws", `aws/${x.instance_type}`, x);
 }
@@ -104,7 +117,7 @@ const azureNetOf = (name) => {
   const m = constrained.exec(name);
   return m ? Number(azureNet.get(m[1] + m[2]) ?? 0) : 0;
 };
-for (const x of load("azure")) {
+for (const x of CACHE_ONLY ? [] : load("azure")) {
   const size = String(x.pretty_name_azure ?? x.pretty_name ?? x.instance_type).replace(/\s+/g, "_");
   const name = `standard_${size}`.toLowerCase();
   add(`azure/${name}`, x.vcpu, mib(x.memory), azureNetOf(name), micro(x, "us-east"));
@@ -112,7 +125,7 @@ for (const x of load("azure")) {
 }
 
 // GCP: 2 Gbps per vCPU up to 32 Gbps (E2: up to 16), the documented default egress cap.
-for (const x of load("gcp")) {
+for (const x of CACHE_ONLY ? [] : load("gcp")) {
   const cap = x.instance_type.startsWith("e2-") ? 16000 : 32000;
   add(`gcp/${x.instance_type}`, x.vCPU, mib(x.memory), Math.min(2000 * Number(x.vCPU), cap), micro(x, "us-central1"));
   noteRegions("gcp", `gcp/${x.instance_type}`, x);
@@ -131,7 +144,7 @@ const RDS_ENGINES = {
   "aurora-postgresql": "Aurora PostgreSQL",
   "aurora-mysql": "Aurora MySQL",
 };
-for (const x of load("rds")) {
+for (const x of CACHE_ONLY ? [] : load("rds")) {
   const n = `aws/${x.instance_type}`.toLowerCase();
   const price = (engine, region) => {
     const v = Number(x.pricing?.[region]?.[RDS_ENGINES[engine]]?.ondemand);
@@ -149,26 +162,34 @@ for (const x of load("rds")) {
   }
 }
 
-// AWS ElastiCache, the managed cache classes (RULES 122): `aws/cache.m5.large`. One price per class and
-// region: Redis OSS (Memcached is the same price wherever both are listed; Valkey is about 20%
-// cheaper and is not here). The default-region price column is us-east-1. A class with no Redis or
-// Memcached price anywhere is left out. Provider key `aws-elasticache` in the price files.
+// AWS ElastiCache, the managed cache classes (RULES 122): `aws/cache.m5.large`. The price of a class
+// depends on the engine, so each is a provider of its own in the price files: `aws-elasticache`
+// (Redis OSS; Memcached is the same price wherever both are listed) and `aws-elasticache-valkey`
+// (Valkey, 20% below Redis OSS on every class the two share, and the only engine on the newest
+// Graviton classes: m8g, r8g, r8gd, c8gn, r7gd). The price column of instances.csv is the Redis price
+// in us-east-1 (Valkey's for a Valkey-only class). A class with no price for any engine is left out.
+const CACHE_ENGINES = { "aws-elasticache": ["Redis", "Memcached"], "aws-elasticache-valkey": ["Valkey"] };
 for (const x of load("elasticache")) {
   const n = `aws/${x.instance_type}`.toLowerCase();
-  const price = (region) => {
-    const p = x.pricing?.[region];
-    const v = Number(p?.Redis?.ondemand ?? p?.Memcached?.ondemand);
-    return Number.isFinite(v) && v > 0 ? Math.round(v * 1e6) : 0;
+  const price = (engines, region) => {
+    for (const e of engines) {
+      const v = Number(x.pricing?.[region]?.[e]?.ondemand);
+      if (Number.isFinite(v) && v > 0) return Math.round(v * 1e6);
+    }
+    return 0;
   };
-  const regions = Object.keys(x.pricing ?? {}).filter((r) => price(r) > 0);
-  if (regions.length === 0) continue;
-  add(n, Number(x.vcpu), mib(x.memory), awsNet(x.network_performance), price("us-east-1"));
+  const regionsOf = (engines) => Object.keys(x.pricing ?? {}).filter((r) => price(engines, r) > 0);
+  if (!Object.values(CACHE_ENGINES).some((e) => regionsOf(e).length > 0)) continue;
+  const usEast = price(CACHE_ENGINES["aws-elasticache"], "us-east-1") || price(CACHE_ENGINES["aws-elasticache-valkey"], "us-east-1");
+  add(n, Number(x.vcpu), mib(x.memory), awsNet(x.network_performance), usEast);
   if (!rows.has(n)) continue;
-  for (const region of regions) ((prices["aws-elasticache"] ??= {})[region] ??= []).push([n, price(region)]);
+  for (const [provider, engines] of Object.entries(CACHE_ENGINES)) {
+    for (const region of regionsOf(engines)) ((prices[provider] ??= {})[region] ??= []).push([n, price(engines, region)]);
+  }
 }
 
 const sorted = [...rows.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-const head = [
+const head = CACHE_ONLY ? csvHead : [
   "# Cloud instance types for `instance: provider/type` (kaanal-core src/instances.rs).",
   `# Generated ${new Date().toISOString().slice(0, 10)} by scripts/gen-instances.mjs; do not edit by hand.`,
   "# name,vcpu,memory_mib,net_mbps,usd_micro_hr. ESTIMATES: an upper bound on capacity (a vCPU is a hardware thread",
@@ -177,16 +198,19 @@ const head = [
   "# per provider (aws us-east-1, azure us-east, gcp us-central1); 0 = no price. An estimate, not a quote.",
 ];
 writeFileSync(
-  new URL("../crates/kaanal-core/data/instances.csv", import.meta.url),
+  csvUrl,
   head.concat(sorted.map((r) => r.join(","))).join("\n") + "\n",
 );
 // One csv per region (data/prices/<provider>/<region>.csv: name,usd_micro_hr, only types that have a
 // price there) and the Rust index that embeds them (src/prices_data.rs), so a region is picked at
 // run time without a network call. Rewritten whole each run.
 const pricesDir = new URL("../crates/kaanal-core/data/prices/", import.meta.url);
-rmSync(pricesDir, { recursive: true, force: true });
+// a full run rewrites every folder; --cache-only only the two cache ones
+for (const d of CACHE_ONLY ? Object.keys(CACHE_ENGINES) : [""]) {
+  rmSync(new URL(d ? `${d}/` : "", pricesDir), { recursive: true, force: true });
+}
+mkdirSync(pricesDir, { recursive: true });
 const date = new Date().toISOString().slice(0, 10);
-const index = [];
 for (const provider of Object.keys(prices)) {
   mkdirSync(new URL(`${provider}/`, pricesDir), { recursive: true });
   for (const region of Object.keys(prices[provider]).sort()) {
@@ -198,15 +222,30 @@ for (const provider of Object.keys(prices)) {
       ...list.map((r) => r.join(",")),
     ].join("\n");
     writeFileSync(new URL(`${provider}/${region}.csv`, pricesDir), body + "\n");
-    index.push([provider, region]);
   }
 }
+// the index lists every folder on disk (providers in the order of the first full run), so a --cache-only
+// run keeps the other providers
+const ORDER = [
+  "aws", "azure", "gcp",
+  "aws-rds-postgresql", "aws-rds-mysql", "aws-rds-mariadb", "aws-rds-aurora-mysql", "aws-rds-aurora-postgresql",
+  ...Object.keys(CACHE_ENGINES),
+];
+const rank = (p) => (ORDER.includes(p) ? ORDER.indexOf(p) : ORDER.length);
+const index = readdirSync(pricesDir)
+  .sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : 1))
+  .flatMap((provider) =>
+    readdirSync(new URL(`${provider}/`, pricesDir))
+      .map((f) => f.replace(/\.csv$/, ""))
+      .sort()
+      .map((region) => [provider, region]),
+  );
 writeFileSync(
   new URL("../crates/kaanal-core/src/prices_data.rs", import.meta.url),
   [
     "//! The per-region price files, embedded. Generated by scripts/gen-instances.mjs; do not edit by hand.",
     "",
-    "/// `(provider, region, csv)`, sorted by provider then region.",
+    "/// `(provider, region, csv)`: grouped by provider, the regions of each sorted. Looked up by name.",
     "#[rustfmt::skip]",
     "pub(super) static FILES: &[(&str, &str, &str)] = &[",
     ...index.map(

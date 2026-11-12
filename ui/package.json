@@ -37,7 +37,7 @@
     "opentype.js": "2.0.0",
     "tailwindcss": "^4.3.5",
     "typescript": "~6.0.3",
-    "vite-plus": "~1.4.0"
+    "vite-plus": "catalog:"
   },
   "devEngines": {
     "packageManager": {

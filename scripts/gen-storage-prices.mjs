@@ -2,7 +2,9 @@
 // Builds crates/kaanal-core/data/storage-prices.csv: what an object store costs per region, for the
 // cost estimate of a `storage` node (RULES 123).
 //
-// Usage: node --max-old-space-size=4096 scripts/gen-storage-prices.mjs [dir-with-s3.json]
+// Usage: node --max-old-space-size=4096 scripts/gen-storage-prices.mjs [--gcp-only] [dir-with-s3.json]
+// --gcp-only redoes the Google rows from scripts/gcs-storage.csv and keeps every aws and azure row of the
+// file as it is (no download).
 //
 // - AWS S3 Standard, from AWS's own public price list (pricing.us-east-1.amazonaws.com, AmazonS3):
 //   storage per GB-month (the first tier, up to 50 TB), PUT/COPY/POST/LIST (request tier 1) and
@@ -25,10 +27,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const dir = process.argv[2] ?? mkdtempSync(join(tmpdir(), "kaanal-storage-"));
+const GCP_ONLY = process.argv.includes("--gcp-only");
+const dir = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? mkdtempSync(join(tmpdir(), "kaanal-storage-"));
 const micro = (usd) => Math.round(Number(usd) * 1e6);
 const rows = [];
 
+const csvUrl = new URL("../crates/kaanal-core/data/storage-prices.csv", import.meta.url);
+if (GCP_ONLY) {
+  for (const l of readFileSync(csvUrl, "utf8").split(/\r?\n/)) {
+    if (l && !l.startsWith("#") && !l.startsWith("gcp,")) rows.push(l.split(",").map((f, i) => (i < 2 ? f : Number(f))));
+  }
+}
+if (!GCP_ONLY) {
 // ---- AWS S3
 const s3file = join(dir, "s3.json");
 if (!existsSync(s3file)) {
@@ -116,11 +126,14 @@ for (const [arm, s] of Object.entries(azure).sort()) {
 }
 console.error(`azure regions with no VM-list name (left out): ${unmatched.join(" ") || "none"}`);
 
+}
+
 // ---- Google Cloud Storage: the hand-kept page figures
 for (const line of readFileSync(new URL("./gcs-storage.csv", import.meta.url), "utf8").split("\n")) {
   if (!line || line.startsWith("#")) continue;
-  const [region, perHour] = line.split(",");
-  rows.push(["gcp", region, Math.round(Number(perHour) * 730 * 1e6), micro(0.005), micro(0.0004)]);
+  const [region, perHour, wide] = line.split(",");
+  // a dual-region or multi-region ("wide") bucket pays $0.01 per 1,000 Class A operations, not $0.005
+  rows.push(["gcp", region, Math.round(Number(perHour) * 730 * 1e6), micro(wide?.trim() === "wide" ? 0.01 : 0.005), micro(0.0004)]);
 }
 
 const head = [
@@ -128,11 +141,12 @@ const head = [
   `# Generated ${new Date().toISOString().slice(0, 10)} by scripts/gen-storage-prices.mjs; do not edit by hand.`,
   "# provider,region,gb_month,write_per_1k,read_per_1k in micro-USD (1000000 = 1 dollar). Standard class, first tier.",
   "# aws: S3 (AWS price list); azure: Blob, Hot LRS (Azure retail prices API); gcp: Cloud Storage Standard, single",
-  "# regions (scripts/gcs-storage.csv, read from cloud.google.com/storage/pricing). ESTIMATES, not quotes.",
+  "# regions and the predefined dual- and multi-regions (scripts/gcs-storage.csv, read from cloud.google.com/storage/pricing).",
+  "# ESTIMATES, not quotes.",
 ];
 rows.sort((a, b) => (a[0] + "/" + a[1] < b[0] + "/" + b[1] ? -1 : 1));
 writeFileSync(
-  new URL("../crates/kaanal-core/data/storage-prices.csv", import.meta.url),
+  csvUrl,
   head.concat(rows.map((r) => r.join(","))).join("\n") + "\n",
 );
 console.error(`${rows.length} rows: aws ${rows.filter((r) => r[0] === "aws").length}, azure ${rows.filter((r) => r[0] === "azure").length}, gcp ${rows.filter((r) => r[0] === "gcp").length}`);

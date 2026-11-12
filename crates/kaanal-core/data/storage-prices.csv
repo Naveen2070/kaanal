@@ -2,7 +2,8 @@
 # Generated 2026-11-12 by scripts/gen-storage-prices.mjs; do not edit by hand.
 # provider,region,gb_month,write_per_1k,read_per_1k in micro-USD (1000000 = 1 dollar). Standard class, first tier.
 # aws: S3 (AWS price list); azure: Blob, Hot LRS (Azure retail prices API); gcp: Cloud Storage Standard, single
-# regions (scripts/gcs-storage.csv, read from cloud.google.com/storage/pricing). ESTIMATES, not quotes.
+# regions and the predefined dual- and multi-regions (scripts/gcs-storage.csv, read from cloud.google.com/storage/pricing).
+# ESTIMATES, not quotes.
 aws,af-south-1,27400,6000,400
 aws,ap-east-1,25000,5000,400
 aws,ap-east-2,22500,4230,333
@@ -96,6 +97,7 @@ azure,us-west-3,18400,5000,400
 azure,us-west-central,18400,5000,400
 azure,west-india,20000,5500,440
 gcp,africa-south1,20000,5000,400
+gcp,asia,26000,10000,400
 gcp,asia-east1,20000,5000,400
 gcp,asia-east2,23000,5000,400
 gcp,asia-northeast1,23000,5000,400
@@ -107,8 +109,14 @@ gcp,asia-southeast1,20000,5000,400
 gcp,asia-southeast2,23000,5000,400
 gcp,asia-southeast3,21000,5000,400
 gcp,asia-southeast4,21000,5000,400
+gcp,asia1,50600,10000,400
 gcp,australia-southeast1,23000,5000,400
 gcp,australia-southeast2,23000,5000,400
+gcp,eu,26000,10000,400
+gcp,eur4,44000,10000,400
+gcp,eur5,47300,10000,400
+gcp,eur7,50600,10000,400
+gcp,eur8,52800,10000,400
 gcp,europe-central2,23000,5000,400
 gcp,europe-north1,20000,5000,400
 gcp,europe-north2,23000,5000,400
@@ -125,11 +133,13 @@ gcp,europe-west9,23000,5000,400
 gcp,me-central1,23000,5000,400
 gcp,me-central2,30000,5000,400
 gcp,me-west1,21000,5000,400
+gcp,nam4,44000,10000,400
 gcp,northamerica-northeast1,23000,5000,400
 gcp,northamerica-northeast2,23000,5000,400
 gcp,northamerica-south1,26000,5000,400
 gcp,southamerica-east1,35000,5000,400
 gcp,southamerica-west1,30000,5000,400
+gcp,us,26000,10000,400
 gcp,us-central1,20000,5000,400
 gcp,us-east1,20000,5000,400
 gcp,us-east4,23000,5000,400

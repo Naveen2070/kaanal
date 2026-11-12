@@ -53,7 +53,8 @@ pub struct CacheParams {
 /// Preset hit ratio and costs of a cache flavor (estimates).
 pub fn cache_defaults(flavor: CacheFlavor) -> CacheParams {
     match flavor {
-        CacheFlavor::Redis => CacheParams {
+        // Valkey is a Redis fork with the same wire protocol; no published figure tells them apart
+        CacheFlavor::Redis | CacheFlavor::Valkey => CacheParams {
             hit_ratio: 0.9,
             hit: pct(200, 1_000),
             miss: pct(200, 1_000),

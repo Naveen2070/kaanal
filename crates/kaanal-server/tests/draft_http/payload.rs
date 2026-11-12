@@ -432,4 +432,16 @@ async fn object_store_prices_and_the_managed_class_lists_are_served() {
             .unwrap()
             .contains(&json!(["aws/cache.m5.large", 156_000]))
     );
+    // Valkey has its own list, 20% below Redis OSS
+    let r = s
+        .get("/__kaanal/prices/aws-elasticache-valkey/us-east-1")
+        .await;
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    assert!(
+        v["prices"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(["aws/cache.m5.large", 124_800]))
+    );
 }

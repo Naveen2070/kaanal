@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use kaanal_core::cost::CostReport;
 use kaanal_sim::Summary;
 use serde::Serialize;
 
@@ -36,6 +37,9 @@ pub struct RunRecord {
     pub finished_ms: Option<u64>,
     /// The report, when `done`.
     pub summary: Option<Summary>,
+    /// What the system costs an hour, estimated (RULES 126): the same sums as Studio's cost card,
+    /// with an object store's requests priced at this run's visits. When `done`.
+    pub cost: Option<CostReport>,
     /// Why it failed, when `failed`.
     pub error: Option<String>,
     /// The log sample, when `done`: served by `/log`, not part of the record's JSON. Shared,
@@ -101,6 +105,7 @@ impl SimStore {
             started_ms: now_ms(),
             finished_ms: None,
             summary: None,
+            cost: None,
             error: None,
             log: Arc::default(),
         });
@@ -108,7 +113,7 @@ impl SimStore {
     }
 
     /// Ends run `id` with its result and frees the slot.
-    pub fn finish(&self, id: &str, result: Result<(Summary, LogSample), String>) {
+    pub fn finish(&self, id: &str, result: Result<(Summary, LogSample, CostReport), String>) {
         let mut i = self.lock();
         if i.running.as_deref() == Some(id) {
             i.running = None;
@@ -116,8 +121,9 @@ impl SimStore {
         if let Some(r) = i.runs.iter_mut().find(|r| r.id == id) {
             r.finished_ms = Some(now_ms());
             match result {
-                Ok((s, log)) => {
+                Ok((s, log, cost)) => {
                     (r.state, r.summary) = ("done", Some(s));
+                    r.cost = Some(cost);
                     r.log = Arc::new(log);
                 }
                 Err(e) => (r.state, r.error) = ("failed", Some(e)),
@@ -137,6 +143,7 @@ impl SimStore {
             .iter()
             .map(|r| RunRecord {
                 summary: None,
+                cost: None,
                 log: Arc::default(),
                 ..r.clone()
             })

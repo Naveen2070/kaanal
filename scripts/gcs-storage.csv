@@ -4,7 +4,14 @@
 # monthly price the page shows is this x 730.
 # Operations, single region, Standard: Class A (writes) $0.005 and Class B (reads) $0.0004 per 1,000
 # (flat namespace), from the same page; the same in every single region.
-# region,usd_per_gib_hour
+# Predefined dual-regions (asia1 eur4 eur5 eur7 eur8 nam4) and multi-regions (asia eu us), Standard, from
+# the same page (read in a browser on 2026-11-12, one selector option at a time): rows marked `wide`.
+# The page bills a dual-region in both of its regions at the listed price, so the listed price is
+# already the total (nam4 is twice a single region). For a bucket in a dual- or multi-region, Class A
+# is $0.01 per 1,000 and Class B stays $0.0004 (the page's "dual-region or multi-region" table).
+# A configurable dual-region (any two regions) is not here: its price is the sum of the two regions'
+# dual-region prices, which needs a pair, not a location.
+# region,usd_per_gib_hour[,wide]
 africa-south1,0.000027397
 asia-east1,0.000027397
 asia-east2,0.000031507
@@ -51,3 +58,12 @@ us-west2,0.000031507
 us-west3,0.000031507
 us-west4,0.000031507
 us-west8,0.000027397
+asia,0.000035616,wide
+asia1,0.000069315,wide
+eu,0.000035616,wide
+eur4,0.000060274,wide
+eur5,0.000064795,wide
+eur7,0.000069315,wide
+eur8,0.000072329,wide
+nam4,0.000060274,wide
+us,0.000035616,wide

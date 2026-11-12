@@ -1,7 +1,8 @@
 // The storage node's own settings (a storage node refuses `proc`): its flavor (a label), the time to
 // the first byte and the throughput that turns a body's size into time. Every edit is a patch.
 
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
+import { loadStoragePrices } from "../../data/api/prices";
 import type { NodeDoc } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { EDGE_LIMITS } from "./edgeFields";
@@ -21,7 +22,16 @@ import {
   setThroughput,
   throughputKb,
 } from "./fields";
-import { setStored, setWriteShare, storedOf, writeShareOf } from "./storageCost";
+import { storageProvider } from "../cost/cost";
+import {
+  locationLabel,
+  locationOf,
+  setLocation,
+  setStored,
+  setWriteShare,
+  storedOf,
+  writeShareOf,
+} from "./storageCost";
 import { BYTE_SIZE_UNITS, RATE_UNITS, TIME_UNITS } from "./units";
 
 const REMOVE =
@@ -30,6 +40,27 @@ const REMOVE =
 export function StorageFields({ name, config }: { name: string; config: NodeDoc }) {
   const patch = useDraft((s) => s.patch);
   const flavorId = useId();
+  const locationId = useId();
+  const provider = storageProvider(config);
+  const [locations, setLocations] = useState<string[]>([]);
+  useEffect(() => {
+    let gone = false;
+    loadStoragePrices().then(
+      (p) =>
+        !gone &&
+        setLocations(
+          Object.keys(p)
+            .filter((k) => k.startsWith(`${provider}/`))
+            .map((k) => k.slice(provider.length + 1))
+            .filter((r) => r !== "*"),
+        ),
+      () => undefined,
+    );
+    return () => {
+      gone = true;
+    };
+  }, [provider]);
+  const location = locationOf(config);
   const flavor = typeof config.flavor === "string" ? config.flavor : "";
   const throughput = throughputKb(config);
   const spread = firstByteSpread(config);
@@ -131,6 +162,32 @@ export function StorageFields({ name, config }: { name: string; config: NodeDoc 
           Remove the throughput
         </button>
       ) : null}
+      <div className="mb-2">
+        <label htmlFor={locationId} className="block text-sm font-medium">
+          Location (for the cost)
+        </label>
+        <select
+          id={locationId}
+          value={location}
+          aria-describedby={`${locationId}-hint`}
+          onChange={(e) => void patch(setLocation(name, config, e.currentTarget.value))}
+          className="h-7 max-w-full rounded border border-control bg-sheet px-1 text-text"
+        >
+          <option value="">The region picked at the globe</option>
+          {location !== "" && !locations.includes(location) ? (
+            <option value={location}>{location}</option>
+          ) : null}
+          {locations.map((l) => (
+            <option key={l} value={l}>
+              {locationLabel(l)}
+            </option>
+          ))}
+        </select>
+        <p id={`${locationId}-hint`} className="text-xs text-muted">
+          Where this store is priced, instead of the globe's region. Google also offers dual-regions
+          and multi-regions here. It changes no timing.
+        </p>
+      </div>
       <NumberField
         label="Data kept (for the cost)"
         units={BYTE_SIZE_UNITS}

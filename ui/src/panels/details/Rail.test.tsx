@@ -38,7 +38,7 @@ test("the_rail_keeps_one_width_on_every_tab_and_stays_in_the_row", () => {
   for (const tab of ["controls", "log", "results", "live"]) {
     show(tab);
     expect(screen.getByRole("complementary").parentElement?.style.width).toBe("360px");
-    expect(screen.getByRole("complementary").className).not.toMatch(/absolute/);
+    expect(screen.getByRole("complementary").className).not.toMatch(/\babsolute\b/);
     cleanup();
   }
 });

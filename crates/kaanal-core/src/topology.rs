@@ -351,7 +351,7 @@ impl fmt::Display for TopologyError {
             ),
             TopologyError::MissingCache(n) => write!(
                 f,
-                "cache node '{n}' needs hit_ratio, hit and miss (or a flavor: redis or memcached)"
+                "cache node '{n}' needs hit_ratio, hit and miss (or a flavor: redis, memcached or valkey)"
             ),
             TopologyError::MissingGatewayEdge(n) => {
                 write!(

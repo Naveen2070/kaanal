@@ -2,9 +2,11 @@
 //! `kaanal_sim` to run: moving the simulator into its own process later (see
 //! `internal/docs/suggestions/2026-10-28-process-isolation.md`) replaces its body and nothing else.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kaanal_core::EffectiveChaos;
+use kaanal_core::cost::{CostReport, estimate};
 use kaanal_sim::{Limits, SimConfig, Summary, run_with_limits, summarize};
 
 use super::log::{LogSample, sample};
@@ -35,7 +37,7 @@ pub(crate) fn check(job: &Job) -> Result<(), String> {
 ///
 /// # Errors
 /// The simulator's message.
-pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample), String> {
+pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample, CostReport), String> {
     let report = run_with_limits(
         &job.g.topo,
         &job.g.endpoints,
@@ -44,10 +46,15 @@ pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample), String> {
         &Limits::server(),
     )?;
     let log = sample(&report, &job.g.topo, &job.g.endpoints, &job.cfg);
-    Ok((
-        summarize(&job.g.topo, &job.g.endpoints, &job.cfg, &report),
-        log,
-    ))
+    let summary = summarize(&job.g.topo, &job.g.endpoints, &job.cfg, &report);
+    // an object store's requests are priced at what this run sent it
+    let visits: BTreeMap<String, f64> = summary
+        .nodes
+        .iter()
+        .map(|n| (n.name.clone(), n.visits_per_s))
+        .collect();
+    let cost = estimate(&job.g.config, &visits);
+    Ok((summary, log, cost))
 }
 
 /// Frees the run slot with a failure if the run never reported: a panic in the simulator, or a
@@ -69,7 +76,7 @@ impl Slot {
     }
 
     /// Records the result and releases the slot.
-    pub(crate) fn finish(mut self, result: Result<(Summary, LogSample), String>) {
+    pub(crate) fn finish(mut self, result: Result<(Summary, LogSample, CostReport), String>) {
         self.done = true;
         self.st.sims.finish(&self.id, result);
     }

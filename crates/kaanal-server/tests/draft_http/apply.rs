@@ -196,6 +196,38 @@ async fn a_request_during_the_pause_waits_and_then_uses_the_new_generation() {
     assert_eq!(applier.await.unwrap(), 200);
 }
 
+/// B10: a JSON content type with an empty body is "no options", for Apply and for validate (axum's
+/// `Json` refused it with a 400); a body that is not JSON is still a 400.
+#[tokio::test]
+async fn an_empty_body_with_a_json_content_type_is_no_options() {
+    let s = start(&system("1ms")).await;
+    let post = |path: &str, body: &'static str| {
+        s.client
+            .post(format!("{}{path}", s.base))
+            .bearer_auth(&s.token)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+    };
+    for empty in [
+        "", "  
+",
+    ] {
+        assert_eq!(post(APPLY, empty).await.unwrap().status(), 200, "{empty:?}");
+        let v = post("/__kaanal/draft/validate", empty).await.unwrap();
+        assert_eq!(v.status(), 200, "{empty:?}");
+    }
+    assert_eq!(post(APPLY, "{nope").await.unwrap().status(), 400);
+    assert_eq!(
+        post(APPLY, r#"{"timeout_ms":60001}"#)
+            .await
+            .unwrap()
+            .status(),
+        400,
+        "options are still checked"
+    );
+}
+
 #[tokio::test]
 async fn an_invalid_draft_is_400_with_diagnostics_and_changes_nothing() {
     let fast = system("1ms");

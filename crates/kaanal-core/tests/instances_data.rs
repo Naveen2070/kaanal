@@ -2,6 +2,7 @@
 //! Microsoft's size pages, and the on-demand price column (RULES 121).
 
 use kaanal_core::Config;
+use kaanal_core::config::CacheFlavor;
 use kaanal_core::instances::{all, lookup};
 
 #[test]
@@ -184,10 +185,109 @@ fn managed_cache_classes_have_their_own_size_and_a_regional_price() {
     // ElastiCache cache.m5.large: 2 vCPU, 6.38 GiB, $0.156 an hour in us-east-1 and $0.172 in eu-west-1
     assert_eq!((c.vcpu, c.memory_mib), (2, 6533));
     assert!(is_cache_class("aws/cache.m5.large") && !is_db_class("aws/cache.m5.large"));
-    assert_eq!(price("us-east-1", "aws/cache.m5.large"), Some(156_000));
-    assert_eq!(price("eu-west-1", "aws/cache.m5.large"), Some(172_000));
+    assert_eq!(
+        price(None, "us-east-1", "aws/cache.m5.large"),
+        Some(156_000)
+    );
+    assert_eq!(
+        price(None, "eu-west-1", "aws/cache.m5.large"),
+        Some(172_000)
+    );
     assert_eq!(c.price_micro_usd_hr, 156_000);
-    assert_eq!(price("us-east-1", "aws/m5.large"), None);
+    assert_eq!(price(None, "us-east-1", "aws/m5.large"), None);
+    // a flavor of Redis or Memcached is the same list as none
+    for f in [CacheFlavor::Redis, CacheFlavor::Memcached] {
+        assert_eq!(
+            price(Some(f), "us-east-1", "aws/cache.m5.large"),
+            Some(156_000)
+        );
+    }
+}
+
+/// B19. AWS prices `ElastiCache` for Valkey 20% below Redis OSS on a node-based cache (the published
+/// relationship), so every class both engines list is checked against 0.8 in every region, within
+/// the rounding of a price quoted in dollars to three or four places (1%).
+#[test]
+fn valkey_is_twenty_percent_below_redis_on_every_shared_class() {
+    use kaanal_core::prices::{managed_cache_price_micro_usd_hr as price, region_table};
+    let regions: Vec<&str> = kaanal_core::prices::regions("aws");
+    let mut shared = 0;
+    for r in regions {
+        let Some(valkey) = region_table("aws-elasticache-valkey", r) else {
+            continue;
+        };
+        for (name, v) in valkey {
+            let Some(redis) = price(None, r, name) else {
+                continue;
+            };
+            shared += 1;
+            let ratio = f64::from(*v) / f64::from(redis);
+            assert!((ratio - 0.8).abs() < 0.01, "{r} {name}: {v} vs {redis}");
+            // and the lookup is the table
+            assert_eq!(price(Some(CacheFlavor::Valkey), r, name), Some(*v));
+        }
+    }
+    assert!(
+        shared > 1_500,
+        "{shared} (class, region) pairs shared by the two engines"
+    );
+    assert_eq!(
+        price(Some(CacheFlavor::Valkey), "us-east-1", "aws/cache.m5.large"),
+        Some(124_800),
+        "$0.1248 an hour (AWS price list)"
+    );
+}
+
+/// B19. The newest Graviton cache classes (`r8gd`) are sold with Valkey only: they are in the table
+/// with a Valkey price somewhere and a Redis price nowhere.
+#[test]
+fn a_valkey_only_class_is_in_the_table_and_priced_for_valkey_alone() {
+    use kaanal_core::prices::{managed_cache_price_micro_usd_hr as price, region_table};
+    let name = "aws/cache.r8gd.xlarge";
+    assert!(lookup(name).is_some(), "{name} is a class");
+    let regions = kaanal_core::prices::regions("aws");
+    let valkey: Vec<_> = regions
+        .iter()
+        .filter(|r| price(Some(CacheFlavor::Valkey), r, name).is_some())
+        .collect();
+    assert!(!valkey.is_empty(), "priced for Valkey somewhere");
+    assert!(
+        regions.iter().all(|r| price(None, r, name).is_none()),
+        "and for Redis nowhere"
+    );
+    assert!(region_table("aws-elasticache-valkey", valkey[0]).is_some());
+}
+
+/// B20, from Google's pricing page: a predefined dual-region bills both of its regions, so it costs
+/// twice a single region in the same area (`nam4` is Iowa and South Carolina: 2 x $0.022 =
+/// $0.044), `eur4` (Finland and Netherlands) likewise, and a multi-region is $0.026; a bucket in a
+/// dual- or multi-region pays $0.01 per 1,000 Class A operations, a single region $0.005.
+#[test]
+fn google_dual_and_multi_region_prices_follow_the_pages_billing_rule() {
+    use kaanal_core::prices::{storage_locations, storage_price};
+    let p = |r: &str| storage_price("gcp", r).unwrap();
+    let single = p("us-central1");
+    assert_eq!(single.gb_month, 20_000, "$0.020 a GB-month");
+    // 2 x the dual-region SKU of each of its two regions ($0.022 each): $0.044
+    assert_eq!(p("nam4").gb_month, 44_000);
+    assert_eq!(p("eur4").gb_month, 44_000);
+    for m in ["us", "eu", "asia"] {
+        assert_eq!(p(m).gb_month, 26_000, "{m}: $0.026");
+    }
+    for w in [
+        "asia", "asia1", "eu", "eur4", "eur5", "eur7", "eur8", "nam4", "us",
+    ] {
+        assert_eq!(
+            (p(w).write_per_1k, p(w).read_per_1k),
+            (10_000, 400),
+            "{w}: Class A doubles, Class B does not"
+        );
+    }
+    assert_eq!((single.write_per_1k, single.read_per_1k), (5_000, 400));
+    // every location is listed once, and the single regions are still all there
+    let all = storage_locations("gcp");
+    assert_eq!(all.len(), 55);
+    assert!(all.contains(&"nam4") && all.contains(&"us-west1"));
 }
 
 #[test]
@@ -232,9 +332,13 @@ fn object_store_prices_are_per_region_for_all_three_clouds() {
     assert!(storage_price("gcp", "southamerica-east1").unwrap().gb_month > iowa.gb_month);
     // almost every Google row is a region the VM price files have (the newest regions may be absent
     // from that catalogue and are then simply not offered in the menu)
+    // (the nine dual- and multi-region locations are not compute regions and are left out of this check)
+    let wide = [
+        "asia", "asia1", "eu", "eur4", "eur5", "eur7", "eur8", "nam4", "us",
+    ];
     let google: Vec<_> = storage_rows()
         .iter()
-        .filter(|(p, _, _)| *p == "gcp")
+        .filter(|(p, r, _)| *p == "gcp" && !wide.contains(r))
         .collect();
     let known = google
         .iter()

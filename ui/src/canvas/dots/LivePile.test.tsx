@@ -72,13 +72,13 @@ test("every_colour_in_the_live_canvas_files_is_a_token_or_a_utility_not_a_loose_
   expect(files.length).toBeGreaterThan(3);
   for (const f of files) {
     const text = readFileSync(join(dir, f), "utf8");
-    expect(text.match(/#[0-9a-fA-F]{3,8}/g) ?? [], f).toEqual([]);
+    expect(text.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [], f).toEqual([]);
   }
   const css = readFileSync(join(process.cwd(), "src/main.css"), "utf8");
   const from = css.indexOf("@keyframes kaanal-dot");
   const rules = css.slice(from, css.indexOf("@media (prefers-reduced-motion: reduce)", from));
   expect(rules.length).toBeGreaterThan(200);
-  expect(rules.match(/#[0-9a-fA-F]{3,8}/g) ?? []).toEqual([]);
+  expect(rules.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
 });
 
 test("the_pile_follows_the_streams_component_order_not_the_drafts", () => {

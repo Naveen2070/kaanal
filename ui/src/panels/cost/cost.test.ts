@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import type { Doc } from "../../data/api/types";
 import {
+  multiAzFactor,
   daysFrom,
   dollarsFor,
   nodeCosts,
@@ -130,6 +131,19 @@ test("a_managed_cache_is_priced_from_the_elasticache_list_and_a_serverless_one_i
   expect(c[2]?.why).toBe("pick a managed cache class");
 });
 
+test("a_valkey_cache_is_priced_from_the_valkey_list", () => {
+  const d = doc({
+    v: { type: "cache", flavor: "valkey", hosting: "managed", instance: "aws/cache.m5.large" },
+  });
+  expect(priceKeysUsed(d)).toEqual([{ key: "aws-elasticache-valkey", provider: "aws" }]);
+  const c = nodeCosts(
+    d,
+    { "aws-elasticache-valkey": new Map([["aws/cache.m5.large", 124_800]]) },
+    region,
+  );
+  expect(c[0]).toMatchObject({ unitMicro: 124_800, totalMicro: 124_800 });
+});
+
 test("a_database_flavor_picks_its_engines_list_when_no_engine_is_written", () => {
   const d = doc({
     m: { type: "database", flavor: "mysql", hosting: "managed", instance: "aws/db.m5.large" },
@@ -180,4 +194,39 @@ test("a_store_is_priced_in_the_cloud_its_flavor_names_and_the_region_picked", ()
   expect(
     nodeCosts(d, {}, { azure: "nowhere" }, { prices: { "azure/us-east": s3 } })[2]?.why,
   ).toMatch(/no object-store price in nowhere/);
+});
+
+test("a_store_location_beats_the_globes_region_and_a_multi_region_is_priced_as_listed", () => {
+  const prices = {
+    "gcp/us-central1": { gbMonth: 20_000, writePer1k: 5_000, readPer1k: 400 },
+    "gcp/nam4": { gbMonth: 44_000, writePer1k: 10_000, readPer1k: 400 },
+  };
+  const d = doc({
+    a: { type: "storage", flavor: "gcs", stored: GB },
+    b: { type: "storage", flavor: "gcs", stored: GB, location: "nam4" },
+    c: { type: "storage", flavor: "gcs", stored: GB, location: "mars-1" },
+  });
+  const c = nodeCosts(d, {}, { gcp: "us-central1" }, { prices });
+  expect(c[0]?.totalMicro).toBe(Math.round(20_000 / 730));
+  expect(c[1]?.totalMicro).toBe(Math.round(44_000 / 730));
+  expect(c[2]?.why).toMatch(/no object-store price in mars-1/);
+});
+
+test("multi_az_doubles_a_managed_database_but_not_aurora_and_matches_the_rust_figures", () => {
+  // the same figures as crates/kaanal-core/tests/cost.rs: db.t3.micro PostgreSQL is $0.018 an hour
+  const tables = { "aws-rds-postgresql": new Map([["aws/db.t3.micro", 18_000]]) };
+  const d = doc({
+    one: { type: "database", flavor: "postgres", hosting: "managed", instance: "aws/db.t3.micro" },
+    two: {
+      type: "database",
+      flavor: "postgres",
+      hosting: "managed",
+      instance: "aws/db.t3.micro",
+      multi_az: true,
+    },
+  });
+  const c = nodeCosts(d, tables, region);
+  expect([c[0]?.totalMicro, c[1]?.totalMicro]).toEqual([18_000, 36_000]);
+  expect(multiAzFactor({ type: "database", engine: "aurora-mysql", multi_az: true })).toBe(1);
+  expect(multiAzFactor({ type: "cache", multi_az: true })).toBe(1);
 });
