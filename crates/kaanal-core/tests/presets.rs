@@ -53,6 +53,8 @@ fn unknown_or_wrong_family_flavor_lists_valid_names() {
         "postgres",
         "mysql",
         "mariadb",
+        "sqlserver",
+        "oracle",
         "mongodb",
         "neo4j",
         "cassandra",
@@ -61,7 +63,7 @@ fn unknown_or_wrong_family_flavor_lists_valid_names() {
     let cache = &["redis", "memcached"][..];
     for (node, names) in [
         ("{ type: database, flavor: redis }", db),
-        ("{ type: database, flavor: oracle }", db),
+        ("{ type: database, flavor: cobol }", db),
         ("{ type: monolith, flavor: memcached }", db),
         ("{ type: cache, flavor: postgres }", cache),
     ] {

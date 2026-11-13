@@ -26,6 +26,11 @@ pub fn db_ops(flavor: DbFlavor) -> [DistConfig; 3] {
         DbFlavor::Mysql | DbFlavor::Mariadb => {
             [pct(300, 2_500), pct(1_200, 10_000), pct(3_000, 30_000)]
         }
+        // estimates, no published figure: the same shape as PostgreSQL (an indexed read, a logged commit, an
+        // indexed list of about 100 rows); to be edited
+        DbFlavor::Sqlserver | DbFlavor::Oracle => {
+            [pct(300, 2_000), pct(1_000, 8_000), pct(3_000, 25_000)]
+        }
         DbFlavor::Mongodb => [pct(400, 3_000), pct(800, 6_000), pct(4_000, 35_000)],
         // estimates, no published figure: an indexed node lookup, a transaction commit (fsync), a
         // traversal of about 100 nodes

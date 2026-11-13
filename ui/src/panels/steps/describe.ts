@@ -41,12 +41,15 @@ export function routeKeys(doc: Doc | null | undefined): string[] {
   return typeof eps === "object" && eps !== null && !Array.isArray(eps) ? Object.keys(eps) : [];
 }
 
-/** The folded summary: how many routes have a chain written, and how many steps and own retries they hold. */
-export function stepsSummary(doc: Doc | null | undefined): string {
+/**
+ * The folded summary: how many routes have a chain written, and how many steps and own retries
+ * they hold. `only` limits it to the routes one component owns (default: every entry).
+ */
+export function stepsSummary(doc: Doc | null | undefined, only?: readonly string[]): string {
   let routes = 0;
   let steps = 0;
   let retries = 0;
-  for (const key of routeKeys(doc)) {
+  for (const key of only ?? routeKeys(doc)) {
     const list = readChain(chainOf(doc, key), []);
     if (!list) continue;
     routes++;
@@ -60,15 +63,22 @@ export function stepsSummary(doc: Doc | null | undefined): string {
 }
 
 /** Whether any route has a chain of its own written. */
-export const anyChain = (doc: Doc | null | undefined): boolean =>
-  routeKeys(doc).some((k) => chainOf(doc, k) !== undefined);
+export const anyChain = (doc: Doc | null | undefined, only?: readonly string[]): boolean =>
+  (only ?? routeKeys(doc)).some((k) => chainOf(doc, k) !== undefined);
+
+/** The route keys a component owns (`owners` is the validate answer's route to owner map), in key order. */
+export const ownedRoutes = (owners: Readonly<Record<string, string>>, node: string): string[] =>
+  Object.keys(owners)
+    .filter((k) => owners[k] === node)
+    .sort();
+
+/** The components a call step of `node` can name: the targets of the edges that start at it. */
+export const calleesOf = (doc: Doc | null | undefined, node: string): string[] => [
+  ...new Set((doc?.edges ?? []).filter((e) => String(e.from) === node).map((e) => String(e.to))),
+];
 
 /** The cache components a `cache:` step can name. */
 export const cacheNodes = (doc: Doc | null | undefined): string[] =>
   Object.entries(doc?.nodes ?? {})
     .filter(([, n]) => n.type === "cache")
     .map(([name]) => name);
-
-/** The components a call step can name: every one but the gateway the request came in through. */
-export const callableNodes = (doc: Doc | null | undefined, gateway: string): string[] =>
-  Object.keys(doc?.nodes ?? {}).filter((n) => n !== gateway);

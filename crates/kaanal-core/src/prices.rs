@@ -226,10 +226,71 @@ pub fn managed_price_micro_usd_hr(
     name: &str,
 ) -> Option<u32> {
     let key = name.trim().to_ascii_lowercase();
-    let provider = format!("aws-rds-{}", engine.word());
+    // Azure SQL's classes are `azure/db.*` and have their own folder (RULES 131)
+    let provider = if engine == crate::config::DbEngine::AzureSql {
+        "azure-sql".to_string()
+    } else {
+        format!("aws-rds-{}", engine.word())
+    };
     let table = region_table(&provider, region)?;
     table
         .binary_search_by(|(n, _)| (*n).cmp(key.as_str()))
         .ok()
         .map(|i| table[i].1)
+}
+
+/// What sending data out to the internet costs in a region (`data/egress.csv`, RULES 131): the
+/// first-tier price, in micro-USD, and the monthly allowance that is free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EgressPrice {
+    /// One GB sent out, micro-USD.
+    pub micro_usd_per_gb: u32,
+    /// GB a month that cost nothing.
+    pub free_gb: u32,
+}
+
+const EGRESS_CSV: &str = include_str!("../data/egress.csv");
+
+/// The internet-egress price of `provider` (`aws`, `azure`, `gcp`) in `region`. A row for region `*`
+/// answers for every region of its provider (Google's headline, today).
+#[must_use]
+pub fn egress_price(provider: &str, region: &str) -> Option<EgressPrice> {
+    static ROWS: OnceLock<Vec<(&'static str, &'static str, EgressPrice)>> = OnceLock::new();
+    let rows = ROWS.get_or_init(|| {
+        EGRESS_CSV
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let mut f = l.split(',');
+                let mut next = || f.next().expect("a csv field");
+                let (p, r) = (next(), next());
+                let mut n = || next().parse::<u32>().expect("a number");
+                let price = EgressPrice {
+                    micro_usd_per_gb: n(),
+                    free_gb: n(),
+                };
+                (p, r, price)
+            })
+            .collect()
+    });
+    let hit = |r: &str| rows.iter().find(|(p, g, _)| *p == provider && *g == r);
+    hit(region).or_else(|| hit("*")).map(|(_, _, p)| *p)
+}
+
+const PER_USE_CSV: &str = include_str!("../data/per-use.csv");
+
+/// A pay-per-use price (`data/per-use.csv`, RULES 131), first tier, in micro-USD: `lambda_request`
+/// and `apigw_request` for a million requests, `lambda_gb_second` for a thousand GB-seconds; `None`
+/// where the cloud does not sell the service in `region`.
+#[must_use]
+pub fn per_use_price(service: &str, region: &str) -> Option<u32> {
+    PER_USE_CSV
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .find_map(|l| {
+            let mut f = l.split(',');
+            (f.next()? == service && f.next()? == region)
+                .then(|| f.next()?.parse().ok())
+                .flatten()
+        })
 }

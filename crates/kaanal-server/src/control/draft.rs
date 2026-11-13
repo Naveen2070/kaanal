@@ -426,17 +426,33 @@ pub async fn validate_draft(
     let (key, port) = (st.auth_key.clone(), st.port);
     // reads spec and data files, so off the async threads
     let built = tokio::task::spawn_blocking(move || {
-        crate::draft::apply::build_draft(&text, &dir, seed, key, port)
-            .map(|b| (b.generation.warnings, b.generation.flagged))
+        crate::draft::apply::build_draft(&text, &dir, seed, key, port).map(|b| {
+            let g = &b.generation;
+            (g.warnings.clone(), g.flagged.clone(), route_owners(g))
+        })
     })
     .await
     .map_err(|e| reject(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
     Ok(Json(match built {
-        Ok((warnings, flagged)) => {
-            json!({ "ok": true, "diagnostics": [], "warnings": warnings, "flagged": flagged })
-        }
-        Err(d) => json!({ "ok": false, "diagnostics": [d], "warnings": [], "flagged": [] }),
+        Ok((warnings, flagged, owners)) => json!({
+            "ok": true, "diagnostics": [], "warnings": warnings, "flagged": flagged,
+            "owners": owners,
+        }),
+        Err(d) => json!({
+            "ok": false, "diagnostics": [d], "warnings": [], "flagged": [], "owners": {},
+        }),
     }))
+}
+
+/// **Private.** Which component owns each route of the built draft, by the route's normalized
+/// key (B8: the Studio hosts a route's Steps on its owner, because a chain is what the owner
+/// calls). Static routes (no owner) and synthesized `HEAD` copies are left out.
+fn route_owners(g: &crate::generation::Generation) -> serde_json::Map<String, Value> {
+    g.endpoints
+        .iter()
+        .filter(|e| !e.synthesized)
+        .filter_map(|e| Some((e.key.clone(), json!(g.topo.nodes[e.owner?].name))))
+        .collect()
 }
 
 /// **Private.** The 400 for a draft over the limit.

@@ -159,10 +159,11 @@ fn managed_database_classes_have_their_own_size_and_a_price_per_engine() {
     );
     assert_eq!(c.price_micro_usd_hr, 178_000);
     // the default region's PostgreSQL file is the table's price column for every class that has one
-    for i in all()
-        .iter()
-        .filter(|i| kaanal_core::instances::is_db_class(i.name) && i.price_micro_usd_hr > 0)
-    {
+    for i in all().iter().filter(|i| {
+        i.name.starts_with("aws/")
+            && kaanal_core::instances::is_db_class(i.name)
+            && i.price_micro_usd_hr > 0
+    }) {
         let p = price(DbEngine::Postgresql, "us-east-1", i.name).or(price(
             DbEngine::Mysql,
             "us-east-1",
@@ -467,5 +468,88 @@ fn azure_network_figures_cover_the_size_pages() {
         with * 10 >= azure.len() * 7,
         "{with} of {} have a figure",
         azure.len()
+    );
+}
+
+#[test]
+fn azure_sql_classes_are_vcores_at_the_per_vcore_rate_in_their_own_price_list() {
+    use kaanal_core::config::{DbEngine, DbFlavor};
+    use kaanal_core::instances::{is_db_class, lookup};
+    use kaanal_core::prices::managed_price_micro_usd_hr as price;
+    // Gen5 memory is 5.1875 GiB a vCore: Microsoft lists 10.4 GB for 2 vCores and 103.8 GB for 20
+    let two = lookup("azure/db.gp_gen5_2").unwrap();
+    assert_eq!((two.vcpu, two.memory_mib), (2, 10_624));
+    assert_eq!(lookup("azure/db.bc_gen5_20").unwrap().memory_mib, 20 * 5312);
+    assert!(is_db_class("azure/db.gp_gen5_2"));
+    // the retail API's compute meter is linear in vCores: 4 vCores cost twice 2 (to rounding), and
+    // Business Critical is twice General Purpose
+    let gp = |n| {
+        price(
+            DbEngine::AzureSql,
+            "us-east",
+            &format!("azure/db.gp_gen5_{n}"),
+        )
+        .unwrap()
+    };
+    let bc = |n| {
+        price(
+            DbEngine::AzureSql,
+            "us-east",
+            &format!("azure/db.bc_gen5_{n}"),
+        )
+        .unwrap()
+    };
+    assert!(gp(4).abs_diff(2 * gp(2)) <= 2, "{} {}", gp(4), gp(2));
+    assert!(bc(8).abs_diff(2 * gp(8)) <= 8, "{} {}", bc(8), gp(8));
+    // the table's price column is the us-east price
+    assert_eq!(two.price_micro_usd_hr, gp(2));
+    // an AWS class has no price under the Azure engine and the reverse
+    assert_eq!(
+        price(DbEngine::AzureSql, "us-east", "aws/db.m5.large"),
+        None
+    );
+    assert_eq!(
+        price(DbEngine::Postgresql, "us-east", "azure/db.gp_gen5_2"),
+        None
+    );
+    assert!(DbFlavor::Sqlserver.engines().contains(&DbEngine::AzureSql));
+}
+
+/// RULES 131: the licence-included Oracle and SQL Server editions, from AWS's own RDS price list. The
+/// oracle is that list for db.m5.large and db.r5.large in us-east-1: Oracle Standard Two $0.438 and
+/// $0.482, SQL Server Standard $0.977 and $1.02, SQL Server Web $0.311 and $0.46 an hour. The licence is
+/// inside the price, so each is dearer than the same class under PostgreSQL ($0.178 for m5.large).
+#[test]
+fn licensed_editions_are_priced_licence_included_from_the_aws_list() {
+    use kaanal_core::config::{DbEngine, DbFlavor};
+    use kaanal_core::prices::managed_price_micro_usd_hr as price;
+    let at = |e, c| price(e, "us-east-1", c);
+    assert_eq!(at(DbEngine::OracleSe2, "aws/db.m5.large"), Some(438_000));
+    assert_eq!(at(DbEngine::OracleSe2, "aws/db.r5.large"), Some(482_000));
+    assert_eq!(
+        at(DbEngine::SqlserverStandard, "aws/db.m5.large"),
+        Some(977_000)
+    );
+    assert_eq!(
+        at(DbEngine::SqlserverStandard, "aws/db.r5.large"),
+        Some(1_020_000)
+    );
+    assert_eq!(at(DbEngine::SqlserverWeb, "aws/db.m5.large"), Some(311_000));
+    assert_eq!(at(DbEngine::SqlserverWeb, "aws/db.r5.large"), Some(460_000));
+    // a class AWS sells no Express or Enterprise edition of has no price there; the editions are not mixed up
+    assert_ne!(
+        at(DbEngine::SqlserverEnterprise, "aws/db.m5.large"),
+        at(DbEngine::SqlserverStandard, "aws/db.m5.large")
+    );
+    assert!(
+        at(DbEngine::OracleSe2, "aws/db.m5.large") > at(DbEngine::Postgresql, "aws/db.m5.large")
+    );
+    // a region other than us-east-1 has its own list (the usage type carries a prefix there)
+    assert!(price(DbEngine::SqlserverStandard, "eu-west-1", "aws/db.m5.large").is_some());
+    // the flavors name them; the first engine of a flavor is its default
+    assert_eq!(DbFlavor::Oracle.engines(), &[DbEngine::OracleSe2]);
+    assert_eq!(
+        DbFlavor::Sqlserver.engines()[0],
+        DbEngine::SqlserverStandard
     );
 }

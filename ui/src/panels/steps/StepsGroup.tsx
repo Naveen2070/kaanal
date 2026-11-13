@@ -1,7 +1,7 @@
 // The Steps group (Part 9): a route's chain as a list of rows, one list per route. A step is one line
 // ("call db · read · ×2 · 80%"); every edit is one patch of the draft (one undo step). The group is on
-// the gateway's Settings, beside the traffic routes, because that is where a route's chain is edited
-// today and the Studio does not know which component owns a route.
+// the owning component's Settings (B8): a chain is what the owner calls, so a route's steps are edited
+// there, with the owner's own callees. `routes` is the keys that component owns.
 
 import { useState } from "react";
 import type { Doc } from "../../data/api/types";
@@ -18,18 +18,25 @@ export function StepsGroup({
   doc,
   callable,
   caches = [],
+  routes,
 }: {
   doc: Doc;
   callable: string[];
   caches?: string[];
+  routes?: string[];
 }) {
-  const keys = routeKeys(doc);
+  const keys = routes ?? routeKeys(doc);
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const [said, setSaid] = useState("");
   const key = picked !== undefined && keys.includes(picked) ? picked : keys[0];
   if (key === undefined) return null;
   return (
-    <Group id={NODE_GROUP.steps} title="Steps" summary={stepsSummary(doc)} changed={anyChain(doc)}>
+    <Group
+      id={NODE_GROUP.steps}
+      title="Steps"
+      summary={stepsSummary(doc, keys)}
+      changed={anyChain(doc, keys)}
+    >
       <p className="mb-2 text-xs text-muted">
         What a request does at each route, in order. A route with no steps runs the default chain.
       </p>

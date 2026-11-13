@@ -4,7 +4,7 @@ Flavor presets (rule R1.25).
 
 ## What it does
 
-Supplies default op costs for database flavors (`postgres`, `mysql`, `mariadb`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`, also usable on a `monolith`) and a default hit ratio and hit/miss costs for cache flavors (`redis`, `memcached`, `valkey`). **All numbers are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`). Precedence is user value > preset > error: any value the user writes wins, and [topology.md](topology.md) raises `MissingOps` when something is still missing.
+Supplies default op costs for database flavors (`postgres`, `mysql`, `mariadb`, `sqlserver`, `oracle`, `mongodb`, `neo4j`, `cassandra`, `dynamodb`, also usable on a `monolith`) and a default hit ratio and hit/miss costs for cache flavors (`redis`, `memcached`, `valkey`). **All numbers are estimates**: typical single-node figures for a warm instance with small rows, network excluded (edges carry `net`). Precedence is user value > preset > error: any value the user writes wins, and [topology.md](topology.md) raises `MissingOps` when something is still missing.
 
 ## Values (estimates)
 

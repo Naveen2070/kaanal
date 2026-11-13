@@ -252,6 +252,21 @@ fn print_cost(c: &Value) {
         c["priced"].as_u64().unwrap_or(0) + c["unpriced"].as_u64().unwrap_or(0),
         regions.join(", ")
     );
+    // what the run sent out to the internet is already in the total; say how much, and when it was guessed
+    for e in c["egress"].as_array().into_iter().flatten() {
+        let Some(m) = e["micro_usd_hr"].as_u64() else {
+            continue;
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let usd = m as f64 / 1e6;
+        println!(
+            "  of which sent out to the internet: ${usd:.4} an hour at {}'s rate{}",
+            clean(e["provider"].as_str().unwrap_or("")),
+            e["note"]
+                .as_str()
+                .map_or(String::new(), |n| format!(" ({})", clean(n)))
+        );
+    }
 }
 
 /// **Private.** `kaanal sample ROUTE`. Text mode prints the body to stdout, so it can be piped,

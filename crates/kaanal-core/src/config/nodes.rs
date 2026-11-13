@@ -526,6 +526,10 @@ pub enum DbFlavor {
     Mongodb,
     /// `MariaDB` (`InnoDB`): the same costs as `MySQL`.
     Mariadb,
+    /// `Microsoft SQL Server` (and Azure SQL Database): placeholder costs, no published figure.
+    Sqlserver,
+    /// `Oracle Database`: placeholder costs, no published figure.
+    Oracle,
     /// `Neo4j`, a graph database: a read is an indexed node lookup with a hop, a scan is a
     /// traversal.
     Neo4j,
@@ -544,6 +548,8 @@ impl DbFlavor {
             DbFlavor::Mysql => "mysql",
             DbFlavor::Mongodb => "mongodb",
             DbFlavor::Mariadb => "mariadb",
+            DbFlavor::Sqlserver => "sqlserver",
+            DbFlavor::Oracle => "oracle",
             DbFlavor::Neo4j => "neo4j",
             DbFlavor::Cassandra => "cassandra",
             DbFlavor::Dynamodb => "dynamodb",

@@ -263,10 +263,12 @@ test("gateway_controls_shows_traffic_routes_and_patches_target", async () => {
   const group = screen.getByRole("group", { name: "GET /" });
   expect((within(group).getByLabelText("All services") as HTMLInputElement).checked).toBe(false);
 
-  const sent = mockFetch([{ json: view() }]);
+  const all = mockFetch([{ json: view() }]);
+  // the owners lookup (validate) may land in the same window; only the edit is looked at
+  const sent = { get: () => all.filter((r) => !r.url.includes("/draft/validate")) };
   fireEvent.click(within(group).getByLabelText(/^app/));
-  await vi.waitFor(() => expect(sent).toHaveLength(1));
-  expect(sent[0]?.body).toEqual({
+  await vi.waitFor(() => expect(sent.get()).toHaveLength(1));
+  expect(sent.get()[0]?.body).toEqual({
     patch: [
       { op: "insert", path: ["endpoints", "GET /", "chain"], value: [{ call: "app" }] },
       ...(edges.some((e) => e.from === "gw" && e.to === "app")

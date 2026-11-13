@@ -1,0 +1,39 @@
+# On-demand price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-oracle-se2, licence included, Single-AZ, in region us-east-2.
+# Generated 2026-11-13 by scripts/gen-rds-licensed.mjs from AWS's AmazonRDS price list; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a class missing here has no price there.
+aws/db.m4.2xlarge,1768000
+aws/db.m4.4xlarge,3537000
+aws/db.m4.large,442000
+aws/db.m4.xlarge,885000
+aws/db.m5.2xlarge,1752000
+aws/db.m5.4xlarge,3504000
+aws/db.m5.large,438000
+aws/db.m5.xlarge,876000
+aws/db.r3.2xlarge,1957000
+aws/db.r3.4xlarge,3913000
+aws/db.r3.large,489000
+aws/db.r3.xlarge,978000
+aws/db.r4.2xlarge,1956800
+aws/db.r4.4xlarge,3913600
+aws/db.r4.large,489200
+aws/db.r4.xlarge,978400
+aws/db.r5.2xlarge,1928000
+aws/db.r5.4xlarge,3856000
+aws/db.r5.large,482000
+aws/db.r5.xlarge,964000
+aws/db.r6i.2xlarge,1928000
+aws/db.r6i.4xlarge,3856000
+aws/db.r6i.large,482000
+aws/db.r6i.xlarge,964000
+aws/db.t2.2xlarge,1208000
+aws/db.t2.large,301000
+aws/db.t2.medium,151000
+aws/db.t2.micro,38000
+aws/db.t2.small,75000
+aws/db.t2.xlarge,604000
+aws/db.t3.2xlarge,1200000
+aws/db.t3.large,300000
+aws/db.t3.medium,150000
+aws/db.t3.small,75000
+aws/db.t3.xlarge,600000
+aws/db.x2iedn.4xlarge,16740000

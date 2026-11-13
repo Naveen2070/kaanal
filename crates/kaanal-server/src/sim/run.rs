@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kaanal_core::EffectiveChaos;
-use kaanal_core::cost::{CostReport, estimate};
+use kaanal_core::cost::{CostReport, egress_flows, estimate_with_egress};
 use kaanal_sim::{Limits, SimConfig, Summary, run_with_limits, summarize};
 
 use super::log::{LogSample, sample};
@@ -53,7 +53,17 @@ pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample, CostReport),
         .iter()
         .map(|n| (n.name.clone(), n.visits_per_s))
         .collect();
-    let cost = estimate(&job.g.config, &visits);
+    // and what its streams send out to the internet: rate x response size, by the cloud of the entry node
+    let flows = egress_flows(
+        &job.g.config,
+        &job.g.topo,
+        &job.g.endpoints,
+        job.cfg.streams.iter().map(|s| {
+            #[allow(clippy::cast_precision_loss)]
+            (s.endpoint_key.as_str(), s.rate_per_s * s.resp_bytes as f64)
+        }),
+    );
+    let cost = estimate_with_egress(&job.g.config, &visits, &flows);
     Ok((summary, log, cost))
 }
 

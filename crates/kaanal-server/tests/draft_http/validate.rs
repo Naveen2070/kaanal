@@ -86,3 +86,22 @@ async fn validate_does_not_change_the_running_system() {
     let d: Value = s.get("/__kaanal/draft").await.json().await.unwrap();
     assert_eq!(d["generation"], 1);
 }
+
+#[tokio::test]
+async fn validate_names_the_component_that_owns_each_route() {
+    let s = start_blank().await;
+    put(&s, &system("1ms")).await;
+    let v = validate(&s, None).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["owners"]["GET /users/{id}"], "app", "{v}");
+    assert!(
+        v["owners"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|k| !k.starts_with("HEAD ")),
+        "a HEAD copy has no owner of its own: {v}"
+    );
+    let bad = validate(&s, Some(json!({ "text": "version: 1\nnodes: {}\n" }))).await;
+    assert_eq!(bad["owners"], json!({}));
+}

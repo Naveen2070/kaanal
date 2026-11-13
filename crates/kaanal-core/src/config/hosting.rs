@@ -69,6 +69,25 @@ pub enum DbEngine {
     /// Amazon Neptune (graph), priced from AWS's own price list (RULES 127).
     #[serde(rename = "neptune")]
     Neptune,
+    /// Azure SQL Database, vCore model (General Purpose and Business Critical), priced from Azure's
+    /// retail prices API (RULES 131).
+    #[serde(rename = "azure-sql")]
+    AzureSql,
+    /// RDS for Oracle Standard Edition Two, licence included (RULES 131).
+    #[serde(rename = "oracle-se2")]
+    OracleSe2,
+    /// RDS for SQL Server Express, licence included.
+    #[serde(rename = "sqlserver-ex")]
+    SqlserverEx,
+    /// RDS for SQL Server Web, licence included.
+    #[serde(rename = "sqlserver-web")]
+    SqlserverWeb,
+    /// RDS for SQL Server Standard, licence included.
+    #[serde(rename = "sqlserver-standard")]
+    SqlserverStandard,
+    /// RDS for SQL Server Enterprise, licence included.
+    #[serde(rename = "sqlserver-enterprise")]
+    SqlserverEnterprise,
 }
 
 impl DbEngine {
@@ -83,6 +102,12 @@ impl DbEngine {
             DbEngine::AuroraMysql => "aurora-mysql",
             DbEngine::Docdb => "docdb",
             DbEngine::Neptune => "neptune",
+            DbEngine::AzureSql => "azure-sql",
+            DbEngine::OracleSe2 => "oracle-se2",
+            DbEngine::SqlserverEx => "sqlserver-ex",
+            DbEngine::SqlserverWeb => "sqlserver-web",
+            DbEngine::SqlserverStandard => "sqlserver-standard",
+            DbEngine::SqlserverEnterprise => "sqlserver-enterprise",
         }
     }
 }
@@ -94,13 +119,24 @@ impl DbFlavor {
     /// Atlas and `AuraDB` publish no class prices, so a managed one is sized and priced by you.
     #[must_use]
     pub fn engines(self) -> &'static [DbEngine] {
-        use DbEngine::{AuroraMysql, AuroraPostgresql, Docdb, Mariadb, Mysql, Neptune, Postgresql};
+        use DbEngine::{
+            AuroraMysql, AuroraPostgresql, AzureSql, Docdb, Mariadb, Mysql, Neptune, OracleSe2,
+            Postgresql, SqlserverEnterprise, SqlserverEx, SqlserverStandard, SqlserverWeb,
+        };
         match self {
             DbFlavor::Postgres => &[Postgresql, AuroraPostgresql],
             DbFlavor::Mysql => &[Mysql, AuroraMysql],
             DbFlavor::Mariadb => &[Mariadb],
             DbFlavor::Mongodb => &[Docdb],
             DbFlavor::Neo4j => &[Neptune],
+            DbFlavor::Sqlserver => &[
+                SqlserverStandard,
+                SqlserverEnterprise,
+                SqlserverWeb,
+                SqlserverEx,
+                AzureSql,
+            ],
+            DbFlavor::Oracle => &[OracleSe2],
             DbFlavor::Cassandra | DbFlavor::Dynamodb => &[],
         }
     }

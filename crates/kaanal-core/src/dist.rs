@@ -60,6 +60,19 @@ impl Dist {
         }
     }
 
+    /// The mean duration: the fixed value, `exp(mu + sigma^2 / 2)` of a lognormal (the textbook mean;
+    /// the 10 x p99 cap on a draw trims a sliver of the tail and is ignored), the mean of an
+    /// exponential. What a bill by duration is multiplied by (RULES 131).
+    pub fn mean(&self) -> Duration {
+        match self {
+            Dist::Fixed(d) => *d,
+            Dist::LogNormal { mu, sigma, .. } => {
+                Duration::from_secs_f64((mu + sigma * sigma / 2.0).exp() / 1000.0)
+            }
+            Dist::Exp { mean } => *mean,
+        }
+    }
+
     /// The median duration (an estimate for warnings; sampling never uses it): the fixed value,
     /// `p50` of a lognormal, `mean * ln 2` of an exponential.
     pub fn median(&self) -> Duration {

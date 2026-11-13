@@ -406,6 +406,36 @@
           "const": "neptune",
           "description": "Amazon Neptune (graph), priced from AWS's own price list (RULES 127).",
           "type": "string"
+        },
+        {
+          "const": "azure-sql",
+          "description": "Azure SQL Database, vCore model (General Purpose and Business Critical), priced from Azure's\nretail prices API (RULES 131).",
+          "type": "string"
+        },
+        {
+          "const": "oracle-se2",
+          "description": "RDS for Oracle Standard Edition Two, licence included (RULES 131).",
+          "type": "string"
+        },
+        {
+          "const": "sqlserver-ex",
+          "description": "RDS for SQL Server Express, licence included.",
+          "type": "string"
+        },
+        {
+          "const": "sqlserver-web",
+          "description": "RDS for SQL Server Web, licence included.",
+          "type": "string"
+        },
+        {
+          "const": "sqlserver-standard",
+          "description": "RDS for SQL Server Standard, licence included.",
+          "type": "string"
+        },
+        {
+          "const": "sqlserver-enterprise",
+          "description": "RDS for SQL Server Enterprise, licence included.",
+          "type": "string"
         }
       ]
     },
@@ -430,6 +460,16 @@
         {
           "const": "mariadb",
           "description": "`MariaDB` (`InnoDB`): the same costs as `MySQL`.",
+          "type": "string"
+        },
+        {
+          "const": "sqlserver",
+          "description": "`Microsoft SQL Server` (and Azure SQL Database): placeholder costs, no published figure.",
+          "type": "string"
+        },
+        {
+          "const": "oracle",
+          "description": "`Oracle Database`: placeholder costs, no published figure.",
           "type": "string"
         },
         {

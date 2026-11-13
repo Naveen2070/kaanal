@@ -347,7 +347,7 @@ impl fmt::Display for TopologyError {
             }
             TopologyError::MissingOps(n) => write!(
                 f,
-                "node '{n}' needs ops: read, write and scan (or a flavor: postgres, mysql, mariadb, mongodb, neo4j, cassandra or dynamodb)"
+                "node '{n}' needs ops: read, write and scan (or a flavor: postgres, mysql, mariadb, sqlserver, oracle, mongodb, neo4j, cassandra or dynamodb)"
             ),
             TopologyError::MissingCache(n) => write!(
                 f,

@@ -133,8 +133,28 @@ test("the_engines_follow_the_flavor_and_cassandra_dynamodb_have_none", () => {
     expect(hasManagedClasses(node({ type: "database", flavor: f }))).toBe(false);
   }
   // no flavor written: every engine, PostgreSQL first
-  expect(enginesFor(node({ type: "database" })).length).toBe(5);
+  expect(enginesFor(node({ type: "database" })).length).toBe(11);
   expect(engineOf(node({ type: "database", flavor: "mysql" }))).toBe("mysql");
   // the flavor's own default engine is not written
   expect(setEngine("d", node({ type: "database", flavor: "mysql" }), "mysql")).toEqual([]);
+});
+
+test("the_sqlserver_flavor_runs_on_azure_sql_which_has_a_price_list_of_its_own", () => {
+  const db = node({ type: "database", hosting: "managed", flavor: "sqlserver" });
+  expect(enginesFor(db).map((e) => e.id)).toEqual([
+    "sqlserver-standard",
+    "sqlserver-enterprise",
+    "sqlserver-web",
+    "sqlserver-ex",
+    "azure-sql",
+  ]);
+  expect(enginesFor(node({ type: "database", flavor: "oracle" })).map((e) => e.id)).toEqual([
+    "oracle-se2",
+  ]);
+  // an Azure class is Azure SQL whatever the engine; an AWS one is the edition's own list
+  expect(priceListKey(db, "azure")).toBe("azure-sql");
+  expect(priceListKey(db, "aws")).toBe("aws-rds-sqlserver-standard");
+  expect(priceListKey(node({ type: "database", hosting: "managed", engine: "mysql" }), "aws")).toBe(
+    "aws-rds-mysql",
+  );
 });

@@ -443,3 +443,9 @@ test("a_step_the_loader_would_not_accept_is_shown_as_written_and_can_be_deleted_
     patch: [{ op: "remove", path: ["endpoints", "GET /orders", "chain", 0] }],
   });
 });
+
+test("owned_routes_are_listed_even_when_the_file_has_no_entry_for_them", () => {
+  render(<StepsGroup doc={doc({})} routes={["GET /users"]} callable={["db"]} />);
+  expect(screen.getByRole("combobox", { name: "Route" })).toBeTruthy();
+  expect(screen.getByText(/the default chain runs/i)).toBeTruthy();
+});

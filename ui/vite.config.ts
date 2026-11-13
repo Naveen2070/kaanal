@@ -79,7 +79,7 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => ({
     // FONTS.md is formatted by dprint (the docs formatter); the two disagree on the Tamil table row
     ignorePatterns: ["node_modules", "pnpm-lock.yaml", "FONTS.md"],
   },
-  test: { environment: "jsdom" },
+  test: { environment: "jsdom", setupFiles: ["./src/test/setup.ts"] },
   // `command` is "serve" | "build"; `mode` is "development" | "production" and is NOT the
   // signal here. The embedded page is served under this base; the dev server must NOT be, or its
   // own asset requests would fall into the /__kaanal proxy above and be answered by the embedded

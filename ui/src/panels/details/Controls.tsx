@@ -13,6 +13,7 @@ import { nodeFigures, percent, replicasOf, twoSignificant } from "../../canvas/m
 import { kindInfo } from "../../canvas/nodeKinds";
 import { LazyBoundary } from "../../kit/LazyBoundary";
 import { useDraft } from "../../data/store/draft";
+import { useRouteOwners } from "../../data/store/owners";
 import { Chaos } from "./Chaos";
 import { BalanceField, NumberField, Section, StyleField } from "./Field";
 import { Group } from "./groups/Group";
@@ -35,7 +36,7 @@ import { NodeDetectField } from "./ResilienceFields";
 import { StorageFields } from "./StorageFields";
 import { TrafficRoutes } from "./TrafficRoutes.lazy";
 import { StepsGroup } from "../steps/StepsGroup.lazy";
-import { anyChain, cacheNodes, callableNodes } from "../steps/describe";
+import { anyChain, cacheNodes, calleesOf, ownedRoutes } from "../steps/describe";
 import { RATE_UNITS, TIME_UNITS } from "./units";
 import { HostingField } from "./HostingField";
 import { InstancePicker } from "./InstancePicker";
@@ -114,6 +115,11 @@ export function Controls({
       : null;
   const calls = edges.filter((e) => String(e.from) === name).map((e) => String(e.to));
   const doc = useDraft((s) => s.view?.doc);
+  // only a component that can own a route asks the server who does (B8)
+  const owned = ownedRoutes(
+    useRouteOwners(["service", "monolith", "auth"].includes(config.type)),
+    name,
+  );
   // nothing to connect, no wire out and nothing to say about wiring: the section is left out
   const hasWiring =
     targetsFor(name, doc?.nodes ?? {}, edges).length > 0 ||
@@ -122,11 +128,7 @@ export function Controls({
 
   return (
     <div className="p-3 text-sm">
-      <NodeHeader
-        name={name}
-        config={config}
-        more={config.type === "gateway" && anyChain(doc) ? ["Steps"] : []}
-      />
+      <NodeHeader name={name} config={config} more={anyChain(doc, owned) ? ["Steps"] : []} />
 
       <NodeStrip node={node} config={config} />
 
@@ -450,7 +452,17 @@ export function Controls({
       {config.type === "gateway" && doc?.endpoints && Object.keys(doc.endpoints).length > 0 ? (
         <LazyBoundary fallback={<p className="mb-3 text-xs text-muted">Loading the routes...</p>}>
           <TrafficRoutes gateway={name} doc={doc} edges={edges} />
-          <StepsGroup doc={doc} callable={callableNodes(doc, name)} caches={cacheNodes(doc)} />
+        </LazyBoundary>
+      ) : null}
+
+      {doc && owned.length > 0 ? (
+        <LazyBoundary fallback={<p className="mb-3 text-xs text-muted">Loading the steps...</p>}>
+          <StepsGroup
+            doc={doc}
+            routes={owned}
+            callable={calleesOf(doc, name)}
+            caches={cacheNodes(doc).filter((c) => calleesOf(doc, name).includes(c))}
+          />
         </LazyBoundary>
       ) : null}
 

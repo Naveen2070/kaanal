@@ -1,6 +1,6 @@
 # `crates/kaanal-core/src/cost.rs`
 
-The cost estimate as arithmetic (RULES 121, 123 to 126). For users: [../../../web/nodes.md](../../../web/nodes.md#cloud-instances-instance) and [simulation.md](../../../web/simulation.md).
+The cost estimate as arithmetic (RULES 121, 123 to 126, 131). For users: [../../../web/nodes.md](../../../web/nodes.md#cloud-instances-instance) and [simulation.md](../../../web/simulation.md).
 
 ## What it does
 
@@ -10,13 +10,15 @@ Where a price comes from, in order: the node's hosting (`serverless`, `external`
 
 ## API
 
-| Item                     | What it is                                                                                                                                                                             |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `estimate(cfg, visits)`  | The report; `visits` is each node's visits a second (a run's `visits_per_s`), empty to price data alone.                                                                               |
-| `regions_of(cfg)`        | The region each cloud is priced in.                                                                                                                                                    |
-| `NodeCost`, `CostReport` | The answer (serializable): per node `unit_micro_usd_hr`, `total_micro_usd_hr`, `copies`, `instance`, `why`; the report adds the total, the priced and unpriced counts and the regions. |
+| Item                     | What it is                                                                                                                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `estimate(cfg, visits)`  | The report; `visits` is each node's visits a second (a run's `visits_per_s`), empty to price data alone.                                                                                                 |
+| `regions_of(cfg)`        | The region each cloud is priced in.                                                                                                                                                                      |
+| `NodeCost`, `CostReport` | The answer (serializable): per node `unit_micro_usd_hr`, `total_micro_usd_hr`, `copies`, `instance`, `why`, `note`; the report adds the total, the priced and unpriced counts, the regions and `egress`. |
 
-Not in it: network egress, licences (Oracle, SQL Server), reserved and spot prices, serverless and other per-use services, storage classes, retrieval fees. A node in one of those says so in `why`, or is simply not covered (see RULES 126).
+`estimate_with_egress(cfg, visits, &flows)` adds what a run sends out to the internet (RULES 131): `egress_flows(cfg, topo, endpoints, streams)` turns each stream's `rate x resp_bytes` into bytes a second by the cloud of its **entry node** (the prefix of its `instance:`; a node that names no cloud is priced at AWS's rate and says so), and each cloud's line is the GB a month less the free allowance (`prices::egress_price`) at the first-tier price, over 730 hours. The server passes the run's streams in `sim/run.rs`; the report gets `egress` (one `EgressCost` per cloud: bytes a second, fee an hour, note) and the total includes it; the CLI prints it under the cost line. A `hosting: serverless` service or monolith is priced as AWS Lambda from its visits (requests plus GB-seconds of its mean `proc` at its `memory:`, 128 MB when none), a `hosting: managed` gateway as an API Gateway REST API (per request); both need the run's `visits` and say "priced by use, after a run" without them, and `NodeCost.note` says what was assumed. The Azure SQL engine is chosen by the class's cloud (`azure/db.*`).
+
+Not in it: egress tiers beyond the first and CDN routes, reserved and spot prices, DynamoDB, ALB and Aurora Serverless usage, Lambda time spent waiting on downstream calls, storage and I/O charges of a managed database, retrieval fees of a store beyond `retrieved`. A node in one of those says so in `why`, or is simply not covered (see RULES 126, 131). Egress is on the run record and the CLI, not in Studio's live cost card.
 
 ## Tests
 

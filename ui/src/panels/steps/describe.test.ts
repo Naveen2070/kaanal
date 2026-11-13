@@ -1,6 +1,14 @@
 import { expect, test } from "vite-plus/test";
 import type { Doc } from "../../data/api/types";
-import { anyChain, retryingCalls, routeKeys, stepLabel, stepsSummary } from "./describe";
+import {
+  anyChain,
+  calleesOf,
+  ownedRoutes,
+  retryingCalls,
+  routeKeys,
+  stepLabel,
+  stepsSummary,
+} from "./describe";
 import { readChain } from "./model";
 
 const steps = (chain: unknown) => readChain(chain, [])!;
@@ -53,4 +61,28 @@ test("a_route_with_no_chain_key_is_a_default_one_and_the_group_is_unchanged", ()
 
 test("endpoints_given_as_a_file_path_have_no_routes_to_edit", () => {
   expect(routeKeys({ endpoints: "endpoints.yaml" } as Doc)).toEqual([]);
+});
+
+test("a_component_owns_the_routes_the_server_names_and_calls_only_what_its_edges_reach", () => {
+  const owners = { "GET /b": "app", "GET /a": "app", "GET /c": "pay" };
+  expect(ownedRoutes(owners, "app")).toEqual(["GET /a", "GET /b"]);
+  expect(ownedRoutes(owners, "gw")).toEqual([]);
+  const doc = {
+    edges: [
+      { from: "gw", to: "app" },
+      { from: "app", to: "db" },
+      { from: "app", to: "db" },
+      { from: "app", to: "cache" },
+    ],
+  } as Doc;
+  expect(calleesOf(doc, "app")).toEqual(["db", "cache"]);
+  expect(calleesOf(doc, "db")).toEqual([]);
+  expect(calleesOf(undefined, "app")).toEqual([]);
+});
+
+test("the_summary_and_the_changed_dot_count_only_the_routes_a_component_owns", () => {
+  const doc = docOf({ "GET /a": ["db"], "GET /b": ["db", "db"] });
+  expect(stepsSummary(doc, ["GET /b"])).toBe("1 route · 2 steps");
+  expect(anyChain(doc, ["GET /zzz"])).toBe(false);
+  expect(anyChain(doc, ["GET /a"])).toBe(true);
 });

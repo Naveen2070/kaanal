@@ -1,0 +1,31 @@
+# On-demand compute price an hour in micro-USD (1000000 = 1 dollar) of azure-sql in region uae-central: vCores x the per-vCore rate.
+# Generated 2026-11-13 by scripts/gen-azure-sql.mjs from Azure's retail prices API; do not edit by hand.
+# name,usd_micro_hr. Compute only (no storage, backup or licence meter). An estimate for a what-if, not a quote.
+azure/db.bc_gen5_10,4788800
+azure/db.bc_gen5_12,5746560
+azure/db.bc_gen5_14,6704320
+azure/db.bc_gen5_16,7662080
+azure/db.bc_gen5_18,8619840
+azure/db.bc_gen5_2,957760
+azure/db.bc_gen5_20,9577600
+azure/db.bc_gen5_24,11493120
+azure/db.bc_gen5_32,15324160
+azure/db.bc_gen5_4,1915520
+azure/db.bc_gen5_40,19155200
+azure/db.bc_gen5_6,2873280
+azure/db.bc_gen5_8,3831040
+azure/db.bc_gen5_80,38310400
+azure/db.gp_gen5_10,2394380
+azure/db.gp_gen5_12,2873256
+azure/db.gp_gen5_14,3352132
+azure/db.gp_gen5_16,3831008
+azure/db.gp_gen5_18,4309884
+azure/db.gp_gen5_2,478876
+azure/db.gp_gen5_20,4788760
+azure/db.gp_gen5_24,5746512
+azure/db.gp_gen5_32,7662016
+azure/db.gp_gen5_4,957752
+azure/db.gp_gen5_40,9577520
+azure/db.gp_gen5_6,1436628
+azure/db.gp_gen5_8,1915504
+azure/db.gp_gen5_80,19155040

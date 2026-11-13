@@ -194,3 +194,135 @@ fn a_colder_class_costs_less_to_keep_and_bills_what_is_read_back() {
         "{why}"
     );
 }
+
+/// AWS prices the first tier of data out to the internet at $0.09 a GB in us-east-1 (price list,
+/// `AWSDataTransfer`) with 100 GB a month free; Azure's global network is $0.087 with 100 GB free;
+/// Google's headline is $0.12. The oracle is that arithmetic, 730 hours to the month.
+#[test]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn what_a_run_sends_out_is_priced_per_cloud_less_the_free_allowance() {
+    use kaanal_core::cost::{EgressFlow, estimate_with_egress};
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    let c = cfg("  app: { type: service, proc: 1ms, instance: aws/t3.micro }\n");
+    let flow = |p: &str, bytes_per_s: f64| EgressFlow {
+        provider: p.to_string(),
+        bytes_per_s,
+    };
+    let gb_month = |bytes_per_s: f64| bytes_per_s * 3600.0 * 730.0 / GIB;
+    let hourly = |bytes_per_s: f64, free: f64, per_gb: f64| {
+        ((gb_month(bytes_per_s) - free).max(0.0) * per_gb / 730.0).round() as u64
+    };
+    let r = estimate_with_egress(
+        &c,
+        &BTreeMap::new(),
+        &[flow("aws", GIB), flow("azure", 1.0e6), flow("gcp", 1.0e6)],
+    );
+    let by = |p: &str| r.egress.iter().find(|e| e.provider == p).unwrap().clone();
+    assert_eq!(by("aws").micro_usd_hr, Some(hourly(GIB, 100.0, 90_000.0)));
+    assert_eq!(
+        by("azure").micro_usd_hr,
+        Some(hourly(1.0e6, 100.0, 87_000.0))
+    );
+    assert_eq!(by("gcp").micro_usd_hr, Some(hourly(1.0e6, 0.0, 120_000.0)));
+    assert_eq!(by("aws").bytes_per_s, 1_073_741_824);
+    // the fees are in the total with the node
+    let fees: u64 = r.egress.iter().filter_map(|e| e.micro_usd_hr).sum();
+    assert_eq!(r.total_micro_usd_hr, 10_400 + fees);
+    // a trickle inside the free allowance costs nothing
+    let small = estimate_with_egress(&c, &BTreeMap::new(), &[flow("aws", 1000.0)]);
+    assert_eq!(small.egress[0].micro_usd_hr, Some(0));
+    // no cloud on the entry node: AWS's rate, said so
+    let own = estimate_with_egress(&c, &BTreeMap::new(), &[flow("", GIB)]);
+    assert_eq!(own.egress[0].provider, "aws");
+    assert!(own.egress[0].note.as_deref().unwrap().contains("no cloud"));
+    assert_eq!(own.egress[0].micro_usd_hr, by("aws").micro_usd_hr);
+    // no run, no egress line
+    assert_eq!(estimate(&c, &BTreeMap::new()).egress, []);
+}
+
+/// A stream is billed in the cloud of its entry node (the gateway), whatever the cloud of the rest.
+#[test]
+fn a_streams_bytes_go_to_the_cloud_of_its_entry_node() {
+    use kaanal_core::chain::{EndpointsInput, RouteSpec, compile};
+    use kaanal_core::cost::egress_flows;
+    use kaanal_core::{Config, Topology};
+    let cfg = Config::from_yaml(
+        "version: 1
+nodes:
+  gw: { type: gateway, proc: 1ms, instance: azure/standard_d2s_v5 }
+  app: { type: service, proc: 1ms, instance: aws/t3.micro }
+edges:
+  - { from: gw, to: app }
+endpoints:
+",
+    )
+    .unwrap();
+    let t = Topology::build(&cfg).unwrap();
+    let specs = [RouteSpec::inferred("GET /a", t.id("app").unwrap())];
+    let eps = compile(&t, &specs, EndpointsInput::inline(&cfg)).unwrap();
+    let flows = egress_flows(&cfg, &t, &eps, [("GET /a", 500.0), ("GET /nope", 9.0)]);
+    assert_eq!(flows.len(), 1);
+    assert_eq!(
+        (flows[0].provider.as_str(), flows[0].bytes_per_s),
+        ("azure", 500.0)
+    );
+}
+
+/// AWS list prices, us-east-1: Lambda $0.20 a million requests and $0.0000166667 a GB-second (x86), API
+/// Gateway REST $3.50 a million. 100 requests a second for an hour is 360,000 requests; at 100 ms and 512 MB
+/// that is 18,000 GB-seconds. The oracle is that arithmetic (the price file rounds a GB-second to 16.667
+/// micro-USD, so the Lambda figure is held to 10 micro-USD).
+#[test]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn serverless_and_a_managed_gateway_are_priced_by_use_from_the_visits() {
+    let c = cfg("  fn: { type: service, proc: 100ms, hosting: serverless, memory: { limit: 512MB, per_request: 1MB } }
+  small: { type: service, proc: 100ms, hosting: serverless }
+  gw: { type: gateway, proc: 1ms, hosting: managed }
+");
+    let visits = BTreeMap::from([
+        ("fn".to_string(), 100.0),
+        ("small".to_string(), 100.0),
+        ("gw".to_string(), 100.0),
+    ]);
+    let r = estimate(&c, &visits);
+    let lambda = cost_of(&r, "fn");
+    let want = 72_000.0 + 18_000.0 * 16.6667; // requests + GB-seconds, micro-USD an hour
+    assert!(
+        (lambda.total_micro_usd_hr.unwrap() as f64 - want).abs() <= 10.0,
+        "{lambda:?}"
+    );
+    assert!(lambda.note.as_deref().unwrap().contains("AWS Lambda"));
+    // no memory: set, so Lambda's 128 MB: a quarter of the GB-seconds
+    let small = cost_of(&r, "small");
+    let want = 72_000.0 + 4_500.0 * 16.6667;
+    assert!(
+        (small.total_micro_usd_hr.unwrap() as f64 - want).abs() <= 10.0,
+        "{small:?}"
+    );
+    assert!(small.note.as_deref().unwrap().contains("128 MB"));
+    assert_eq!(cost_of(&r, "gw").total_micro_usd_hr, Some(1_260_000));
+    assert_eq!((r.priced, r.unpriced), (3, 0));
+    // without visits they say what they need, and stay out of the total
+    let none = estimate(&c, &BTreeMap::new());
+    assert!(
+        cost_of(&none, "fn")
+            .why
+            .unwrap()
+            .starts_with("serverless: priced by use")
+    );
+    assert!(
+        cost_of(&none, "gw")
+            .why
+            .unwrap()
+            .starts_with("managed: priced by use")
+    );
+    assert_eq!(none.total_micro_usd_hr, 0);
+}

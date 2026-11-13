@@ -70,7 +70,7 @@ export function hostingHint(type: string, h: HostingId): string {
         : "A machine you run in any cloud or on premises, nginx on a VM included. A VM type fills the cores, memory and network card, and the cost estimate prices it as a VM.";
     case "managed":
       if (type === "database") {
-        return "Pick a managed class (AWS RDS): it fills the cores, memory and network card, and the estimate prices it per engine. Azure and Google Cloud classes are not in the table yet: set cores and memory yourself.";
+        return "Pick a managed class (AWS RDS, or Azure SQL vCore for the sqlserver flavor; the Oracle and SQL Server engines are the licence-included editions, the licence is in the price): it fills the cores, memory and network card, and the estimate prices it per engine. Google Cloud SQL classes are not in the table: set cores and memory yourself.";
       }
       if (type === "cache") {
         return "Pick a managed class (AWS ElastiCache) for its price and size; the valkey flavor is priced as ElastiCache for Valkey, 20% below Redis. Azure and Google Cloud classes are not in the table yet. A cache's hits are fixed times, so the class does not change them.";
@@ -89,6 +89,12 @@ export const ENGINES: readonly { id: string; label: string }[] = [
   { id: "mariadb", label: "MariaDB" },
   { id: "aurora-postgresql", label: "Aurora PostgreSQL" },
   { id: "aurora-mysql", label: "Aurora MySQL" },
+  { id: "oracle-se2", label: "Oracle Standard Edition Two" },
+  { id: "sqlserver-standard", label: "SQL Server Standard" },
+  { id: "sqlserver-enterprise", label: "SQL Server Enterprise" },
+  { id: "sqlserver-web", label: "SQL Server Web" },
+  { id: "sqlserver-ex", label: "SQL Server Express" },
+  { id: "azure-sql", label: "Azure SQL Database" },
 ];
 
 /** The engines of the non-relational flavors (RULES 127): offered with their flavor, not to a database with none. */
@@ -113,6 +119,14 @@ export function enginesFor(config: NodeDoc): readonly { id: string; label: strin
       postgres: ["postgresql", "aurora-postgresql"],
       mysql: ["mysql", "aurora-mysql"],
       mariadb: ["mariadb"],
+      sqlserver: [
+        "sqlserver-standard",
+        "sqlserver-enterprise",
+        "sqlserver-web",
+        "sqlserver-ex",
+        "azure-sql",
+      ],
+      oracle: ["oracle-se2"],
       mongodb: ["docdb"],
       neo4j: ["neptune"],
       cassandra: [],
@@ -191,7 +205,13 @@ export function priceListKey(
     if (config.type === "cache") {
       return `${provider}-elasticache${flavorOf(config as NodeDoc) === "valkey" ? "-valkey" : ""}`;
     }
-    if (config.type === "database") return `${provider}-rds-${engineOf(config as NodeDoc)}`;
+    if (config.type === "database") {
+      const engine = engineOf(config as NodeDoc);
+      // Azure SQL has a price list of its own, and an Azure class is Azure SQL (RULES 131)
+      return engine === "azure-sql" || provider === "azure"
+        ? "azure-sql"
+        : `${provider}-rds-${engine}`;
+    }
     return null;
   }
   return provider;

@@ -94,6 +94,8 @@ export interface ValidateResult {
   diagnostics: Diagnostic[];
   warnings: string[];
   flagged: { file: string; scenario: string; message: string }[];
+  /** Route key to the name of the component that owns it (empty when the draft does not build). */
+  owners?: Record<string, string>;
 }
 
 export interface ApplyResult {
