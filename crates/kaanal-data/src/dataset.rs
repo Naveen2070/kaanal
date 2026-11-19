@@ -173,8 +173,7 @@ impl DataSet {
                 .packs
                 .keys()
                 .find(|k| k.eq_ignore_ascii_case(tag))
-                .map(|k| format!(" (did you mean `{k}`?)"))
-                .unwrap_or_default();
+                .map_or_default(|k| format!(" (did you mean `{k}`?)"));
             DataError::unplaced(
                 &[],
                 format!(

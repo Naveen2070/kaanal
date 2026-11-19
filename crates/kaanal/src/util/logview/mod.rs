@@ -181,7 +181,7 @@ pub fn waterfall(e: &Value) -> String {
             h["dur_ms"].as_f64().unwrap_or(0.0),
         );
         let cut = h["cut"] == true || failed == Some(i);
-        let mut note = h["why"].as_str().map(clean).unwrap_or_default();
+        let mut note = h["why"].as_str().map_or_default(clean);
         if h["lane"].as_u64().unwrap_or(0) > 0 {
             if !note.is_empty() {
                 note.push_str(", ");

@@ -407,7 +407,7 @@ pub fn parse_endpoints(src: &str) -> Result<IndexMap<String, EndpointConfig>, Co
     }
     let src = super::preprocess(src)?;
     serde_yaml_ng::from_str::<Option<File>>(src)
-        .map(|f| f.map(|f| f.0).unwrap_or_default())
+        .map(|f| f.map_or_default(|f| f.0))
         .map_err(|e| serde_error(&e))
 }
 

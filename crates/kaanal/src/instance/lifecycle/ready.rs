@@ -183,9 +183,7 @@ pub fn existing_instance(
 /// **Private.** The last `lines` lines of the log, each cleaned (the log holds server text).
 pub fn tail_log(path: &Path, lines: usize) -> String {
     // Reads the whole file; the log is fresh per `up -d`, so it is small on a failed start.
-    let text = std::fs::read(path)
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
-        .unwrap_or_default();
+    let text = std::fs::read(path).map_or_default(|b| String::from_utf8_lossy(&b).into_owned());
     let all: Vec<&str> = text.lines().collect();
     all[all.len().saturating_sub(lines)..]
         .iter()

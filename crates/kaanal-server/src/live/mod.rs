@@ -196,8 +196,7 @@ fn start_session(st: &Arc<AppState>, id: u64, running: Option<kaanal_core::Confi
         system_started: g.as_deref().map(|g| g.started),
         node_names: g
             .as_deref()
-            .map(|g| g.topo.nodes.iter().map(|n| n.name.clone()).collect())
-            .unwrap_or_default(),
+            .map_or_default(|g| g.topo.nodes.iter().map(|n| n.name.clone()).collect()),
         stream_names,
         running,
         profile,

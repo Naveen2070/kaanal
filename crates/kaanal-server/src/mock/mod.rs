@@ -347,8 +347,7 @@ pub(crate) fn preview(g: &Generation, key: &str) -> Option<Preview> {
         .endpoint
         .response
         .as_ref()
-        .map(|o| o.headers.clone())
-        .unwrap_or_default();
+        .map_or_default(|o| o.headers.clone());
     let content_type = route
         .endpoint
         .response

@@ -48,8 +48,7 @@ pub fn entries(manifest: &str, dist: &Path) -> Result<Vec<Entry>, String> {
         let strs = |field: &str| -> Vec<&str> {
             chunk[field]
                 .as_array()
-                .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
-                .unwrap_or_default()
+                .map_or_default(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
         };
         let mut refs: Vec<(&str, bool)> = chunk["file"]
             .as_str()

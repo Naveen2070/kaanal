@@ -609,13 +609,12 @@ fn allowed_fields(schema: &Value, branch: &Value, path: &[PathSeg]) -> Vec<Strin
     let mut names: Vec<String> = resolve(schema, s)
         .get("properties")
         .and_then(Value::as_object)
-        .map(|p| {
+        .map_or_default(|p| {
             p.keys()
                 .filter(|k| !path.is_empty() || k.as_str() != "type")
                 .cloned()
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     names.sort();
     names
 }

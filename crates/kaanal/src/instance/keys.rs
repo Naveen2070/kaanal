@@ -95,8 +95,7 @@ fn key_id(config: &Path) -> Result<String, Fail> {
 fn store(dir: &Path, file: &Path, pem: &str) -> Result<String, Fail> {
     let stem = file
         .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_default(|s| s.to_string_lossy().into_owned());
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());

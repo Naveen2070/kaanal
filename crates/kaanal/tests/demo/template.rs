@@ -216,7 +216,7 @@ fn the_page_makes_no_external_requests() {
     }
     for (i, _) in js.match_indices("api(\"") {
         let rest = &js[i + "api(\"".len()..];
-        let target = rest.split_once("\", ").map(|(_, t)| t).unwrap_or_default();
+        let target = rest.split_once("\", ").map_or_default(|(_, t)| t);
         assert!(
             (target.starts_with("\"/") || target.starts_with("`/"))
                 && !target[1..].starts_with("//"),

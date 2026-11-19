@@ -596,11 +596,7 @@ impl Aggregator {
         let mut total = std::mem::replace(&mut self.total, Counts::new(n, w).with_node_hist());
         let mut real = std::mem::replace(&mut self.real, Counts::new(n, w));
         for (i, node) in total.nodes.iter_mut().enumerate() {
-            node.hist = total
-                .node_hist
-                .get(i)
-                .map(LatencyHist::sparse)
-                .unwrap_or_default();
+            node.hist = total.node_hist.get(i).map_or_default(LatencyHist::sparse);
             let (busy, queued) = loads.get(i).copied().unwrap_or((0, 0));
             node.busy_slots = busy;
             node.queue = queued;
@@ -617,11 +613,7 @@ impl Aggregator {
             }
         }
         for (i, wire) in total.wires.iter_mut().enumerate() {
-            wire.hist = total
-                .wire_hist
-                .get(i)
-                .map(LatencyHist::sparse)
-                .unwrap_or_default();
+            wire.hist = total.wire_hist.get(i).map_or_default(LatencyHist::sparse);
             wire.funnel = engine.funnel.get(i).copied().unwrap_or_default();
             wire.load = engine.link_load.get(i).copied().flatten();
         }

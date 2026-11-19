@@ -52,10 +52,7 @@ fn check(dir: &Path, extra: &str) -> Result<Vec<String>, Located> {
 fn shown(e: &Located) -> String {
     format!(
         "{} {}",
-        e.file
-            .as_ref()
-            .map(|f| f.display().to_string())
-            .unwrap_or_default(),
+        e.file.as_ref().map_or_default(|f| f.display().to_string()),
         e.msg
     )
 }

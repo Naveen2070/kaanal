@@ -233,8 +233,7 @@ impl ApiModel {
                 let mut out = e
                     .schema
                     .as_ref()
-                    .map(|s| unsupported_keywords(s, &at))
-                    .unwrap_or_default();
+                    .map_or_default(|s| unsupported_keywords(s, &at));
                 out.extend(paged_array_warning(e, &at));
                 // a file's size is not in the spec, and size costs need it (RULES 65)
                 if e.file_in {

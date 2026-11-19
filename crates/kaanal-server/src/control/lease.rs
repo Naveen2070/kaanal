@@ -75,8 +75,7 @@ pub(super) fn expire_chaos(st: &AppState, c: &mut MutexGuard<'_, Control>) -> us
             .stack
             .live()
             .layer(&key)
-            .map(chaos_lease::units_set)
-            .unwrap_or_default();
+            .map_or_default(chaos_lease::units_set);
         if !units.iter().any(|u| set.contains(u)) {
             for u in &units {
                 c.chaos_leases.remove(&(key.clone(), *u));

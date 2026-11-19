@@ -74,7 +74,7 @@ impl Draft {
         };
         // absolute, so a later change of the working directory cannot move it
         let file = std::path::absolute(&s.file).unwrap_or(s.file);
-        let (layout, layout_note) = file.parent().map(layout::load).unwrap_or_default();
+        let (layout, layout_note) = file.parent().map_or_default(layout::load);
         Draft {
             applied: s.text.clone(),
             base: Some(s.text.clone()),
@@ -95,7 +95,7 @@ impl Draft {
     /// refuses if it changed meanwhile, and replaces an existing file only if nobody touched it.
     pub fn blank(file: &std::path::Path) -> Draft {
         let abs = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-        let (layout, layout_note) = abs.parent().map(layout::load).unwrap_or_default();
+        let (layout, layout_note) = abs.parent().map_or_default(layout::load);
         Draft {
             text: BLANK_TEXT.to_string(),
             applied: String::new(),

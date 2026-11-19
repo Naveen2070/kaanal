@@ -14,12 +14,14 @@ serde_yaml_ng.workspace = true
 indexmap.workspace = true
 humantime-serde.workspace = true
 rand.workspace = true
-rand_chacha.workspace = true
 rand_distr.workspace = true
 schemars.workspace = true
 saphyr.workspace = true
 saphyr-parser.workspace = true
 jsonschema.workspace = true
+
+[dev-dependencies]
+rand_chacha.workspace = true
 
 [lints]
 workspace = true

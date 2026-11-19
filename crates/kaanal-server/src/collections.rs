@@ -97,7 +97,7 @@ impl Collections {
             |l: &List| want.and_then(|w| l.items.iter().position(|v| v["id"].as_u64() == Some(w)));
         match op {
             CollectionOp::List => {
-                let items = lists.get(name).map(|l| l.items.clone()).unwrap_or_default();
+                let items = lists.get(name).map_or_default(|l| l.items.clone());
                 (200, Value::Array(items))
             }
             CollectionOp::Get => match lists.get(name).and_then(|l| at(l).map(|i| &l.items[i])) {

@@ -142,12 +142,11 @@ impl Sc {
         self.ctl("/__kaanal/chaos").await.json().await.unwrap()
     }
     pub(crate) fn files(&self) -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_dir(self.dir.join("scenarios"))
-            .map(|rd| {
+        let mut v: Vec<String> =
+            std::fs::read_dir(self.dir.join("scenarios")).map_or_default(|rd| {
                 rd.map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
                     .collect()
-            })
-            .unwrap_or_default();
+            });
         v.sort();
         v
     }

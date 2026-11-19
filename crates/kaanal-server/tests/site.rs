@@ -15,7 +15,7 @@ fn scratch(name: &str) -> PathBuf {
 
 /// A project with one gateway and the given `site:` value (`None`: no key).
 fn src(site: Option<&str>) -> String {
-    let tail = site.map(|s| format!("site: {s}\n")).unwrap_or_default();
+    let tail = site.map_or_default(|s| format!("site: {s}\n"));
     format!("version: 1\nnodes:\n  gw: {{ type: gateway }}\n{tail}")
 }
 
