@@ -316,3 +316,29 @@ fn a_configured_data_path_that_is_not_a_file_is_an_error_at_data() {
     );
     assert!(e.message.contains("is not a file"), "{}", e.message);
 }
+
+#[test]
+fn files_lists_what_load_reads() {
+    let dir = scratch("files");
+    assert!(
+        DataSet::files(&dir, None).unwrap().is_empty(),
+        "nothing yet"
+    );
+    write(&dir, "locales/xx-YY.yaml", &pack("xx-YY", "Nowhere"));
+    write(&dir, "locales/notes.txt", "not a pack\n");
+    write(
+        &dir,
+        "data.yaml",
+        "fields:\n  sku: { gen: static, value: X }\n",
+    );
+    write(&dir, "conf/mine.yaml", "fields: {}\n");
+    assert_eq!(
+        DataSet::files(&dir, None).unwrap(),
+        [dir.join("locales/xx-YY.yaml"), dir.join("data.yaml")]
+    );
+    // a configured `data:` replaces `data.yaml`
+    assert_eq!(
+        DataSet::files(&dir, Some("conf/mine.yaml")).unwrap(),
+        [dir.join("locales/xx-YY.yaml"), dir.join("conf/mine.yaml")]
+    );
+}

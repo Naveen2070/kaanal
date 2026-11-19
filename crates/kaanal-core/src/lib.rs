@@ -23,6 +23,7 @@ pub mod cost;
 pub mod diagnostics;
 pub mod dist;
 pub mod exec;
+pub mod fingerprint;
 pub mod instances;
 pub mod pin;
 pub mod presets;

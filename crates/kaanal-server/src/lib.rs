@@ -15,6 +15,7 @@ mod chaos_lease;
 mod collections;
 mod control;
 mod draft;
+mod fingerprint;
 mod generation;
 mod live;
 mod log;

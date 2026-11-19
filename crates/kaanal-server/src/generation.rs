@@ -103,6 +103,16 @@ pub struct Generation {
     /// The config this generation was built from, for what needs a node's own fields after the
     /// build (the cost estimate of a run).
     pub config: Arc<Config>,
+    /// The design fingerprint of every input the build read (12 hex digits), taken right after
+    /// the loaders ran: see [`crate::fingerprint::of_system`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by the sweep record (Step 9b Task 3); the expect fails once it is"
+        )
+    )]
+    pub fingerprint: String,
 }
 
 impl Generation {
@@ -174,6 +184,7 @@ impl Generation {
             &mut warnings,
             trust == Trust::Api,
         )?;
+        let fingerprint = crate::fingerprint::of_system(cfg, base_dir);
         // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         let mut counters = Vec::new();
@@ -274,6 +285,7 @@ impl Generation {
                 auth: None,
                 engine: None,
                 config: Arc::new(cfg.clone()),
+                fingerprint,
                 started: std::time::Instant::now(),
             },
             scenarios,
@@ -552,13 +564,7 @@ fn load_scenarios(
         set.insert(s, Source::Inline)
             .map_err(|m| Located::new(at, m))?;
     }
-    // Canonicalized once, so a later `cd` cannot move it (S16). A symlinked `scenarios/` is
-    // followed here, once; its target is what `save` writes through. Absent: the joined path.
-    let dir = base_dir
-        .canonicalize()
-        .unwrap_or_else(|_| base_dir.to_path_buf())
-        .join("scenarios");
-    let dir = dir.canonicalize().unwrap_or(dir);
+    let dir = scenarios_dir(base_dir);
     let (found, found_warnings) = scenarios::discover(&dir)?;
     warnings.extend(found_warnings);
     for (name, sc, file) in found {
@@ -581,6 +587,17 @@ fn load_scenarios(
             .map_err(|m| Located::new(Vec::new(), m).in_file(file))?;
     }
     Ok((set, dir, flagged))
+}
+
+/// The `scenarios/` directory next to the config, as [`load_scenarios`] reads it. Canonicalized
+/// once, so a later `cd` cannot move it (S16). A symlinked `scenarios/` is followed here, once;
+/// its target is what `save` writes through. Absent: the joined path.
+pub(crate) fn scenarios_dir(base_dir: &Path) -> PathBuf {
+    let dir = base_dir
+        .canonicalize()
+        .unwrap_or_else(|_| base_dir.to_path_buf())
+        .join("scenarios");
+    dir.canonicalize().unwrap_or(dir)
 }
 
 #[cfg(test)]

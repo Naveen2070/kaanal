@@ -114,19 +114,16 @@ impl DataSet {
             }
             packs.insert(tag, Arc::new(pack));
         }
-        let path = match data {
-            Some(p) => {
-                let path = base_dir.join(p);
-                if !path.is_file() {
-                    return Err(DataError::at_value(
-                        &["data"],
-                        format!("data: {} is not a file", path.display()),
-                    ));
-                }
-                Some(path)
-            }
-            None => Some(base_dir.join("data.yaml")).filter(|p| p.is_file()),
-        };
+        let path = dictionary_file(base_dir, data);
+        if data.is_some()
+            && let Some(path) = &path
+            && !path.is_file()
+        {
+            return Err(DataError::at_value(
+                &["data"],
+                format!("data: {} is not a file", path.display()),
+            ));
+        }
         let project = match path {
             None => None,
             Some(path) => {
@@ -197,6 +194,28 @@ impl DataSet {
     /// Load-time warnings: skipped files, and project dictionary keys that normalise alike.
     pub fn warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// The files [`DataSet::load`] reads for the same arguments, without reading them: the pack
+    /// files of `locales/` by its listing rules, then the dictionary (`data` when given, else
+    /// `data.yaml` when it exists). A given `data` is listed even when it is not a file (`load`
+    /// refuses it). For a fingerprint of the project's inputs.
+    ///
+    /// # Errors
+    /// The listing errors `load` reports: an unreadable `locales/` or too many pack files.
+    pub fn files(base_dir: &Path, data: Option<&str>) -> Result<Vec<PathBuf>, DataError> {
+        let mut files = pack_files(&base_dir.join("locales"), &mut Vec::new())?;
+        files.extend(dictionary_file(base_dir, data));
+        Ok(files)
+    }
+}
+
+/// **Private.** The dictionary file: `data` under `base_dir` when given (checked by the caller),
+/// else `data.yaml` when it is a file.
+fn dictionary_file(base_dir: &Path, data: Option<&str>) -> Option<PathBuf> {
+    match data {
+        Some(p) => Some(base_dir.join(p)),
+        None => Some(base_dir.join("data.yaml")).filter(|p| p.is_file()),
     }
 }
 

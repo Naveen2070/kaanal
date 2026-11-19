@@ -145,6 +145,10 @@ pub struct Config {
     #[serde(default)]
     #[schemars(skip)]
     routes: Option<serde::de::IgnoredAny>,
+    /// **Private.** Canonical digest of the (preprocessed) source text, set by [`Config::from_yaml`].
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub digest: [u8; 32],
 }
 
 /// **Private.** serde default for [`Config::port`].
@@ -285,6 +289,7 @@ impl Config {
             )
             .in_source(src));
         }
+        cfg.digest = crate::fingerprint::canonical_digest(src);
         machine::check(&cfg).map_err(|e| e.in_source(src))?;
         hosting::check(&cfg).map_err(|e| e.in_source(src))?;
         machine::apply(&mut cfg);

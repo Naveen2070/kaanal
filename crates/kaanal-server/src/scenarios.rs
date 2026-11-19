@@ -31,10 +31,30 @@ fn plain(p: &Path) -> PathBuf {
 /// An unreadable directory or file, a file over 1 MiB, a stem that is not a valid scenario
 /// name, more than [`MAX_SCENARIOS`] files, or a parse error (placed in the file).
 #[allow(clippy::type_complexity)]
-#[allow(clippy::case_sensitive_file_extension_comparisons)] // lower is already lower-cased
 pub fn discover(
     dir: &Path,
 ) -> Result<(Vec<(String, ScenarioConfig, PathBuf)>, Vec<String>), Located> {
+    let (files, warnings) = list(dir)?;
+    let found = files
+        .into_iter()
+        .map(|(stem, path)| {
+            valid_name(&stem).map_err(|m| Located::new(Vec::new(), m).in_file(path.clone()))?;
+            let src = read(&path)?;
+            let cfg = parse_scenario(&src).map_err(|e| Located::parsed(path.clone(), e))?;
+            Ok((stem, cfg, path))
+        })
+        .collect::<Result<Vec<_>, Located>>()?;
+    Ok((found, warnings))
+}
+
+/// The scenario files in `dir` by [`discover`]'s rules, sorted by name, without reading them:
+/// `((stem, file), warnings)`. An absent `dir` means no files.
+///
+/// # Errors
+/// An unreadable directory, or more than [`MAX_SCENARIOS`] files.
+#[allow(clippy::type_complexity)]
+#[allow(clippy::case_sensitive_file_extension_comparisons)] // lower is already lower-cased
+pub(crate) fn list(dir: &Path) -> Result<(Vec<(String, PathBuf)>, Vec<String>), Located> {
     let dir = plain(dir);
     let rd = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
@@ -92,16 +112,7 @@ pub fn discover(
         ));
     }
     files.sort();
-    let found = files
-        .into_iter()
-        .map(|(stem, path)| {
-            valid_name(&stem).map_err(|m| Located::new(Vec::new(), m).in_file(path.clone()))?;
-            let src = read(&path)?;
-            let cfg = parse_scenario(&src).map_err(|e| Located::parsed(path.clone(), e))?;
-            Ok((stem, cfg, path))
-        })
-        .collect::<Result<Vec<_>, Located>>()?;
-    Ok((found, warnings))
+    Ok((files, warnings))
 }
 
 /// **Private.** The file as text, refusing more than 1 MiB without reading it all.
