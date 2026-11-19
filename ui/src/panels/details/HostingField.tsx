@@ -12,6 +12,9 @@ import {
   engineOf,
   enginesFor,
   flavorOf,
+  GATEWAY_APIS,
+  gatewayApiOf,
+  hasGatewayApi,
   hasManagedClasses,
   hasMultiAz,
   hostingHint,
@@ -20,6 +23,7 @@ import {
   hostingsFor,
   isManagedDb,
   setEngine,
+  setGatewayApi,
   setMultiAz,
   setHosting,
   type HostingId,
@@ -80,6 +84,27 @@ export function HostingField({ name, config }: { name: string; config: NodeDoc }
           <span className="text-xs font-normal text-muted">
             The price of a class depends on the engine. The engine is the cache's flavor, so it also
             fills the hit ratio and costs you have not written.
+          </span>
+        </label>
+      ) : null}
+      {hasGatewayApi(config) ? (
+        <label className="mt-1 flex flex-col gap-0.5 text-sm font-medium">
+          API type
+          <select
+            name="api"
+            value={gatewayApiOf(config)}
+            onChange={(e) => void patch(setGatewayApi(name, config, e.currentTarget.value))}
+            className={SELECT}
+          >
+            {GATEWAY_APIS.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs font-normal text-muted">
+            The API Gateway product a run prices this gateway as. New builds without API keys, usage
+            plans, WAF or a response cache are HTTP APIs, so that is the default.
           </span>
         </label>
       ) : null}

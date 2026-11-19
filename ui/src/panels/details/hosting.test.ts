@@ -10,6 +10,7 @@ import {
   isOwnClass,
   priceListKey,
   setEngine,
+  setGatewayApi,
   setHosting,
   takesInstance,
 } from "./hosting";
@@ -157,4 +158,21 @@ test("the_sqlserver_flavor_runs_on_azure_sql_which_has_a_price_list_of_its_own",
   expect(priceListKey(node({ type: "database", hosting: "managed", engine: "mysql" }), "aws")).toBe(
     "aws-rds-mysql",
   );
+});
+
+test("the_api_type_is_written_for_rest_removed_for_http_and_dropped_when_the_hosting_leaves_managed", () => {
+  const g = (extra: Record<string, unknown> = {}) =>
+    node({ type: "gateway", hosting: "managed", ...extra });
+  expect(setGatewayApi("g", g(), "rest")).toEqual([
+    { op: "insert", path: ["nodes", "g", "api"], value: "rest" },
+  ]);
+  expect(setGatewayApi("g", g({ api: "rest" }), "http")).toEqual([
+    { op: "remove", path: ["nodes", "g", "api"] },
+  ]);
+  expect(setGatewayApi("g", g(), "http")).toEqual([]);
+  // `api` only goes with a managed gateway: back to self removes it with the hosting
+  expect(setHosting("g", g({ api: "rest" }), "self")).toEqual([
+    { op: "remove", path: ["nodes", "g", "hosting"] },
+    { op: "remove", path: ["nodes", "g", "api"] },
+  ]);
 });

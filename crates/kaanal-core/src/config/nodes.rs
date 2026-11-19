@@ -373,6 +373,14 @@ impl NodeConfig {
         }
     }
 
+    /// The gateway's `api:` as written; `None` for every other kind.
+    pub fn gateway_api_written(&self) -> Option<crate::config::GatewayApi> {
+        match self {
+            NodeConfig::Gateway(n) => n.api,
+            _ => None,
+        }
+    }
+
     /// The database's `multi_az:` as written; `None` for every other kind.
     pub fn multi_az_written(&self) -> Option<bool> {
         match self {

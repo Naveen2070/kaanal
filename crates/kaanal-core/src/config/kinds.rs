@@ -1,6 +1,6 @@
 //! The per-kind config structs of the seven original node kinds (gateway, service, monolith, database, cache, external API, auth); split out of `nodes.rs`, which reached 800 lines.
 
-use super::hosting::{DbEngine, Hosting};
+use super::hosting::{DbEngine, GatewayApi, Hosting};
 use super::nodes::{CacheFlavor, DbFlavor, Hold, OpsConfig};
 use super::{
     ConcurrencyConfig, CpuConfig, Deserialize, DistConfig, Duration, IndexMap, JsonSchema,
@@ -72,6 +72,11 @@ pub struct GatewayConfig {
     /// `instance:` is allowed and how the cost estimate prices the node.
     #[serde(default)]
     pub hosting: Option<Hosting>,
+    /// Which API Gateway product a `hosting: managed` gateway is priced as, for the **cost estimate
+    /// only**: `http` (the default, $1.00 per million requests in us-east-1) or `rest` ($3.50). Only
+    /// with `hosting: managed`. Absent = `http`.
+    #[serde(default)]
+    pub api: Option<GatewayApi>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most
     /// `(limit - base) / per_request` requests at once, lowering `concurrency` when that is fewer.
     /// No GC or swap curve is modelled. `limit` may come from `instance`. Absent = no memory limit.
@@ -311,9 +316,11 @@ pub struct DatabaseConfig {
     #[serde(default)]
     pub engine: Option<DbEngine>,
     /// A standby in a second availability zone (`true`), for the **cost estimate only**: a Multi-AZ
-    /// class costs twice the single-AZ price (AWS's own rule for RDS PostgreSQL, MySQL, MariaDB and
-    /// Oracle; the failover itself is not modelled). Only with `hosting: managed`, and not for
-    /// Aurora (it keeps its copies with `replicas` and bills each). Absent = `false`.
+    /// class costs twice the single-AZ price (AWS's own rule for RDS PostgreSQL, MySQL and MariaDB;
+    /// the licence-included Oracle and SQL Server editions use AWS's real Multi-AZ price per class
+    /// and region, twice only where it has none; the failover itself is not modelled). Only with
+    /// `hosting: managed`, and not for Aurora (it keeps its copies with `replicas` and bills
+    /// each). Absent = `false`.
     #[serde(default)]
     pub multi_az: Option<bool>,
     /// Memory as a hard limit: `{ limit, per_request, base }`. The copy holds at most

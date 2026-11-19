@@ -90,7 +90,46 @@ pub enum DbEngine {
     SqlserverEnterprise,
 }
 
+/// Which API Gateway product a `hosting: managed` gateway is priced as (`api:`, RULES 133 a).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+pub enum GatewayApi {
+    /// An HTTP API, $1.00 per million requests in us-east-1. The default: AWS steers every new
+    /// build without API keys, usage plans, WAF or a response cache to it, so it is the commoner bill.
+    #[default]
+    #[serde(rename = "http")]
+    Http,
+    /// A REST API, $3.50 per million requests in us-east-1 (API keys, usage plans, WAF, a response cache).
+    #[serde(rename = "rest")]
+    Rest,
+}
+
+impl GatewayApi {
+    /// The word written in the file.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            GatewayApi::Http => "http",
+            GatewayApi::Rest => "rest",
+        }
+    }
+}
+
 impl DbEngine {
+    /// True for the licence-included editions, whose Multi-AZ price is its own table
+    /// (`aws-rds-<word>-multiaz`, RULES 133 b) because a standby is not always exactly twice the
+    /// instance: the factor runs 1.23 to 2.59. The other engines are priced at exactly 2 times.
+    #[must_use]
+    pub const fn has_multi_az_prices(self) -> bool {
+        matches!(
+            self,
+            DbEngine::OracleSe2
+                | DbEngine::SqlserverEx
+                | DbEngine::SqlserverWeb
+                | DbEngine::SqlserverStandard
+                | DbEngine::SqlserverEnterprise
+        )
+    }
+
     /// The word written in the file, which is also the suffix of its price files (`aws-rds-<word>`).
     #[must_use]
     pub const fn word(self) -> &'static str {
@@ -265,7 +304,7 @@ pub(super) fn check(cfg: &Config) -> Result<(), Located> {
                 return Err(Located::at_value(at("engine"), msg));
             }
         }
-        check_multi_az(node, n, hosting, &at)?;
+        check_cost_fields(node, n, hosting, &at)?;
         if n.engine_written().is_some()
             && !(kind == NodeKind::Database && hosting == Hosting::Managed)
         {
@@ -276,6 +315,18 @@ pub(super) fn check(cfg: &Config) -> Result<(), Located> {
         }
     }
     Ok(())
+}
+
+/// **Private.** The fields that only steer the cost estimate (`multi_az`, `api`): each goes with one
+/// kind of managed node.
+fn check_cost_fields(
+    node: &str,
+    n: &NodeConfig,
+    hosting: Hosting,
+    at: &dyn Fn(&str) -> Vec<crate::diagnostics::PathSeg>,
+) -> Result<(), Located> {
+    check_multi_az(node, n, hosting, at)?;
+    check_gateway_api(node, n, hosting, at)
 }
 
 /// **Private.** `multi_az` goes with a managed database that is not Aurora (an Aurora cluster keeps
@@ -304,6 +355,25 @@ fn check_multi_az(
             format!(
                 "node '{node}': an Aurora cluster has no Multi-AZ switch: keep its copies with replicas, each billed"
             ),
+        ));
+    }
+    Ok(())
+}
+
+/// **Private.** `api` goes with a gateway that has `hosting: managed` (it picks the API Gateway
+/// product the cost estimate prices), refused at the field anywhere else.
+fn check_gateway_api(
+    node: &str,
+    n: &NodeConfig,
+    hosting: Hosting,
+    at: &dyn Fn(&str) -> Vec<crate::diagnostics::PathSeg>,
+) -> Result<(), Located> {
+    if n.gateway_api_written().is_some()
+        && !(n.kind() == NodeKind::Gateway && hosting == Hosting::Managed)
+    {
+        return Err(Located::at_value(
+            at("api"),
+            format!("node '{node}': api goes with a gateway that has hosting: managed"),
         ));
     }
     Ok(())

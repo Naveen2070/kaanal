@@ -12,8 +12,9 @@
 // product codes in the same file; the Outposts rows. Single-AZ, on-demand, instance hours only. A class that
 // is not already in instances.csv is reported and left out (no size is invented). The instance price is
 // the licence-included price: the licence is inside it.
-// Also checks the Multi-AZ rule of cost.rs (a standby is a second instance, so exactly 2 x) on every class and
-// region it reads, and prints the range.
+// Multi-AZ (RULES 133 b): the same editions also get `aws-rds-<engine>-multiaz/<region>.csv`, the real Multi-AZ
+// price of each class that has a Single-AZ price here (a standby is not always exactly 2 x: 1.23 to 2.59). A class
+// with no Multi-AZ row is left out and cost.rs falls back to 2 x. The ratio range is printed.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,6 +34,7 @@ const known = new Set(
 const regions = readdirSync(new URL("prices/aws-rds-postgresql/", data)).map((f) => f.replace(/\.csv$/, "")).sort();
 const tmp = mkdtempSync(join(tmpdir(), "kaanal-rds-"));
 const out = {}; // engine -> region -> [[name, micro]]
+const outMulti = {}; // the same, Multi-AZ prices
 const left = new Set();
 let ratioMin = Infinity;
 let ratioMax = 0;
@@ -70,6 +72,7 @@ for (const region of regions) {
     ((out[engine] ??= {})[region] ??= []).push([name, v]);
     const m = multi.get(k);
     if (m) {
+      ((outMulti[engine] ??= {})[region] ??= []).push([name, m]);
       ratioMin = Math.min(ratioMin, m / v);
       ratioMax = Math.max(ratioMax, m / v);
       pairs++;
@@ -82,8 +85,11 @@ rmSync(tmp, { recursive: true, force: true });
 
 const date = new Date().toISOString().slice(0, 10);
 const providers = [];
-for (const [engine, byRegion] of Object.entries(out)) {
-  const provider = `aws-rds-${engine}`;
+const tables = [
+  ...Object.entries(out).map(([engine, byRegion]) => [`aws-rds-${engine}`, byRegion, "Single-AZ"]),
+  ...Object.entries(outMulti).map(([engine, byRegion]) => [`aws-rds-${engine}-multiaz`, byRegion, "Multi-AZ"]),
+];
+for (const [provider, byRegion, az] of tables) {
   providers.push(provider);
   const dir = new URL(`prices/${provider}/`, data);
   rmSync(dir, { recursive: true, force: true });
@@ -93,7 +99,7 @@ for (const [engine, byRegion] of Object.entries(out)) {
     writeFileSync(
       new URL(`${region}.csv`, dir),
       [
-        `# On-demand price an hour in micro-USD (1000000 = 1 dollar) of ${provider}, licence included, Single-AZ, in region ${region}.`,
+        `# On-demand price an hour in micro-USD (1000000 = 1 dollar) of ${provider}, licence included, ${az}, in region ${region}.`,
         `# Generated ${date} by scripts/gen-rds-licensed.mjs from AWS's AmazonRDS price list; do not edit by hand.`,
         "# name,usd_micro_hr. An estimate for a what-if, not a quote; a class missing here has no price there.",
         ...list.map((r) => r.join(",")),

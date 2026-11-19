@@ -887,6 +887,21 @@
         }
       ]
     },
+    "GatewayApi": {
+      "description": "Which API Gateway product a `hosting: managed` gateway is priced as (`api:`, RULES 133 a).",
+      "oneOf": [
+        {
+          "const": "http",
+          "description": "An HTTP API, $1.00 per million requests in us-east-1. The default: AWS steers every new\nbuild without API keys, usage plans, WAF or a response cache to it, so it is the commoner bill.",
+          "type": "string"
+        },
+        {
+          "const": "rest",
+          "description": "A REST API, $3.50 per million requests in us-east-1 (API keys, usage plans, WAF, a response cache).",
+          "type": "string"
+        }
+      ]
+    },
     "HeaderBytes": {
       "anyOf": [
         {
@@ -1221,6 +1236,17 @@
           "additionalProperties": false,
           "description": "A reverse proxy / API gateway / load balancer.",
           "properties": {
+            "api": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GatewayApi"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which API Gateway product a `hosting: managed` gateway is priced as, for the **cost estimate\nonly**: `http` (the default, $1.00 per million requests in us-east-1) or `rest` ($3.50). Only\nwith `hosting: managed`. Absent = `http`."
+            },
             "balance": {
               "anyOf": [
                 {
@@ -1869,7 +1895,7 @@
             },
             "multi_az": {
               "default": null,
-              "description": "A standby in a second availability zone (`true`), for the **cost estimate only**: a Multi-AZ\nclass costs twice the single-AZ price (AWS's own rule for RDS PostgreSQL, MySQL, MariaDB and\nOracle; the failover itself is not modelled). Only with `hosting: managed`, and not for\nAurora (it keeps its copies with `replicas` and bills each). Absent = `false`.",
+              "description": "A standby in a second availability zone (`true`), for the **cost estimate only**: a Multi-AZ\nclass costs twice the single-AZ price (AWS's own rule for RDS PostgreSQL, MySQL and MariaDB;\nthe licence-included Oracle and SQL Server editions use AWS's real Multi-AZ price per class\nand region, twice only where it has none; the failover itself is not modelled). Only with\n`hosting: managed`, and not for Aurora (it keeps its copies with `replicas` and bills\neach). Absent = `false`.",
               "type": [
                 "boolean",
                 "null"

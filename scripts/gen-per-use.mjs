@@ -4,8 +4,8 @@
 // lists (AWSLambda, AmazonApiGateway), the first tier of each, x86 for Lambda:
 //   lambda_request   micro-USD per million invocations                 ($0.20 in us-east-1)
 //   lambda_gb_second micro-USD per 1,000 GB-seconds of billed duration ($0.0000166667 a GB-s in us-east-1)
-//   apigw_request    micro-USD per million REST API requests, first 333 M ($3.50 in us-east-1; an HTTP API is
-//                    $1.00 and is not priced)
+//   apigw_request    micro-USD per million REST API requests, first 333 M ($3.50 in us-east-1)
+//   apigw_http_request micro-USD per million HTTP API requests, first 300 M ($1.00 in us-east-1; RULES 133)
 // No free tier is subtracted. Usage: node scripts/gen-per-use.mjs [folder holding AWSLambda.json and AmazonApiGateway.json]
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -36,11 +36,12 @@ function collect(name, service, usagetype, scale) {
 collect("AWSLambda", "lambda_request", /^([A-Z0-9]+-)?Request$/, 1e12); // USD a request -> micro-USD a million
 collect("AWSLambda", "lambda_gb_second", /^([A-Z0-9]+-)?Lambda-GB-Second$/, 1e9); // USD a GB-s -> micro-USD a 1,000 GB-s
 collect("AmazonApiGateway", "apigw_request", /^([A-Z0-9]+-)?ApiGatewayRequest$/, 1e12);
+collect("AmazonApiGateway", "apigw_http_request", /^([A-Z0-9]+-)?ApiGatewayHttpRequest$/, 1e12);
 rows.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
 writeFileSync(
   new URL("../crates/kaanal-core/data/per-use.csv", import.meta.url),
   [
-    "# Pay-per-use prices, first tier, in micro-USD (1000000 = 1 dollar): lambda_request and apigw_request a million requests,",
+    "# Pay-per-use prices, first tier, in micro-USD (1000000 = 1 dollar): lambda_request, apigw_request and apigw_http_request a million requests,",
     `# lambda_gb_second a thousand GB-seconds. Generated ${new Date().toISOString().slice(0, 10)} by scripts/gen-per-use.mjs from AWS's price lists; do not edit by hand.`,
     "# No free tier subtracted; an estimate for a what-if, not a quote.",
     "# service,region,usd_micro_per_unit",
@@ -48,4 +49,4 @@ writeFileSync(
   ].join("\n") + "\n",
 );
 const n = (s) => rows.filter((r) => r[0] === s).length;
-console.error(`per-use: lambda_request ${n("lambda_request")}, lambda_gb_second ${n("lambda_gb_second")}, apigw_request ${n("apigw_request")} regions`);
+console.error(`per-use: lambda_request ${n("lambda_request")}, lambda_gb_second ${n("lambda_gb_second")}, apigw_request ${n("apigw_request")}, apigw_http_request ${n("apigw_http_request")} regions`);

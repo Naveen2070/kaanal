@@ -239,6 +239,26 @@ pub fn managed_price_micro_usd_hr(
         .map(|i| table[i].1)
 }
 
+/// The real Multi-AZ price an hour of a licence-included class (`aws/db.m5.large` running Oracle or
+/// SQL Server) in the AWS `region`, in micro-USD (RULES 133 b); `None` for an engine that has no
+/// such table (see [`crate::config::DbEngine::has_multi_az_prices`]) or a class with no Multi-AZ row there.
+#[must_use]
+pub fn managed_multi_az_price_micro_usd_hr(
+    engine: crate::config::DbEngine,
+    region: &str,
+    name: &str,
+) -> Option<u32> {
+    if !engine.has_multi_az_prices() {
+        return None;
+    }
+    let key = name.trim().to_ascii_lowercase();
+    let table = region_table(&format!("aws-rds-{}-multiaz", engine.word()), region)?;
+    table
+        .binary_search_by(|(n, _)| (*n).cmp(key.as_str()))
+        .ok()
+        .map(|i| table[i].1)
+}
+
 /// What sending data out to the internet costs in a region (`data/egress.csv`, RULES 131): the
 /// first-tier price, in micro-USD, and the monthly allowance that is free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,9 +299,10 @@ pub fn egress_price(provider: &str, region: &str) -> Option<EgressPrice> {
 
 const PER_USE_CSV: &str = include_str!("../data/per-use.csv");
 
-/// A pay-per-use price (`data/per-use.csv`, RULES 131), first tier, in micro-USD: `lambda_request`
-/// and `apigw_request` for a million requests, `lambda_gb_second` for a thousand GB-seconds; `None`
-/// where the cloud does not sell the service in `region`.
+/// A pay-per-use price (`data/per-use.csv`, RULES 131, 133), first tier, in micro-USD: `lambda_request`,
+/// `apigw_request` (REST) and `apigw_http_request` (HTTP API) for a million requests,
+/// `lambda_gb_second` for a thousand GB-seconds; `None` where the cloud does not sell the service in
+/// `region`.
 #[must_use]
 pub fn per_use_price(service: &str, region: &str) -> Option<u32> {
     PER_USE_CSV

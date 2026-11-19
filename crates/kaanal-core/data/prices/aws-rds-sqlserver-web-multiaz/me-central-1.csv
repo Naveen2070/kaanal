@@ -1,0 +1,24 @@
+# On-demand price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-sqlserver-web-multiaz, licence included, Multi-AZ, in region me-central-1.
+# Generated 2026-11-19 by scripts/gen-rds-licensed.mjs from AWS's AmazonRDS price list; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a class missing here has no price there.
+aws/db.m5.2xlarge,2446800
+aws/db.m5.4xlarge,4993600
+aws/db.m5.large,658400
+aws/db.m5.xlarge,1200400
+aws/db.m6i.2xlarge,2446800
+aws/db.m6i.4xlarge,4993600
+aws/db.m6i.large,658400
+aws/db.m6i.xlarge,1200400
+aws/db.r5.2xlarge,3802800
+aws/db.r5.4xlarge,7605600
+aws/db.r5.large,956400
+aws/db.r5.xlarge,1902400
+aws/db.r6i.2xlarge,3802800
+aws/db.r6i.4xlarge,7605600
+aws/db.r6i.large,956400
+aws/db.r6i.xlarge,1902400
+aws/db.t3.2xlarge,1714800
+aws/db.t3.large,464400
+aws/db.t3.medium,308400
+aws/db.t3.small,242400
+aws/db.t3.xlarge,858400

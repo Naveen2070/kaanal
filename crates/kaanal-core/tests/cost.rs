@@ -273,7 +273,7 @@ endpoints:
 }
 
 /// AWS list prices, us-east-1: Lambda $0.20 a million requests and $0.0000166667 a GB-second (x86), API
-/// Gateway REST $3.50 a million. 100 requests a second for an hour is 360,000 requests; at 100 ms and 512 MB
+/// Gateway HTTP API $1.00 a million (REST $3.50). 100 requests a second for an hour is 360,000 requests; at 100 ms and 512 MB
 /// that is 18,000 GB-seconds. The oracle is that arithmetic (the price file rounds a GB-second to 16.667
 /// micro-USD, so the Lambda figure is held to 10 micro-USD).
 #[test]
@@ -308,7 +308,8 @@ fn serverless_and_a_managed_gateway_are_priced_by_use_from_the_visits() {
         "{small:?}"
     );
     assert!(small.note.as_deref().unwrap().contains("128 MB"));
-    assert_eq!(cost_of(&r, "gw").total_micro_usd_hr, Some(1_260_000));
+    // an unnamed API is an HTTP API (RULES 133 a): 360,000 requests at $1.00 a million
+    assert_eq!(cost_of(&r, "gw").total_micro_usd_hr, Some(360_000));
     assert_eq!((r.priced, r.unpriced), (3, 0));
     // without visits they say what they need, and stay out of the total
     let none = estimate(&c, &BTreeMap::new());
@@ -325,4 +326,149 @@ fn serverless_and_a_managed_gateway_are_priced_by_use_from_the_visits() {
             .starts_with("managed: priced by use")
     );
     assert_eq!(none.total_micro_usd_hr, 0);
+}
+
+/// RULES 133 a: a managed gateway is an API Gateway HTTP API unless it says `api: rest`; the note says which
+/// was assumed, and `api:` is refused on a gateway that is not `hosting: managed`.
+#[test]
+fn a_managed_gateway_is_an_http_api_unless_it_says_rest() {
+    let visits = BTreeMap::from([("gw".to_string(), 100.0)]);
+    let one = |props: &str| {
+        let c = cfg(&format!(
+            "  gw: {{ type: gateway, hosting: managed{props} }}
+"
+        ));
+        cost_of(&estimate(&c, &visits), "gw")
+    };
+    // 100 req/s for an hour is 360,000 requests: $1.00 a million (HTTP API) or $3.50 (REST API)
+    let default = one("");
+    assert_eq!(default.total_micro_usd_hr, Some(360_000));
+    assert!(
+        default
+            .note
+            .as_deref()
+            .unwrap()
+            .contains("HTTP API (write api: rest"),
+        "{default:?}"
+    );
+    let http = one(", api: http");
+    assert_eq!(http.total_micro_usd_hr, Some(360_000));
+    let note = http.note.as_deref().unwrap();
+    assert!(
+        note.contains("an API Gateway HTTP API") && !note.contains("write api"),
+        "{http:?}"
+    );
+    let rest = one(", api: rest");
+    assert_eq!(rest.total_micro_usd_hr, Some(1_260_000));
+    assert!(
+        rest.note
+            .as_deref()
+            .unwrap()
+            .contains("an API Gateway REST API"),
+        "{rest:?}"
+    );
+    // the field belongs to a managed gateway
+    let e = Config::from_yaml(
+        "version: 1
+nodes:
+  gw: { type: gateway, api: rest }
+",
+    )
+    .unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("api goes with a gateway that has hosting: managed"),
+        "{e}"
+    );
+    let e = Config::from_yaml(
+        "version: 1
+nodes:
+  s: { type: service, hosting: serverless, api: rest }
+",
+    )
+    .unwrap_err();
+    // another kind does not have the field at all
+    assert!(e.to_string().contains("unknown field 'api'"), "{e}");
+    assert!(
+        Config::from_yaml(
+            "version: 1
+nodes:
+  gw: { type: gateway, api: bogus, hosting: managed }
+"
+        )
+        .is_err()
+    );
+}
+
+/// RULES 133 b: a Multi-AZ licence-included Oracle or SQL Server database costs AWS's own Multi-AZ price for
+/// its class and region (the standby runs 1.23 to 2.59 times the instance, not always 2). The oracle is the
+/// two price files read here directly, not the lookup under test; where a class has no Multi-AZ row (SQL
+/// Server Express has none) the price is twice the Single-AZ one and the note says so.
+#[test]
+fn a_licensed_multi_az_database_reads_the_real_standby_price() {
+    let read = |provider: &str, region: &str| -> BTreeMap<String, u64> {
+        let path = format!(
+            "{}/data/prices/{provider}/{region}.csv",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let (n, p) = l.split_once(',').unwrap();
+                (n.to_string(), p.parse().unwrap())
+            })
+            .collect()
+    };
+    let est = |region: &str, engine: &str, class: &str, multi: bool| {
+        let flavor = if engine.starts_with("sqlserver") {
+            "sqlserver"
+        } else {
+            "oracle"
+        };
+        let c = Config::from_yaml(&format!(
+            "version: 1
+region: {{ aws: {region} }}
+nodes:
+  db: {{ type: database, flavor: {flavor}, hosting: managed, engine: {engine}, instance: aws/{class}, multi_az: {multi} }}
+"
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+        cost_of(&estimate(&c, &BTreeMap::new()), "db")
+    };
+    let single = read("aws-rds-oracle-se2", "us-east-1");
+    let multi = read("aws-rds-oracle-se2-multiaz", "us-east-1");
+    // a class whose standby is not exactly twice the instance, so a flat factor of 2 would be wrong
+    let (class, (s, m)) = single
+        .iter()
+        .filter_map(|(n, s)| multi.get(n).map(|m| (n, (*s, *m))))
+        .find(|(_, (s, m))| m.abs_diff(2 * s) * 100 > 2 * s)
+        .expect("the price list has a class whose Multi-AZ price is not 2 x");
+    let class = class.trim_start_matches("aws/");
+    assert_eq!(
+        est("us-east-1", "oracle-se2", class, false).total_micro_usd_hr,
+        Some(s)
+    );
+    let got = est("us-east-1", "oracle-se2", class, true);
+    assert_eq!(got.total_micro_usd_hr, Some(m), "{got:?}");
+    assert_ne!(Some(m), Some(2 * s));
+    assert!(got.note.is_none(), "{got:?}");
+    // a class with a Single-AZ price and no Multi-AZ row falls back to 2 x, with a note
+    let ex = read("aws-rds-sqlserver-ex", "us-east-1");
+    let (name, p) = ex.iter().next().unwrap();
+    let fell = est(
+        "us-east-1",
+        "sqlserver-ex",
+        name.trim_start_matches("aws/"),
+        true,
+    );
+    assert_eq!(fell.total_micro_usd_hr, Some(2 * p), "{fell:?}");
+    assert!(
+        fell.note
+            .as_deref()
+            .unwrap()
+            .contains("no Multi-AZ price for this class"),
+        "{fell:?}"
+    );
 }

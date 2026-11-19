@@ -53,7 +53,7 @@ use endpoints::default_calls;
 pub use endpoints::{
     Branch, CallStep, EndpointConfig, EndpointsConfig, ErrorMapping, StepConfig, parse_endpoints,
 };
-pub use hosting::{DbEngine, Hosting};
+pub use hosting::{DbEngine, GatewayApi, Hosting};
 pub use kinds::{
     AuthConfig, CacheConfig, DatabaseConfig, ExternalApiConfig, GatewayConfig, MonolithConfig,
     ServiceConfig,

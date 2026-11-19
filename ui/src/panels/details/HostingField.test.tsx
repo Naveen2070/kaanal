@@ -121,3 +121,26 @@ test("a_managed_database_has_a_multi_az_switch_that_aurora_does_not", () => {
   );
   expect(screen.queryByLabelText(/Multi-AZ/)).toBeNull();
 });
+
+test("a_managed_gateway_picks_its_api_type_and_http_is_the_default_that_is_not_written", () => {
+  const { rerender } = render(<HostingField name="g" config={{ type: "gateway" } as NodeDoc} />);
+  expect(screen.queryByLabelText(/API type/)).toBeNull();
+  rerender(<HostingField name="g" config={{ type: "gateway", hosting: "managed" } as NodeDoc} />);
+  const select = screen.getByLabelText(/API type/) as HTMLSelectElement;
+  expect(select.value).toBe("http");
+  expect([...select.options].map((o) => o.value)).toEqual(["http", "rest"]);
+  fireEvent.change(select, { target: { value: "rest" } });
+  expect(patch).toHaveBeenLastCalledWith([
+    { op: "insert", path: ["nodes", "g", "api"], value: "rest" },
+  ]);
+  rerender(
+    <HostingField
+      name="g"
+      config={{ type: "gateway", hosting: "managed", api: "rest" } as NodeDoc}
+    />,
+  );
+  const now = screen.getByLabelText(/API type/) as HTMLSelectElement;
+  expect(now.value).toBe("rest");
+  fireEvent.change(now, { target: { value: "http" } });
+  expect(patch).toHaveBeenLastCalledWith([{ op: "remove", path: ["nodes", "g", "api"] }]);
+});

@@ -1,7 +1,43 @@
-# Pay-per-use prices, first tier, in micro-USD (1000000 = 1 dollar): lambda_request and apigw_request a million requests,
-# lambda_gb_second a thousand GB-seconds. Generated 2026-11-13 by scripts/gen-per-use.mjs from AWS's price lists; do not edit by hand.
+# Pay-per-use prices, first tier, in micro-USD (1000000 = 1 dollar): lambda_request, apigw_request and apigw_http_request a million requests,
+# lambda_gb_second a thousand GB-seconds. Generated 2026-11-19 by scripts/gen-per-use.mjs from AWS's price lists; do not edit by hand.
 # No free tier subtracted; an estimate for a what-if, not a quote.
 # service,region,usd_micro_per_unit
+apigw_http_request,af-south-1,1320000
+apigw_http_request,ap-east-1,1380000
+apigw_http_request,ap-east-2,1161000
+apigw_http_request,ap-northeast-1,1290000
+apigw_http_request,ap-northeast-2,1230000
+apigw_http_request,ap-northeast-3,1290000
+apigw_http_request,ap-south-1,1050000
+apigw_http_request,ap-south-2,1050000
+apigw_http_request,ap-southeast-1,1250000
+apigw_http_request,ap-southeast-2,1290000
+apigw_http_request,ap-southeast-3,1290000
+apigw_http_request,ap-southeast-4,1290000
+apigw_http_request,ap-southeast-5,1125000
+apigw_http_request,ap-southeast-6,1354500
+apigw_http_request,ap-southeast-7,1125000
+apigw_http_request,ca-central-1,1110000
+apigw_http_request,ca-west-1,1110000
+apigw_http_request,eu-central-1,1200000
+apigw_http_request,eu-central-2,1320000
+apigw_http_request,eu-north-1,1060000
+apigw_http_request,eu-south-1,1170000
+apigw_http_request,eu-south-2,1110000
+apigw_http_request,eu-west-1,1110000
+apigw_http_request,eu-west-2,1160000
+apigw_http_request,eu-west-3,1170000
+apigw_http_request,il-central-1,1220000
+apigw_http_request,me-central-1,1220000
+apigw_http_request,me-south-1,1230000
+apigw_http_request,mx-central-1,1050000
+apigw_http_request,sa-east-1,1590000
+apigw_http_request,us-east-1,1000000
+apigw_http_request,us-east-2,1000000
+apigw_http_request,us-gov-east-1,1000000
+apigw_http_request,us-gov-west-1,1260000
+apigw_http_request,us-west-1,1170000
+apigw_http_request,us-west-2,1000000
 apigw_request,af-south-1,4170000
 apigw_request,ap-east-1,4675000
 apigw_request,ap-east-2,3825000

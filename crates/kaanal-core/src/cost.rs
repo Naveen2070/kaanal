@@ -13,7 +13,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::chain::Endpoints;
-use crate::config::{Config, DbEngine, Hosting, NodeConfig, NodeKind, StorageClass, StorageFlavor};
+use crate::config::{
+    Config, DbEngine, GatewayApi, Hosting, NodeConfig, NodeKind, StorageClass, StorageFlavor,
+};
 use crate::prices;
 use crate::topology::Topology;
 
@@ -24,7 +26,8 @@ pub const HOURS_PER_MONTH: f64 = 730.0;
 /// instance, so exactly 2 on RDS PostgreSQL, MySQL, MariaDB and Oracle (checked against the price
 /// catalogue: 5,413 of 5,560 PostgreSQL region and class pairs are 2.00, the rest 1.98 to 2.01). For the
 /// licence-included Oracle and SQL Server editions it is the common case, not the rule: 3,640 of 6,181
-/// region and class pairs are 2.00 and the rest run from 1.23 to 2.59 (RULES 131).
+/// region and class pairs are 2.00 and the rest run from 1.23 to 2.59 (RULES 131), so those editions are
+/// priced from their own Multi-AZ tables and the factor stays only for a class with no row (RULES 133).
 pub const MULTI_AZ_FACTOR: u64 = 2;
 
 /// Dollars as whole micro-USD. The inputs are checked at load (`cost_per_hour` is 0 to 1,000,000), so
@@ -184,9 +187,9 @@ fn node_cost(
         .map(str::trim)
         .filter(|i| !i.is_empty())
         .map(str::to_string);
-    let (unit, why) = match unit_price(cfg, regions, n, instance.as_deref()) {
-        Ok(u) => (Some(u), None),
-        Err(w) => (None, Some(w)),
+    let (unit, why, note) = match unit_price(cfg, regions, n, instance.as_deref()) {
+        Ok((u, note)) => (Some(u), None, note),
+        Err(w) => (None, Some(w), None),
     };
     NodeCost {
         name: name.to_string(),
@@ -195,7 +198,7 @@ fn node_cost(
         unit_micro_usd_hr: unit,
         total_micro_usd_hr: unit.map(|u| u * u64::from(copies)),
         why,
-        note: None,
+        note,
     }
 }
 
@@ -205,7 +208,7 @@ fn unit_price(
     regions: &BTreeMap<String, String>,
     n: &NodeConfig,
     instance: Option<&str>,
-) -> Result<u64, String> {
+) -> Result<(u64, Option<String>), String> {
     let kind = n.kind();
     let hosting = n.hosting();
     match hosting {
@@ -234,7 +237,7 @@ fn unit_price(
     if let Some(mine) = cfg.instances.get(instance) {
         return mine
             .cost_per_hour
-            .map(micro_usd)
+            .map(|c| (micro_usd(c), None))
             .ok_or_else(|| "your instance has no cost_per_hour".to_string());
     }
     let provider = instance
@@ -276,11 +279,27 @@ fn unit_price(
             n.engine(),
             DbEngine::AuroraPostgresql | DbEngine::AuroraMysql
         );
-    Ok(if multi_az {
-        unit * MULTI_AZ_FACTOR
-    } else {
-        unit
-    })
+    if !multi_az {
+        return Ok((unit, None));
+    }
+    // a licence-included Oracle or SQL Server standby has its own price (RULES 133 b): the factor
+    // is 1.23 to 2.59, not 2; twice the single-AZ price only where the class has no Multi-AZ row
+    let engine = n.engine();
+    if engine.has_multi_az_prices() {
+        return Ok(
+            match prices::managed_multi_az_price_micro_usd_hr(engine, region, instance) {
+                Some(p) => (u64::from(p), None),
+                None => (
+                    unit * MULTI_AZ_FACTOR,
+                    Some(
+                        "no Multi-AZ price for this class here: twice the Single-AZ price"
+                            .to_string(),
+                    ),
+                ),
+            },
+        );
+    }
+    Ok((unit * MULTI_AZ_FACTOR, None))
 }
 
 /// An object store's price an hour (RULES 123): the data kept over a month plus its requests at
@@ -406,8 +425,8 @@ fn egress_cost(regions: &BTreeMap<String, String>, f: &EgressFlow) -> EgressCost
 const LAMBDA_DEFAULT_MEMORY_BYTES: f64 = 128.0 * 1024.0 * 1024.0;
 
 /// A node billed by use (RULES 131): a serverless service or monolith as AWS Lambda (requests plus
-/// GB-seconds of its own `proc` at its `memory:`), a managed gateway as API Gateway (a REST API's
-/// requests). Priced from the run's visits a second; every copy's visits are in the one figure, so
+/// GB-seconds of its own `proc` at its `memory:`), a managed gateway as API Gateway (an HTTP API's
+/// requests by default, a REST API's with `api: rest`, RULES 133). Priced from the run's visits a second; every copy's visits are in the one figure, so
 /// `copies` is 1. `None` for any other node. Billed duration is the node's own mean `proc`: time spent
 /// waiting on what it calls is not in it, so a Lambda that calls others costs more than this says.
 fn per_use_cost(
@@ -447,15 +466,25 @@ fn per_use_cost(
     let requests_hr = rate * 3600.0;
     let assumed = "priced as AWS Lambda and API Gateway (the node names no cloud): an estimate";
     if gateway {
-        let Some(per_m) = prices::per_use_price("apigw_request", region) else {
+        let written = n.gateway_api_written();
+        let (service, word) = match written.unwrap_or_default() {
+            GatewayApi::Http => ("apigw_http_request", "HTTP API"),
+            GatewayApi::Rest => ("apigw_request", "REST API"),
+        };
+        let Some(per_m) = prices::per_use_price(service, region) else {
             return Some(made(
                 None,
-                Some(format!("no API Gateway price in {region}")),
+                Some(format!("no API Gateway {word} price in {region}")),
                 None,
             ));
         };
         let micro = micro_usd_of_micro(requests_hr * f64::from(per_m) / 1e6);
-        return Some(made(Some(micro), None, Some(assumed.to_string())));
+        let note = if written.is_some() {
+            format!("{assumed}; an API Gateway {word}")
+        } else {
+            format!("{assumed}; an API Gateway HTTP API (write api: rest for a REST API)")
+        };
+        return Some(made(Some(micro), None, Some(note)));
     }
     let (Some(per_m), Some(per_k)) = (
         prices::per_use_price("lambda_request", region),

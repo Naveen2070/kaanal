@@ -75,7 +75,9 @@ export function hostingHint(type: string, h: HostingId): string {
       if (type === "cache") {
         return "Pick a managed class (AWS ElastiCache) for its price and size; the valkey flavor is priced as ElastiCache for Valkey, 20% below Redis. Azure and Google Cloud classes are not in the table yet. A cache's hits are fixed times, so the class does not change them.";
       }
-      return "The provider runs and scales it, so there is no instance to pick. Set cores and memory yourself if you model them. The estimate leaves it out: it is priced by use.";
+      return type === "gateway"
+        ? "The provider runs and scales it, so there is no instance to pick. Set cores and memory yourself if you model them. Studio's card leaves it out; a run prices it by use, as an API Gateway HTTP API unless you pick REST below."
+        : "The provider runs and scales it, so there is no instance to pick. Set cores and memory yourself if you model them. The estimate leaves it out: it is priced by use.";
     case "serverless":
       return "Pay per use, so there is no instance to pick. Set cores and memory yourself if you model them. The estimate leaves it out.";
     case "external":
@@ -151,6 +153,27 @@ export const CACHE_ENGINES = [
 
 /** The cache's engine: its `flavor:`, Redis when none is written. */
 export const cacheEngineOf = (config: NodeDoc): string => flavorOf(config) || "redis";
+
+/** The API Gateway products a managed gateway is priced as (`api:`, RULES 133 a); `http` is the default and is not written. */
+export const GATEWAY_APIS = [
+  { id: "http", label: "HTTP API ($1.00 per million requests)" },
+  { id: "rest", label: "REST API ($3.50 per million requests)" },
+] as const;
+
+/** Whether the node is a managed gateway, the only one with an API type. */
+export const hasGatewayApi = (config: NodeDoc): boolean =>
+  config.type === "gateway" && hostingOf(config) === "managed";
+
+/** The gateway's API type: `rest` when written, else the default `http`. */
+export const gatewayApiOf = (config: NodeDoc): string => (config.api === "rest" ? "rest" : "http");
+
+/** The patch for the API type: `http` (the default) removes the key. */
+export function setGatewayApi(name: string, config: NodeDoc, id: string): Op[] {
+  const path = ["nodes", name, "api"];
+  const present = "api" in config;
+  if (id === "http") return present ? [{ op: "remove", path }] : [];
+  return [put(path, present, id)];
+}
 
 /** Whether the node has a Multi-AZ switch: a managed database that is not Aurora (Aurora keeps copies with `replicas`). */
 export const hasMultiAz = (config: NodeDoc): boolean =>
@@ -245,6 +268,10 @@ export function setHosting(name: string, config: NodeDoc, next: HostingId): Op[]
   }
   if ("engine" in config && !(config.type === "database" && next === "managed")) {
     ops.push({ op: "remove", path: [...base, "engine"] });
+  }
+  // the API type belongs to a managed gateway
+  if ("api" in config && !(config.type === "gateway" && next === "managed")) {
+    ops.push({ op: "remove", path: [...base, "api"] });
   }
   return ops;
 }

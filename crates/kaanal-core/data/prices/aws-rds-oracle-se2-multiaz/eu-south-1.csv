@@ -1,0 +1,16 @@
+# On-demand price an hour in micro-USD (1000000 = 1 dollar) of aws-rds-oracle-se2-multiaz, licence included, Multi-AZ, in region eu-south-1.
+# Generated 2026-11-19 by scripts/gen-rds-licensed.mjs from AWS's AmazonRDS price list; do not edit by hand.
+# name,usd_micro_hr. An estimate for a what-if, not a quote; a class missing here has no price there.
+aws/db.m5.2xlarge,4124000
+aws/db.m5.4xlarge,8249000
+aws/db.m5.large,1031000
+aws/db.m5.xlarge,2062000
+aws/db.r5.2xlarge,4500000
+aws/db.r5.4xlarge,9002000
+aws/db.r5.large,1126000
+aws/db.r5.xlarge,2250000
+aws/db.t3.2xlarge,2587000
+aws/db.t3.large,647000
+aws/db.t3.medium,323000
+aws/db.t3.small,162000
+aws/db.t3.xlarge,1294000

@@ -45,6 +45,18 @@ export function engineOf(config: Cfg): string {
   return typeof config.engine === "string" && config.engine !== "" ? config.engine : "postgresql";
 }
 
+/**
+ * The licence-included engines whose Multi-AZ price is its own list (`aws-rds-<engine>-multiaz`, RULES 133 b),
+ * the same five as `DbEngine::has_multi_az_prices` in Rust: a standby is 1.23 to 2.59 times the instance there.
+ */
+const MULTI_AZ_LISTED = new Set([
+  "oracle-se2",
+  "sqlserver-ex",
+  "sqlserver-web",
+  "sqlserver-standard",
+  "sqlserver-enterprise",
+]);
+
 /** What a Multi-AZ standby adds: a second instance, so twice the price (RDS; never Aurora). 1 for everything else. */
 export function multiAzFactor(config: Cfg): number {
   const aurora = engineOf(config).startsWith("aurora");
@@ -68,6 +80,13 @@ export function priceKeyOf(config: Cfg, mine: Record<string, unknown>): PriceKey
   return key === null ? null : { key, provider };
 }
 
+/** The list of a Multi-AZ licence-included database's standby prices, beside its own list; null for any other node. */
+function multiAzKeyOf(config: Cfg, base: PriceKey | null): PriceKey | null {
+  if (base === null || multiAzFactor(config) !== 2 || !MULTI_AZ_LISTED.has(engineOf(config)))
+    return null;
+  return { key: `${base.key}-multiaz`, provider: base.provider };
+}
+
 /** The price lists a document's nodes read, sorted. */
 export function priceKeysUsed(doc: Doc | null): PriceKey[] {
   const mine = customInstancesOf(doc);
@@ -75,6 +94,8 @@ export function priceKeysUsed(doc: Doc | null): PriceKey[] {
   for (const n of Object.values(doc?.nodes ?? {})) {
     const k = priceKeyOf(n, mine);
     if (k) out.set(k.key, k);
+    const m = multiAzKeyOf(n, k);
+    if (m) out.set(m.key, m);
   }
   return [...out.values()].sort((x, y) => (x.key < y.key ? -1 : 1));
 }
@@ -203,8 +224,14 @@ export function nodeCosts(
       if (table === undefined) why = "prices are loading";
       else {
         const p = table.get(instance.toLowerCase());
+        const standby = multiAzKeyOf(config, k);
         if (p === undefined) why = `no price in ${region[k?.provider ?? ""] ?? "this region"}`;
-        else unitMicro = p * multiAzFactor(config);
+        else if (standby !== null) {
+          // a licence-included standby has its own price; twice the instance only where the list has no row
+          const m = tables[standby.key];
+          if (m === undefined) why = "prices are loading";
+          else unitMicro = m.get(instance.toLowerCase()) ?? p * 2;
+        } else unitMicro = p * multiAzFactor(config);
       }
     }
     return {

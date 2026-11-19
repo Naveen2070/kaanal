@@ -258,3 +258,45 @@ test("a_colder_class_keeps_data_for_less_and_bills_what_is_read_back_as_the_rust
   expect(c[1]?.totalMicro).toBe(32_263);
   expect(c[2]?.why).toMatch(/no archive object-store price in us-east-1/);
 });
+
+test("a_licensed_multi_az_database_reads_its_own_price_list_as_the_rust_figures_do", () => {
+  // the same figures as crates/kaanal-core/tests/cost.rs (RULES 133 b): RDS for Oracle SE2, licence included,
+  // db.t2.micro in us-east-1 is $0.038 Single-AZ and $0.075 Multi-AZ (a flat factor of 2 would say $0.076)
+  const node = (extra: Record<string, unknown>) => ({
+    type: "database",
+    flavor: "oracle",
+    hosting: "managed",
+    engine: "oracle-se2",
+    instance: "aws/db.t2.micro",
+    ...extra,
+  });
+  const single = { "aws-rds-oracle-se2": new Map([["aws/db.t2.micro", 38_000]]) };
+  const both = { ...single, "aws-rds-oracle-se2-multiaz": new Map([["aws/db.t2.micro", 75_000]]) };
+  const d = doc({ one: node({}), two: node({ multi_az: true }) });
+  // the standby list is fetched only for a Multi-AZ node of a licensed engine
+  expect(priceKeysUsed(doc({ one: node({}) }))).toEqual([
+    { key: "aws-rds-oracle-se2", provider: "aws" },
+  ]);
+  expect(priceKeysUsed(d)).toEqual([
+    { key: "aws-rds-oracle-se2", provider: "aws" },
+    { key: "aws-rds-oracle-se2-multiaz", provider: "aws" },
+  ]);
+  const c = nodeCosts(d, both, region);
+  expect([c[0]?.totalMicro, c[1]?.totalMicro]).toEqual([38_000, 75_000]);
+  // until its list has arrived the node says so, not a guess
+  expect(nodeCosts(d, single, region)[1]?.why).toBe("prices are loading");
+  // a class with no Multi-AZ row is twice the Single-AZ price
+  const missing = { ...single, "aws-rds-oracle-se2-multiaz": new Map<string, number>() };
+  expect(nodeCosts(d, missing, region)[1]?.totalMicro).toBe(76_000);
+  // PostgreSQL has no standby list: still exactly twice
+  const pg = doc({
+    p: {
+      type: "database",
+      flavor: "postgres",
+      hosting: "managed",
+      instance: "aws/db.t3.micro",
+      multi_az: true,
+    },
+  });
+  expect(priceKeysUsed(pg)).toEqual([{ key: "aws-rds-postgresql", provider: "aws" }]);
+});
