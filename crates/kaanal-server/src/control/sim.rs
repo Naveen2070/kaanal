@@ -2,7 +2,8 @@
 //!
 //! A run is started and answered with `202` and a `Location`; the client polls the record. One
 //! run at a time (`409` with the running id otherwise), under `spawn_blocking`, with the server
-//! caps ([`kaanal_sim::Limits::server`]), keeping a summary and dropping the hop records.
+//! caps ([`kaanal_sim::Limits::server`]), keeping a summary and dropping the hop records. A load
+//! sweep (`POST /sim/sweep`, in `sweep.rs`) shares the slot, the records and the helpers here.
 
 use super::*;
 use crate::sim::draft_run::{DraftRunError, draft_job};
@@ -47,8 +48,68 @@ fn secs(name: &str, v: Option<f64>) -> Result<Option<Duration>, Reject> {
     .transpose()
 }
 
-fn from_sim(e: &SimError) -> Reject {
+pub(super) fn from_sim(e: &SimError) -> Reject {
     reject(e.status, &e.message)
+}
+
+/// **Private.** The body's `profile`, a name or a profile written out, with the label a record
+/// shows for it (the name, or `inline`).
+pub(super) fn parse_profile(v: Value) -> Result<(String, Profile), Reject> {
+    // not an untagged enum: it would throw away the precise message of a bad inline profile
+    match v {
+        Value::String(n) => Ok((n.clone(), Profile::Named(n))),
+        v @ Value::Object(_) => {
+            let p = serde_json::from_value(v)
+                .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad profile: {e}")))?;
+            Ok(("inline".to_string(), Profile::Inline(p)))
+        }
+        _ => Err(reject(
+            StatusCode::BAD_REQUEST,
+            "profile must be a profile name or an object",
+        )),
+    }
+}
+
+/// **Private.** The system in force and the chaos `req` runs under: the named scenario's alone,
+/// else the live chaos.
+pub(super) fn applied_inputs(
+    st: &AppState,
+    req: &RunRequest,
+) -> Result<(Arc<Generation>, EffectiveChaos), Reject> {
+    // the chaos and the generation as one pair: an Apply swaps under this same lock
+    let (c, g) = locked(st)?;
+    let chaos = if let Some(name) = &req.scenario {
+        let mut stack = kaanal_core::ChaosStack::default();
+        stack
+            .set_active(&c.scenarios, std::slice::from_ref(name))
+            .map_err(|_| reject(StatusCode::NOT_FOUND, &format!("unknown scenario '{name}'")))?;
+        stack.compile(&c.scenarios)
+    } else {
+        st.snapshot().chaos.clone()
+    };
+    drop(c);
+    Ok((g, chaos))
+}
+
+/// **Private.** `202` with the id and a `Location` to poll.
+pub(super) fn accepted(id: &str) -> Response {
+    let mut resp = (
+        StatusCode::ACCEPTED,
+        Json(json!({ "id": id, "state": "running" })),
+    )
+        .into_response();
+    if let Ok(v) = HeaderValue::from_str(&format!("/__kaanal/sim/runs/{id}")) {
+        resp.headers_mut().insert(header::LOCATION, v);
+    }
+    resp
+}
+
+/// **Private.** `409` naming the run that holds the slot.
+pub(super) fn busy(running: &str) -> Reject {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({ "error": "a run is already in progress", "id": running })),
+    )
 }
 
 /// `POST /__kaanal/sim/run` — starts a run.
@@ -59,21 +120,7 @@ fn from_sim(e: &SimError) -> Reject {
 pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Response, Reject> {
     let b: RunBody = serde_json::from_slice(&body)
         .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad body: {e}")))?;
-    // not an untagged enum: it would throw away the precise message of a bad inline profile
-    let (label, profile) = match b.profile {
-        Value::String(n) => (n.clone(), Profile::Named(n)),
-        v @ Value::Object(_) => {
-            let p = serde_json::from_value(v)
-                .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad profile: {e}")))?;
-            ("inline".to_string(), Profile::Inline(p))
-        }
-        _ => {
-            return Err(reject(
-                StatusCode::BAD_REQUEST,
-                "profile must be a profile name or an object",
-            ));
-        }
-    };
+    let (label, profile) = parse_profile(b.profile)?;
     let req = RunRequest {
         profile,
         duration: secs("duration_s", b.duration_s)?,
@@ -83,20 +130,7 @@ pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Re
     };
     let (g, chaos, source, draft_rev) = match b.source.as_deref() {
         None | Some("applied") => {
-            // the chaos and the generation as one pair: an Apply swaps under this same lock
-            let (c, g) = locked(&st)?;
-            let chaos = if let Some(name) = &req.scenario {
-                let mut stack = kaanal_core::ChaosStack::default();
-                stack
-                    .set_active(&c.scenarios, std::slice::from_ref(name))
-                    .map_err(|_| {
-                        reject(StatusCode::NOT_FOUND, &format!("unknown scenario '{name}'"))
-                    })?;
-                stack.compile(&c.scenarios)
-            } else {
-                st.snapshot().chaos.clone()
-            };
-            drop(c);
+            let (g, chaos) = applied_inputs(&st, &req)?;
             (g, chaos, "applied", None)
         }
         Some("draft") => {
@@ -135,12 +169,7 @@ pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Re
     let id = st
         .sims
         .begin(job.g.id, &label, req.scenario.as_deref(), source, draft_rev)
-        .map_err(|running| {
-            (
-                StatusCode::CONFLICT,
-                Json(json!({ "error": "a run is already in progress", "id": running })),
-            )
-        })?;
+        .map_err(|running| busy(&running))?;
     let slot = Slot::new(Arc::clone(&st), id.clone());
     tokio::task::spawn_blocking(move || {
         planned.fill_sizes(&job.g);
@@ -148,15 +177,7 @@ pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Re
         let result = execute_run(&job);
         slot.finish(result);
     });
-    let mut resp = (
-        StatusCode::ACCEPTED,
-        Json(json!({ "id": id, "state": "running" })),
-    )
-        .into_response();
-    if let Ok(v) = HeaderValue::from_str(&format!("/__kaanal/sim/runs/{id}")) {
-        resp.headers_mut().insert(header::LOCATION, v);
-    }
-    Ok(resp)
+    Ok(accepted(&id))
 }
 
 /// `GET /__kaanal/sim/runs` — the kept runs, without their summaries.
@@ -265,8 +286,8 @@ const LOG_DEFAULT: usize = 200;
 /// lines, before the filters.
 ///
 /// # Errors
-/// 400 for a bad `level` or `endpoint`; 404 for an unknown id; 409 while the run is running, and
-/// for a failed run (it has no log; the body carries its `error`).
+/// 400 for a bad `level` or `endpoint`; 404 for an unknown id; 409 while the run is running, for
+/// a failed run (it has no log; the body carries its `error`), and for a sweep.
 pub async fn get_run_log(
     State(st): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -304,6 +325,12 @@ pub async fn get_run_log(
             "no such run (only the last eight are kept)",
         )
     })?;
+    if run.kind == "sweep" {
+        return Err(reject(
+            StatusCode::CONFLICT,
+            "a sweep has no log; its points are in the record",
+        ));
+    }
     match run.state {
         "done" => {}
         "running" => return Err(reject(StatusCode::CONFLICT, "the run is still running")),

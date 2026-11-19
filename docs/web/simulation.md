@@ -35,9 +35,52 @@ A **batch run** (the rest of this page) simulates a stretch of time at once, see
 
 With `"source": "draft"` the run simulates the text of the draft (`GET /draft`) as it is now, without Apply: nothing is swapped, no counter is reset, mock traffic is untouched. The live chaos is carried onto the draft by name (what the draft no longer has is left out), and a `scenario` resolves against the draft's scenarios. A draft that does not build is `400` with `{ "error", "diagnostic" }` and does not take the run slot. The run record says `"source": "draft"` and a `draft_rev` (the draft's `rev`, which `GET /draft` shows and which counts each change of its text), so a result can be matched to the edit it describes; `generation` is the one in force.
 
+## Load sweep: where does it break?
+
+A single run answers "how does the system behave at this rate". A **load sweep** answers "how much more traffic can it take before it misses a target". It runs your profile at a ladder of **load factors** `k` (multiples of the profile's rate: 0.25x, 0.35x, 0.5x, ... up to `max_factor`, each step x1.414), checks every point against a **limit** (p99 latency and error rate), and then bisects between the last point that passed and the first that failed until they are within 2%. The last passing `k` is the **knee**.
+
+```bash
+curl -s -X POST localhost:8080/__kaanal/sim/sweep \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{ "profile": "peak", "p99_ms": 500, "error_pct": 1, "max_factor": 8 }'
+# 202 {"id":"s2","state":"running"}   Location: /__kaanal/sim/runs/s2
+```
+
+| Field        | Meaning                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `profile`    | A profile name from `traffic:`, or a profile written out, as for a run.                          |
+| `p99_ms`     | Highest p99 latency that passes, in milliseconds; above 0 (default 1000).                        |
+| `error_pct`  | Highest share of failed requests that passes, in percent, 0 to 100 (default 1).                  |
+| `max_factor` | Top of the ladder, 1 to 64 (default 8). Anything outside is `400`.                               |
+| `seed`       | Seed of the draws, the same at every point, so two points differ only in load (default `seed:`). |
+| `scenario`   | Sweep under this scenario's chaos alone; without it, the live chaos in force when it starts.     |
+
+A sweep always runs the **system in force**: there is no `source` (no draft sweep), and no `duration_s` or `warmup_s`, because each point sizes its own window to about 20 000 reported requests (never shorter than ten times the slowest node's mean processing time). A body with any of those fields is `400`.
+
+A sweep is a run record with `"kind": "sweep"` (a plain run says `"run"`), under the same single slot: a sweep while a run runs, or the other way round, is `409` with the running id. Poll `GET /sim/runs/{id}`: `sweep_points` grows as each point finishes, and when `state` is `done`, `sweep` holds the finding (and `sweep_points` is emptied: `sweep.points` has every point):
+
+- **`verdict`**: `{ "kind": "knee", "k", "req_s" }`, the last passing point; `broken_at_lowest`, already over the limit at 0.25x; or `holds_to`, no failure up to the last point that ran.
+- **`limit`**: the line used, as `{ "p99_ms", "error_rate" }`. The body takes a percentage (`error_pct: 1`); the record carries the fraction (`error_rate: 0.01`).
+- **`points`**: every point run, sorted by `k`, each with `req_s`, `requests`, `goodput_req_s`, `error_rate`, `p50_ms`, `p95_ms`, `p99_ms`, `cause`, `over` (`{ "p99", "errors" }`: which of the two limits the point is over) and per-node `utilization`, `saturated`, `saturates_at_req_s`.
+- **`first_to_saturate`**: the node saturated at the lowest `k`, with its analytic `saturates_at_req_s`. It is a report, not a cause: the knee can come from something else.
+- **`dominant_cause`**: the most common failure cause at the first point over the limit.
+- **`recovers_at`**: a `k` above the knee that passes again with margin (a retry storm or a breaker can do this).
+- **`stopped_at`**: the `k` where the ladder was cut because a point was too large to run. With `holds_to` it means "held to the last point run", not "holds to the top".
+- **`warnings`** and **`label`**, as in a run's summary. A sweep has no run log (`/log` is `409`).
+
+From the CLI, `kaanal sim sweep` posts the sweep, waits for it and prints the finding:
+
+```bash
+kaanal sim sweep -p peak --p99 500ms --errors 1% --max-factor 8
+```
+
+`--p99` is a duration (`500ms`, `1s`; default 1s), `--errors` a percentage, `1%` or `1`, 0 to 100 (default 1%), `--max-factor` the top of the ladder (default 8); `--seed` and `--scenario` are as for `sim run`, and `-f FILE` takes a profile written out. A bad `--p99` or `--errors` is a usage error (exit 64) before anything is sent. The text is the verdict (`knee at 94 req/s (1.88x): p99 over 500ms`, or where it broke at the lowest point, or how far it held; a cut ladder says `held to N req/s, the last point run`, not `holds to`), the first node to saturate with its analytic figure, the dominant cause, the warnings (a cut ladder among them: `ladder stopped at 5.657x (283 req/s): run too large` when a point was too big to run, `ladder cut at ...` at the engine's rate cap) and the label, then one row per point: `load req/s`, `goodput`, `p99`, `errors` and `ok` (whether it passed the limit). `--no-wait` prints the id; `kaanal sim list` shows each record's `kind` (`run` or `sweep`); `kaanal sim show ID` prints a sweep record the same way, and `--json` prints the record.
+
+**The knee is only as true as the node figures.** The sweep finds where _the model_ breaks: if `proc`, slots, `cpu` or bandwidth are guesses, the knee is a guess too. Calibrate the slow nodes against a real measurement first, and read the knee as a relative figure (this design against that one), like every other result here.
+
 ## Limits
 
-- **One run at a time.** A second `POST` while one runs is `409` with the running id.
+- **One run at a time.** A second `POST` while one runs is `409` with the running id. A sweep counts as a run.
 - **Server caps.** A run is limited to about 2 million recorded hops and 5 million simulated hops (a couple of seconds of CPU); a bigger request is `400` and says which limit it hit. Lower the rate or the duration.
 - **A run keeps the system it began on.** If you Apply a new draft while it runs, the report still describes the old one; its `generation` says which.
 - The report is kept, the per-request records are not.
@@ -94,7 +137,7 @@ Two real limits are off unless you turn them on, so a healthy-looking run can be
 
 - **A journey is a stream of independent requests**, not a user session: no think time, no state, and Poisson arrivals are smoother than real traffic. Real tails will be worse.
 - **One run is one sample.** There is no confidence interval; the report warns when the tail rests on few requests. Run longer or compare seeds.
-- **No cancel.** A run is bounded to a couple of seconds of CPU by the server caps, so it ends on its own. Runs are not kept across a restart (the last eight are kept while the server runs).
+- **No cancel.** A run is bounded to a couple of seconds of CPU by the server caps, so it ends on its own. A sweep is a run per point (11 ladder points at the default `max_factor`, plus at most 6 to refine), each under the same caps. Runs are not kept across a restart (the last eight are kept while the server runs).
 - **Request bodies are not sized from the spec.** `req_bytes` is 0 unless the profile sets it. A paged list route's default `resp_bytes` is the whole schema body, not one page.
 - **Samples** use the mock's generator and seeds, but a sample's data can differ from what the mock returns for the same path.
 - **Skeleton specs** have empty object schemas and cover every key of `endpoints:`.

@@ -1,4 +1,5 @@
-//! The runs Studio started: one at a time, the last eight kept, summaries and a log sample.
+//! The runs Studio started: one at a time, the last eight kept, summaries and a log sample. A
+//! load sweep is a record of kind `sweep` under the same slot, its points kept as they finish.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use kaanal_core::cost::CostReport;
 use kaanal_sim::Summary;
+use kaanal_sim::sweep::{Point, SweepResult};
 use serde::Serialize;
 
 use super::log::LogSample;
@@ -19,6 +21,8 @@ const KEEP: usize = 8;
 pub struct RunRecord {
     /// `s1`, `s2`, ...; never reused.
     pub id: String,
+    /// `run` (`POST /sim/run`) or `sweep` (`POST /sim/sweep`).
+    pub kind: &'static str,
     /// `running`, `done` or `failed`.
     pub state: &'static str,
     /// The generation the run used: an Apply later does not change what this report describes.
@@ -42,6 +46,10 @@ pub struct RunRecord {
     pub cost: Option<CostReport>,
     /// Why it failed, when `failed`.
     pub error: Option<String>,
+    /// A sweep's points in run order, growing while it runs; kept when it fails. Empty for a run.
+    pub sweep_points: Vec<Point>,
+    /// A sweep's finding, when `done`.
+    pub sweep: Option<SweepResult>,
     /// The log sample, when `done`: served by `/log`, not part of the record's JSON. Shared,
     /// so reading a record does not copy it.
     #[serde(skip)]
@@ -72,12 +80,37 @@ impl SimStore {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Starts a record and takes the single run slot.
+    /// Starts a run record and takes the single run slot.
     ///
     /// # Errors
     /// The id of the run that already holds the slot.
     pub fn begin(
         &self,
+        generation: u64,
+        profile: &str,
+        scenario: Option<&str>,
+        source: &'static str,
+        draft_rev: Option<u64>,
+    ) -> Result<String, String> {
+        self.begin_kind("run", generation, profile, scenario, source, draft_rev)
+    }
+
+    /// Starts a sweep record (always on the system in force) and takes the same single slot.
+    ///
+    /// # Errors
+    /// The id of the run that already holds the slot.
+    pub fn begin_sweep(
+        &self,
+        generation: u64,
+        profile: &str,
+        scenario: Option<&str>,
+    ) -> Result<String, String> {
+        self.begin_kind("sweep", generation, profile, scenario, "applied", None)
+    }
+
+    fn begin_kind(
+        &self,
+        kind: &'static str,
         generation: u64,
         profile: &str,
         scenario: Option<&str>,
@@ -96,6 +129,7 @@ impl SimStore {
         }
         i.runs.push_back(RunRecord {
             id: id.clone(),
+            kind,
             state: "running",
             generation,
             profile: profile.to_string(),
@@ -107,6 +141,8 @@ impl SimStore {
             summary: None,
             cost: None,
             error: None,
+            sweep_points: Vec::new(),
+            sweep: None,
             log: Arc::default(),
         });
         Ok(id)
@@ -114,20 +150,44 @@ impl SimStore {
 
     /// Ends run `id` with its result and frees the slot.
     pub fn finish(&self, id: &str, result: Result<(Summary, LogSample, CostReport), String>) {
+        self.end(id, |r| match result {
+            Ok((s, log, cost)) => {
+                (r.state, r.summary) = ("done", Some(s));
+                r.cost = Some(cost);
+                r.log = Arc::new(log);
+            }
+            Err(e) => (r.state, r.error) = ("failed", Some(e)),
+        });
+    }
+
+    /// Adds a finished point to sweep `id`.
+    pub fn sweep_point(&self, id: &str, p: Point) {
+        if let Some(r) = self.lock().runs.iter_mut().find(|r| r.id == id) {
+            r.sweep_points.push(p);
+        }
+    }
+
+    /// Ends sweep `id` with its finding and frees the slot.
+    pub fn finish_sweep(&self, id: &str, result: Result<SweepResult, String>) {
+        self.end(id, |r| match result {
+            // the finding holds every point, sorted; the progress list is spent
+            Ok(s) => {
+                (r.state, r.sweep) = ("done", Some(s));
+                r.sweep_points = Vec::new();
+            }
+            Err(e) => (r.state, r.error) = ("failed", Some(e)),
+        });
+    }
+
+    /// Frees the slot if `id` holds it, and stamps and fills its record if it is still kept.
+    fn end(&self, id: &str, fill: impl FnOnce(&mut RunRecord)) {
         let mut i = self.lock();
         if i.running.as_deref() == Some(id) {
             i.running = None;
         }
         if let Some(r) = i.runs.iter_mut().find(|r| r.id == id) {
             r.finished_ms = Some(now_ms());
-            match result {
-                Ok((s, log, cost)) => {
-                    (r.state, r.summary) = ("done", Some(s));
-                    r.cost = Some(cost);
-                    r.log = Arc::new(log);
-                }
-                Err(e) => (r.state, r.error) = ("failed", Some(e)),
-            }
+            fill(r);
         }
     }
 
@@ -136,7 +196,7 @@ impl SimStore {
         self.lock().runs.iter().find(|r| r.id == id).cloned()
     }
 
-    /// The kept runs, oldest first, without their summaries.
+    /// The kept runs, oldest first, without their summaries or sweep points.
     pub fn list(&self) -> Vec<RunRecord> {
         self.lock()
             .runs
@@ -144,6 +204,8 @@ impl SimStore {
             .map(|r| RunRecord {
                 summary: None,
                 cost: None,
+                sweep_points: Vec::new(),
+                sweep: None,
                 log: Arc::default(),
                 ..r.clone()
             })
@@ -173,6 +235,83 @@ mod tests {
         assert!(
             s.get(&first).is_none(),
             "the ninth run pushed the first out"
+        );
+        assert_eq!(s.list().len(), 8);
+    }
+
+    fn point(k: f64) -> Point {
+        Point {
+            k,
+            req_s: 100.0 * k,
+            requests: 1000,
+            goodput_req_s: 100.0 * k,
+            error_rate: 0.0,
+            p50_ms: 1.0,
+            p95_ms: 2.0,
+            p99_ms: 3.0,
+            cause: None,
+            nodes: Vec::new(),
+            over: kaanal_sim::sweep::Over::default(),
+        }
+    }
+
+    #[test]
+    fn store_progress_grows_and_finish_keeps_eight() {
+        let s = SimStore::default();
+        let first = s.begin_sweep(1, "p", None).unwrap();
+        assert_eq!(s.begin(1, "p", None, "applied", None), Err(first.clone()));
+        assert_eq!(s.begin_sweep(1, "p", None), Err(first.clone()), "one slot");
+        let r = s.get(&first).unwrap();
+        assert_eq!((r.kind, r.state, r.source), ("sweep", "running", "applied"));
+        assert_eq!(r.sweep_points, []);
+        assert!(r.sweep.is_none());
+        s.sweep_point(&first, point(0.25));
+        s.sweep_point(&first, point(0.5));
+        let ks: Vec<f64> = s
+            .get(&first)
+            .unwrap()
+            .sweep_points
+            .iter()
+            .map(|p| p.k)
+            .collect();
+        assert_eq!(ks, [0.25, 0.5], "the points grow in run order");
+        s.finish_sweep(&first, Err("boom".into()));
+        let r = s.get(&first).unwrap();
+        assert_eq!(r.state, "failed");
+        assert_eq!(r.sweep_points.len(), 2, "a failed sweep keeps what it ran");
+        assert_eq!(s.list()[0].sweep_points, [], "the list strips the points");
+        // a sweep that finishes OK hands its points to `sweep` and empties the progress list
+        let second = s.begin_sweep(1, "p", None).unwrap();
+        s.sweep_point(&second, point(0.25));
+        s.finish_sweep(
+            &second,
+            Ok(SweepResult {
+                label: "relative what-if",
+                limit: kaanal_sim::sweep::Limit::default(),
+                points: vec![point(0.25)],
+                verdict: kaanal_sim::sweep::Verdict::HoldsTo {
+                    k: 0.25,
+                    req_s: 25.0,
+                },
+                recovers_at: None,
+                stopped_at: None,
+                first_to_saturate: None,
+                dominant_cause: None,
+                warnings: Vec::new(),
+            }),
+        );
+        let r = s.get(&second).unwrap();
+        assert_eq!(r.state, "done");
+        assert_eq!(r.sweep_points, [], "the points moved into `sweep`");
+        assert_eq!(r.sweep.unwrap().points.len(), 1);
+        for _ in 0..8 {
+            let id = s.begin(1, "p", None, "applied", None).unwrap();
+            assert_eq!(s.get(&id).unwrap().kind, "run");
+            s.finish(&id, Err("x".into()));
+        }
+        assert!(
+            s.get(&first).is_none(),
+            "the ninth record pushed the sweep out"
         );
         assert_eq!(s.list().len(), 8);
     }

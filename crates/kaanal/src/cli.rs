@@ -341,9 +341,36 @@ pub(crate) enum SimCmd {
         #[arg(long)]
         no_wait: bool,
     },
+    /// Raise the load until p99 or errors cross a limit, and print the knee
+    Sweep {
+        /// A profile of the config's `traffic:` section
+        #[arg(short, long, conflicts_with = "file")]
+        profile: Option<String>,
+        /// A file holding one profile (`rps`, `journeys`, ...) as YAML or JSON
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+        /// Highest p99 that passes, e.g. 500ms (default 1s)
+        #[arg(long)]
+        p99: Option<String>,
+        /// Highest share of failed requests that passes, e.g. 1% or 1, 0 to 100 (default 1%)
+        #[arg(long)]
+        errors: Option<String>,
+        /// Top of the ladder of load factors, 1 to 64 (default 8)
+        #[arg(long)]
+        max_factor: Option<f64>,
+        /// Seed of the draws, the same at every point (default the config's `seed:`)
+        #[arg(long)]
+        seed: Option<u64>,
+        /// Sweep under this scenario's chaos alone (default: the live chaos)
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Print the sweep id and return without waiting
+        #[arg(long)]
+        no_wait: bool,
+    },
     /// List the last eight runs
     List,
-    /// Show one run with its report
+    /// Show one run with its report, or a sweep with its finding
     Show {
         /// A run id, e.g. s1
         id: String,

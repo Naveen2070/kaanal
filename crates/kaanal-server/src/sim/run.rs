@@ -1,12 +1,14 @@
-//! Running the simulator for the control API. [`execute_run`] is the only place the server calls
-//! `kaanal_sim` to run: moving the simulator into its own process later (see
-//! `internal/docs/suggestions/2026-10-28-process-isolation.md`) replaces its body and nothing else.
+//! Running the simulator for the control API. [`execute_run`] and [`execute_sweep`] are the only
+//! places the server calls `kaanal_sim` to run: moving the simulator into its own process later
+//! (see `internal/docs/suggestions/2026-10-28-process-isolation.md`) replaces their bodies and
+//! nothing else.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kaanal_core::EffectiveChaos;
 use kaanal_core::cost::{CostReport, egress_flows, estimate_with_egress};
+use kaanal_sim::sweep::{Options, Point, SweepResult, sweep};
 use kaanal_sim::{Limits, SimConfig, Summary, run_with_limits, summarize};
 
 use super::log::{LogSample, sample};
@@ -67,6 +69,27 @@ pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample, CostReport),
     Ok((summary, log, cost))
 }
 
+/// Sweeps `job` under the server caps; `job.cfg`'s duration and warmup are ignored (each point
+/// sizes its own). `on_point` sees each point as it finishes.
+///
+/// # Errors
+/// The sweep's message (bad options, a lowest point too large, a run error).
+pub(crate) fn execute_sweep(
+    job: &Job,
+    opts: &Options,
+    on_point: &mut dyn FnMut(&Point),
+) -> Result<SweepResult, String> {
+    sweep(
+        &job.g.topo,
+        &job.g.endpoints,
+        &job.chaos,
+        &job.cfg,
+        opts,
+        &Limits::server(),
+        on_point,
+    )
+}
+
 /// Frees the run slot with a failure if the run never reported: a panic in the simulator, or a
 /// closure the blocking pool dropped without running (it owns the state, so `Drop` still runs).
 pub(crate) struct Slot {
@@ -90,14 +113,21 @@ impl Slot {
         self.done = true;
         self.st.sims.finish(&self.id, result);
     }
+
+    /// Records the sweep's finding and releases the slot.
+    pub(crate) fn finish_sweep(mut self, result: Result<SweepResult, String>) {
+        self.done = true;
+        self.st.sims.finish_sweep(&self.id, result);
+    }
 }
 
 impl Drop for Slot {
     fn drop(&mut self) {
         if !self.done {
-            self.st
-                .sims
-                .finish(&self.id, Err("the run stopped unexpectedly".into()));
+            self.st.sims.finish(
+                &self.id,
+                Err("the run or sweep stopped unexpectedly".into()),
+            );
         }
     }
 }

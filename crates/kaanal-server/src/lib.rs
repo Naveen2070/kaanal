@@ -374,6 +374,7 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/openapi/skeleton", get(control::get_skeleton))
         .route("/__kaanal/sample", post(control::post_sample))
         .route("/__kaanal/sim/run", post(control::post_run))
+        .route("/__kaanal/sim/sweep", post(control::post_sweep))
         .route("/__kaanal/sim/runs", get(control::list_runs))
         .route("/__kaanal/sim/runs/{id}", get(control::get_run))
         .route("/__kaanal/sim/runs/{id}/log", get(control::get_run_log))

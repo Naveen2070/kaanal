@@ -10,6 +10,7 @@
 
 mod engine;
 mod summary;
+pub mod sweep;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -66,7 +67,7 @@ const MAX_SERVICE: Duration = Duration::from_hours(10);
 /// **Private.** Slowest stream: one arrival per ~11.6 days. Bounds the mean gap.
 const MIN_RATE_PER_S: f64 = 1e-6;
 /// **Private.** Fastest stream: a 1 µs mean gap. Above ~1e9 the gap rounds to 0 ns.
-const MAX_RATE_PER_S: f64 = 1e6;
+pub(crate) const MAX_RATE_PER_S: f64 = 1e6;
 /// **Private.** Longest simulated time; keeps the virtual clock far inside `u64` nanoseconds.
 const MAX_SIM_DURATION: Duration = Duration::from_hours(365 * 24);
 /// **Private.** Most streams a run may have (a request tag packs the stream index into 16 bits).
