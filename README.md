@@ -77,7 +77,7 @@ Kaanal solves this with a **single YAML topology file** and an **OpenAPI 3.0 spe
 
 ## Try it
 
-Needs Rust 1.99 or newer.
+Needs Rust 1.100 or newer.
 
 ```bash
 cargo run -p kaanal -- up -c examples/nginx-server/kaanal.yaml

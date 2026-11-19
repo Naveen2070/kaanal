@@ -6,7 +6,7 @@ Welcome to Kaanal. This page is the contributor intro: how the code is written, 
 
 The codebase is small and deliberately plain. Match it:
 
-- **Rust edition 2024, rustc ≥ 1.99** (pinned in the workspace `Cargo.toml`). Never name anything `gen` — it's a reserved keyword.
+- **Rust edition 2024, rustc ≥ 1.100** (pinned in the workspace `Cargo.toml`). Never name anything `gen` — it's a reserved keyword.
 - **Let the types carry the rules.** Invalid states are rejected at load (`Topology::build`, `AppState::build`), not checked defensively at request time. Handlers trust their inputs.
 - **Errors are precise.** Every user-facing error says what was wrong and where: `file:line:col: message` for config, the operation JSON-pointer for OpenAPI, the edge number for topology. Never `unwrap` on user input; never return a bare `Err("invalid")`.
 - **No surprises in errors.** Unknown config fields are rejected (`deny_unknown_fields`). Typos fail loudly.

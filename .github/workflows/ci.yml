@@ -67,7 +67,7 @@ jobs:
         run: cargo test --workspace
 
   msrv:
-    name: MSRV (Rust 1.99)
+    name: MSRV (Rust 1.100)
     needs: lint
     runs-on: ubuntu-latest
     steps:
@@ -75,7 +75,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99
+        uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
