@@ -50,10 +50,35 @@ pub struct RunRecord {
     pub sweep_points: Vec<Point>,
     /// A sweep's finding, when `done`.
     pub sweep: Option<SweepResult>,
+    /// A sweep's seed: the body's, else the config's. `None` for a run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    /// A sweep's highest load factor, as checked. `None` for a run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_factor: Option<f64>,
+    /// A sweep's design fingerprint: the system it swept (see `crate::fingerprint`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// The profile a sweep was posted with, when it was written out in the body (not a name from `traffic:`); kept so a report can
+    /// say what was swept. Heavy, so `list()` strips it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_profile: Option<serde_json::Value>,
     /// The log sample, when `done`: served by `/log`, not part of the record's JSON. Shared,
     /// so reading a record does not copy it.
     #[serde(skip)]
     pub(crate) log: Arc<LogSample>,
+}
+
+/// What a sweep record keeps besides the run's own fields.
+pub struct SweepMeta {
+    /// The seed the draws used.
+    pub seed: u64,
+    /// The highest load factor on the ladder.
+    pub max_factor: f64,
+    /// The design fingerprint of the system in force.
+    pub fingerprint: String,
+    /// The posted profile when it was written out (label `inline`).
+    pub inline_profile: Option<serde_json::Value>,
 }
 
 #[derive(Default)]
@@ -92,7 +117,7 @@ impl SimStore {
         source: &'static str,
         draft_rev: Option<u64>,
     ) -> Result<String, String> {
-        self.begin_kind("run", generation, profile, scenario, source, draft_rev)
+        self.begin_kind(generation, profile, scenario, source, draft_rev, None)
     }
 
     /// Starts a sweep record (always on the system in force) and takes the same single slot.
@@ -104,19 +129,23 @@ impl SimStore {
         generation: u64,
         profile: &str,
         scenario: Option<&str>,
+        meta: SweepMeta,
     ) -> Result<String, String> {
-        self.begin_kind("sweep", generation, profile, scenario, "applied", None)
+        self.begin_kind(generation, profile, scenario, "applied", None, Some(meta))
     }
 
+    /// Creates the record under one lock: a sweep (`meta` given) carries its fields from the
+    /// first poll on.
     fn begin_kind(
         &self,
-        kind: &'static str,
         generation: u64,
         profile: &str,
         scenario: Option<&str>,
         source: &'static str,
         draft_rev: Option<u64>,
+        meta: Option<SweepMeta>,
     ) -> Result<String, String> {
+        let kind = if meta.is_some() { "sweep" } else { "run" };
         let mut i = self.lock();
         if let Some(id) = &i.running {
             return Err(id.clone());
@@ -143,6 +172,10 @@ impl SimStore {
             error: None,
             sweep_points: Vec::new(),
             sweep: None,
+            seed: meta.as_ref().map(|m| m.seed),
+            max_factor: meta.as_ref().map(|m| m.max_factor),
+            fingerprint: meta.as_ref().map(|m| m.fingerprint.clone()),
+            inline_profile: meta.and_then(|m| m.inline_profile),
             log: Arc::default(),
         });
         Ok(id)
@@ -206,6 +239,7 @@ impl SimStore {
                 cost: None,
                 sweep_points: Vec::new(),
                 sweep: None,
+                inline_profile: None,
                 log: Arc::default(),
                 ..r.clone()
             })
@@ -239,6 +273,34 @@ mod tests {
         assert_eq!(s.list().len(), 8);
     }
 
+    fn meta() -> SweepMeta {
+        SweepMeta {
+            seed: 7,
+            max_factor: 8.0,
+            fingerprint: "0123456789ab".into(),
+            inline_profile: Some(serde_json::json!({ "rps": 1 })),
+        }
+    }
+
+    #[test]
+    fn a_named_profile_sweep_has_no_inline_profile() {
+        let s = SimStore::default();
+        let id = s
+            .begin_sweep(
+                1,
+                "peak",
+                None,
+                SweepMeta {
+                    inline_profile: None,
+                    ..meta()
+                },
+            )
+            .unwrap();
+        let r = s.get(&id).unwrap();
+        assert_eq!(r.seed, Some(7));
+        assert!(r.inline_profile.is_none());
+    }
+
     fn point(k: f64) -> Point {
         Point {
             k,
@@ -258,13 +320,21 @@ mod tests {
     #[test]
     fn store_progress_grows_and_finish_keeps_eight() {
         let s = SimStore::default();
-        let first = s.begin_sweep(1, "p", None).unwrap();
+        let first = s.begin_sweep(1, "p", None, meta()).unwrap();
         assert_eq!(s.begin(1, "p", None, "applied", None), Err(first.clone()));
-        assert_eq!(s.begin_sweep(1, "p", None), Err(first.clone()), "one slot");
+        assert_eq!(
+            s.begin_sweep(1, "p", None, meta()),
+            Err(first.clone()),
+            "one slot"
+        );
         let r = s.get(&first).unwrap();
         assert_eq!((r.kind, r.state, r.source), ("sweep", "running", "applied"));
         assert_eq!(r.sweep_points, []);
         assert!(r.sweep.is_none());
+        assert_eq!((r.seed, r.max_factor), (Some(7), Some(8.0)));
+        assert_eq!(r.fingerprint.as_deref(), Some("0123456789ab"));
+        assert!(r.inline_profile.is_some());
+        assert!(s.list()[0].inline_profile.is_none(), "the list strips it");
         s.sweep_point(&first, point(0.25));
         s.sweep_point(&first, point(0.5));
         let ks: Vec<f64> = s
@@ -281,7 +351,7 @@ mod tests {
         assert_eq!(r.sweep_points.len(), 2, "a failed sweep keeps what it ran");
         assert_eq!(s.list()[0].sweep_points, [], "the list strips the points");
         // a sweep that finishes OK hands its points to `sweep` and empties the progress list
-        let second = s.begin_sweep(1, "p", None).unwrap();
+        let second = s.begin_sweep(1, "p", None, meta()).unwrap();
         s.sweep_point(&second, point(0.25));
         s.finish_sweep(
             &second,

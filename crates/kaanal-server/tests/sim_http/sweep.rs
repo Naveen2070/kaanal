@@ -204,3 +204,67 @@ async fn bad_limits_are_400() {
     let runs: Value = s.get("/__kaanal/sim/runs").await.json().await.unwrap();
     assert_eq!(runs["runs"], json!([]), "a refused request starts nothing");
 }
+
+/// Posts a sweep (`max_factor` 1 keeps it short) and waits for its record.
+async fn swept(s: &Srv, mut body: Value) -> Value {
+    body["max_factor"] = body.get("max_factor").cloned().unwrap_or(json!(1));
+    let v: Value = sweep(s, body).await.json().await.unwrap();
+    finished(s, v["id"].as_str().unwrap()).await
+}
+
+#[tokio::test]
+async fn a_sweep_record_carries_seed_max_factor_and_fingerprint() {
+    let s = start(&config()).await;
+    let a = swept(&s, json!({ "profile": "peak", "seed": 7, "max_factor": 2 })).await;
+    assert_eq!(a["seed"], 7, "{a}");
+    assert_eq!(a["max_factor"], 2.0, "{a}");
+    let fp = a["fingerprint"].as_str().unwrap();
+    assert!(
+        fp.len() == 12 && fp.bytes().all(|c| c.is_ascii_hexdigit()),
+        "{fp}"
+    );
+    let b = swept(&s, json!({ "profile": "peak", "max_factor": null })).await;
+    assert_eq!(
+        b["seed"], 42,
+        "the config's seed when the body has none: {b}"
+    );
+    assert_eq!(b["max_factor"], 8.0, "{b}");
+    assert_eq!(
+        b["fingerprint"], a["fingerprint"],
+        "same system, same fingerprint"
+    );
+}
+
+#[tokio::test]
+async fn an_inline_profile_is_kept_on_the_record_and_a_named_one_is_not() {
+    let s = start(&config()).await;
+    let inline = json!({ "rps": 50, "journeys": [ { "endpoint": "GET /users/{id}" } ] });
+    let a = swept(&s, json!({ "profile": inline })).await;
+    assert_eq!(a["profile"], "inline", "{a}");
+    assert_eq!(a["inline_profile"], inline, "{a}");
+    let b = swept(&s, json!({ "profile": "peak" })).await;
+    assert!(b.get("inline_profile").is_none(), "{b}");
+    let list: Value = s.get("/__kaanal/sim/runs").await.json().await.unwrap();
+    assert!(
+        list["runs"][0].get("inline_profile").is_none(),
+        "the list strips it: {list}"
+    );
+}
+
+#[tokio::test]
+async fn a_run_record_has_none_of_them() {
+    let s = start(&config()).await;
+    let v: Value = post(
+        &s,
+        "/__kaanal/sim/run",
+        json!({ "profile": "peak", "duration_s": 5 }),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    let done = finished(&s, v["id"].as_str().unwrap()).await;
+    for k in ["seed", "max_factor", "fingerprint", "inline_profile"] {
+        assert!(done.get(k).is_none(), "{k} on a run: {done}");
+    }
+}

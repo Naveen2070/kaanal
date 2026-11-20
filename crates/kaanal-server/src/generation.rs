@@ -105,13 +105,6 @@ pub struct Generation {
     pub config: Arc<Config>,
     /// The design fingerprint of every input the build read (12 hex digits), taken right after
     /// the loaders ran: see [`crate::fingerprint::of_system`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by the sweep record (Step 9b Task 3); the expect fails once it is"
-        )
-    )]
     pub fingerprint: String,
 }
 

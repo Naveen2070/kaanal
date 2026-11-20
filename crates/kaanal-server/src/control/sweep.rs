@@ -8,8 +8,9 @@
 
 use super::sim::{accepted, applied_inputs, busy, from_sim, parse_profile};
 use super::*;
-use crate::sim::profile::{RunRequest, to_sim};
+use crate::sim::profile::{Profile, RunRequest, to_sim};
 use crate::sim::run::{Job, Slot, execute_sweep};
+use crate::sim::store::SweepMeta;
 use kaanal_sim::sweep::{Limit, Options};
 
 /// Highest `max_factor` the route takes: 64x the profile's rate is far past any knee worth
@@ -75,7 +76,13 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
     let b: SweepBody = serde_json::from_slice(&body)
         .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad body: {e}")))?;
     let opts = options(&b)?;
+    // only an object can be an inline profile: keep a copy for the record, not for a name
+    let posted = b.profile.is_object().then(|| b.profile.clone());
     let (label, profile) = parse_profile(b.profile)?;
+    let inline_profile = match profile {
+        Profile::Inline(_) => posted,
+        Profile::Named(_) => None,
+    };
     let req = RunRequest {
         profile,
         duration: None,
@@ -88,7 +95,17 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
     // no `check`: the sweep sizes each point itself and holds every one to the server caps
     let id = st
         .sims
-        .begin_sweep(g.id, &label, req.scenario.as_deref())
+        .begin_sweep(
+            g.id,
+            &label,
+            req.scenario.as_deref(),
+            SweepMeta {
+                seed: b.seed.unwrap_or(g.seed),
+                max_factor: opts.max_factor,
+                fingerprint: g.fingerprint.clone(),
+                inline_profile,
+            },
+        )
         .map_err(|running| busy(&running))?;
     let slot = Slot::new(Arc::clone(&st), id.clone());
     let id2 = id.clone();
