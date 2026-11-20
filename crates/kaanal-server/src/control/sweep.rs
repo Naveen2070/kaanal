@@ -9,6 +9,7 @@
 use super::sim::{accepted, applied_inputs, busy, from_sim, parse_profile};
 use super::*;
 use crate::sim::profile::{Profile, RunRequest, to_sim};
+use crate::sim::report::{ReportError, sweep_report};
 use crate::sim::run::{Job, Slot, execute_sweep};
 use crate::sim::store::SweepMeta;
 use kaanal_sim::sweep::{Limit, Options};
@@ -120,4 +121,66 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
         slot.finish_sweep(result);
     });
     Ok(accepted(&id))
+}
+
+/// The query of `GET /__kaanal/sim/runs/{id}/report`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportQuery {
+    /// `markdown` (default) or `json`.
+    format: Option<String>,
+}
+
+/// `GET /__kaanal/sim/runs/{id}/report` — a finished sweep's report: the Markdown
+/// (`text/markdown; charset=utf-8`), or with `?format=json` its data alone.
+///
+/// # Errors
+/// 400 for a bad `format`; 404 for an unknown id; 409 while the sweep runs, for a failed sweep
+/// (the body carries why) and for a plain run; 500 for a sweep record missing its recipe.
+pub async fn get_sweep_report(
+    State(st): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    q: Result<Query<ReportQuery>, QueryRejection>,
+) -> Result<Response, Reject> {
+    let Query(q) = q.map_err(|e| reject(StatusCode::BAD_REQUEST, &e.body_text()))?;
+    let json_form = match q.format.as_deref() {
+        None | Some("markdown") => false,
+        Some("json") => true,
+        Some(_) => {
+            return Err(reject(
+                StatusCode::BAD_REQUEST,
+                "format must be markdown or json",
+            ));
+        }
+    };
+    let rec = st.sims.get(&id).ok_or_else(|| {
+        reject(
+            StatusCode::NOT_FOUND,
+            "no such run (only the last eight are kept)",
+        )
+    })?;
+    let rep = sweep_report(&rec, env!("CARGO_PKG_VERSION")).map_err(|e| match e {
+        ReportError::NotASweep => reject(
+            StatusCode::CONFLICT,
+            "run reports are made in Studio; only a sweep has a report here",
+        ),
+        ReportError::Running => reject(StatusCode::CONFLICT, "the sweep is not finished"),
+        ReportError::Failed(why) => reject(
+            StatusCode::CONFLICT,
+            &format!("the sweep failed and has no report: {why}"),
+        ),
+        ReportError::Internal(field) => reject(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("the sweep record has no {field}"),
+        ),
+    })?;
+    Ok(if json_form {
+        Json(rep.json).into_response()
+    } else {
+        (
+            [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+            rep.markdown,
+        )
+            .into_response()
+    })
 }

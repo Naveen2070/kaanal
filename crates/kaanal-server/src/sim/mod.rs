@@ -5,10 +5,6 @@
 pub(crate) mod draft_run;
 pub(crate) mod log;
 pub(crate) mod profile;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Step 9b task 5's route calls it")
-)]
 pub(crate) mod report;
 pub(crate) mod run;
 pub(crate) mod sample;

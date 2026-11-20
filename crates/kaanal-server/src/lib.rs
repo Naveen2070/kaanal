@@ -293,6 +293,7 @@ async fn bind(host: IpAddr, port: u16) -> Result<tokio::net::TcpListener, String
 /// **Private.** Builds the route table: control routes first (wrapped in the
 /// `guard` middleware via `route_layer`, so a new control route cannot forget
 /// authentication), then the mock fallback.
+#[expect(clippy::too_many_lines, reason = "one flat table of routes")]
 fn router(st: Arc<state::AppState>) -> Router {
     Router::new()
         .route(
@@ -379,6 +380,10 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/sim/runs", get(control::list_runs))
         .route("/__kaanal/sim/runs/{id}", get(control::get_run))
         .route("/__kaanal/sim/runs/{id}/log", get(control::get_run_log))
+        .route(
+            "/__kaanal/sim/runs/{id}/report",
+            get(control::get_sweep_report),
+        )
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/shutdown", post(control::shutdown))
         .route("/__kaanal/events", get(control::events))
