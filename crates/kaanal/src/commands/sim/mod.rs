@@ -1,10 +1,11 @@
 //! `kaanal sim`, `kaanal sample` and `kaanal skeleton`: thin clients of the simulation routes
 //! (`docs/web/simulation.md`). All the logic is the server's; this reads the answers aloud.
 
-use std::fmt::Write as _;
+mod print;
 
 use crate::cli::SimCmd;
-use crate::{Duration, Fail, Path, Value, call, clean, err, json, output};
+use crate::{Duration, Fail, Path, Value, call, call_text, clean, err, json, output};
+use print::{print_run, print_sweep};
 
 /// **Private.** How long `sim run` waits for a report before it says to look again later.
 const WAIT: Duration = Duration::from_secs(300);
@@ -38,7 +39,16 @@ pub(crate) fn sim(cmd: SimCmd) -> Result<(), Fail> {
             seed,
             scenario,
             no_wait,
+            report,
+            force,
         } => {
+            // a report file that exists is refused now, not after the sweep has run
+            if let Some(f) = report.as_deref().filter(|f| !force && f.exists()) {
+                return Err(err(format!(
+                    "{} exists; --force overwrites it",
+                    clean(&f.display().to_string())
+                )));
+            }
             // the limits first: a bad one is a usage error before anything is read or sent
             let body = limits(p99.as_deref(), errors.as_deref(), max_factor)?;
             sweep(
@@ -48,10 +58,12 @@ pub(crate) fn sim(cmd: SimCmd) -> Result<(), Fail> {
                 seed,
                 scenario,
                 no_wait,
+                report.as_deref().map(|f| (f, force)),
             )
         }
         SimCmd::List => list(),
         SimCmd::Show { id } => show(&id),
+        SimCmd::Report { id, output, force } => report_cmd(&id, output.as_deref(), force),
     }
 }
 
@@ -94,7 +106,7 @@ fn start(
     scenario: Option<String>,
     no_wait: bool,
     print: fn(&Value),
-) -> Result<(), Fail> {
+) -> Result<String, Fail> {
     if let Some(s) = seed {
         body["seed"] = json!(s);
     }
@@ -111,7 +123,7 @@ fn start(
     let id = started["id"].as_str().unwrap_or_default().to_string();
     if no_wait {
         output::emit(&started, || println!("{}", clean(&id)));
-        return Ok(());
+        return Ok(id);
     }
     let v = wait(&id)?;
     // a failed run is reported by the error below, not twice
@@ -127,7 +139,7 @@ fn start(
             clean(&id),
             clean(e)
         ))),
-        None => Ok(()),
+        None => Ok(id),
     }
 }
 
@@ -158,6 +170,7 @@ fn run(
         no_wait,
         print_run,
     )
+    .map(|_| ())
 }
 
 /// **Private.** The limit of `sim sweep` as body fields: `--p99` a duration above zero, sent as
@@ -213,10 +226,11 @@ fn sweep(
     seed: Option<u64>,
     scenario: Option<String>,
     no_wait: bool,
+    report: Option<(&Path, bool)>,
 ) -> Result<(), Fail> {
     let (profile, unnamed) = profile_of(profile, file)?;
     body["profile"] = profile;
-    start(
+    let id = start(
         "/__kaanal/sim/sweep",
         body,
         unnamed,
@@ -224,7 +238,43 @@ fn sweep(
         scenario,
         no_wait,
         print_sweep,
-    )
+    )?;
+    // a failed sweep returned its error above: only a finished one has a report
+    if let Some((file, force)) = report {
+        let text = report_text(&id, false)?;
+        write_file(file, &text, force)?;
+        eprintln!("wrote {}", clean(&file.display().to_string()));
+    }
+    Ok(())
+}
+
+/// **Private.** The report of sweep `id`, cleaned of control text, as Markdown or (`json`) the
+/// data block alone; ends in one newline.
+fn report_text(id: &str, json: bool) -> Result<String, Fail> {
+    let q = if json { "?format=json" } else { "" };
+    let text = call_text(&format!(
+        "/__kaanal/sim/runs/{}/report{q}",
+        crate::encode_segment(id)
+    ))?;
+    // an unreadable or empty body must not become a blank report file
+    if text.trim().is_empty() {
+        return Err(err("the server sent no report text"));
+    }
+    Ok(crate::clean_lines(&text) + "\n")
+}
+
+/// **Private.** `sim report ID [-o FILE] [--force]`: the server's report, printed or written.
+/// `--json` is the data alone (`report_version`, the points, the re-run recipe).
+fn report_cmd(id: &str, output_file: Option<&Path>, force: bool) -> Result<(), Fail> {
+    let text = report_text(id, output::json_on())?;
+    let Some(file) = output_file else {
+        crate::out_bytes(text.as_bytes());
+        return Ok(());
+    };
+    write_file(file, &text, force)?;
+    let shown = clean(&file.display().to_string());
+    output::emit(&json!({ "written": shown }), || println!("wrote {shown}"));
+    Ok(())
 }
 
 /// **Private.** Polls run `id` until it is no longer running.
@@ -292,216 +342,6 @@ fn show(id: &str) -> Result<(), Fail> {
     Ok(())
 }
 
-/// **Private.** A share (0 to 1) as a percentage, `1%`, `0.5%`; `<0.01%` for a share too small
-/// for two decimals, so a row never says `0%` and over a limit of zero at once.
-fn pct(v: &Value) -> String {
-    let p = v.as_f64().unwrap_or(0.0) * 100.0;
-    if p > 0.0 && p < 0.005 {
-        return "<0.01%".into();
-    }
-    let s = format!("{p:.2}");
-    format!("{}%", s.trim_end_matches('0').trim_end_matches('.'))
-}
-
-/// **Private.** The finding of a sweep as text: the verdict, the first node to saturate, the
-/// dominant cause, the warnings (a cut ladder among them) and the label, then one row per point. Read from
-/// `sweep` alone: its `points` are the full, sorted list once the sweep is done.
-fn print_sweep(v: &Value) {
-    let id = clean(v["id"].as_str().unwrap_or(""));
-    let state = clean(v["state"].as_str().unwrap_or(""));
-    println!("sweep {id} {state} (generation {})", v["generation"]);
-    let s = &v["sweep"];
-    if !s.is_object() {
-        if let Some(e) = v["error"].as_str() {
-            println!("error: {}", clean(e));
-        }
-        return;
-    }
-    let lim_ms = s["limit"]["p99_ms"].as_f64().unwrap_or(0.0);
-    let lim_p99 = Duration::try_from_secs_f64(lim_ms / 1000.0).map_or_else(
-        |_| format!("{lim_ms} ms"),
-        |d| humantime::format_duration(d).to_string(),
-    );
-    // the record says which limit each point is over (`kaanal_sim::sweep::Limit::over`): no second copy of the rule here
-    let p99_over = |p: &Value| p["over"]["p99"] == true;
-    let err_over = |p: &Value| p["over"]["errors"] == true;
-    let points = s["points"].as_array().map_or(&[][..], Vec::as_slice);
-    let crossed = points.iter().find(|p| p99_over(p) || err_over(p)).map(|p| {
-        let mut why = Vec::new();
-        if p99_over(p) {
-            why.push(format!("p99 over {lim_p99}"));
-        }
-        if err_over(p) {
-            why.push(format!("errors over {}", pct(&s["limit"]["error_rate"])));
-        }
-        format!(": {}", why.join(" and "))
-    });
-    let vd = &s["verdict"];
-    let at = format!(
-        "{:.0} req/s ({:.2}x)",
-        vd["req_s"].as_f64().unwrap_or(0.0),
-        vd["k"].as_f64().unwrap_or(0.0)
-    );
-    let crossed = crossed.unwrap_or_default();
-    match vd["kind"].as_str().unwrap_or("") {
-        "knee" => println!("knee at {at}{crossed}"),
-        "broken_at_lowest" => println!("over the limit already at the lowest point, {at}{crossed}"),
-        // a cut ladder only held to the last point that ran: it does not claim the top
-        "holds_to" if s["stopped_at"].is_number() => println!(
-            "held to {at}, the last point run (the ladder stopped above it): no point over p99 {lim_p99} or errors {}",
-            pct(&s["limit"]["error_rate"])
-        ),
-        "holds_to" => println!(
-            "holds to {at}: no point over p99 {lim_p99} or errors {}",
-            pct(&s["limit"]["error_rate"])
-        ),
-        k => println!("verdict {}", clean(k)),
-    }
-    let f = &s["first_to_saturate"];
-    if f.is_object() {
-        println!(
-            "first to saturate: {} at {:.0} req/s ({:.2}x){}",
-            clean(f["node"].as_str().unwrap_or("")),
-            f["req_s"].as_f64().unwrap_or(0.0),
-            f["k"].as_f64().unwrap_or(0.0),
-            f["analytic_req_s"]
-                .as_f64()
-                .map_or(String::new(), |a| format!(", analytic {a:.0} req/s"))
-        );
-    }
-    if let Some(c) = s["dominant_cause"].as_str() {
-        println!("dominant cause: {}", clean(c));
-    }
-    // a cut ladder (`stopped_at`) is told by the sim's own warning, with its reason and req/s
-    for w in s["warnings"].as_array().into_iter().flatten() {
-        println!("warning: {}", clean(w.as_str().unwrap_or("")));
-    }
-    println!("{}", clean(s["label"].as_str().unwrap_or("")));
-    println!(
-        "{:>10}  {:>10}  {:>10}  {:>7}  ok",
-        "load req/s", "goodput", "p99 ms", "errors"
-    );
-    for p in points {
-        println!(
-            "{:>10.1}  {:>10.1}  {:>10}  {:>7}  {}",
-            p["req_s"].as_f64().unwrap_or(0.0),
-            p["goodput_req_s"].as_f64().unwrap_or(0.0),
-            ms(&p["p99_ms"]),
-            pct(&p["error_rate"]),
-            if p99_over(p) || err_over(p) {
-                "no"
-            } else {
-                "yes"
-            }
-        );
-    }
-}
-
-/// **Private.** A number from an answer, one decimal.
-fn ms(v: &Value) -> String {
-    format!("{:.1}", v.as_f64().unwrap_or(0.0))
-}
-
-/// **Private.** A load or share from an answer, two decimals; `-` when absent.
-fn share(v: &Value) -> String {
-    v.as_f64().map_or("-".into(), |x| format!("{x:.2}"))
-}
-
-/// **Private.** The report of a run as text: the label first, then latency, failures, the
-/// busiest nodes and the warnings.
-fn print_run(v: &Value) {
-    let id = clean(v["id"].as_str().unwrap_or(""));
-    let state = clean(v["state"].as_str().unwrap_or(""));
-    println!("run {id} {state} (generation {})", v["generation"]);
-    let s = &v["summary"];
-    if !s.is_object() {
-        if let Some(e) = v["error"].as_str() {
-            println!("error: {}", clean(e));
-        }
-        return;
-    }
-    println!("{}", clean(s["label"].as_str().unwrap_or("")));
-    let l = &s["latency"];
-    println!(
-        "requests {} (failed {})   latency p50 {} ms  p95 {} ms  p99 {} ms  max {} ms",
-        s["requests"],
-        s["failed"],
-        ms(&l["p50_ms"]),
-        ms(&l["p95_ms"]),
-        ms(&l["p99_ms"]),
-        ms(&l["max_ms"])
-    );
-    if let Some(errors) = s["errors"].as_object().filter(|e| !e.is_empty()) {
-        let mut line = String::from("errors:");
-        for (k, n) in errors {
-            let _ = write!(line, " {} {n}", clean(k));
-        }
-        println!("{line}");
-    }
-    print_cost(&v["cost"]);
-    let nodes = s["nodes"].as_array().map_or(&[][..], Vec::as_slice);
-    println!("busiest nodes (offered load, utilization):");
-    for i in s["bottlenecks"].as_array().into_iter().flatten().take(5) {
-        let Some(n) = i.as_u64().and_then(|i| nodes.get(usize::try_from(i).ok()?)) else {
-            continue;
-        };
-        println!(
-            "  {:<16} load {:>5}  util {:>5}  wait {:>7} ms  visits/s {} (expected {}){}",
-            clean(n["name"].as_str().unwrap_or("")),
-            share(&n["offered_load"]),
-            share(&n["utilization"]),
-            ms(&n["mean_wait_ms"]),
-            ms(&n["visits_per_s"]),
-            ms(&n["expected_visits_per_s"]),
-            if n["saturated"] == true {
-                "  SATURATED"
-            } else {
-                ""
-            }
-        );
-    }
-    for w in s["warnings"].as_array().into_iter().flatten() {
-        println!("warning: {}", clean(w.as_str().unwrap_or("")));
-    }
-}
-
-/// **Private.** The estimated cost line of a run: dollars an hour of what has a price, how many
-/// nodes that is, and the region each cloud was priced in. Silent when the record has no cost.
-fn print_cost(c: &Value) {
-    let Some(total) = c["total_micro_usd_hr"].as_u64() else {
-        return;
-    };
-    let regions: Vec<String> = c["regions"]
-        .as_object()
-        .into_iter()
-        .flatten()
-        .map(|(p, r)| format!("{} {}", clean(p), clean(r.as_str().unwrap_or(""))))
-        .collect();
-    #[allow(clippy::cast_precision_loss)]
-    let usd = total as f64 / 1e6;
-    println!(
-        "estimated cost: ${usd:.4} an hour ({} of {} nodes priced; {}) - an estimate, not a quote",
-        c["priced"],
-        c["priced"].as_u64().unwrap_or(0) + c["unpriced"].as_u64().unwrap_or(0),
-        regions.join(", ")
-    );
-    // what the run sent out to the internet is already in the total; say how much, and when it was guessed
-    for e in c["egress"].as_array().into_iter().flatten() {
-        let Some(m) = e["micro_usd_hr"].as_u64() else {
-            continue;
-        };
-        #[allow(clippy::cast_precision_loss)]
-        let usd = m as f64 / 1e6;
-        println!(
-            "  of which sent out to the internet: ${usd:.4} an hour at {}'s rate{}",
-            clean(e["provider"].as_str().unwrap_or("")),
-            e["note"]
-                .as_str()
-                .map_or(String::new(), |n| format!(" ({})", clean(n)))
-        );
-    }
-}
-
 /// **Private.** `kaanal sample ROUTE`. Text mode prints the body to stdout, so it can be piped,
 /// and the size and status to stderr; `--json` prints the whole answer.
 pub(crate) fn sample(endpoint: &str, seed: Option<u64>) -> Result<(), Fail> {
@@ -531,29 +371,7 @@ pub(crate) fn skeleton_cmd(output_file: Option<&Path>, force: bool) -> Result<()
         return Ok(());
     };
     let shown = clean(&file.display().to_string());
-    let mut open = std::fs::OpenOptions::new();
-    open.write(true);
-    if force {
-        open.create(true).truncate(true);
-    } else {
-        // create_new: an existing file is an error here, not a race with a check
-        open.create_new(true);
-    }
-    let mut f = open.open(file).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            err(format!("{shown} exists; --force overwrites it"))
-        } else {
-            err(format!("{shown}: {e}"))
-        }
-    })?;
-    if let Err(e) = std::io::Write::write_all(&mut f, text.as_bytes()) {
-        drop(f);
-        if !force {
-            // the file is ours (create_new): do not leave half of it behind
-            let _ = std::fs::remove_file(file);
-        }
-        return Err(err(format!("{shown}: {e}")));
-    }
+    write_file(file, text, force)?;
     output::emit(
         &json!({ "written": shown, "endpoints": v["endpoints"] }),
         || {
@@ -563,16 +381,37 @@ pub(crate) fn skeleton_cmd(output_file: Option<&Path>, force: bool) -> Result<()
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_tiny_share_is_not_printed_as_zero() {
-        assert_eq!(pct(&json!(0.0)), "0%");
-        assert_eq!(pct(&json!(0.00004)), "<0.01%");
-        assert_eq!(pct(&json!(0.0001)), "0.01%");
-        assert_eq!(pct(&json!(0.01)), "1%");
-        assert_eq!(pct(&json!(0.005)), "0.5%");
+/// **Private.** Writes `text` to `file`: an existing file is refused unless `force`.
+fn write_file(file: &Path, text: &str, force: bool) -> Result<(), Fail> {
+    let shown = clean(&file.display().to_string());
+    if force {
+        // write beside it and rename over it: a failed write leaves the old file whole
+        let mut tmp = file.as_os_str().to_owned();
+        tmp.push(".kaanal-tmp");
+        let tmp = std::path::PathBuf::from(tmp);
+        if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file)) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(err(format!("{shown}: {e}")));
+        }
+        return Ok(());
     }
+    // create_new: an existing file is an error here, not a race with a check
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(file)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                err(format!("{shown} exists; --force overwrites it"))
+            } else {
+                err(format!("{shown}: {e}"))
+            }
+        })?;
+    if let Err(e) = std::io::Write::write_all(&mut f, text.as_bytes()) {
+        drop(f);
+        // the file is ours (create_new): do not leave half of it behind
+        let _ = std::fs::remove_file(file);
+        return Err(err(format!("{shown}: {e}")));
+    }
+    Ok(())
 }

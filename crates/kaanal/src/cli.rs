@@ -367,6 +367,12 @@ pub(crate) enum SimCmd {
         /// Print the sweep id and return without waiting
         #[arg(long)]
         no_wait: bool,
+        /// When it finishes, write its report (Markdown) to this file; not with --no-wait
+        #[arg(long, value_name = "FILE", conflicts_with = "no_wait")]
+        report: Option<PathBuf>,
+        /// Overwrite the --report file if it exists
+        #[arg(long, requires = "report")]
+        force: bool,
     },
     /// List the last eight runs
     List,
@@ -374,6 +380,17 @@ pub(crate) enum SimCmd {
     Show {
         /// A run id, e.g. s1
         id: String,
+    },
+    /// Print the report of a finished sweep: Markdown, or with --json the data alone
+    Report {
+        /// A sweep id, e.g. s1
+        id: String,
+        /// Write the report to this file instead of printing it
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Overwrite the file if it exists
+        #[arg(long, requires = "output")]
+        force: bool,
     },
 }
 

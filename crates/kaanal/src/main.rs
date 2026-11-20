@@ -51,7 +51,7 @@ use self::{
     },
     instance::{
         keys, lifecycle,
-        remote::{ShutdownReply, call, call_for, control_agent, post_shutdown, status},
+        remote::{ShutdownReply, call, call_for, call_text, control_agent, post_shutdown, status},
         state_dir::{lock_instance, private_dir, write_run_file},
         target,
     },

@@ -311,6 +311,135 @@ fn sim_show_prints_a_sweep_record() {
 }
 
 #[test]
+fn sim_report_prints_the_markdown_and_the_json() {
+    let up = sweep_up("report-print");
+    ok(&up, &["sim", "sweep", "-p", "peak", "--seed", "7"]);
+    let md = ok(&up, &["sim", "report", "s1"]);
+    assert!(md.starts_with("# Load sweep s1"), "{md}");
+    let v = one_json(&ok(&up, &["sim", "report", "s1", "--json"]));
+    assert_eq!(v["report_version"], 1, "{v}");
+    // a sweep's show tells the seed and the fingerprint, to re-run it
+    let shown = ok(&up, &["sim", "show", "s1"]);
+    assert!(shown.contains("seed 7"), "{shown}");
+    assert!(shown.contains("fingerprint "), "{shown}");
+}
+
+#[test]
+fn sim_report_writes_a_file_and_refuses_to_overwrite() {
+    let up = sweep_up("report-file");
+    ok(&up, &["sim", "sweep", "-p", "peak"]);
+    let file = up.dir.join("report.md");
+    let path = file.to_str().unwrap();
+    assert!(ok(&up, &["sim", "report", "s1", "-o", path]).contains("wrote"));
+    assert!(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .starts_with("# Load sweep s1")
+    );
+    let err = fails(&up, &["sim", "report", "s1", "-o", path]);
+    assert!(err.contains("--force"), "{err}");
+    ok(&up, &["sim", "report", "s1", "-o", path, "--force"]);
+}
+
+#[test]
+fn sim_sweep_report_flag_writes_the_file() {
+    let up = sweep_up("report-flag");
+    let file = up.dir.join("sweep.md");
+    let path = file.to_str().unwrap();
+    let out = ok(&up, &["sim", "sweep", "-p", "peak", "--report", path]);
+    assert!(out.contains("knee at "), "{out}");
+    assert!(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .starts_with("# Load sweep s1")
+    );
+    // an existing file is refused before the sweep starts
+    let err = fails(&up, &["sim", "sweep", "-p", "peak", "--report", path]);
+    assert!(err.contains("--force"), "{err}");
+    assert!(!ok(&up, &["sim", "list"]).contains("s2"));
+}
+
+#[test]
+fn sim_report_json_with_output_prints_the_written_path_as_json() {
+    let up = sweep_up("report-json-o");
+    ok(&up, &["sim", "sweep", "-p", "peak"]);
+    let file = up.dir.join("report.json");
+    let path = file.to_str().unwrap();
+    let v = one_json(&ok(&up, &["sim", "report", "s1", "--json", "-o", path]));
+    assert!(
+        v["written"].as_str().unwrap().ends_with("report.json"),
+        "{v}"
+    );
+    let data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(data["report_version"], 1);
+}
+
+#[test]
+fn sim_sweep_report_force_overwrites_and_a_failed_sweep_writes_nothing() {
+    let up = sweep_up("report-force");
+    let file = up.dir.join("sweep.md");
+    let path = file.to_str().unwrap();
+    std::fs::write(&file, "old").unwrap();
+    ok(
+        &up,
+        &["sim", "sweep", "-p", "peak", "--report", path, "--force"],
+    );
+    assert!(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .starts_with("# Load sweep s1")
+    );
+    // no temp sibling is left behind
+    assert!(!up.dir.join("sweep.md.kaanal-tmp").exists());
+    // a sweep that cannot run: the error, and the file is as it was
+    let bad = sweep_up_with("report-failed", "proc: 1h", 100_000);
+    let file = bad.dir.join("never.md");
+    fails(
+        &bad,
+        &[
+            "sim",
+            "sweep",
+            "-p",
+            "peak",
+            "--report",
+            file.to_str().unwrap(),
+        ],
+    );
+    assert!(!file.exists());
+}
+
+#[test]
+fn sim_sweep_report_with_no_wait_is_a_usage_error() {
+    let up = sweep_up("report-nowait");
+    let file = up.dir.join("x.md");
+    let err = usage_fails(
+        &up,
+        &[
+            "sim",
+            "sweep",
+            "-p",
+            "peak",
+            "--no-wait",
+            "--report",
+            file.to_str().unwrap(),
+        ],
+    );
+    assert!(err.contains("--no-wait"), "{err}");
+    assert!(ok(&up, &["sim", "list"]).contains("no runs"));
+}
+
+#[test]
+fn sim_report_of_a_run_or_an_unknown_id_fails_with_the_servers_reason() {
+    let up = sweep_up("report-409");
+    let err = fails(&up, &["sim", "report", "s9"]);
+    assert!(err.contains("HTTP 404"), "{err}");
+    ok(&up, &["sim", "run", "-p", "peak", "--duration", "10s"]);
+    let err = fails(&up, &["sim", "report", "s1"]);
+    assert!(err.contains("HTTP 409"), "{err}");
+}
+
+#[test]
 fn sample_prints_a_body_that_parses() {
     let (up, _) = up("sample");
     let out = ok(&up, &["sample", "GET /users"]);

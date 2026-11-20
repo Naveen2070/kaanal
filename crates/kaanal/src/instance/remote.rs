@@ -60,6 +60,23 @@ pub(crate) fn call_for(
     body: Option<Value>,
     total: Duration,
 ) -> Result<Value, Fail> {
+    request(method, path, body, total).map(|(_, v)| v)
+}
+
+/// **Private.** `GET path` answered as text, for a route that sends Markdown (`sim report`):
+/// the same target, token, timeouts and error handling as [`call`].
+pub(crate) fn call_text(path: &str) -> Result<String, Fail> {
+    request("GET", path, None, Duration::from_secs(10)).map(|(t, _)| t)
+}
+
+/// **Private.** The one request behind [`call_for`] and [`call_text`]: the body text and, when it
+/// was JSON, the parsed value (else null).
+fn request(
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    total: Duration,
+) -> Result<(String, Value), Fail> {
     let target = target::resolve()?;
     let auth = target.auth();
     let url = target.url(path);
@@ -129,7 +146,7 @@ pub(crate) fn call_for(
             "{method} {path}: HTTP {status}: {msg}{detail}"
         ))));
     }
-    Ok(v)
+    Ok((text, v))
 }
 
 /// **Private.** Prints the node table with each node's effective chaos (scenarios plus live)
