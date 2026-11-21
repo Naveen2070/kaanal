@@ -12,10 +12,11 @@ Building blocks for the design fingerprint a sweep report prints, so a reader ca
 
 ## Public surface
 
-| Item               | Kind  | Notes                                              |
-| ------------------ | ----- | -------------------------------------------------- |
-| `canonical_digest` | fn    | `(&str) -> [u8; 32]`                               |
-| `combine`          | fn    | `(&[(String, [u8; 32])]) -> String`, 12 hex digits |
-| `Config::digest`   | field | `[u8; 32]`, `[0; 32]` until `from_yaml` sets it    |
+| Item               | Kind  | Notes                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canonical_digest` | fn    | `(&str) -> [u8; 32]`                                                                                                                                                                                                                                                                                                                                                                                           |
+| `value_digest`     | fn    | `(&serde_json::Value) -> [u8; 32]`: the digest of a value already parsed (a loader that parsed the text hands it over instead of the text being parsed twice), streamed into SHA-256 through `serde_json::to_writer` (no buffer of the whole JSON); equal to `canonical_digest` of the text except past the 50 000 alias-node bound, where `canonical_digest` hashes raw bytes (only ever a false "different") |
+| `combine`          | fn    | `(&[(String, [u8; 32])]) -> String`, 12 hex digits                                                                                                                                                                                                                                                                                                                                                             |
+| `Config::digest`   | field | `[u8; 32]`, `[0; 32]` until `from_yaml` sets it                                                                                                                                                                                                                                                                                                                                                                |
 
 Tests: `tests/fingerprint.rs`; expected hashes come from `sha256sum` on the exact bytes, not from the code.

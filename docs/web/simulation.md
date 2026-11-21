@@ -46,21 +46,21 @@ curl -s -X POST localhost:8080/__kaanal/sim/sweep \
 # 202 {"id":"s2","state":"running"}   Location: /__kaanal/sim/runs/s2
 ```
 
-| Field        | Meaning                                                                                          |
-| ------------ | ------------------------------------------------------------------------------------------------ |
-| `profile`    | A profile name from `traffic:`, or a profile written out, as for a run.                          |
-| `p99_ms`     | Highest p99 latency that passes, in milliseconds; above 0 (default 1000).                        |
-| `error_pct`  | Highest share of failed requests that passes, in percent, 0 to 100 (default 1).                  |
-| `max_factor` | Top of the ladder, 1 to 64 (default 8). Anything outside is `400`.                               |
-| `seed`       | Seed of the draws, the same at every point, so two points differ only in load (default `seed:`). |
-| `scenario`   | Sweep under this scenario's chaos alone; without it, the live chaos in force when it starts.     |
+| Field        | Meaning                                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profile`    | A profile name from `traffic:`, or a profile written out, as for a run. Without it, the first profile of `traffic:` (no profiles is `400`). |
+| `p99_ms`     | Highest p99 latency that passes, in milliseconds; above 0 (default 1000).                                                                   |
+| `error_pct`  | Highest share of failed requests that passes, in percent, 0 to 100 (default 1).                                                             |
+| `max_factor` | Top of the ladder, 1 to 64 (default 8). Anything outside is `400`.                                                                          |
+| `seed`       | Seed of the draws, the same at every point, so two points differ only in load (default `seed:`).                                            |
+| `scenario`   | Sweep under this scenario's chaos alone; without it, the live chaos in force when it starts.                                                |
 
 A sweep always runs the **system in force**: there is no `source` (no draft sweep), and no `duration_s` or `warmup_s`, because each point sizes its own window to about 20 000 reported requests (never shorter than ten times the slowest node's mean processing time). A body with any of those fields is `400`.
 
 A sweep is a run record with `"kind": "sweep"` (a plain run says `"run"`), under the same single slot: a sweep while a run runs, or the other way round, is `409` with the running id. Poll `GET /sim/runs/{id}`: `sweep_points` grows as each point finishes, and when `state` is `done`, `sweep` holds the finding (and `sweep_points` is emptied: `sweep.points` has every point):
 
 - **`verdict`**: `{ "kind": "knee", "k", "req_s" }`, the last passing point; `broken_at_lowest`, already over the limit at 0.25x; or `holds_to`, no failure up to the last point that ran.
-- **`seed`**, **`max_factor`**, **`fingerprint`** and **`inline_profile`**: what was swept, so a report can name it. `seed` is the body's, else the config's; `max_factor` is the checked top of the ladder; `fingerprint` is 12 hex digits over every input the build read; `inline_profile` is the posted profile when it was written out (absent for a named profile). A plain run has none of them.
+- **`seed`**, **`max_factor`**, **`fingerprint`**, **`inline_profile`** and **`live_chaos`**: what was swept, so a report can name it. `seed` is the body's, else the config's; `max_factor` is the checked top of the ladder; `fingerprint` is 12 hex digits over the design files the build read; `inline_profile` is the posted profile when it was written out (absent for a named profile); `live_chaos` is the chaos in force when a sweep without `scenario` started: `{ "scenarios": [active scenarios, bottom to top], "entries": N, "digest": "12 hex digits" }` (the live entries of `PUT /chaos` by name; the order they were set in and the config's node order do not change the digest). A sweep with `scenario` has no `live_chaos`: the scenario named is its chaos. Every sweep also has `chaos_digest` (the compiled chaos, see the design fingerprint below) and, when a scenario in force was defined through the control API (`PUT /scenarios/{name}`), `runtime_scenarios` with their names. A plain run has none of them.
 - **`limit`**: the line used, as `{ "p99_ms", "error_rate" }`. The body takes a percentage (`error_pct: 1`); the record carries the fraction (`error_rate: 0.01`).
 - **`points`**: every point run, sorted by `k`, each with `req_s`, `requests`, `goodput_req_s`, `error_rate`, `p50_ms`, `p95_ms`, `p99_ms`, `cause`, `over` (`{ "p99", "errors" }`: which of the two limits the point is over) and per-node `utilization`, `saturated`, `saturates_at_req_s`.
 - **`first_to_saturate`**: the node saturated at the lowest `k`, with its analytic `saturates_at_req_s`. It is a report, not a cause: the knee can come from something else.
@@ -75,11 +75,54 @@ From the CLI, `kaanal sim sweep` posts the sweep, waits for it and prints the fi
 kaanal sim sweep -p peak --p99 500ms --errors 1% --max-factor 8
 ```
 
-`--p99` is a duration (`500ms`, `1s`; default 1s), `--errors` a percentage, `1%` or `1`, 0 to 100 (default 1%), `--max-factor` the top of the ladder (default 8); `--seed` and `--scenario` are as for `sim run`, and `-f FILE` takes a profile written out. A bad `--p99` or `--errors` is a usage error (exit 64) before anything is sent. The text is the verdict (`knee at 94 req/s (1.88x): p99 over 500ms`, or where it broke at the lowest point, or how far it held; a cut ladder says `held to N req/s, the last point run`, not `holds to`), the first node to saturate with its analytic figure, the dominant cause, the warnings (a cut ladder among them: `ladder stopped at 5.657x (283 req/s): run too large` when a point was too big to run, `ladder cut at ...` at the engine's rate cap) and the label, then one row per point: `load req/s`, `goodput`, `p99`, `errors` and `ok` (whether it passed the limit). `--no-wait` prints the id; `kaanal sim list` shows each record's `kind` (`run` or `sweep`); `kaanal sim show ID` prints a sweep record the same way (with its `seed` and `fingerprint` lines, what a re-run needs), and `--json` prints the record.
+`--p99` is a duration (`500ms`, `1s`; default 1s), `--errors` a percentage, `1%` or `1`, 0 to 100 (default 1%), `--max-factor` the top of the ladder (default 8); `--seed` and `--scenario` are as for `sim run`, and `-f FILE` takes a profile written out. A bad `--p99` or `--errors` is a usage error (exit 64) before anything is sent. The text is the verdict (`knee at 94 req/s (1.88x), the last point within the limit; the next point is over: p99 over 500ms`, or where it broke at the lowest point, or how far it held; a cut ladder says `held to N req/s, the last point run`, not `holds to`), the first node to saturate with its analytic figure, the dominant cause, the warnings (a cut ladder among them: `ladder stopped at 5.657x (283 req/s): run too large` when a point was too big to run, `ladder cut at ...` at the engine's rate cap) and the label, then one row per point: `load req/s`, `goodput`, `p99`, `errors` and `ok` (whether it passed the limit). `--no-wait` prints the id; `kaanal sim list` shows each record's `kind` (`run` or `sweep`); `kaanal sim show ID` prints a sweep record the same way (with its `seed`, `fingerprint` and `chaos in force` lines, what a re-run needs), and `--json` prints the record.
 
-`kaanal sim report ID` prints the report of a finished sweep (Markdown; `--json` the data block alone, with `report_version`); `-o FILE` writes it instead and refuses to overwrite an existing file without `--force`. `kaanal sim sweep ... --report FILE` writes the report when the sweep ends (an existing file is refused before the sweep starts, unless `--force`; `--report` with `--no-wait` is a usage error, exit 64). A run, a running or failed sweep, or an unknown id answers with the server's reason (`HTTP 409` or `404`), exit 1.
+`kaanal sim report ID` prints the report of a finished sweep (Markdown; `--json` the data block alone, with `report_version`); `-o FILE` writes it instead and refuses to overwrite an existing file without `--force`. With `--force` the report is written to a new file that replaces the old one, so the file gets default permissions (your umask on Unix), not the old file's. `kaanal sim sweep ... --report FILE` writes the report when the sweep ends (an existing file is refused before the sweep starts, unless `--force`; `--report` with `--no-wait` is a usage error, exit 64). A run, a running or failed sweep, or an unknown id answers with the server's reason (`HTTP 409` or `404`), exit 1.
 
 **The knee is only as true as the node figures.** The sweep finds where _the model_ breaks: if `proc`, slots, `cpu` or bandwidth are guesses, the knee is a guess too. Calibrate the slow nodes against a real measurement first, and read the knee as a relative figure (this design against that one), like every other result here.
+
+## Sharing a sweep
+
+A finished sweep has a **report**: one Markdown file that a person can read cold and an AI agent can parse. The server writes it, and the CLI and Studio only fetch it, so the bytes are the same everywhere. It holds, in order:
+
+- **The label** first: _relative what-if, not a prediction_.
+- **Finding:** the verdict (the knee, the last point within the limit, with what the next point is over; broken at the lowest point; or how far it held), the limit used, the first node to saturate with its analytic figure, the dominant cause, the **chaos in force** (`none`, `scenario NAME`, or `live chaos: active scenarios ...; N entries, digest X`), the **chaos digest** and the warnings.
+- **Curve:** one row per point: `load req/s`, `goodput`, `p99 ms`, `errors` and `ok` (which limit a point is over).
+- **Re-run:** the exact `kaanal sim sweep ...` command (profile, limits, `--max-factor`, `--seed`, `--scenario`), the seed, the design fingerprint and the Kaanal version. A profile written out (`-f FILE`) is embedded in the data block and the command reads it with `-f profile.yaml`. A sweep under live chaos adds a line saying the command alone cannot reproduce it (set the same chaos first: the count and digest let you check you did), and so does a sweep under a scenario defined at runtime (`--scenario=NAME` stays in the command, but no file holds that scenario, and after a restart the name is unknown); the chaos digest checks you set it up the same.
+- **Data:** a fenced JSON block with the same data (`report_version`, `label`, `id`, `finding`, `points`, `recipe`; `recipe.chaos` is `none`, `scenario` or `live`, `recipe.live_chaos`, `recipe.chaos_digest` and `recipe.runtime_scenarios` the record's), for an agent or a script.
+
+The report names only the nodes its finding mentions; it never carries the design file.
+
+**The design fingerprint** is 12 hex digits of a SHA-256 over everything the build read: the config, each node's `spec:` file, the `endpoints:` file, `scenarios/*.yaml`, `locales/*.yaml` and the `data:` file or `data.yaml` (not the `site:` folder). Each file is parsed and written back with sorted keys before it is hashed, so comments, whitespace and key order do not change it. It covers the **design files only**, not the chaos a sweep ran under. That has its own **chaos digest**: 12 hex digits over the compiled chaos the sweep used, whatever it came from (a file, inline or runtime scenario, live entries), after the scenario choice and the stacking. **The same fingerprint, the same chaos digest and the same seed mean the same numbers; the fingerprint alone does not.** A different fingerprint or chaos digest means the two sweeps are not comparable. The chaos digest ignores the order live entries were set in and the config's node order; a different scenario stack order changes it only where it changes the effect (a higher scenario's failure comes first), so two stacks that compile to the same chaos, which give the same numbers, share it. What the fingerprint is **not**:
+
+- Not a hash of the raw bytes: reformatting a file keeps it, while renaming a label changes it (a false "different" is harmless, a false "same" is not).
+- Not the design on disk, and not every change that moves the numbers: it is computed when the system is built (each Apply), so it names the design last applied. A saved but unapplied edit does not change it, nor does live chaos, nor a parameter edit that went straight into a live run without Apply ([control-api.md](control-api.md)).
+- Not a second reading: every file is hashed from the text the build read (a spec from the document it parsed), so a file saved while the build runs cannot be counted in a newer form than the one built.
+- Not the Kaanal version, which the recipe names on its own line.
+
+`kaanal sim show ID` prints the fingerprint and the seed of a sweep.
+
+From the CLI:
+
+```bash
+kaanal sim report s2                 # the Markdown on stdout
+kaanal sim report s2 --json          # the data block alone
+kaanal sim report s2 -o sweep.md     # write a file; --force to overwrite one
+kaanal sim sweep -p peak --report sweep.md   # sweep, then write the report
+```
+
+Over HTTP, `GET /__kaanal/sim/runs/{id}/report` answers `text/markdown`, and `?format=json` the data alone. It is `404` for an unknown id or one pushed out of the last 8 records, and `409` while the sweep runs, for a failed sweep and for a plain run. See [control-api.md](control-api.md).
+
+```bash
+curl -s localhost:8080/__kaanal/sim/runs/s2/report -H "Authorization: Bearer $TOKEN"
+```
+
+**In Studio**, the Results tab has a group **Find where it breaks**: a p99 limit (ms, default 1000) and an error limit (%, default 1), and **Start**. While it runs it says "point N of up to M" and the points arrive on a chart (load factor and p99 on log axes, the limit as a dashed line, the knee as a labelled line, a point over a limit drawn as a square, an error-rate strip under it, and a points table). When it ends it shows the finding, the first node to saturate, the dominant cause and the warnings, and two buttons: **Copy as Markdown** and **Save as a file** (`kaanal-sweep-<id>.md`). Studio fetches the report once, when the sweep ends, and keeps that text, so it is still there after the server has dropped the record. On Windows the clipboard can turn the line ends into CRLF; the text is otherwise the CLI's.
+
+- Studio sweeps the **applied** design with its first `traffic:` profile. While the draft has unapplied edits it says "Sweeps the applied design; Apply to include your edits."
+- A sweep made before the design was applied again says "Made on an earlier design", and one made before a server restart says so too: start a new sweep to see the design in force.
+- In Live mode the group is there but Start is off: a sweep steps the load, which a live system cannot. Switch to Batch.
+- A sweep and a run share the one slot: while a run is in progress Start is off, and a slot taken elsewhere says the simulator is busy.
 
 ## Limits
 
