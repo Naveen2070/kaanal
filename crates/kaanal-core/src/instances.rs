@@ -120,6 +120,71 @@ pub fn is_managed_class(name: &str) -> bool {
     is_db_class(name) || is_cache_class(name)
 }
 
+/// The class name with its size removed, so every size of one family shares it: `aws/m5.large` and
+/// `aws/db.m5.xlarge` give `aws/m5` and `aws/db.m5` (up to the last `.`); `gcp/n2-standard-8` gives
+/// `gcp/n2-standard` (the all-digit part, with an optional `g`, is dropped); `azure/standard_d4s_v5`
+/// gives `azure/standard_d#s_v5` (the vCPU digits become `#`) and `azure/db.gp_gen5_4` gives
+/// `azure/db.gp_gen5` (a trailing `_<digits>`). `None` when the name shows no size (`gcp/e2-micro`).
+#[must_use]
+pub fn series(name: &str) -> Option<String> {
+    let key = name.trim().to_ascii_lowercase();
+    let (provider, t) = key.split_once('/')?;
+    let t = match provider {
+        "aws" => t.rsplit_once('.')?.0.to_string(),
+        "gcp" => {
+            let mut parts: Vec<&str> = t.split('-').collect();
+            let k = parts
+                .iter()
+                .skip(1)
+                .position(|p| is_size(p.strip_suffix('g').unwrap_or(p)))?
+                + 1;
+            parts.remove(k);
+            parts.join("-")
+        }
+        "azure" => match t.rsplit_once('_') {
+            Some((head, tail)) if t.starts_with("db.") && is_size(tail) => head.to_string(),
+            _ => {
+                let a = t.find(|c: char| c.is_ascii_digit())?;
+                let n = t[a..]
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(t.len() - a);
+                format!("{}#{}", &t[..a], &t[a + n..])
+            }
+        },
+        _ => return None,
+    };
+    Some(format!("{provider}/{t}"))
+}
+
+/// A non-empty run of ASCII digits.
+fn is_size(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Every class of the same [`series`] as `name` that `region`'s price file prices, `name` included,
+/// sorted by vCPU then price (the rungs a resize can step along). Empty when `name` has no series.
+#[must_use]
+pub fn ladder(name: &str, region: &str) -> Vec<&'static Instance> {
+    ladder_by(name, |c| crate::prices::price_micro_usd_hr(region, c))
+}
+
+/// [`ladder`] with the price list chosen by the caller (`price` gives a class's price, `None` when
+/// the list does not carry it): a managed database or cache class is priced from its own lists, not
+/// the compute one.
+#[must_use]
+pub fn ladder_by(name: &str, price: impl Fn(&str) -> Option<u32>) -> Vec<&'static Instance> {
+    let Some(s) = series(name) else {
+        return Vec::new();
+    };
+    let mut v: Vec<(&'static Instance, u32)> = all()
+        .iter()
+        .filter(|i| series(i.name).as_deref() == Some(s.as_str()))
+        .filter_map(|i| price(i.name).map(|p| (i, p)))
+        .collect();
+    v.sort_by_key(|(i, p)| (i.vcpu, *p));
+    v.into_iter().map(|(i, _)| i).collect()
+}
+
 /// A hint for an unknown name: how many types that provider has and a few of its names that start
 /// like the one written, or the providers when it names none.
 #[must_use]

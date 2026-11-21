@@ -30,6 +30,7 @@ pub mod presets;
 pub mod prices;
 mod prices_data;
 pub mod replay;
+pub mod resize;
 pub mod rng;
 pub mod scenario;
 pub mod schema;

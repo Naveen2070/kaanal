@@ -281,8 +281,8 @@ impl NodeConfig {
         })
     }
 
-    /// **Private.** The `cpu:` the node itself sets.
-    fn own_cpu(&self) -> Option<CpuConfig> {
+    /// The `cpu:` the node itself sets (the planner reads it: a hand-written figure); crate-only.
+    pub(crate) fn own_cpu(&self) -> Option<CpuConfig> {
         match self {
             NodeConfig::Gateway(n) => n.cpu,
             NodeConfig::Service(n) => n.cpu,

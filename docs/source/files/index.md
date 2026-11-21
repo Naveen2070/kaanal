@@ -40,6 +40,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/chain/endpoint.rs`   | [kaanal-core/chain.md](kaanal-core/chain.md)                 | `Compiler` methods that compile a whole endpoint: node chains, state overrides, heads                                       |
 | `src/exec/`               | [kaanal-core/exec.md](kaanal-core/exec.md)                   | The chain executor (`execute`), ops, hops, spans, determinism                                                               |
 | `src/pin.rs`              | [kaanal-core/pin.md](kaanal-core/pin.md)                     | UI-state pins: `PinState`, layers, `states:` overrides, `resolve`                                                           |
+| `src/resize/`             | [kaanal-core/resize.md](kaanal-core/resize.md)               | Sizing planner candidates: the move rules per node and `apply` to a cloned config                                           |
 
 ## [kaanal-data](kaanal-data/) (OpenAPI + data generation)
 

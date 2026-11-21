@@ -202,6 +202,37 @@ fn node_cost(
     }
 }
 
+/// The price an hour of the table class `instance` for node `n` in `region` (`provider` is the cloud
+/// word of the class): the managed database, managed cache or compute price list, as the node's
+/// hosting and engine pick it. The one place that choice is made (the sizing planner prices the rungs
+/// of a class ladder with it).
+pub(crate) fn class_price(
+    n: &NodeConfig,
+    provider: &str,
+    region: &str,
+    instance: &str,
+) -> Option<u32> {
+    let hosting = n.hosting();
+    let kind = n.kind();
+    if hosting == Hosting::Managed && kind == NodeKind::Database {
+        // an Azure class is Azure SQL whatever the flavor's first engine (RULES 131)
+        let engine = if provider == "azure" {
+            DbEngine::AzureSql
+        } else {
+            n.engine()
+        };
+        prices::managed_price_micro_usd_hr(engine, region, instance)
+    } else if hosting == Hosting::Managed {
+        let flavor = match n {
+            NodeConfig::Cache(c) => c.flavor,
+            _ => None,
+        };
+        prices::managed_cache_price_micro_usd_hr(flavor, region, instance)
+    } else {
+        prices::price_micro_usd_hr(region, instance)
+    }
+}
+
 /// One copy's price an hour, or the reason there is none.
 fn unit_price(
     cfg: &Config,
@@ -246,23 +277,7 @@ fn unit_price(
         .unwrap_or_default()
         .to_ascii_lowercase();
     let region = regions.get(&provider).map_or("", String::as_str);
-    let found = if hosting == Hosting::Managed && kind == NodeKind::Database {
-        // an Azure class is Azure SQL whatever the flavor's first engine (RULES 131)
-        let engine = if provider == "azure" {
-            DbEngine::AzureSql
-        } else {
-            n.engine()
-        };
-        prices::managed_price_micro_usd_hr(engine, region, instance)
-    } else if hosting == Hosting::Managed {
-        let flavor = match n {
-            NodeConfig::Cache(c) => c.flavor,
-            _ => None,
-        };
-        prices::managed_cache_price_micro_usd_hr(flavor, region, instance)
-    } else {
-        prices::price_micro_usd_hr(region, instance)
-    };
+    let found = class_price(n, &provider, region, instance);
     let unit = found.map(u64::from).ok_or_else(|| {
         format!(
             "no price in {}",
