@@ -67,6 +67,20 @@ impl DataSet {
     /// that is not a file or cannot be read has no `file` and `at` = `["data"]`: it belongs to
     /// the config.
     pub fn load(base_dir: &Path, data: Option<&str>) -> Result<DataSet, DataError> {
+        Self::load_with_sources(base_dir, data).map(|(set, _)| set)
+    }
+
+    /// [`DataSet::load`], also handing back each file it read with its text, in reading order
+    /// (the same files as [`DataSet::files`]), so a caller that digests them (the design
+    /// fingerprint) neither reads them again nor races an edit made in between.
+    ///
+    /// # Errors
+    /// As [`DataSet::load`].
+    pub fn load_with_sources(
+        base_dir: &Path,
+        data: Option<&str>,
+    ) -> Result<(DataSet, Vec<(PathBuf, String)>), DataError> {
+        let mut sources = Vec::new();
         let mut packs: BTreeMap<String, Arc<Pack>> = builtin_tags()
             .iter()
             .map(|t| {
@@ -93,7 +107,8 @@ impl DataSet {
                     ))
                 })?
                 .to_string();
-            let pack = Pack::parse(&read(&file).map_err(in_file)?).map_err(in_file)?;
+            let src = read(&file).map_err(in_file)?;
+            let pack = Pack::parse(&src).map_err(in_file)?;
             if pack.tag != tag {
                 return Err(in_file(DataError::at_value(
                     &["tag"],
@@ -113,6 +128,7 @@ impl DataSet {
                 )));
             }
             packs.insert(tag, Arc::new(pack));
+            sources.push((file, src));
         }
         let path = dictionary_file(base_dir, data);
         if data.is_some()
@@ -149,14 +165,18 @@ impl DataSet {
                         .iter()
                         .map(|w| format!("{}: {w}", path.display())),
                 );
+                sources.push((path, src));
                 Some(Arc::new(d))
             }
         };
-        Ok(DataSet {
-            packs,
-            project,
-            warnings,
-        })
+        Ok((
+            DataSet {
+                packs,
+                project,
+                warnings,
+            },
+            sources,
+        ))
     }
 
     /// The options of locale `tag`: its pack, the built-in dictionary and the project's.

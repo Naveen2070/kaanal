@@ -381,19 +381,52 @@ pub(crate) fn skeleton_cmd(output_file: Option<&Path>, force: bool) -> Result<()
     Ok(())
 }
 
+/// **Private.** The `N` of the next temp name [`replace_file`] tries; shared by every write of
+/// this process, so two writes never try the same name.
+static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// **Private.** Writes `text` to a new temp file beside `file` and renames it over `file`, so a failed
+/// write leaves the old file whole. The temp is made with `create_new` (`O_CREAT | O_EXCL`: an
+/// existing path, a symlink included, is never opened, so nothing planted there is followed or
+/// clobbered) under `FILE.PID.N.kaanal-tmp`, a clash retried with the next `N`; on any failure it
+/// is removed. The rename replaces a symlink at `file` itself, not what it points to.
+fn replace_file(file: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::Ordering;
+    let mut clash = None;
+    for _ in 0..16 {
+        let mut tmp = file.as_os_str().to_owned();
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        tmp.push(format!(".{}.{n}.kaanal-tmp", std::process::id()));
+        let tmp = std::path::PathBuf::from(tmp);
+        let mut f = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                clash = Some(e);
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        let r = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
+        drop(f);
+        let r = r.and_then(|()| std::fs::rename(&tmp, file));
+        if r.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        return r;
+    }
+    Err(clash.unwrap_or_else(|| std::io::Error::other("no free temp name")))
+}
+
 /// **Private.** Writes `text` to `file`: an existing file is refused unless `force`.
 fn write_file(file: &Path, text: &str, force: bool) -> Result<(), Fail> {
     let shown = clean(&file.display().to_string());
     if force {
-        // write beside it and rename over it: a failed write leaves the old file whole
-        let mut tmp = file.as_os_str().to_owned();
-        tmp.push(".kaanal-tmp");
-        let tmp = std::path::PathBuf::from(tmp);
-        if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file)) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(err(format!("{shown}: {e}")));
-        }
-        return Ok(());
+        return replace_file(file, text).map_err(|e| err(format!("{shown}: {e}")));
     }
     // create_new: an existing file is an error here, not a race with a check
     let mut f = std::fs::OpenOptions::new()
@@ -414,4 +447,111 @@ fn write_file(file: &Path, text: &str, force: bool) -> Result<(), Fail> {
         return Err(err(format!("{shown}: {e}")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh, empty directory for one test.
+    fn dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("kaanal-write-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Temp siblings left in `d`.
+    fn temps(d: &Path) -> Vec<String> {
+        std::fs::read_dir(d)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".kaanal-tmp"))
+            .collect()
+    }
+
+    /// Held by every test that writes with `--force`, so none moves [`NEXT`] while another reads it.
+    static FORCE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The temp names the next `k` attempts will try for `file`, read from [`NEXT`] (hold [`FORCE`]).
+    fn next_names(file: &Path, k: u32) -> Vec<std::path::PathBuf> {
+        let n = NEXT.load(std::sync::atomic::Ordering::Relaxed);
+        (n..n + k)
+            .map(|i| {
+                let mut p = file.as_os_str().to_owned();
+                p.push(format!(".{}.{i}.kaanal-tmp", std::process::id()));
+                std::path::PathBuf::from(p)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn force_replaces_the_target_and_leaves_a_planted_temp_name_alone() {
+        let _held = FORCE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let d = dir("planted");
+        let file = d.join("r.md");
+        std::fs::write(&file, "old").unwrap();
+        // the old fixed temp name, and the exact names the next four attempts will use, planted
+        let mut planted = vec![d.join("r.md.kaanal-tmp")];
+        planted.extend(next_names(&file, 4));
+        for p in &planted {
+            std::fs::write(p, "planted").unwrap();
+        }
+        let before = NEXT.load(std::sync::atomic::Ordering::Relaxed);
+        write_file(&file, "new", true).unwrap();
+        assert_eq!(
+            NEXT.load(std::sync::atomic::Ordering::Relaxed) - before,
+            5,
+            "four clashes retried, the fifth name taken"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
+        for p in &planted {
+            assert_eq!(
+                std::fs::read_to_string(p).unwrap(),
+                "planted",
+                "{}",
+                p.display()
+            );
+        }
+        assert_eq!(temps(&d).len(), planted.len(), "no temp of ours is left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn force_never_writes_through_a_symlink_at_the_temp_name() {
+        let _held = FORCE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let d = dir("symlink");
+        let file = d.join("r.md");
+        let victim = d.join("victim");
+        std::fs::write(&victim, "keep").unwrap();
+        std::os::unix::fs::symlink(&victim, d.join("r.md.kaanal-tmp")).unwrap();
+        for p in next_names(&file, 4) {
+            std::os::unix::fs::symlink(&victim, p).unwrap();
+        }
+        write_file(&file, "new", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_failed_forced_write_leaves_no_temp() {
+        let _held = FORCE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let d = dir("failed");
+        // a directory cannot be replaced by a file: the rename fails after the temp was written
+        let target = d.join("taken");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("inside"), "x").unwrap();
+        assert!(write_file(&target, "new", true).is_err());
+        assert!(temps(&d).is_empty(), "{:?}", temps(&d));
+        assert!(target.join("inside").exists(), "the target is as it was");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

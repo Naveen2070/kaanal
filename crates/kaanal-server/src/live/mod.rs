@@ -124,7 +124,7 @@ pub(crate) struct ApplyHold<'a> {
 
 /// The first traffic profile of `g` as a mix and a rate, or why there is none.
 fn mix_of(g: &Generation) -> Result<(String, Vec<StreamShare>, f64), String> {
-    let Some(name) = g.traffic.keys().next().cloned() else {
+    let Some(name) = crate::sim::profile::first_profile(g).map(str::to_owned) else {
         return Err("the file has no traffic profile: add a traffic: section to run live".into());
     };
     let req = RunRequest {

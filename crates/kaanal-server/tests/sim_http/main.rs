@@ -13,4 +13,5 @@ mod run;
 mod sample;
 mod skeleton;
 mod sweep;
+mod sweep_chaos;
 mod sweep_report;

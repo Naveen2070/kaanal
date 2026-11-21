@@ -127,6 +127,12 @@ fn missing_profile(g: &Generation, name: &str) -> String {
     }
 }
 
+/// The profile a request that names none uses: the first of the config's `traffic:` section, in
+/// file order (live runs and a sweep with no `profile` both take it).
+pub(crate) fn first_profile(g: &Generation) -> Option<&str> {
+    g.traffic.keys().next().map(String::as_str)
+}
+
 /// The simulator input for `req` on the system `g`.
 ///
 /// # Errors

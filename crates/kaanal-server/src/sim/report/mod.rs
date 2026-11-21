@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 use kaanal_sim::sweep::{Point, SweepResult, Verdict};
 use serde_json::{Value, json};
 
-use super::store::RunRecord;
+use super::store::{LiveChaos, RunRecord};
 
 /// The `report_version` of the JSON: bump it when a field changes meaning or goes away.
 const REPORT_VERSION: u32 = 1;
@@ -62,6 +62,11 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
         .fingerprint
         .as_deref()
         .ok_or(ReportError::Internal("fingerprint"))?;
+    let chaos = chaos_in_force(rec)?;
+    let chaos_digest = rec
+        .chaos_digest
+        .as_deref()
+        .ok_or(ReportError::Internal("chaos_digest"))?;
     let command = command(rec, s, max_factor, seed);
     let json = json!({
         "report_version": REPORT_VERSION,
@@ -85,6 +90,10 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
             "inline_profile": rec.inline_profile,
             "scenario": rec.scenario,
             "fingerprint": fingerprint,
+            "chaos": chaos.kind(),
+            "live_chaos": rec.live_chaos,
+            "chaos_digest": chaos_digest,
+            "runtime_scenarios": rec.runtime_scenarios,
             "generation": rec.generation,
             "kaanal_version": version,
         },
@@ -97,7 +106,7 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
         text(&rec.id),
         text(s.label)
     );
-    finding(&mut md, s);
+    finding(&mut md, s, &chaos, chaos_digest);
     curve(&mut md, &s.points);
     let _ = write!(md, "## Re-run\n\n```bash\n{command}\n");
     if rec.inline_profile.is_some() {
@@ -105,12 +114,29 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
             "# profile.yaml: recipe.inline_profile in the Data block below (JSON is YAML)\n",
         );
     }
+    if let Chaos::Live(l) = chaos {
+        let _ = writeln!(
+            md,
+            "# live chaos in force when this ran ({}): the command alone cannot reproduce it; activate the same chaos first",
+            live_text(l, clean)
+        );
+    }
+    if !rec.runtime_scenarios.is_empty() {
+        let names: Vec<String> = rec.runtime_scenarios.iter().map(|n| clean(n)).collect();
+        let _ = writeln!(
+            md,
+            "# scenarios defined at runtime in force ({}): the command alone cannot reproduce it; define them the same way first and compare the chaos digest",
+            names.join(", ")
+        );
+    }
     let _ = write!(
         md,
         "# seed {seed}: every point draws the same random numbers, so the same seed on the same design repeats the curve\n\
-         # fingerprint {}: SHA-256 of every file the build read, comments and whitespace aside; the same value means the same design, so the same numbers\n\
+         # fingerprint {}: SHA-256 of the design files the build read, comments and whitespace aside; it does not cover the chaos in force (here: {}; chaos digest {}): the same fingerprint, the same chaos digest and the same seed mean the same numbers, the fingerprint alone does not\n\
          # kaanal {}\n```\n\n## Data\n\n```json\n",
         clean(fingerprint),
+        chaos.describe(clean),
+        clean(chaos_digest),
         clean(version)
     );
     md.push_str(&json_text(&json));
@@ -118,7 +144,66 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
     Ok(SweepReport { markdown: md, json })
 }
 
-/// `v` pretty-printed, every format character written as a `\u` escape (RFC 8259 section 7 lets any
+/// The chaos a sweep ran under, as the report names it.
+enum Chaos<'a> {
+    /// No scenario named, none active and no live entry.
+    None,
+    /// `--scenario NAME`: that scenario's chaos alone, which the command repeats when the scenario
+    /// is in a file or the config (a runtime one is flagged by `runtime_scenarios`).
+    Scenario(&'a str),
+    /// The live chaos (active scenarios, live entries); the command cannot repeat its live entries.
+    Live(&'a LiveChaos),
+}
+
+/// The chaos `rec` ran under; a sweep without a scenario and without its `live_chaos` is a bug.
+fn chaos_in_force(rec: &RunRecord) -> Result<Chaos<'_>, ReportError> {
+    if let Some(sc) = &rec.scenario {
+        return Ok(Chaos::Scenario(sc));
+    }
+    let l = rec
+        .live_chaos
+        .as_ref()
+        .ok_or(ReportError::Internal("live_chaos"))?;
+    Ok(if l.scenarios.is_empty() && l.entries == 0 {
+        Chaos::None
+    } else {
+        Chaos::Live(l)
+    })
+}
+
+impl Chaos<'_> {
+    /// `recipe.chaos` in the JSON.
+    fn kind(&self) -> &'static str {
+        match self {
+            Chaos::None => "none",
+            Chaos::Scenario(_) => "scenario",
+            Chaos::Live(_) => "live",
+        }
+    }
+
+    /// In words, each name passed through `name` (`text` in the prose, `clean` in the bash block).
+    fn describe(&self, name: fn(&str) -> String) -> String {
+        match self {
+            Chaos::None => "none".into(),
+            Chaos::Scenario(n) => format!("scenario {}", name(n)),
+            Chaos::Live(l) => format!("live chaos: {}", live_text(l, name)),
+        }
+    }
+}
+
+/// `active scenarios a, b; 3 entries, digest X` (the scenarios part only when one is active).
+fn live_text(l: &LiveChaos, name: fn(&str) -> String) -> String {
+    let mut s = String::new();
+    if !l.scenarios.is_empty() {
+        let names: Vec<String> = l.scenarios.iter().map(|n| name(n)).collect();
+        let _ = write!(s, "active scenarios {}; ", names.join(", "));
+    }
+    let unit = if l.entries == 1 { "entry" } else { "entries" };
+    let _ = write!(s, "{} {unit}, digest {}", l.entries, clean(&l.digest));
+    s
+}
+
+/// `v` pretty-printed, every format character and line or paragraph separator written as a `\u` escape (RFC 8259 section 7 lets any
 /// character be escaped, and in this text they occur only inside strings), so a name in the block
 /// cannot reorder or hide text either; it parses back to `v` unchanged.
 fn json_text(v: &Value) -> String {
@@ -126,7 +211,7 @@ fn json_text(v: &Value) -> String {
     let pretty = serde_json::to_string_pretty(v).unwrap_or_default();
     let mut out = String::with_capacity(pretty.len());
     for c in pretty.chars() {
-        if is_format(c) {
+        if hidden(c) {
             for u in c.encode_utf16(&mut [0; 2]) {
                 let _ = write!(out, "\\u{u:04x}");
             }
@@ -154,8 +239,8 @@ fn point_json(p: &Point) -> Value {
 }
 
 /// The `## Finding` section: the verdict in one sentence (the CLI's wording), the limit, the first
-/// node to saturate, the dominant cause and the warnings.
-fn finding(md: &mut String, s: &SweepResult) {
+/// node to saturate, the dominant cause, the chaos in force with its digest, and the warnings.
+fn finding(md: &mut String, s: &SweepResult, chaos: &Chaos<'_>, chaos_digest: &str) {
     let p99 = humantime::format_duration(s.limit.p99).to_string();
     let errors = limit_pct(s.limit.error_rate);
     let crossed = s
@@ -175,7 +260,11 @@ fn finding(md: &mut String, s: &SweepResult) {
     let at = |k: f64, req_s: f64| format!("{req_s:.0} req/s ({k:.2}x)");
     let none_over = format!("no point over p99 {p99} or errors {errors}");
     let verdict = match s.verdict {
-        Verdict::Knee { k, req_s } => format!("knee at {}{crossed}", at(k, req_s)),
+        // the knee is the last point within the limit; `crossed` is the next point's, the first over
+        Verdict::Knee { k, req_s } => format!(
+            "knee at {}, the last point within the limit; the next point is over{crossed}",
+            at(k, req_s)
+        ),
         Verdict::BrokenAtLowest { k, req_s } => {
             format!(
                 "over the limit already at the lowest point, {}{crossed}",
@@ -198,7 +287,9 @@ fn finding(md: &mut String, s: &SweepResult) {
     let cause = s.dominant_cause.map_or("none".into(), text);
     let _ = write!(
         md,
-        "**Verdict:** {verdict}.\n\n- Limit: p99 {p99}, errors {errors}.\n- First to saturate: {first}.\n- Dominant cause: {cause}.\n\n"
+        "**Verdict:** {verdict}.\n\n- Limit: p99 {p99}, errors {errors}.\n- First to saturate: {first}.\n- Dominant cause: {cause}.\n- Chaos in force: {}.\n- Chaos digest: {}.\n\n",
+        chaos.describe(text),
+        text(chaos_digest)
     );
     if s.warnings.is_empty() {
         md.push_str("Warnings: none.\n\n");
@@ -283,8 +374,15 @@ fn row_pct(share: f64) -> String {
 /// text, the "Trojan Source" attack, CVE-2021-42574).
 fn clean(s: &str) -> String {
     s.chars()
-        .filter(|&c| !c.is_control() && !is_format(c))
+        .filter(|&c| !c.is_control() && !hidden(c))
         .collect()
+}
+
+/// A format character, or U+2028 / U+2029 (`Zl`, `Zp`: line breaks to some renderers and to
+/// JavaScript before ES2019). The CLI prints all of them as `?`, so the server drops them from the
+/// text and escapes them in the JSON, and its bytes pass the CLI's cleaning unchanged.
+fn hidden(c: char) -> bool {
+    is_format(c) || matches!(c, '\u{2028}' | '\u{2029}')
 }
 
 /// True for a character of Unicode `General_Category` Cf (Unicode 15.1, `DerivedGeneralCategory.txt`);

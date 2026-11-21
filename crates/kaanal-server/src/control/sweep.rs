@@ -3,15 +3,17 @@
 //! A sweep runs the system in force at a ladder of load factors and finds the knee
 //! ([`kaanal_sim::sweep`]). It is a run record of kind `sweep`: the same single slot as a run
 //! (`409` with the holder's id), `202` and a `Location` to poll, the points added to the record
-//! as they finish. There is no `source` (the draft is not swept) and no `duration_s`/`warmup_s`
+//! as they finish. With no `profile` it sweeps the applied design's first one
+//! ([`first_profile`]). There is no `source` (the draft is not swept) and no `duration_s`/`warmup_s`
 //! (each point sizes its own window), so a body naming them is a `400` (unknown field).
 
-use super::sim::{accepted, applied_inputs, busy, from_sim, parse_profile};
+use super::sim::{Applied, accepted, applied_inputs, busy, from_sim, parse_profile};
 use super::*;
-use crate::sim::profile::{Profile, RunRequest, to_sim};
+use crate::sim::profile::{Profile, RunRequest, first_profile, to_sim};
 use crate::sim::report::{ReportError, sweep_report};
 use crate::sim::run::{Job, Slot, execute_sweep};
-use crate::sim::store::SweepMeta;
+use crate::sim::store::{LiveChaos, SweepMeta};
+use kaanal_core::fingerprint::{canonical_digest, combine};
 use kaanal_sim::sweep::{Limit, Options};
 
 /// Highest `max_factor` the route takes: 64x the profile's rate is far past any knee worth
@@ -22,8 +24,10 @@ const MAX_FACTOR: f64 = 64.0;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SweepBody {
-    /// A profile name from `traffic:`, or a profile written out.
-    profile: Value,
+    /// A profile name from `traffic:`, or a profile written out (default the applied design's
+    /// first profile; Studio sends none, as the draft it shows may not be the design swept).
+    #[serde(default)]
+    profile: Option<Value>,
     /// Seed of the draws at every point (default the config's `seed:`).
     #[serde(default)]
     seed: Option<u64>,
@@ -71,27 +75,46 @@ fn options(b: &SweepBody) -> Result<Options, Reject> {
 /// `POST /__kaanal/sim/sweep` — starts a load sweep of the system in force.
 ///
 /// # Errors
-/// 400 for a bad body or limit, 404 for an unknown profile or scenario, 409 when a run or sweep
-/// is in progress or there is no system.
+/// 400 for a bad body or limit, or no `profile` and none defined; 404 for an unknown profile or
+/// scenario; 409 when a run or sweep is in progress or there is no system.
 pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Response, Reject> {
     let b: SweepBody = serde_json::from_slice(&body)
         .map_err(|e| reject(StatusCode::BAD_REQUEST, &format!("bad body: {e}")))?;
     let opts = options(&b)?;
     // only an object can be an inline profile: keep a copy for the record, not for a name
-    let posted = b.profile.is_object().then(|| b.profile.clone());
-    let (label, profile) = parse_profile(b.profile)?;
-    let inline_profile = match profile {
-        Profile::Inline(_) => posted,
-        Profile::Named(_) => None,
-    };
-    let req = RunRequest {
-        profile,
+    let posted = b.profile.as_ref().filter(|v| v.is_object()).cloned();
+    let parsed = b.profile.map(parse_profile).transpose()?;
+    let mut req = RunRequest {
+        // set below, once the applied design is known
+        profile: Profile::Named(String::new()),
         duration: None,
         warmup: None,
         seed: b.seed,
         scenario: b.scenario,
     };
-    let (g, chaos) = applied_inputs(&st, &req)?;
+    let Applied {
+        g,
+        chaos,
+        snap,
+        runtime,
+    } = applied_inputs(&st, &req)?;
+    let (label, inline_profile) = if let Some((label, profile)) = parsed {
+        let inline = match profile {
+            Profile::Inline(_) => posted,
+            Profile::Named(_) => None,
+        };
+        req.profile = profile;
+        (label, inline)
+    } else {
+        let name = first_profile(&g).ok_or_else(|| {
+            reject(
+                StatusCode::BAD_REQUEST,
+                "no traffic profile to sweep: the applied design has no traffic: section; add one, or send a profile",
+            )
+        })?;
+        req.profile = Profile::Named(name.to_owned());
+        (name.to_owned(), None)
+    };
     let mut planned = to_sim(&g, &req).map_err(|e| from_sim(&e))?;
     // no `check`: the sweep sizes each point itself and holds every one to the server caps
     let id = st
@@ -105,6 +128,9 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
                 max_factor: opts.max_factor,
                 fingerprint: g.fingerprint.clone(),
                 inline_profile,
+                live_chaos: snap.map(|e| live_chaos(&g, &e)),
+                chaos_digest: chaos_digest(&g, &chaos),
+                runtime_scenarios: runtime,
             },
         )
         .map_err(|running| busy(&running))?;
@@ -121,6 +147,81 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
         slot.finish_sweep(result);
     });
     Ok(accepted(&id))
+}
+
+/// **Private.** The live chaos of `snap` for a sweep record: the active scenarios (an ordered stack,
+/// a later one wins, so kept in order), the live entry count, and a digest of the live entries. Each
+/// entry is its `GET /chaos` view plus its key by name (no `expires_in_ms`), written as compact JSON
+/// with sorted keys; the entries are a set, so their texts are sorted before hashing, and neither the
+/// order they were set in nor the config's node order (ids) changes the digest. The digest is the
+/// fingerprint's form: 12 hex digits of SHA-256 (`canonical_digest`, `combine`). It does not cover
+/// the active scenarios' definitions (a scenario redefined through the API keeps its name).
+fn live_chaos(g: &Generation, snap: &Effective) -> LiveChaos {
+    let live = snap.stack.live();
+    let mut items: Vec<String> = live
+        .entries()
+        .into_iter()
+        .map(|(k, l)| {
+            let mut o = Map::new();
+            if let Value::Object(v) = json!(super::chaos::ChaosView::from(l)) {
+                o = v;
+            }
+            super::view::key_fields(g, &k, &mut o);
+            Value::Object(o).to_string()
+        })
+        .collect();
+    items.sort_unstable();
+    let text = format!("[{}]", items.join(","));
+    LiveChaos {
+        scenarios: snap.stack.active().to_vec(),
+        entries: live.entry_count(),
+        digest: combine(&[("live".to_string(), canonical_digest(&text))]),
+    }
+}
+
+/// **Private.** 12 hex digits over the compiled chaos a sweep runs under (RULES 140), whatever it
+/// came from: file, inline and runtime scenarios and the live entries, after the scenario choice
+/// and the stacking. Each compiled key (`EffectiveChaos::entries` and `replica_at_entries`) is
+/// written by name (`key_fields`, so the config's node order does not matter) with its resolved
+/// effect: latency, jitter and the outage start in integer nanoseconds, `down`, the bandwidth cap,
+/// and the failure bands in compiled order (a higher layer's band comes first, so a stack order
+/// that changes the effect changes the digest, and two stacks compiled to the same effect, which
+/// give the same numbers, share it). The keys are a set: their texts are sorted, then hashed as the
+/// fingerprint is (`canonical_digest`, `combine`).
+fn chaos_digest(g: &Generation, chaos: &EffectiveChaos) -> String {
+    let ns = |d: Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+    let resolved = |r: &Resolved| {
+        let faults: Vec<Value> = r
+            .faults()
+            .iter()
+            .map(|f| json!({ "upto": f.upto, "kind": f.kind.as_str(), "status": f.status }))
+            .collect();
+        json!({
+            "latency_ns": ns(r.latency_add),
+            "jitter_ns": ns(r.jitter),
+            "down": r.down,
+            "down_from_ns": r.down_from.map(ns),
+            "bandwidth_cap": r.bandwidth_cap,
+            "faults": faults,
+        })
+    };
+    let mut items: Vec<String> = chaos
+        .entries()
+        .into_iter()
+        .map(|(k, r)| {
+            let mut o = Map::new();
+            super::view::key_fields(g, &k, &mut o);
+            o.insert("chaos".into(), resolved(r));
+            Value::Object(o).to_string()
+        })
+        .collect();
+    items.extend(chaos.replica_at_entries().into_iter().map(|(n, rep, ep, r)| {
+        json!({ "node": g.topo.nodes[n].name, "replica": rep, "endpoint": ep, "chaos": resolved(r) })
+            .to_string()
+    }));
+    items.sort_unstable();
+    let text = format!("[{}]", items.join(","));
+    combine(&[("chaos".to_string(), canonical_digest(&text))])
 }
 
 /// The query of `GET /__kaanal/sim/runs/{id}/report`.

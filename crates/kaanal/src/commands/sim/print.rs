@@ -29,6 +29,10 @@ pub(super) fn print_sweep(v: &Value) {
     if let Some(f) = v["fingerprint"].as_str() {
         println!("fingerprint {}", clean(f));
     }
+    // the fingerprint covers the design files only: the chaos is recorded beside it
+    if let Some(c) = chaos_line(v) {
+        println!("chaos in force: {c}");
+    }
     let s = &v["sweep"];
     if !s.is_object() {
         if let Some(e) = v["error"].as_str() {
@@ -63,7 +67,10 @@ pub(super) fn print_sweep(v: &Value) {
     );
     let crossed = crossed.unwrap_or_default();
     match vd["kind"].as_str().unwrap_or("") {
-        "knee" => println!("knee at {at}{crossed}"),
+        // the knee is the last passing point; `crossed` is the next point's, the first over
+        "knee" => println!(
+            "knee at {at}, the last point within the limit; the next point is over{crossed}"
+        ),
         "broken_at_lowest" => println!("over the limit already at the lowest point, {at}{crossed}"),
         // a cut ladder only held to the last point that ran: it does not claim the top
         "holds_to" if s["stopped_at"].is_number() => println!(
@@ -114,6 +121,59 @@ pub(super) fn print_sweep(v: &Value) {
             }
         );
     }
+}
+
+/// **Private.** The chaos a sweep record ran under, as the report words it: `scenario NAME`, `none`,
+/// or `live chaos: [active scenarios a, b; ]N entries, digest X`, then a runtime mark and
+/// `; chaos digest C` when the record has them; `None` for a record without it.
+fn chaos_line(v: &Value) -> Option<String> {
+    let mut line = chaos_words(v)?;
+    let runtime: Vec<String> = v["runtime_scenarios"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|n| clean(n.as_str().unwrap_or("")))
+        .collect();
+    if !runtime.is_empty() {
+        if v["scenario"].is_string() {
+            line.push_str(" (defined at runtime)");
+        } else {
+            let _ = write!(line, "; defined at runtime: {}", runtime.join(", "));
+        }
+    }
+    if let Some(d) = v["chaos_digest"].as_str() {
+        let _ = write!(line, "; chaos digest {}", clean(d));
+    }
+    Some(line)
+}
+
+/// **Private.** The chaos in words, without the runtime marks or the digest.
+fn chaos_words(v: &Value) -> Option<String> {
+    if let Some(s) = v["scenario"].as_str() {
+        return Some(format!("scenario {}", clean(s)));
+    }
+    let l = v["live_chaos"].as_object()?;
+    let names: Vec<String> = l["scenarios"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|n| clean(n.as_str().unwrap_or("")))
+        .collect();
+    let entries = l["entries"].as_u64().unwrap_or(0);
+    if names.is_empty() && entries == 0 {
+        return Some("none".into());
+    }
+    let mut s = "live chaos: ".to_string();
+    if !names.is_empty() {
+        let _ = write!(s, "active scenarios {}; ", names.join(", "));
+    }
+    let unit = if entries == 1 { "entry" } else { "entries" };
+    let _ = write!(
+        s,
+        "{entries} {unit}, digest {}",
+        clean(l["digest"].as_str().unwrap_or(""))
+    );
+    Some(s)
 }
 
 /// **Private.** A number from an answer, one decimal.
@@ -233,5 +293,34 @@ mod tests {
         assert_eq!(pct(&json!(0.0001)), "0.01%");
         assert_eq!(pct(&json!(0.01)), "1%");
         assert_eq!(pct(&json!(0.005)), "0.5%");
+    }
+
+    #[test]
+    fn the_chaos_line_says_what_the_report_says() {
+        let none = json!({ "live_chaos": { "scenarios": [], "entries": 0, "digest": "d" } });
+        assert_eq!(chaos_line(&none).as_deref(), Some("none"));
+        let sc = json!({ "scenario": "db-down" });
+        assert_eq!(chaos_line(&sc).as_deref(), Some("scenario db-down"));
+        let live =
+            json!({ "live_chaos": { "scenarios": ["a", "b"], "entries": 1, "digest": "abc" } });
+        assert_eq!(
+            chaos_line(&live).as_deref(),
+            Some("live chaos: active scenarios a, b; 1 entry, digest abc")
+        );
+        assert_eq!(chaos_line(&json!({ "kind": "run" })), None);
+    }
+
+    #[test]
+    fn the_chaos_line_carries_the_chaos_digest_and_a_runtime_scenario() {
+        let v = json!({ "scenario": "rt", "chaos_digest": "c0ffee012345", "runtime_scenarios": ["rt"] });
+        assert_eq!(
+            chaos_line(&v).as_deref(),
+            Some("scenario rt (defined at runtime); chaos digest c0ffee012345")
+        );
+        let v = json!({ "live_chaos": { "scenarios": [], "entries": 0, "digest": "d" }, "chaos_digest": "9f86d081884c" });
+        assert_eq!(
+            chaos_line(&v).as_deref(),
+            Some("none; chaos digest 9f86d081884c")
+        );
     }
 }

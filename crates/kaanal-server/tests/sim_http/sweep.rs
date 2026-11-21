@@ -205,6 +205,40 @@ async fn bad_limits_are_400() {
     assert_eq!(runs["runs"], json!([]), "a refused request starts nothing");
 }
 
+#[tokio::test]
+async fn an_omitted_profile_sweeps_the_applied_designs_first_profile() {
+    let s = start(&config()).await;
+    let done = swept(&s, json!({})).await;
+    assert_eq!(done["state"], "done", "{done}");
+    assert_eq!(
+        done["profile"], "peak",
+        "the first traffic: key, named on the record: {done}"
+    );
+}
+
+#[tokio::test]
+async fn a_null_profile_is_an_omitted_profile() {
+    let s = start(&config()).await;
+    assert_eq!(
+        swept(&s, json!({ "profile": null })).await["profile"],
+        "peak"
+    );
+}
+
+#[tokio::test]
+async fn an_omitted_profile_with_none_defined_is_a_400() {
+    let s = start(&system("1ms")).await;
+    let r = sweep(&s, json!({})).await;
+    assert_eq!(r.status(), 400);
+    let v: Value = r.json().await.unwrap();
+    assert!(
+        v["error"].as_str().unwrap().contains("no traffic profile"),
+        "{v}"
+    );
+    let runs: Value = s.get("/__kaanal/sim/runs").await.json().await.unwrap();
+    assert_eq!(runs["runs"], json!([]), "a refused request starts nothing");
+}
+
 /// Posts a sweep (`max_factor` 1 keeps it short) and waits for its record.
 async fn swept(s: &Srv, mut body: Value) -> Value {
     body["max_factor"] = body.get("max_factor").cloned().unwrap_or(json!(1));
@@ -264,7 +298,69 @@ async fn a_run_record_has_none_of_them() {
     .await
     .unwrap();
     let done = finished(&s, v["id"].as_str().unwrap()).await;
-    for k in ["seed", "max_factor", "fingerprint", "inline_profile"] {
+    for k in [
+        "seed",
+        "max_factor",
+        "fingerprint",
+        "inline_profile",
+        "live_chaos",
+    ] {
         assert!(done.get(k).is_none(), "{k} on a run: {done}");
     }
+}
+
+/// What it proves: a sweep's numbers depend on the design by name, not on the order the config lists
+/// its nodes or its traffic profiles in. The seeded draws are not keyed to a node's index or a
+/// profile's position, so two configs that differ only in order give the same curve under one seed.
+/// Errors drawn at two nodes (a scenario) make the curve depend on the draws, so a draw keyed to a
+/// node's position would show. (Per-node data follows the topology order, so it is compared sorted
+/// by name.)
+#[tokio::test]
+async fn reordering_nodes_and_profiles_keeps_the_sweep_points() {
+    let a = format!(
+        "{}scenarios:\n  flaky: {{ chaos: [ {{ node: app, error_rate: 0.05 }}, {{ node: db, error_rate: 0.1 }} ] }}\n",
+        config()
+    );
+    let app = "  app:   { type: service, spec: openapi.yaml, proc: 1ms }\n";
+    let db = "  db:    { type: database, ops: { read: 1ms, write: 1ms, scan: 1ms } }\n";
+    let peak = "  peak:\n    rps: 100\n    journeys: [ { endpoint: 'GET /users/{id}' } ]\n";
+    let big = "  big:\n    rps: 1000\n    journeys: [ { endpoint: 'GET /users/{id}' } ]\n";
+    let b = a
+        .replace(&format!("{app}{db}"), &format!("{db}{app}"))
+        .replace(&format!("{peak}{big}"), &format!("{big}{peak}"));
+    assert!(b.find("  db:").unwrap() < b.find("  app:").unwrap(), "{b}");
+    assert!(
+        b.find("  big:").unwrap() < b.find("  peak:").unwrap(),
+        "{b}"
+    );
+    let mut sweeps = Vec::new();
+    for cfg in [a, b] {
+        let s = start(&cfg).await;
+        let r = sweep(
+            &s,
+            json!({ "profile": "peak", "max_factor": 1, "seed": 7, "scenario": "flaky" }),
+        )
+        .await;
+        assert_eq!(r.status(), 202);
+        let id = r.json::<Value>().await.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mut done = finished(&s, &id).await;
+        assert_eq!(done["state"], "done", "{done}");
+        for p in done["sweep"]["points"].as_array_mut().unwrap() {
+            p["nodes"]
+                .as_array_mut()
+                .unwrap()
+                .sort_by(|x, y| x["name"].as_str().cmp(&y["name"].as_str()));
+        }
+        sweeps.push(done["sweep"].take());
+    }
+    let errors = sweeps[0]["points"][0]["error_rate"].as_f64().unwrap();
+    assert!(
+        errors > 0.1 && errors < 0.2,
+        "the draws were exercised: {errors}"
+    );
+    assert_eq!(sweeps[0]["points"], sweeps[1]["points"]);
+    assert_eq!(sweeps[0], sweeps[1], "the finding too");
 }

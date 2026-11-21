@@ -24,16 +24,13 @@ fn plain(p: &Path) -> PathBuf {
 /// subdirectories, dotfiles and editor temp files (`*~`, `.#*`) silently. Skips with a
 /// warning (second return value) symlinks (not followed), names that are not UTF-8, names
 /// that look like scenario files but do not end in exactly `.yaml` (`.yml`, `.YAML`), and
-/// entries whose type cannot be read. An absent `dir` means no files. Returns
-/// `((name, parsed, file), warnings)`.
+/// entries whose type cannot be read. An absent `dir` means no files. Returns each file as a
+/// [`Found`] (its text kept, for the design fingerprint) and the warnings.
 ///
 /// # Errors
 /// An unreadable directory or file, a file over 1 MiB, a stem that is not a valid scenario
 /// name, more than [`MAX_SCENARIOS`] files, or a parse error (placed in the file).
-#[allow(clippy::type_complexity)]
-pub fn discover(
-    dir: &Path,
-) -> Result<(Vec<(String, ScenarioConfig, PathBuf)>, Vec<String>), Located> {
+pub(crate) fn discover(dir: &Path) -> Result<(Vec<Found>, Vec<String>), Located> {
     let (files, warnings) = list(dir)?;
     let found = files
         .into_iter()
@@ -41,20 +38,39 @@ pub fn discover(
             valid_name(&stem).map_err(|m| Located::new(Vec::new(), m).in_file(path.clone()))?;
             let src = read(&path)?;
             let cfg = parse_scenario(&src).map_err(|e| Located::parsed(path.clone(), e))?;
-            Ok((stem, cfg, path))
+            Ok(Found {
+                name: stem,
+                cfg,
+                file: path,
+                text: src,
+            })
         })
         .collect::<Result<Vec<_>, Located>>()?;
     Ok((found, warnings))
 }
+
+/// One scenario file as [`discover`] read it.
+pub(crate) struct Found {
+    /// The file's stem, a valid scenario name.
+    pub(crate) name: String,
+    /// The parsed scenario.
+    pub(crate) cfg: ScenarioConfig,
+    /// The file.
+    pub(crate) file: PathBuf,
+    /// The text parsed, for the design fingerprint (so the file is not read twice).
+    pub(crate) text: String,
+}
+
+/// What [`list`] finds: `(stem, file)` per scenario file, sorted by name, and the warnings.
+type Listing = (Vec<(String, PathBuf)>, Vec<String>);
 
 /// The scenario files in `dir` by [`discover`]'s rules, sorted by name, without reading them:
 /// `((stem, file), warnings)`. An absent `dir` means no files.
 ///
 /// # Errors
 /// An unreadable directory, or more than [`MAX_SCENARIOS`] files.
-#[allow(clippy::type_complexity)]
 #[allow(clippy::case_sensitive_file_extension_comparisons)] // lower is already lower-cased
-pub(crate) fn list(dir: &Path) -> Result<(Vec<(String, PathBuf)>, Vec<String>), Located> {
+pub(crate) fn list(dir: &Path) -> Result<Listing, Located> {
     let dir = plain(dir);
     let rd = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,

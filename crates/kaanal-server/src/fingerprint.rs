@@ -1,75 +1,68 @@
 //! The system's design fingerprint: 12 hex digits over a canonical digest of every input the
 //! build reads, so a sweep report can say whether two sweeps ran on the same design. The inputs
 //! are the config, each node's `spec:` file, the `endpoints:` file, `scenarios/*.yaml`,
-//! `locales/*.yaml` and the `data:` file or `data.yaml`, found by the loaders' own rules. The
-//! `site:` folder is not an input. A false "same design" is the failure that matters; a false
-//! "different" is harmless.
+//! `locales/*.yaml` and the `data:` file or `data.yaml`. The `site:` folder is not an input. A
+//! false "same design" is the failure that matters; a false "different" is harmless. It covers the
+//! design files only: the chaos a sweep ran under is recorded beside it (RULES 140).
+//!
+//! The loaders hand each input over as they read it ([`Inputs`]): the text, or for a spec the
+//! document the loader parsed already, so no file is read twice (no window for an edit between
+//! the build and the fingerprint) and a large spec is not parsed twice (measured 2026-11-21: the
+//! second read and parse cost more than the rest of the build on 50 MiB of specs).
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use kaanal_core::Config;
-use kaanal_core::config::{EndpointsConfig, NodeConfig};
-use kaanal_core::fingerprint::{canonical_digest, combine};
-use kaanal_data::DataSet;
+use kaanal_core::fingerprint::{canonical_digest, combine, value_digest};
 
-use crate::generation::{Trust, scenarios_dir};
-use crate::paths::{read_text, resolve};
-use crate::scenarios;
+use crate::generation::Trust;
+use crate::paths::resolve;
 
-/// **Private.** The digest of an input that cannot be read or listed now, though the build read it
-/// a moment ago (deleted or changed in between). Its label still counts, so the fingerprint
-/// differs from that of a project without the input; all zeros is no SHA-256 anyone will meet.
-const UNREADABLE: [u8; 32] = [0; 32];
+/// The design inputs one build read: label to digest. The label is the file's path relative to
+/// the project folder with forward slashes (`scenarios/NAME.yaml` for a scenario file), so a file
+/// read twice (two nodes naming one spec) counts once.
+#[derive(Default)]
+pub(crate) struct Inputs(BTreeMap<String, [u8; 32]>);
 
-/// The fingerprint of the system `cfg` builds from `base_dir`: [`combine`] over [`parts`]. Never
-/// fails (see [`UNREADABLE`]). **Known and accepted:** the files are read again here, right after
-/// the loaders and from the same `base_dir`; only the config's digest is of the exact bytes parsed.
-pub(crate) fn of_system(cfg: &Config, base_dir: &Path) -> String {
-    combine(&parts(cfg, base_dir))
+impl Inputs {
+    /// An input read as `text`, through [`canonical_digest`].
+    pub(crate) fn text(&mut self, label: String, text: &str) {
+        self.0.insert(label, canonical_digest(text));
+    }
+
+    /// An input the loader parsed to `doc` already: [`value_digest`], the digest of its text
+    /// (except past the alias bound, see `value_digest`: only ever a false "different").
+    pub(crate) fn parsed(&mut self, label: String, doc: &serde_json::Value) {
+        self.0.insert(label, value_digest(doc));
+    }
+
+    /// The fingerprint: [`combine`] over `config` (the config text's digest) and every input.
+    pub(crate) fn fingerprint(&self, config: [u8; 32]) -> String {
+        let mut parts = vec![("config".to_string(), config)];
+        parts.extend(self.0.iter().map(|(l, d)| (l.clone(), *d)));
+        combine(&parts)
+    }
+
+    /// The labels counted, `config` included, sorted.
+    #[cfg(test)]
+    pub(crate) fn labels(&self) -> Vec<String> {
+        let mut l: Vec<String> = self.0.keys().cloned().collect();
+        l.push("config".into());
+        l.sort();
+        l
+    }
 }
 
-/// **Private.** One `(label, digest)` per input: `config` for the config (its parsed text), else
-/// the file's path relative to `base_dir` with forward slashes, its text through
-/// [`canonical_digest`]. Each file is read once (two nodes naming one spec count it once); a
-/// missing optional input adds nothing.
-fn parts(cfg: &Config, base_dir: &Path) -> Vec<(String, [u8; 32])> {
-    // label -> file; `None`: a listing that failed now
-    let mut files: BTreeMap<String, Option<PathBuf>> = BTreeMap::new();
-    let mut add = |rel: &str| {
-        // the owner's rule never fails: it is `base_dir` joined with `rel`
-        if let Ok(f) = resolve(base_dir, rel, Trust::Owner, &[]) {
-            files.insert(label(base_dir, &f), Some(f));
-        }
-    };
-    for spec in cfg.nodes.values().filter_map(NodeConfig::spec) {
-        add(spec);
-    }
-    if let Some(EndpointsConfig::File(p)) = &cfg.endpoints {
-        add(p);
-    }
-    match scenarios::list(&scenarios_dir(base_dir)) {
-        Ok((found, _)) => files.extend(
-            found
-                .into_iter()
-                .map(|(stem, f)| (format!("scenarios/{stem}.yaml"), Some(f))),
-        ),
-        Err(_) => drop(files.insert("scenarios/".into(), None)),
-    }
-    match DataSet::files(base_dir, cfg.data.as_deref()) {
-        Ok(found) => files.extend(found.into_iter().map(|f| (label(base_dir, &f), Some(f)))),
-        Err(_) => drop(files.insert("locales/".into(), None)),
-    }
-    let mut out = vec![("config".to_string(), cfg.digest)];
-    out.extend(files.into_iter().map(|(l, f)| {
-        let text = f.and_then(|f| read_text(&f).ok());
-        (l, text.map_or(UNREADABLE, |t| canonical_digest(&t)))
-    }));
-    out
+/// The label of `rel` as the config names it: resolved by the owner's rule (`base_dir` joined
+/// with `rel`), so a draft build (held to the project by [`Trust::Api`]) labels a file as a boot does.
+pub(crate) fn rel_label(base_dir: &Path, rel: &str) -> String {
+    // the owner's rule never fails: it is `base_dir` joined with `rel`
+    resolve(base_dir, rel, Trust::Owner, &[])
+        .map_or_else(|_| rel.replace('\\', "/"), |f| label(base_dir, &f))
 }
 
-/// **Private.** `file` relative to `base_dir`, forward slashes; as is when it is not under it.
-fn label(base_dir: &Path, file: &Path) -> String {
+/// `file` relative to `base_dir`, forward slashes; as is when it is not under it.
+pub(crate) fn label(base_dir: &Path, file: &Path) -> String {
     file.strip_prefix(base_dir)
         .unwrap_or(file)
         .to_string_lossy()
@@ -81,7 +74,7 @@ mod tests {
     use super::*;
     use crate::generation::{Generation, Trust};
     use kaanal_core::Config;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     const SPEC: &str = "openapi: 3.0.0\ninfo: { title: t, version: '1' }\npaths:\n  /ping:\n    get:\n      responses:\n        '200':\n          description: ok\n          content: { application/json: { schema: { type: object, properties: { a: { type: string } } } } }\n";
     /// Every kind of input, plus a `site:` folder (not an input).
@@ -120,14 +113,55 @@ mod tests {
         Config::from_yaml(&std::fs::read_to_string(dir.join("kaanal.yaml")).unwrap()).unwrap()
     }
 
-    fn fp(dir: &Path) -> String {
-        of_system(&config(dir), dir)
+    /// The oracle: the files listed and read again from disk, by the listing helpers the loaders
+    /// share (`scenarios::list`, `DataSet::files`), the way the fingerprint was taken before the
+    /// loaders handed their inputs over. The build's fingerprint must equal it on a quiet project.
+    fn reread(cfg: &Config, base_dir: &Path) -> (String, Vec<String>) {
+        use crate::paths::read_text;
+        use kaanal_core::config::{EndpointsConfig, NodeConfig};
+        let mut files: BTreeMap<String, PathBuf> = BTreeMap::new();
+        for spec in cfg.nodes.values().filter_map(NodeConfig::spec) {
+            let f = resolve(base_dir, spec, Trust::Owner, &[]).unwrap();
+            files.insert(label(base_dir, &f), f);
+        }
+        if let Some(EndpointsConfig::File(p)) = &cfg.endpoints {
+            let f = resolve(base_dir, p, Trust::Owner, &[]).unwrap();
+            files.insert(label(base_dir, &f), f);
+        }
+        let (found, _) =
+            crate::scenarios::list(&crate::generation::scenarios_dir(base_dir)).unwrap();
+        files.extend(
+            found
+                .into_iter()
+                .map(|(stem, f)| (format!("scenarios/{stem}.yaml"), f)),
+        );
+        let data = kaanal_data::DataSet::files(base_dir, cfg.data.as_deref()).unwrap();
+        files.extend(data.into_iter().map(|f| (label(base_dir, &f), f)));
+        let mut parts = vec![("config".to_string(), cfg.digest)];
+        parts.extend(
+            files
+                .iter()
+                .map(|(l, f)| (l.clone(), canonical_digest(&read_text(f).unwrap()))),
+        );
+        let mut labels: Vec<String> = parts.iter().map(|p| p.0.clone()).collect();
+        labels.sort();
+        (combine(&parts), labels)
     }
 
+    /// The fingerprint a build of `dir` takes.
+    fn fp(dir: &Path) -> String {
+        Generation::build(&config(dir), dir, None, Trust::Owner)
+            .unwrap()
+            .0
+            .fingerprint
+    }
+
+    /// The inputs a build of `dir` counted.
     fn labels(dir: &Path) -> Vec<String> {
-        let mut l: Vec<String> = parts(&config(dir), dir).into_iter().map(|p| p.0).collect();
-        l.sort();
-        l
+        Generation::build_counted(&config(dir), dir, None, Trust::Owner)
+            .unwrap()
+            .2
+            .labels()
     }
 
     /// Replaces `from` (which must be there) with `to` in the file `rel`.
@@ -227,26 +261,29 @@ mod tests {
     }
 
     #[test]
-    fn an_input_that_cannot_be_read_now_still_gives_a_fingerprint() {
-        let dir = project("gone", true);
-        let before = fp(&dir);
-        // the config still names it, but it is gone (a moment ago the build read it)
-        std::fs::remove_file(dir.join("endpoints.yaml")).unwrap();
-        let after = fp(&dir);
-        assert_eq!(after.len(), 12);
-        assert_ne!(after, before);
-        assert!(labels(&dir).contains(&"endpoints.yaml".to_string()));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn the_build_fingerprint_equals_a_fresh_reading_of_its_files() {
+        // the oracle reads the files again; on a quiet project both must agree, label for label
+        for (name, full) in [("oracle-full", true), ("oracle-bare", false)] {
+            let dir = project(name, full);
+            let cfg = config(&dir);
+            let (g, _, inputs) = Generation::build_counted(&cfg, &dir, None, Trust::Owner).unwrap();
+            let (want, want_labels) = reread(&cfg, &dir);
+            assert_eq!(g.fingerprint, want, "{name}");
+            assert_eq!(inputs.labels(), want_labels, "{name}");
+            let (again, _) = Generation::build(&cfg, &dir, None, Trust::Owner).unwrap();
+            assert_eq!(g.fingerprint, again.fingerprint, "two builds agree");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]
-    fn the_generation_carries_it() {
-        let dir = project("gen", true);
+    fn a_draft_build_labels_its_inputs_as_a_boot_does() {
+        let dir = project("draft-labels", true);
         let cfg = config(&dir);
-        let (g, _) = Generation::build(&cfg, &dir, None, Trust::Owner).unwrap();
-        assert_eq!(g.fingerprint, of_system(&cfg, &dir));
-        let (again, _) = Generation::build(&cfg, &dir, None, Trust::Owner).unwrap();
-        assert_eq!(g.fingerprint, again.fingerprint);
+        let owner = Generation::build_counted(&cfg, &dir, None, Trust::Owner).unwrap();
+        let api = Generation::build_counted(&cfg, &dir, None, Trust::Api).unwrap();
+        assert_eq!(owner.2.labels(), api.2.labels());
+        assert_eq!(owner.0.fingerprint, api.0.fingerprint);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

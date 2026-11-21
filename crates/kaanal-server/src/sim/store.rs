@@ -63,10 +63,34 @@ pub struct RunRecord {
     /// say what was swept. Heavy, so `list()` strips it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inline_profile: Option<serde_json::Value>,
+    /// A sweep without a scenario: the live chaos it ran under. The fingerprint covers the design
+    /// files only, so the chaos in force is recorded beside it (RULES 140). `None` for a run, and
+    /// for a sweep under a named `scenario` (that name is the chaos).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_chaos: Option<LiveChaos>,
+    /// A sweep's chaos digest: 12 hex digits over the compiled chaos it ran under, whatever it came
+    /// from (RULES 140). With the fingerprint and the seed it says whether two sweeps match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chaos_digest: Option<String>,
+    /// A sweep's scenarios in force that were defined through the control API: no file holds them,
+    /// so the re-run command alone cannot repeat them. Empty (absent) for none and for a run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub runtime_scenarios: Vec<String>,
     /// The log sample, when `done`: served by `/log`, not part of the record's JSON. Shared,
     /// so reading a record does not copy it.
     #[serde(skip)]
     pub(crate) log: Arc<LogSample>,
+}
+
+/// The live chaos in force when a sweep started without a scenario.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveChaos {
+    /// The active scenarios, bottom to top.
+    pub scenarios: Vec<String>,
+    /// How many live chaos entries (`PUT /chaos`, `kaanal chaos`) were set.
+    pub entries: usize,
+    /// The first 12 hex digits of SHA-256 over the live entries by name (`control::sweep`).
+    pub digest: String,
 }
 
 /// What a sweep record keeps besides the run's own fields.
@@ -79,6 +103,12 @@ pub struct SweepMeta {
     pub fingerprint: String,
     /// The posted profile when it was written out (label `inline`).
     pub inline_profile: Option<serde_json::Value>,
+    /// The live chaos, when no scenario was named.
+    pub live_chaos: Option<LiveChaos>,
+    /// The digest of the compiled chaos.
+    pub chaos_digest: String,
+    /// The runtime-defined scenarios in force.
+    pub runtime_scenarios: Vec<String>,
 }
 
 #[derive(Default)]
@@ -175,6 +205,11 @@ impl SimStore {
             seed: meta.as_ref().map(|m| m.seed),
             max_factor: meta.as_ref().map(|m| m.max_factor),
             fingerprint: meta.as_ref().map(|m| m.fingerprint.clone()),
+            live_chaos: meta.as_ref().and_then(|m| m.live_chaos.clone()),
+            chaos_digest: meta.as_ref().map(|m| m.chaos_digest.clone()),
+            runtime_scenarios: meta
+                .as_ref()
+                .map_or_else(Vec::new, |m| m.runtime_scenarios.clone()),
             inline_profile: meta.and_then(|m| m.inline_profile),
             log: Arc::default(),
         });
@@ -279,7 +314,35 @@ mod tests {
             max_factor: 8.0,
             fingerprint: "0123456789ab".into(),
             inline_profile: Some(serde_json::json!({ "rps": 1 })),
+            live_chaos: Some(LiveChaos {
+                scenarios: vec!["slow".into()],
+                entries: 2,
+                digest: "abcdef012345".into(),
+            }),
+            chaos_digest: "c0ffee012345".into(),
+            runtime_scenarios: vec!["rt".into()],
         }
+    }
+
+    #[test]
+    fn a_sweep_record_carries_its_live_chaos_and_the_list_keeps_it() {
+        let s = SimStore::default();
+        let id = s.begin_sweep(1, "peak", None, meta()).unwrap();
+        assert_eq!(s.get(&id).unwrap().live_chaos, meta().live_chaos);
+        assert_eq!(
+            s.get(&id).unwrap().chaos_digest.as_deref(),
+            Some("c0ffee012345")
+        );
+        assert_eq!(s.get(&id).unwrap().runtime_scenarios, ["rt"]);
+        assert_eq!(
+            s.list()[0].live_chaos,
+            meta().live_chaos,
+            "small: the list keeps it"
+        );
+        // a run records none
+        s.finish_sweep(&id, Err("x".into()));
+        let run = s.begin(1, "peak", None, "applied", None).unwrap();
+        assert!(s.get(&run).unwrap().live_chaos.is_none());
     }
 
     #[test]

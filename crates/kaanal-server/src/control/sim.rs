@@ -70,25 +70,51 @@ pub(super) fn parse_profile(v: Value) -> Result<(String, Profile), Reject> {
     }
 }
 
+/// **Private.** What [`applied_inputs`] hands back.
+pub(super) struct Applied {
+    /// The system in force.
+    pub(super) g: Arc<Generation>,
+    /// The compiled chaos the run uses.
+    pub(super) chaos: EffectiveChaos,
+    /// The published state the live chaos was compiled from; `None` for a named scenario.
+    pub(super) snap: Option<Arc<Effective>>,
+    /// The scenarios in force (the named one, else the active stack) defined through the control
+    /// API (`Source::Runtime`): no file or config holds them, so a command cannot repeat them.
+    pub(super) runtime: Vec<String>,
+}
+
 /// **Private.** The system in force and the chaos `req` runs under: the named scenario's alone,
-/// else the live chaos.
-pub(super) fn applied_inputs(
-    st: &AppState,
-    req: &RunRequest,
-) -> Result<(Arc<Generation>, EffectiveChaos), Reject> {
+/// else the live chaos, with the published state it was compiled from (`None` for a scenario), so
+/// a sweep can record what was in force.
+pub(super) fn applied_inputs(st: &AppState, req: &RunRequest) -> Result<Applied, Reject> {
     // the chaos and the generation as one pair: an Apply swaps under this same lock
     let (c, g) = locked(st)?;
-    let chaos = if let Some(name) = &req.scenario {
+    let runtime_of = |names: &[String]| -> Vec<String> {
+        names
+            .iter()
+            .filter(|n| matches!(c.scenarios.get(n), Some((_, kaanal_core::Source::Runtime))))
+            .cloned()
+            .collect()
+    };
+    let (chaos, snap, runtime) = if let Some(name) = &req.scenario {
         let mut stack = kaanal_core::ChaosStack::default();
         stack
             .set_active(&c.scenarios, std::slice::from_ref(name))
             .map_err(|_| reject(StatusCode::NOT_FOUND, &format!("unknown scenario '{name}'")))?;
-        stack.compile(&c.scenarios)
+        let runtime = runtime_of(std::slice::from_ref(name));
+        (stack.compile(&c.scenarios), None, runtime)
     } else {
-        st.snapshot().chaos.clone()
+        let snap = st.snapshot();
+        let runtime = runtime_of(snap.stack.active());
+        (snap.chaos.clone(), Some(snap), runtime)
     };
     drop(c);
-    Ok((g, chaos))
+    Ok(Applied {
+        g,
+        chaos,
+        snap,
+        runtime,
+    })
 }
 
 /// **Private.** `202` with the id and a `Location` to poll.
@@ -130,8 +156,8 @@ pub async fn post_run(State(st): State<Arc<AppState>>, body: Bytes) -> Result<Re
     };
     let (g, chaos, source, draft_rev) = match b.source.as_deref() {
         None | Some("applied") => {
-            let (g, chaos) = applied_inputs(&st, &req)?;
-            (g, chaos, "applied", None)
+            let a = applied_inputs(&st, &req)?;
+            (a.g, a.chaos, "applied", None)
         }
         Some("draft") => {
             let (job, rev) = draft_job(&st, &req).await.map_err(|e| match e {

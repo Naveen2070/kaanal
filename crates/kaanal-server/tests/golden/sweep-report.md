@@ -4,11 +4,13 @@
 
 ## Finding
 
-**Verdict:** knee at 200 req/s (2.00x): p99 over 1s and errors over 1%.
+**Verdict:** knee at 200 req/s (2.00x), the last point within the limit; the next point is over: p99 over 1s and errors over 1%.
 
 - Limit: p99 1s, errors 1%.
 - First to saturate: db at 400 req/s (4.00x), analytic 400 req/s.
 - Dominant cause: overflow.
+- Chaos in force: none.
+- Chaos digest: 9f86d081884c.
 
 Warnings:
 
@@ -27,7 +29,7 @@ Warnings:
 ```bash
 kaanal sim sweep --profile=peak --p99 1s --errors 1% --max-factor 8 --seed 42
 # seed 42: every point draws the same random numbers, so the same seed on the same design repeats the curve
-# fingerprint 0123456789ab: SHA-256 of every file the build read, comments and whitespace aside; the same value means the same design, so the same numbers
+# fingerprint 0123456789ab: SHA-256 of the design files the build read, comments and whitespace aside; it does not cover the chaos in force (here: none; chaos digest 9f86d081884c): the same fingerprint, the same chaos digest and the same seed mean the same numbers, the fingerprint alone does not
 # kaanal 9.9.9
 ```
 
@@ -108,13 +110,21 @@ kaanal sim sweep --profile=peak --p99 1s --errors 1% --max-factor 8 --seed 42
     }
   ],
   "recipe": {
+    "chaos": "none",
+    "chaos_digest": "9f86d081884c",
     "command": "kaanal sim sweep --profile=peak --p99 1s --errors 1% --max-factor 8 --seed 42",
     "fingerprint": "0123456789ab",
     "generation": 2,
     "inline_profile": null,
     "kaanal_version": "9.9.9",
+    "live_chaos": {
+      "digest": "e3b0c44298fc",
+      "entries": 0,
+      "scenarios": []
+    },
     "max_factor": 8.0,
     "profile": "peak",
+    "runtime_scenarios": [],
     "scenario": null,
     "seed": 42
   },

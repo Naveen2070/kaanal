@@ -621,3 +621,18 @@ fn a_file_route_gets_a_hint_to_set_its_size_and_a_json_route_none() {
         "a spec with no file routes has no file hints"
     );
 }
+
+#[test]
+fn from_openapi_doc_is_from_openapi_plus_the_parsed_document() {
+    let (api, doc) = ApiModel::from_openapi_doc(SPEC).unwrap();
+    assert_eq!(
+        format!("{:?}", api.endpoints),
+        format!("{:?}", ApiModel::from_openapi(SPEC).unwrap().endpoints)
+    );
+    let parsed: serde_json::Value = serde_yaml_ng::from_str(SPEC).unwrap();
+    assert_eq!(doc, parsed);
+    assert_eq!(
+        ApiModel::from_openapi_doc("openapi: 2.0\npaths: {}\n").unwrap_err(),
+        ApiModel::from_openapi("openapi: 2.0\npaths: {}\n").unwrap_err()
+    );
+}

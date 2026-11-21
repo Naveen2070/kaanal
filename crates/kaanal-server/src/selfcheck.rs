@@ -12,7 +12,7 @@ use crate::generation::{Trust, load_data, read_api};
 /// project's, plus the project dictionary), as the mock would generate it.
 pub(crate) fn run(cfg: &Config, base_dir: &Path) -> Result<Vec<String>, Located> {
     let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
-    let (options, _) = load_data(cfg, base_dir, &topo, &mut Vec::new(), Trust::Owner)?;
+    let (options, _) = load_data(cfg, base_dir, &topo, &mut Vec::new(), Trust::Owner, None)?;
     let mut lines = Vec::new();
     for (id, node) in topo.nodes.iter().enumerate() {
         let Some(spec) = &node.spec else { continue };

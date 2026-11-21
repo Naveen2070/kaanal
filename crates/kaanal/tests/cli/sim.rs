@@ -158,7 +158,10 @@ fn sim_sweep_prints_the_knee_the_first_node_and_the_label() {
     );
     assert!(out.starts_with("sweep s1 done (generation 1)"), "{out}");
     assert!(out.contains("knee at ") && out.contains(" req/s"), "{out}");
-    assert!(out.contains("p99 over 500ms"), "{out}");
+    assert!(
+        out.contains("the last point within the limit; the next point is over: p99 over 500ms"),
+        "{out}"
+    );
     assert!(out.contains("first to saturate: app at "), "{out}");
     assert!(out.contains("not a prediction"), "{out}");
     assert!(
@@ -322,6 +325,7 @@ fn sim_report_prints_the_markdown_and_the_json() {
     let shown = ok(&up, &["sim", "show", "s1"]);
     assert!(shown.contains("seed 7"), "{shown}");
     assert!(shown.contains("fingerprint "), "{shown}");
+    assert!(shown.contains("chaos in force: none"), "{shown}");
 }
 
 #[test]
@@ -391,7 +395,12 @@ fn sim_sweep_report_force_overwrites_and_a_failed_sweep_writes_nothing() {
             .starts_with("# Load sweep s1")
     );
     // no temp sibling is left behind
-    assert!(!up.dir.join("sweep.md.kaanal-tmp").exists());
+    assert!(!std::fs::read_dir(&up.dir).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".kaanal-tmp")
+    }));
     // a sweep that cannot run: the error, and the file is as it was
     let bad = sweep_up_with("report-failed", "proc: 1h", 100_000);
     let file = bad.dir.join("never.md");

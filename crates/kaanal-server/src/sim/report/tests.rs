@@ -1,11 +1,15 @@
+//! The sweep report's unit tests, kept apart from `report/mod.rs` (AGENTS.md file size).
+
 use std::sync::Arc;
 use std::time::Duration;
 
 use kaanal_sim::sweep::{FirstSaturated, Limit, NodePoint, Over, Point, SweepResult, Verdict};
 
 use super::*;
+use crate::sim::store::LiveChaos;
 
 const GOLDEN: &str = include_str!("../../../tests/golden/sweep-report.md");
+const GOLDEN_LIVE: &str = include_str!("../../../tests/golden/sweep-report-live-chaos.md");
 
 fn point(k: f64, goodput: f64, error_rate: f64, p99_ms: f64, over: Over) -> Point {
     Point {
@@ -76,6 +80,13 @@ fn rec() -> RunRecord {
         max_factor: Some(8.0),
         fingerprint: Some("0123456789ab".into()),
         inline_profile: None,
+        live_chaos: Some(LiveChaos {
+            scenarios: Vec::new(),
+            entries: 0,
+            digest: "e3b0c44298fc".into(),
+        }),
+        chaos_digest: Some("9f86d081884c".into()),
+        runtime_scenarios: Vec::new(),
         log: Arc::default(),
     }
 }
@@ -159,6 +170,16 @@ fn a_running_failed_or_run_record_is_refused() {
         },
         RunRecord {
             sweep: None,
+            ..rec()
+        },
+        // a sweep without --scenario always records the live chaos it ran under
+        RunRecord {
+            live_chaos: None,
+            ..rec()
+        },
+        // every sweep records the digest of its compiled chaos
+        RunRecord {
+            chaos_digest: None,
             ..rec()
         },
     ] {
@@ -378,4 +399,213 @@ fn hostile_names_cannot_break_the_markdown_or_the_json() {
     assert!(cmd.ends_with("--scenario='x`|y```z'"), "{cmd}");
     // the node name in the prose is escaped
     assert!(md.contains(r"First to saturate: x\`\|y\`\`\`z at"), "{md}");
+}
+
+/// A sweep that ran under live chaos: two active scenarios and three live entries.
+fn live() -> RunRecord {
+    RunRecord {
+        live_chaos: Some(LiveChaos {
+            scenarios: vec!["slow-db".into(), "flaky".into()],
+            entries: 3,
+            digest: "abcdef012345".into(),
+        }),
+        ..rec()
+    }
+}
+
+#[test]
+fn the_knee_is_the_last_point_within_the_limit_and_the_next_is_over() {
+    // Verdict::Knee is the last passing point (200 req/s); the crossing named is the next one's
+    let md = sweep_report(&rec(), "v").unwrap().markdown;
+    assert!(
+        md.contains("**Verdict:** knee at 200 req/s (2.00x), the last point within the limit; the next point is over: p99 over 1s and errors over 1%.\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn no_chaos_says_none_and_the_fingerprint_covers_the_files_only() {
+    let rep = sweep_report(&rec(), "v").unwrap();
+    let md = &rep.markdown;
+    assert!(md.contains("- Chaos in force: none.\n"), "{md}");
+    let bash = block(md, "```bash\n");
+    assert!(
+        bash.contains("it does not cover the chaos in force (here: none; chaos digest 9f86d081884c): the same fingerprint, the same chaos digest and the same seed mean the same numbers, the fingerprint alone does not"),
+        "{bash}"
+    );
+    assert!(!bash.contains("live chaos in force"), "{bash}");
+    assert_eq!(rep.json["recipe"]["chaos"], "none");
+    assert_eq!(rep.json["recipe"]["live_chaos"]["entries"], 0);
+}
+
+#[test]
+fn a_scenario_sweep_names_the_scenario_and_its_command_repeats_it() {
+    let r = RunRecord {
+        scenario: Some("db-down".into()),
+        live_chaos: None,
+        ..rec()
+    };
+    let rep = sweep_report(&r, "v").unwrap();
+    let md = &rep.markdown;
+    assert!(md.contains("- Chaos in force: scenario db-down.\n"), "{md}");
+    let bash = block(md, "```bash\n");
+    assert!(
+        bash.lines()
+            .next()
+            .unwrap()
+            .ends_with(" --scenario=db-down"),
+        "{bash}"
+    );
+    assert!(
+        bash.contains("(here: scenario db-down; chaos digest 9f86d081884c)"),
+        "{bash}"
+    );
+    assert!(!bash.contains("live chaos in force"), "{bash}");
+    assert_eq!(rep.json["recipe"]["chaos"], "scenario");
+    assert!(rep.json["recipe"]["live_chaos"].is_null());
+    assert_eq!(rep.json["recipe"]["scenario"], "db-down");
+}
+
+#[test]
+fn live_chaos_is_named_and_the_recipe_says_the_command_alone_cannot_repeat_it() {
+    let rep = sweep_report(&live(), "v").unwrap();
+    let md = &rep.markdown;
+    let what = "active scenarios slow-db, flaky; 3 entries, digest abcdef012345";
+    assert!(
+        md.contains(&format!("- Chaos in force: live chaos: {what}.\n")),
+        "{md}"
+    );
+    let bash = block(md, "```bash\n");
+    assert!(
+        bash.contains(&format!("# live chaos in force when this ran ({what}): the command alone cannot reproduce it; activate the same chaos first\n")),
+        "{bash}"
+    );
+    assert!(
+        bash.contains(&format!(
+            "(here: live chaos: {what}; chaos digest 9f86d081884c)"
+        )),
+        "{bash}"
+    );
+    assert_eq!(rep.json["recipe"]["chaos"], "live");
+    assert_eq!(rep.json["recipe"]["live_chaos"]["digest"], "abcdef012345");
+    assert_eq!(rep.json["recipe"]["live_chaos"]["entries"], 3);
+    assert_eq!(rep.json["recipe"]["live_chaos"]["scenarios"][1], "flaky");
+    // live entries alone, no scenario active: one entry is singular
+    let r = RunRecord {
+        live_chaos: Some(LiveChaos {
+            scenarios: Vec::new(),
+            entries: 1,
+            digest: "0a0a0a0a0a0a".into(),
+        }),
+        ..rec()
+    };
+    let md = sweep_report(&r, "v").unwrap().markdown;
+    assert!(
+        md.contains("- Chaos in force: live chaos: 1 entry, digest 0a0a0a0a0a0a.\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn the_live_chaos_report_matches_its_golden_file() {
+    let rep = sweep_report(&live(), "9.9.9").unwrap();
+    assert_eq!(rep.markdown, GOLDEN_LIVE);
+}
+
+#[test]
+fn a_line_separator_in_a_name_reads_as_the_cli_would_print_it() {
+    // U+2028 and U+2029 are line breaks to some renderers (Zl, Zp: neither control nor format), and
+    // the CLI's clean prints them as '?'. The server drops them from the text and escapes them in the
+    // JSON, so its bytes pass the CLI's cleaning unchanged: `sim report`, the route and Studio agree.
+    let mut r = rec();
+    r.profile = "pe\u{2028}ak".into();
+    r.scenario = Some("db\u{2029}down".into());
+    r.live_chaos = None;
+    r.sweep
+        .as_mut()
+        .unwrap()
+        .first_to_saturate
+        .as_mut()
+        .unwrap()
+        .node = "d\u{2028}b".into();
+    let rep = sweep_report(&r, "v").unwrap();
+    // the CLI's `clean` (crates/kaanal/src/util/parse.rs) replaces these, so none may be left
+    let cli_changes = |c: char| {
+        c != '\n'
+            && (c.is_control()
+                || matches!(c, '\u{61c}' | '\u{200e}'..='\u{200f}' | '\u{2028}'..='\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}'))
+    };
+    assert!(!rep.markdown.chars().any(cli_changes), "{:?}", rep.markdown);
+    let data = block(&rep.markdown, "```json\n");
+    assert!(
+        data.contains(r"\u2028") && data.contains(r"\u2029"),
+        "{data}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(data).unwrap();
+    assert_eq!(parsed, rep.json, "the escapes parse back to the names");
+    assert!(
+        rep.markdown.contains("First to saturate: db at"),
+        "{}",
+        rep.markdown
+    );
+}
+
+#[test]
+fn every_report_names_the_chaos_digest() {
+    for r in [
+        rec(),
+        live(),
+        RunRecord {
+            scenario: Some("db-down".into()),
+            live_chaos: None,
+            ..rec()
+        },
+    ] {
+        let rep = sweep_report(&r, "v").unwrap();
+        assert!(
+            rep.markdown.contains("- Chaos digest: 9f86d081884c.\n"),
+            "{}",
+            rep.markdown
+        );
+        assert_eq!(rep.json["recipe"]["chaos_digest"], "9f86d081884c");
+        assert_eq!(
+            rep.json["recipe"]["runtime_scenarios"],
+            serde_json::json!([])
+        );
+    }
+}
+
+#[test]
+fn a_runtime_scenario_in_force_says_the_command_alone_cannot_repeat_it() {
+    let r = RunRecord {
+        scenario: Some("rt".into()),
+        live_chaos: None,
+        runtime_scenarios: vec!["rt".into()],
+        ..rec()
+    };
+    let rep = sweep_report(&r, "v").unwrap();
+    let bash = block(&rep.markdown, "```bash\n");
+    assert!(
+        bash.lines().next().unwrap().ends_with(" --scenario=rt"),
+        "the flag stays: {bash}"
+    );
+    assert!(
+        bash.contains("# scenarios defined at runtime in force (rt): the command alone cannot reproduce it; define them the same way first and compare the chaos digest\n"),
+        "{bash}"
+    );
+    assert_eq!(
+        rep.json["recipe"]["runtime_scenarios"],
+        serde_json::json!(["rt"])
+    );
+    // a file or config scenario has no such line
+    let md = sweep_report(
+        &RunRecord {
+            runtime_scenarios: Vec::new(),
+            ..r
+        },
+        "v",
+    )
+    .unwrap()
+    .markdown;
+    assert!(!md.contains("defined at runtime"), "{md}");
 }

@@ -95,3 +95,31 @@ fn an_alias_bomb_hashes_its_bytes_without_expanding() {
         "dfce0503aa496b676593f7a74a2d4dfac9014f4c23de0b06bc9c4c1d4e0be55a"
     );
 }
+
+#[test]
+fn a_parsed_value_digests_as_its_text_does() {
+    // a loader that has parsed the text already hands its value over instead of the text being parsed twice
+    use kaanal_core::fingerprint::value_digest;
+    for text in [
+        "openapi: 3.0.0\n# a comment\npaths: { /a: {}, /b: { get: {} } }\n",
+        "{\"b\": [1, 2.5, null, true], \"a\": {\"z\": \"x\", \"y\": {}}}",
+    ] {
+        let v: serde_json::Value = serde_yaml_ng::from_str(text).unwrap();
+        assert_eq!(value_digest(&v), canonical_digest(text), "{text:?}");
+    }
+}
+
+#[test]
+fn the_streamed_value_digest_equals_the_buffered_one() {
+    // value_digest streams the JSON into the hash; the oracle is SHA-256 of the whole buffer
+    use kaanal_core::fingerprint::value_digest;
+    use sha2::{Digest, Sha256};
+    let big: Vec<serde_json::Value> = (0..200_000)
+        .map(|i| serde_json::json!({ "k": i, "s": format!("lorem ipsum {i}"), "f": f64::from(i) / 7.0 }))
+        .collect();
+    let unicode = serde_json::json!({ "na\u{ef}ve": "caf\u{e9} \u{1F600} \u{2028} \u{202E}", "\u{4e2d}": ["\u{0}", "\"", "\\"] });
+    for v in [serde_json::Value::Array(big), unicode] {
+        let buffered: [u8; 32] = Sha256::digest(serde_json::to_vec(&v).unwrap()).into();
+        assert_eq!(value_digest(&v), buffered);
+    }
+}

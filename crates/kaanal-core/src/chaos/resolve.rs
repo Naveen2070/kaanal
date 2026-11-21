@@ -246,6 +246,20 @@ impl EffectiveChaos {
         self.endpoints.get(endpoint)
     }
 
+    /// Every replica-through-endpoint entry, which [`EffectiveChaos::entries`] leaves out, sorted
+    /// by node, replica and endpoint. With `entries` it is the whole compiled state, for a digest
+    /// of the chaos a run used.
+    #[must_use]
+    pub fn replica_at_entries(&self) -> Vec<(NodeId, u16, &str, &Resolved)> {
+        let mut v: Vec<_> = self
+            .replica_at
+            .iter()
+            .flat_map(|(&(n, r), m)| m.iter().map(move |(e, l)| (n, r, e.as_str(), l)))
+            .collect();
+        v.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+        v
+    }
+
     /// Every entry with its key, sorted like [`ChaosState::entries`].
     #[must_use]
     pub fn entries(&self) -> Vec<(ChaosKey, &Resolved)> {

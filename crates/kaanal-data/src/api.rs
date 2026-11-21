@@ -69,6 +69,15 @@ impl ApiModel {
     /// Returns a message for non-3.0.x versions, missing `paths`, bad paths,
     /// external or recursive `$ref`s, dangling refs, or ref-expansion bombs.
     pub fn from_openapi(src: &str) -> Result<ApiModel, String> {
+        Self::from_openapi_doc(src).map(|(api, _)| api)
+    }
+
+    /// [`ApiModel::from_openapi`], also handing back the parsed document, so a caller that digests
+    /// the spec (the design fingerprint) does not parse the text a second time.
+    ///
+    /// # Errors
+    /// As [`ApiModel::from_openapi`].
+    pub fn from_openapi_doc(src: &str) -> Result<(ApiModel, Value), String> {
         let doc: Value =
             serde_yaml_ng::from_str(src).map_err(|e| format!("invalid YAML/JSON: {e}"))?;
         // `openapi: 3.0` (unquoted) parses as a YAML number, not a string.
@@ -113,7 +122,7 @@ impl ApiModel {
                 });
             }
         }
-        Ok(ApiModel { endpoints })
+        Ok((ApiModel { endpoints }, doc))
     }
 }
 

@@ -342,3 +342,34 @@ fn files_lists_what_load_reads() {
         [dir.join("locales/xx-YY.yaml"), dir.join("conf/mine.yaml")]
     );
 }
+
+#[test]
+fn load_with_sources_hands_back_each_file_it_read_with_its_text() {
+    let dir = scratch("sources");
+    write(&dir, "locales/xx-YY.yaml", &pack("xx-YY", "Nowhere"));
+    write(
+        &dir,
+        "data.yaml",
+        "fields:\n  sku: { gen: static, value: X }\n",
+    );
+    write(&dir, "conf/mine.yaml", "fields: {}\n");
+    for data in [None, Some("conf/mine.yaml")] {
+        let (_, sources) = DataSet::load_with_sources(&dir, data).unwrap();
+        let files: Vec<_> = sources.iter().map(|(f, _)| f.clone()).collect();
+        assert_eq!(
+            files,
+            DataSet::files(&dir, data).unwrap(),
+            "the same files as files()"
+        );
+        for (f, text) in &sources {
+            assert_eq!(
+                *text,
+                std::fs::read_to_string(f).unwrap(),
+                "{}",
+                f.display()
+            );
+        }
+    }
+    let (_, none) = DataSet::load_with_sources(&scratch("sources-none"), None).unwrap();
+    assert_eq!(none.len(), 0, "{none:?}");
+}

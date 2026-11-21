@@ -19,6 +19,7 @@ use kaanal_core::{
 use kaanal_data::{ApiModel, DEFAULT_LOCALE, DataError, DataSet, Options, PageSpec};
 use serde_json::Value;
 
+use crate::fingerprint::{Inputs, label, rel_label};
 use crate::paths::{read_text, resolve, shown};
 use crate::scenarios;
 use crate::state::Route;
@@ -103,8 +104,8 @@ pub struct Generation {
     /// The config this generation was built from, for what needs a node's own fields after the
     /// build (the cost estimate of a run).
     pub config: Arc<Config>,
-    /// The design fingerprint of every input the build read (12 hex digits), taken right after
-    /// the loaders ran: see [`crate::fingerprint::of_system`].
+    /// The design fingerprint of every input the build read (12 hex digits), from the text the
+    /// loaders read: see [`crate::fingerprint::Inputs`].
     pub fingerprint: String,
 }
 
@@ -129,16 +130,29 @@ impl Generation {
     /// A [`Located`] error (path into `kaanal.yaml` + message, with file paths where relevant) for
     /// unreadable or invalid specs or endpoints file, route conflicts, any `endpoints:` error from
     /// `compile`, or any topology error. Nothing is served half-configured (rule R6.1).
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one linear load pipeline; one line over after the generation id"
-    )]
     pub fn build(
         cfg: &Config,
         base_dir: &Path,
         drawn_seed: Option<u64>,
         trust: Trust,
     ) -> Result<(Generation, ScenarioSet), Located> {
+        Self::build_counted(cfg, base_dir, drawn_seed, trust).map(|(g, s, _)| (g, s))
+    }
+
+    /// [`Generation::build`], also handing back the design inputs the loaders read (the
+    /// fingerprint's parts), for the tests that check what it counts.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear load pipeline, kept in one function so each step reads the previous one's output in order and every early return names the step that failed; split it at a seam (the route table) when it next grows"
+    )]
+    pub(crate) fn build_counted(
+        cfg: &Config,
+        base_dir: &Path,
+        drawn_seed: Option<u64>,
+        trust: Trust,
+    ) -> Result<(Generation, ScenarioSet, Inputs), Located> {
+        // what the loaders read, for the fingerprint: each input handed over as it is read
+        let mut inputs = Inputs::default();
         let topo = Topology::build(cfg).map_err(|e| e.located(cfg))?;
         // `/users/{id}` -> `/users/{}`; the router cannot hold two spellings of one shape.
         let mut shapes: HashMap<String, String> = HashMap::new();
@@ -154,7 +168,14 @@ impl Generation {
             }
         }
 
-        let (options, project_options) = load_data(cfg, base_dir, &topo, &mut warnings, trust)?;
+        let (options, project_options) = load_data(
+            cfg,
+            base_dir,
+            &topo,
+            &mut warnings,
+            trust,
+            Some(&mut inputs),
+        )?;
         let site = load_site(cfg, base_dir)?;
         let specs = load_specs(
             &topo,
@@ -163,8 +184,9 @@ impl Generation {
             &mut warnings,
             Some(&options),
             trust,
+            Some(&mut inputs),
         )?;
-        let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes, trust)?;
+        let endpoints = compile_endpoints(cfg, base_dir, &topo, &specs.routes, trust, &mut inputs)?;
         warnings.extend(endpoints.warnings.iter().cloned());
         // The seed only changes generated values, not whether an empty form exists.
         let ok = crate::pins::empty_ok(&specs.info, cfg.seed);
@@ -176,8 +198,9 @@ impl Generation {
             &endpoints,
             &mut warnings,
             trust == Trust::Api,
+            &mut inputs,
         )?;
-        let fingerprint = crate::fingerprint::of_system(cfg, base_dir);
+        let fingerprint = inputs.fingerprint(cfg.digest);
         // BTreeMap and `Endpoints::iter` (sorted by key): a conflict always names the same path.
         let mut by_path: BTreeMap<String, Vec<Route>> = BTreeMap::new();
         let mut counters = Vec::new();
@@ -282,6 +305,7 @@ impl Generation {
                 started: std::time::Instant::now(),
             },
             scenarios,
+            inputs,
         ))
     }
 }
@@ -340,6 +364,7 @@ pub(crate) fn spec_routes(
         &mut Vec::new(),
         None,
         Trust::Owner,
+        None,
     )?;
     Ok((topo, specs.routes))
 }
@@ -354,6 +379,7 @@ fn load_specs(
     warnings: &mut Vec<String>,
     options: Option<&[Options]>,
     trust: Trust,
+    mut inputs: Option<&mut Inputs>,
 ) -> Result<Specs, Located> {
     let mut specs = Specs {
         routes: Vec::new(),
@@ -364,7 +390,11 @@ fn load_specs(
     for (id, node) in topo.nodes.iter().enumerate() {
         let Some(spec) = &node.spec else { continue };
         let at = keys(&["nodes", node.name.as_str(), "spec"]);
-        let (file, api) = read_api(spec, base_dir, &at, trust)?;
+        let (file, api, doc) = read_api_doc(spec, base_dir, &at, trust)?;
+        if let Some(i) = inputs.as_deref_mut() {
+            i.parsed(rel_label(base_dir, spec), &doc);
+        }
+        drop(doc);
         let label = shown(base_dir, &file, trust);
         warnings.extend(api.warnings().into_iter().map(|w| format!("{label}: {w}")));
         if let Some(opts) = options {
@@ -406,10 +436,20 @@ pub(crate) fn read_api(
     at: &[PathSeg],
     trust: Trust,
 ) -> Result<(PathBuf, ApiModel), Located> {
+    read_api_doc(spec, base_dir, at, trust).map(|(file, api, _)| (file, api))
+}
+
+/// **Private.** [`read_api`], also handing back the parsed document (for the fingerprint).
+fn read_api_doc(
+    spec: &str,
+    base_dir: &Path,
+    at: &[PathSeg],
+    trust: Trust,
+) -> Result<(PathBuf, ApiModel, Value), Located> {
     let file = resolve(base_dir, spec, trust, at)?;
     let label = shown(base_dir, &file, trust);
     let src = read_text(&file).map_err(|e| Located::new(at.to_vec(), format!("{label}: {e}")))?;
-    let api = ApiModel::from_openapi(&src).map_err(|e| {
+    let (api, doc) = ApiModel::from_openapi_doc(&src).map_err(|e| {
         // a parse error can quote the file's text; the API must not echo a file it was only pointed at
         let msg = if trust == Trust::Api {
             "not a valid OpenAPI document".to_string()
@@ -418,7 +458,7 @@ pub(crate) fn read_api(
         };
         Located::new(at.to_vec(), format!("{label}: {msg}"))
     })?;
-    Ok((file, api))
+    Ok((file, api, doc))
 }
 
 /// **Private.** A data-file error as a [`Located`]: in its file (parse position, else the
@@ -461,11 +501,21 @@ pub(crate) fn load_data(
     topo: &Topology,
     warnings: &mut Vec<String>,
     trust: Trust,
+    inputs: Option<&mut Inputs>,
 ) -> Result<(Vec<Options>, Options), Located> {
     if let Some(rel) = cfg.data.as_deref() {
         resolve(base_dir, rel, trust, &keys(&["data"]))?;
     }
-    let data = DataSet::load(base_dir, cfg.data.as_deref()).map_err(|e| data_located(e, trust))?;
+    let data = match inputs {
+        None => DataSet::load(base_dir, cfg.data.as_deref()),
+        Some(i) => DataSet::load_with_sources(base_dir, cfg.data.as_deref()).map(|(d, sources)| {
+            for (file, text) in sources {
+                i.text(label(base_dir, &file), &text);
+            }
+            d
+        }),
+    }
+    .map_err(|e| data_located(e, trust))?;
     warnings.extend(data.warnings().iter().cloned());
     let project = data
         .options_for(cfg.locale.as_deref().unwrap_or(DEFAULT_LOCALE))
@@ -506,6 +556,7 @@ fn compile_endpoints(
     topo: &Topology,
     routes: &[RouteSpec],
     trust: Trust,
+    inputs: &mut Inputs,
 ) -> Result<Endpoints, Located> {
     // P4: a spec route with no entry and no gateway edge would fail in `compile` with no place,
     // but `Topology::build` already rejects a spec node without an edge from the gateway.
@@ -524,6 +575,7 @@ fn compile_endpoints(
         }
         Located::parsed(path.clone(), e)
     })?;
+    inputs.text(rel_label(base_dir, p), &src);
     compile(
         topo,
         routes,
@@ -537,6 +589,10 @@ fn compile_endpoints(
 /// **Private.** Every scenario: the inline ones, then `scenarios/*.yaml` next to the config
 /// (S2, S16). Inline errors are placed in `kaanal.yaml`, file errors in the file. Returns the
 /// set and the scenarios directory (under the canonical config directory; it may not exist).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one loader step of the pipeline; the fingerprint's inputs are the eighth"
+)]
 fn load_scenarios(
     cfg: &Config,
     empty_ok: kaanal_core::EmptyOk,
@@ -545,6 +601,7 @@ fn load_scenarios(
     endpoints: &Endpoints,
     warnings: &mut Vec<String>,
     lenient: bool,
+    inputs: &mut Inputs,
 ) -> Result<(ScenarioSet, PathBuf, Vec<Flagged>), Located> {
     let mut set = ScenarioSet::default();
     let mut flagged = Vec::new();
@@ -560,7 +617,15 @@ fn load_scenarios(
     let dir = scenarios_dir(base_dir);
     let (found, found_warnings) = scenarios::discover(&dir)?;
     warnings.extend(found_warnings);
-    for (name, sc, file) in found {
+    for scenarios::Found {
+        name,
+        cfg: sc,
+        file,
+        text,
+    } in found
+    {
+        // counted even when a draft leaves it out (flagged): the build read it
+        inputs.text(format!("scenarios/{name}.yaml"), &text);
         let resolved = resolve_scenario(&name, &sc, topo, endpoints, empty_ok);
         let (s, w) = match resolved {
             Ok(ok) => ok,

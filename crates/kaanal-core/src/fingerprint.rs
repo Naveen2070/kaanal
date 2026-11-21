@@ -11,12 +11,39 @@ use sha2::{Digest, Sha256};
 /// untrusted spec, scenario and data files.
 #[must_use]
 pub fn canonical_digest(text: &str) -> [u8; 32] {
-    // serde_json's map is a BTreeMap (no `preserve_order` in this workspace), so keys come out sorted.
-    let canon = crate::config::preprocess(text)
+    crate::config::preprocess(text)
         .ok()
         .and_then(|src| serde_yaml_ng::from_str::<serde_json::Value>(src).ok())
-        .and_then(|v| serde_json::to_vec(&v).ok());
-    Sha256::digest(canon.as_deref().unwrap_or(text.as_bytes())).into()
+        .map_or_else(
+            || Sha256::digest(text.as_bytes()).into(),
+            |v| value_digest(&v),
+        )
+}
+
+/// SHA-256 of `v` written as compact JSON with sorted keys, streamed into the hash (no buffer of
+/// the whole text: a 16 MiB spec would need one). For a loader that has parsed the text already.
+/// It equals [`canonical_digest`] of a text that parses to `v`, except for a text whose aliases
+/// expand past the bound of [`crate::config::preprocess`] (about 50 000 alias nodes), where
+/// `canonical_digest` hashes the raw bytes instead; harmless, as the two can only disagree as a
+/// false "different", never a false "same".
+#[must_use]
+pub fn value_digest(v: &serde_json::Value) -> [u8; 32] {
+    /// **Private.** An `io::Write` that feeds the hash.
+    struct Hashing(Sha256);
+    impl std::io::Write for Hashing {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.update(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut h = Hashing(Sha256::new());
+    // serde_json's map is a BTreeMap (no `preserve_order` in this workspace), so keys come out
+    // sorted; a Value always serialises and this writer never fails
+    let _ = serde_json::to_writer(&mut h, v);
+    h.0.finalize().into()
 }
 
 /// The first 12 lower-case hex digits of SHA-256 over `label NUL hex(digest) newline` for each
