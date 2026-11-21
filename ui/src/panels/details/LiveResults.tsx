@@ -1,6 +1,6 @@
 // The Results tab while Studio is live (step 8L): what breaks first over the window, the timeline
 // and the notes. Compare with the last run, plan for a rate, share and the heatmap belong to a
-// finished run and stay in Batch.
+// finished run and stay in Batch. The sweep group shows with Start off: a live system cannot step its load.
 
 import { useEffect, useState } from "react";
 import { LazyBoundary } from "../../kit/LazyBoundary";
@@ -13,6 +13,7 @@ import { useSelected } from "../../data/store/view";
 import { BusyChart } from "./BusyChart";
 import { Heatmap } from "./Heatmap";
 import { Results } from "./Results.lazy";
+import { SweepGroup } from "../sweep/SweepGroup";
 import { liveFeed } from "../../canvas/liveFeed";
 import { breaksFirst, fmtMs, twoSignificant } from "../../canvas/metrics";
 import { Section } from "./Field";
@@ -227,13 +228,16 @@ export function LiveResults() {
         </label>
         {problem ? <p className="mt-2 text-xs text-warn">{problem}</p> : null}
       </Section>
+      {/* Results carries the sweep group; with no measured run it stands alone (Start is off live) */}
       {run ? (
         <div className="-mx-3 mt-2 border-t border-border">
           <LazyBoundary fallback={null}>
             <Results />
           </LazyBoundary>
         </div>
-      ) : null}
+      ) : (
+        <SweepGroup />
+      )}
     </div>
   );
 }

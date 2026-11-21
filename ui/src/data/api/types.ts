@@ -294,6 +294,8 @@ export interface BreakerSummary {
 
 export interface RunRecord {
   id: string;
+  /** `run` or `sweep`; the server always sends it, optional only for an older server. */
+  kind?: "run" | "sweep";
   state: "running" | "done" | "failed";
   generation: number;
   profile: string;
@@ -304,6 +306,99 @@ export interface RunRecord {
   started_ms: number;
   finished_ms: number | null;
   summary?: Summary | null;
+  error?: string | null;
+}
+
+/** The body of `POST /sim/sweep`. `error_pct` is a percentage (0 to 100); the record carries it as a fraction. */
+export interface SweepBody {
+  /** A profile name from `traffic:`, or a profile written out; none sweeps the applied design's first. */
+  profile?: string | object;
+  seed?: number;
+  scenario?: string;
+  /** Highest p99 that passes, ms. */
+  p99_ms?: number;
+  error_pct?: number;
+  /** Highest load factor on the ladder, 1 to 64. */
+  max_factor?: number;
+}
+
+/** One node's load at one sweep point. */
+export interface SweepNodeDoc {
+  name: string;
+  utilization: number | null;
+  saturated: boolean;
+  saturates_at_req_s: number | null;
+}
+
+/** One load factor of a sweep. */
+export interface SweepPointDoc {
+  k: number;
+  req_s: number;
+  requests: number;
+  goodput_req_s: number;
+  /** A share, 0 to 1. */
+  error_rate: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  cause: string | null;
+  nodes: SweepNodeDoc[];
+  over: { p99: boolean; errors: boolean };
+}
+
+export type SweepVerdict = {
+  kind: "knee" | "broken_at_lowest" | "holds_to";
+  k: number;
+  req_s: number;
+};
+
+/** What a finished sweep found. */
+export interface SweepResultDoc {
+  label: string;
+  limit: { p99_ms: number; error_rate: number };
+  points: SweepPointDoc[];
+  verdict: SweepVerdict;
+  recovers_at: number | null;
+  stopped_at: number | null;
+  first_to_saturate: {
+    node: string;
+    k: number;
+    req_s: number;
+    analytic_req_s: number | null;
+  } | null;
+  dominant_cause: string | null;
+  warnings: string[];
+}
+
+/** The live chaos a sweep ran under: active scenarios (bottom to top), the live entry count, a 12-hex digest of the entries. */
+export interface LiveChaos {
+  scenarios: string[];
+  entries: number;
+  digest: string;
+}
+
+/** A sweep's record from `GET /sim/runs/{id}`. */
+export interface SweepRecord {
+  id: string;
+  kind: "sweep";
+  state: "running" | "done" | "failed";
+  generation: number;
+  profile: string;
+  seed: number;
+  max_factor: number;
+  fingerprint: string;
+  /** The scenario whose chaos alone the sweep ran under; absent or null for the live chaos. */
+  scenario?: string | null;
+  /** Without a `scenario`: the live chaos in force when the sweep started (the fingerprint covers the design files only). */
+  live_chaos?: LiveChaos;
+  /** 12 hex digits over the compiled chaos the sweep ran under; with the fingerprint and the seed it says whether two sweeps match. */
+  chaos_digest?: string;
+  /** Scenarios in force defined through the control API: the re-run command alone cannot repeat them. */
+  runtime_scenarios?: string[];
+  /** Points in run order while it runs; kept when it fails. */
+  sweep_points: SweepPointDoc[];
+  /** The finding, when `done`. */
+  sweep?: SweepResultDoc | null;
   error?: string | null;
 }
 

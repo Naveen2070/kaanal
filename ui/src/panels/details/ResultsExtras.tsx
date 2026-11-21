@@ -140,9 +140,19 @@ export function PlanSection({ s }: { s: Summary }) {
 
 /** Copy the report as Markdown, or save it as a file. */
 export function ReportButtons({ runId, s }: { runId: string | undefined; s: Summary }) {
+  return (
+    <CopySaveButtons
+      text={() =>
+        reportMarkdown(runId ? `Run ${runId.replace(/^s/, "")}` : "Run", s, rankedByPeak(s))
+      }
+      fileName={`kaanal-run-${runId ?? "report"}.md`}
+    />
+  );
+}
+
+/** Copy some Markdown to the clipboard, or save it as a file named `fileName`. */
+export function CopySaveButtons({ text, fileName }: { text: () => string; fileName: string }) {
   const [said, setSaid] = useState("");
-  const text = () =>
-    reportMarkdown(runId ? `Run ${runId.replace(/^s/, "")}` : "Run", s, rankedByPeak(s));
   const btn =
     "flex min-h-7 items-center gap-1 rounded border border-control bg-sheet px-2 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent";
   return (
@@ -166,7 +176,7 @@ export function ReportButtons({ runId, s }: { runId: string | undefined; s: Summ
           const url = URL.createObjectURL(new Blob([text()], { type: "text/markdown" }));
           const a = document.createElement("a");
           a.href = url;
-          a.download = `kaanal-run-${runId ?? "report"}.md`;
+          a.download = fileName;
           a.click();
           URL.revokeObjectURL(url);
           setSaid("Saved");

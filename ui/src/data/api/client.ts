@@ -14,6 +14,7 @@ import type {
   PutBody,
   RunBody,
   RunRecord,
+  SweepBody,
   SaveBody,
   SampleResult,
   SaveResult,
@@ -54,7 +55,7 @@ async function send(
   path: string,
   body: unknown,
   opts: Opts,
-): Promise<{ status: number; json: unknown }> {
+): Promise<{ status: number; json: unknown; text: string }> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token()}` };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await globalThis.fetch(ROOT + path, {
@@ -72,7 +73,7 @@ async function send(
       json = null;
     }
   }
-  return { status: res.status, json };
+  return { status: res.status, json, text };
 }
 
 function fail(status: number, json: unknown): ApiError {
@@ -92,6 +93,14 @@ function query(q: object): string {
   for (const [k, v] of Object.entries(q)) if (v !== undefined) p.set(k, String(v));
   const s = p.toString();
   return s ? `?${s}` : "";
+}
+
+function started({ status, json }: { status: number; json: unknown }): StartRun {
+  if (status === 202) return { kind: "started", id: (json as { id: string }).id };
+  if (status === 409 || status === 429) {
+    return { kind: "busy", status, message: fail(status, json).message };
+  }
+  throw fail(status, json);
 }
 
 export const api = {
@@ -197,12 +206,22 @@ export const api = {
     call<{ entries: FeedRow[]; boot?: number }>("GET", `/logs${query(q)}`, undefined, o),
   /** A busy simulator (409, or 429 while draft builds are in progress) is a result, not an error. */
   async startRun(body: RunBody, o: Opts = {}): Promise<StartRun> {
-    const { status, json } = await send("POST", "/sim/run", body, o);
-    if (status === 202) return { kind: "started", id: (json as { id: string }).id };
-    if (status === 409 || status === 429) {
-      return { kind: "busy", status, message: fail(status, json).message };
-    }
-    throw fail(status, json);
+    return started(await send("POST", "/sim/run", body, o));
+  },
+  /** Starts a load sweep; busy is a result, as for `startRun`. */
+  async startSweep(body: SweepBody, o: Opts = {}): Promise<StartRun> {
+    return started(await send("POST", "/sim/sweep", body, o));
+  },
+  /** A finished sweep as Markdown. */
+  async getSweepReport(id: string, o: Opts = {}): Promise<string> {
+    const { status, json, text } = await send(
+      "GET",
+      `/sim/runs/${encodeURIComponent(id)}/report`,
+      undefined,
+      o,
+    );
+    if (status < 200 || status > 299) throw fail(status, json);
+    return text;
   },
   getRun: (id: string, o: Opts = {}) =>
     call<RunRecord>("GET", `/sim/runs/${encodeURIComponent(id)}`, undefined, o),

@@ -19,6 +19,7 @@ import { CompareLine, PlanSection, ReportButtons, SloSection, Verdict } from "./
 import { Group } from "./groups/Group";
 import { RESULTS_GROUP } from "./groups/ids";
 import { useSlo } from "./slo";
+import { SweepGroup } from "../sweep/SweepGroup";
 
 /** Starts the value of a wire in the picker, so it cannot be a component's name. */
 const WIRE = String.fromCharCode(31);
@@ -39,12 +40,21 @@ export function Results() {
   const s = run?.summary;
   const target = useSlo((x) => x.targetMs);
 
-  if (!s && status === "running") return <ResultsSkeleton />;
+  // the sweep does not need a finished run: it shows (and keeps a finished sweep) on every path
   if (!s) {
     return (
-      <p className="p-3 text-sm text-muted">
-        No finished run yet. The results appear after the first run.
-      </p>
+      <>
+        {status === "running" ? (
+          <ResultsSkeleton />
+        ) : (
+          <p className="p-3 text-sm text-muted">
+            No finished run yet. The results appear after the first run.
+          </p>
+        )}
+        <div className="px-3 pb-3 text-sm">
+          <SweepGroup />
+        </div>
+      </>
     );
   }
 
@@ -68,7 +78,9 @@ export function Results() {
   return (
     <div className="p-3 text-sm">
       {/* always present: a number from this tool is a relative what-if, never a prediction */}
-      {dimmed ? (
+      {/* only a blocked try "could not finish": a run in flight, or one waiting out a busy slot
+          (a sweep holds it), is dimmed without the warning */}
+      {dimmed && status === "blocked" ? (
         <p className="mb-2 text-xs text-warn">
           Out of date: the newest run could not finish, so these are the last figures that did.
         </p>
@@ -231,6 +243,8 @@ export function Results() {
           </ul>
         )}
       </Section>
+
+      <SweepGroup />
 
       <Group
         id={RESULTS_GROUP.goals}

@@ -47,6 +47,33 @@ test("a_409_run_busy_is_not_thrown_as_a_failure", async () => {
   expect(await api.startRun({ profile: "peak" })).toEqual({ kind: "started", id: "s3" });
 });
 
+test("startSweep_posts_to_sim_sweep_and_reads_202_409_429", async () => {
+  const sent = mockFetch([
+    { status: 202, json: { id: "w1" } },
+    { status: 409, json: { error: "busy" } },
+    { status: 429, json: { error: "builds" } },
+  ]);
+  expect(await api.startSweep({ profile: "peak", max_factor: 4 })).toEqual({
+    kind: "started",
+    id: "w1",
+  });
+  expect((await api.startSweep({ profile: "peak" })).kind).toBe("busy");
+  expect((await api.startSweep({ profile: "peak" })).kind).toBe("busy");
+  expect(sent[0]?.url).toBe("/__kaanal/sim/sweep");
+  expect(sent[0]?.method).toBe("POST");
+  expect(sent[0]?.body).toEqual({ profile: "peak", max_factor: 4 });
+});
+
+test("getSweepReport_returns_the_text", async () => {
+  const sent = mockFetch([
+    { text: "# Sweep\n\nknee at 2x" },
+    { status: 409, json: { error: "running" } },
+  ]);
+  expect(await api.getSweepReport("w 1")).toBe("# Sweep\n\nknee at 2x");
+  expect(sent[0]?.url).toBe("/__kaanal/sim/runs/w%201/report");
+  await expect(api.getSweepReport("w1")).rejects.toMatchObject({ status: 409 });
+});
+
 test("other_errors_throw_and_a_cancelled_call_is_aborted", async () => {
   mockFetch([{ status: 500, json: { error: "boom" } }]);
   await expect(api.getDraft()).rejects.toMatchObject({ status: 500, message: "boom" });

@@ -12,6 +12,8 @@ export interface Sent {
 export interface Answer {
   status?: number;
   json?: unknown;
+  /** A plain-text body, instead of JSON. */
+  text?: string;
   /** Resolves later than the answers after it, to test ordering. */
   delayMs?: number;
 }
@@ -33,11 +35,13 @@ export function mockFetch(answers: Answer[]): Sent[] {
       const status = a.status ?? 200;
       // a 204 or 304 may carry no body at all, not even an empty one
       const body =
-        a.json === undefined
-          ? [204, 205, 304].includes(status)
-            ? null
-            : ""
-          : JSON.stringify(a.json);
+        a.text !== undefined
+          ? a.text
+          : a.json === undefined
+            ? [204, 205, 304].includes(status)
+              ? null
+              : ""
+            : JSON.stringify(a.json);
       return new Response(body, { status });
     }),
   );

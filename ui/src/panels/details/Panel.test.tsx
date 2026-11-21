@@ -6,6 +6,8 @@ import type { DraftView } from "../../data/api/types";
 import { useDraft } from "../../data/store/draft";
 import { usePickedWire } from "../../canvas/picked";
 import { useMode } from "../../data/store/mode";
+import { RESULTS_GROUP } from "./groups/ids";
+import { useGroups } from "./groups/store";
 import { mockFetch } from "../../test/fetch";
 import { Panel } from "./Panel";
 
@@ -71,7 +73,10 @@ test("the_tabs_switch_between_controls_log_and_results", async () => {
   expect(await screen.findByText(/No finished run yet. The log appears/)).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Trace" }).getAttribute("aria-selected")).toBe("true");
   await act(async () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Results" })));
-  expect(await screen.findByText(/The results appear after the first run/)).toBeTruthy();
+  // the lazy Results chunk pulls in the sweep group too: a cold load can pass the 1 s default
+  expect(
+    await screen.findByText(/The results appear after the first run/, undefined, { timeout: 5000 }),
+  ).toBeTruthy();
   await act(async () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Settings" })));
   expect(await screen.findByLabelText("Service time")).toBeTruthy();
 });
@@ -89,4 +94,14 @@ test("a_picked_wire_shows_its_settings_and_a_selected_component_wins", async () 
   usePickedWire.setState({ index: 7 }); // a place that is not there any more
   await show("/__kaanal/studio");
   expect(screen.getByText(/Select a component/)).toBeTruthy();
+});
+
+test("live_results_show_the_sweep_group_with_start_off", async () => {
+  useMode.setState({ mode: "live" });
+  useGroups.setState({ open: { [RESULTS_GROUP.sweep]: true } });
+  await show("/__kaanal/studio");
+  await act(async () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Results" })));
+  const start = await screen.findByRole("button", { name: "Start" }, { timeout: 5000 });
+  expect(start).toHaveProperty("disabled", true);
+  expect(screen.getByText(/A sweep steps the load, which a live system cannot\./)).toBeTruthy();
 });

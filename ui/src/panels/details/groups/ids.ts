@@ -26,6 +26,7 @@ export const DOC_GROUP = { headers: "doc.headers", live: "doc.live" } as const;
 
 /** The folded groups at the foot of Results. */
 export const RESULTS_GROUP = {
+  sweep: "results.sweep",
   goals: "results.goals",
   share: "results.share",
   notes: "results.notes",
