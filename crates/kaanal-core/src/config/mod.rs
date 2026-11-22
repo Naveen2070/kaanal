@@ -306,11 +306,13 @@ impl Config {
     /// Re-runs the load checks a size change can break on a config changed in memory (a sizing
     /// candidate, [`crate::resize::apply`]): the memory limit against the class, the cores' range
     /// ([`check_edges`]), the replica range and a `weighted` balance against the copy count
-    /// ([`check_replicas`]). Nothing that re-reads a file, nothing about hosting.
+    /// ([`check_replicas`]), and the hosting, engine and instance rules ([`hosting::check`]: a family
+    /// alternative changes hosting). Nothing that re-reads a file.
     ///
     /// # Errors
     /// The first problem, naming the node (or edge) and the field.
     pub fn validate_candidate(&self) -> Result<(), String> {
+        hosting::check(self).map_err(|e| e.msg)?;
         check_edges(self).map_err(|e| e.msg)?;
         check_replicas(self).map_err(|e| e.msg)
     }
