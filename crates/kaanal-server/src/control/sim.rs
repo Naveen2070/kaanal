@@ -313,7 +313,7 @@ const LOG_DEFAULT: usize = 200;
 ///
 /// # Errors
 /// 400 for a bad `level` or `endpoint`; 404 for an unknown id; 409 while the run is running, for
-/// a failed run (it has no log; the body carries its `error`), and for a sweep.
+/// a failed run (it has no log; the body carries its `error`), and for a sweep or a plan.
 pub async fn get_run_log(
     State(st): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -351,10 +351,10 @@ pub async fn get_run_log(
             "no such run (only the last eight are kept)",
         )
     })?;
-    if run.kind == "sweep" {
+    if run.kind != "run" {
         return Err(reject(
             StatusCode::CONFLICT,
-            "a sweep has no log; its points are in the record",
+            &format!("a {} has no log; its findings are in the record", run.kind),
         ));
     }
     match run.state {

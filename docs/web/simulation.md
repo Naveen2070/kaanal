@@ -124,9 +124,32 @@ curl -s localhost:8080/__kaanal/sim/runs/s2/report -H "Authorization: Bearer $TO
 - In Live mode the group is there but Start is off: a sweep steps the load, which a live system cannot. Switch to Batch.
 - A sweep and a run share the one slot: while a run is in progress Start is off, and a slot taken elsewhere says the simulator is busy.
 
+## Sizing a design: what would hold this load?
+
+A sweep says where the design breaks. A **sizing plan** answers the next question: "what do I change so it holds 3x this traffic, and what does that cost?" It is a **relative what-if, not a prediction**: the same cost model as every run, so it ranks changes and shows their order of size; it does not promise a number, and every price is an estimate. Kaanal never applies a plan. It writes a **proposed draft**, a text you read and apply yourself.
+
+```bash
+kaanal sim plan -p peak --target 3x --report plan.md -o plan.yaml
+```
+
+- **The target** is a multiple of the profile's rates (`3x`, 0.1 to 64) or a total rate (`500`, req/s, shaped like the profile). The limits are the sweep's: `--p99` (default 1 s) and `--errors` (default 1%). A design **holds** the target only with a margin: p99 at most 90% of the p99 limit and errors at most half of the error limit, so a plan does not sit on the edge.
+- **The check** is one run at the target load (not a sweep). It gives pass or fail, the p99 and error rate, and a **capacity estimate**: the lowest closed-form saturation rate of any node, as in the sweep. The estimate is not a measurement.
+- **The walk** repeats the check and moves the first node to saturate one size step, until the design holds, nothing sizable is left, the cause is one size cannot fix (see _Cannot hold it_), the next step would add to the price and break the budget (a step that adds nothing never does), two steps in a row do not help, or `--max-steps` (default 30, 1 to 100) is reached. Each step shows the node, the change, the price, the capacity estimate and the p99 and error rate at the target, before and after.
+- **What it may change** (size knobs only): the instance class of a node up the same series in the region's price file (`m5.large` to `m5.xlarge`), cores only on a node with no instance, memory only when the failures at the target are out-of-memory (`oom`: the next class up on a node with an instance, else its written memory limit doubled), and copies (`replicas`). A cache gets copies only. It never changes a node's kind, the region, the wires, a rate limit, a timeout, a breaker or a retry. A node you do not want touched is kept with `--keep NODE` (repeatable).
+- **The menu** lists, at each step, the other moves the walk tried for that node (a larger class, one more copy) with their price and effect. No extra runs.
+- **Cannot hold it** is a result, with the reason. When the errors at the target are over the limit and most failures come from a rate limit you set (the node is named when one node has one), from the chaos in force, or from a deadline you set while no node saturates, the walk sizes nothing and says sizing cannot fix it. When the bottleneck has no size knob (an external API, an object store, a node you kept), the verdict names it the same way. The node can be absent in the data (`null`) when the cause is not one node's. The plan stops rather than invent a fix.
+- **The budget** (`--budget 2.00`) is a ceiling in dollars an hour. It counts the **priced nodes only**: a node with no `instance:` has no price and is listed as not priced. It includes per-use prices at the visits of the target run: the walk prices without them, so the verdict is judged again from the re-check's cost, and a **budget check** line says what the plan shown costs against the budget (and says so when those prices turned a holding plan into an over-budget one). A plan that holds but costs more is not hidden: the verdict says it holds and is over budget by how much. When no holding design was found, the verdict says so, what the next step needed would cost and by how much that passes the budget; the budget check says whether the plan shown is itself within the budget (it is not when the design in force already costs more).
+- **Dollars are dollars an hour.** In the data, fields named `micro_usd_hr` are millionths of a dollar an hour (1,000,000 = one dollar), integers.
+
+**If you changed the database family** is a separate section, never part of the path. For a database whose `ops:` you did not write, it runs the same walk as if the flavor were the other family (relational against `mongodb`, `dynamodb`, `cassandra`, and the reverse) on the flavor's preset read, write and scan times. It **assumes your application can use that family** (no joins, transactions or consistency are modelled), the presets are estimates, and a price appears only where a price table exists. It is a what-if, not a recommendation to migrate. A database with `ops:` of your own, or one you kept, is skipped with the reason.
+
+**Checked.** The proposed draft is built again from its own text and run at the target, so what is reported holding is what the file says. A load sweep of that design then finds its knee, which should lie above the target. The checked design's cost counts per-use prices at that run's visits, so it can differ a little from the plan's price.
+
+The report (`kaanal sim report ID`, or `--report`) has the label first, then the target, now, the steps, the menu, the family section, the verdict, the check, a re-run command and a JSON `## Data` block. It carries the design fingerprint, the chaos digest and the seed: the same three and the same target give the same plan, byte for byte apart from the id (comments in the file do not change the fingerprint). A plan is of the **applied** design, as a sweep is; Apply a draft first. It shares the run slot with runs and sweeps (there is no Studio view of it yet). Over HTTP: `POST /__kaanal/sim/plan`, then `GET /__kaanal/sim/runs/{id}/draft` for the proposed draft; see [control-api.md](control-api.md).
+
 ## Limits
 
-- **One run at a time.** A second `POST` while one runs is `409` with the running id. A sweep counts as a run.
+- **One run at a time.** A second `POST` while one runs is `409` with the running id. A sweep or a plan counts as a run.
 - **Server caps.** A run is limited to about 2 million recorded hops and 5 million simulated hops (a couple of seconds of CPU); a bigger request is `400` and says which limit it hit. Lower the rate or the duration.
 - **A run keeps the system it began on.** If you Apply a new draft while it runs, the report still describes the old one; its `generation` says which.
 - The report is kept, the per-request records are not.

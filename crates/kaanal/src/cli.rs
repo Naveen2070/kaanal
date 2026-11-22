@@ -374,6 +374,8 @@ pub(crate) enum SimCmd {
         #[arg(long, requires = "report")]
         force: bool,
     },
+    /// Plan the sizing that holds a target load (a relative what-if); never applied
+    Plan(PlanArgs),
     /// List the last eight runs
     List,
     /// Show one run with its report, or a sweep with its finding
@@ -392,6 +394,53 @@ pub(crate) enum SimCmd {
         #[arg(long, requires = "output")]
         force: bool,
     },
+}
+
+/// **Private.** `sim plan` flags.
+#[derive(clap::Args)]
+pub(crate) struct PlanArgs {
+    /// A profile of the config's `traffic:` section (default: the first)
+    #[arg(short, long, conflicts_with = "file")]
+    pub(crate) profile: Option<String>,
+    /// A file holding one profile (`rps`, `journeys`, ...) as YAML or JSON
+    #[arg(short, long)]
+    pub(crate) file: Option<PathBuf>,
+    /// The load to hold: a multiple of the profile's rates (`3x`, 0.1 to 64) or a total req/s (`500`)
+    #[arg(long, allow_hyphen_values = true)]
+    pub(crate) target: String,
+    /// Highest p99 that passes, e.g. 500ms (default 1s)
+    #[arg(long)]
+    pub(crate) p99: Option<String>,
+    /// Highest share of failed requests that passes, e.g. 1% or 1 (default 1%)
+    #[arg(long)]
+    pub(crate) errors: Option<String>,
+    /// The most the plan may cost, dollars an hour of the priced nodes, e.g. 2.00
+    #[arg(long, allow_hyphen_values = true)]
+    pub(crate) budget: Option<String>,
+    /// A node the plan must not move (repeatable)
+    #[arg(long, value_name = "NODE")]
+    pub(crate) keep: Vec<String>,
+    /// The most steps, up to 100 (default 30)
+    #[arg(long)]
+    pub(crate) max_steps: Option<u32>,
+    /// Seed of the draws (default the config's `seed:`)
+    #[arg(long)]
+    pub(crate) seed: Option<u64>,
+    /// Plan under this scenario's chaos alone (default: the live chaos)
+    #[arg(long)]
+    pub(crate) scenario: Option<String>,
+    /// Print the plan id and return without waiting
+    #[arg(long)]
+    pub(crate) no_wait: bool,
+    /// When it finishes, write its report (Markdown) to this file; not with --no-wait
+    #[arg(long, value_name = "FILE", conflicts_with = "no_wait")]
+    pub(crate) report: Option<PathBuf>,
+    /// When it finishes, write the proposed draft (the applied text with the plan's steps) to this file; not with --no-wait
+    #[arg(short, long, value_name = "FILE", conflicts_with = "no_wait")]
+    pub(crate) output: Option<PathBuf>,
+    /// Overwrite the --report and -o files if they exist
+    #[arg(long)]
+    pub(crate) force: bool,
 }
 
 /// **Private.** `draft save --fix-scenarios` values.

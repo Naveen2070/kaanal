@@ -67,8 +67,9 @@ impl Limits {
 const MAX_SERVICE: Duration = Duration::from_hours(10);
 /// **Private.** Slowest stream: one arrival per ~11.6 days. Bounds the mean gap.
 const MIN_RATE_PER_S: f64 = 1e-6;
-/// **Private.** Fastest stream: a 1 µs mean gap. Above ~1e9 the gap rounds to 0 ns.
-pub(crate) const MAX_RATE_PER_S: f64 = 1e6;
+/// Fastest stream the engine runs, req/s: a 1 µs mean gap (above ~1e9 the gap rounds to 0 ns). Public
+/// so a caller can refuse a request over it before it starts work (the server's plan route).
+pub const MAX_RATE_PER_S: f64 = 1e6;
 /// **Private.** Longest simulated time; keeps the virtual clock far inside `u64` nanoseconds.
 const MAX_SIM_DURATION: Duration = Duration::from_hours(365 * 24);
 /// **Private.** Most streams a run may have (a request tag packs the stream index into 16 bits).

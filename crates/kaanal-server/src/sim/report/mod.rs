@@ -1,4 +1,4 @@
-//! The sweep report (Step 9b): one finished sweep record as a Markdown file with a fenced JSON
+//! The sweep report (Step 9b) and the plan report (Step 9c-1, [`plan`]): one finished record as a Markdown file with a fenced JSON
 //! block holding the same data, so a person can read it cold and an agent can parse it. The
 //! server is the only maker; the route, the CLI and Studio hand over these bytes unchanged.
 //!
@@ -17,6 +17,9 @@ use serde_json::{Value, json};
 
 use super::store::{LiveChaos, RunRecord};
 
+mod plan;
+pub(crate) use plan::plan_report;
+
 /// The `report_version` of the JSON: bump it when a field changes meaning or goes away.
 const REPORT_VERSION: u32 = 1;
 
@@ -32,14 +35,26 @@ pub(crate) struct SweepReport {
 /// Why a record has no report.
 #[derive(Debug, PartialEq)]
 pub(crate) enum ReportError {
-    /// A plain run: its report stays in Studio.
-    NotASweep,
-    /// The sweep has not finished.
+    /// A plain run (its report stays in Studio), or the wrong kind for the maker asked.
+    NotAReport,
+    /// The sweep or plan has not finished.
     Running,
-    /// The sweep failed; why.
+    /// The sweep or plan failed; why.
     Failed(String),
-    /// A finished sweep without the fields every sweep record gets (a server bug); which one.
+    /// A finished sweep or plan without the fields every such record gets (a server bug); which one.
     Internal(&'static str),
+}
+
+/// The report of the finished sweep or plan `rec` (its `kind` decides).
+///
+/// # Errors
+/// [`ReportError`] for a run, a running or failed record, or one missing its recipe.
+pub(crate) fn report(rec: &RunRecord, version: &str) -> Result<SweepReport, ReportError> {
+    if rec.kind == "plan" {
+        plan_report(rec, version)
+    } else {
+        sweep_report(rec, version)
+    }
 }
 
 /// The report of the finished sweep `rec`; `version` is the `kaanal` version the recipe names.
@@ -48,7 +63,7 @@ pub(crate) enum ReportError {
 /// [`ReportError`] for a run, a running or failed sweep, or a sweep record missing its recipe.
 pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport, ReportError> {
     if rec.kind != "sweep" {
-        return Err(ReportError::NotASweep);
+        return Err(ReportError::NotAReport);
     }
     match rec.state {
         "running" => return Err(ReportError::Running),
@@ -108,7 +123,43 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
     );
     finding(&mut md, s, &chaos, chaos_digest);
     curve(&mut md, &s.points);
-    let _ = write!(md, "## Re-run\n\n```bash\n{command}\n");
+    rerun(
+        &mut md,
+        &Recipe {
+            rec,
+            command: &command,
+            chaos: &chaos,
+            seed,
+            fingerprint,
+            chaos_digest,
+            version,
+            seed_note: "every point draws the same random numbers, so the same seed on the same design repeats the curve",
+        },
+    );
+    md.push_str(&json_text(&json));
+    md.push_str("\n```\n");
+    Ok(SweepReport { markdown: md, json })
+}
+
+/// What the `## Re-run` block of a sweep or a plan report says.
+struct Recipe<'a> {
+    rec: &'a RunRecord,
+    /// The command that repeats the job.
+    command: &'a str,
+    chaos: &'a Chaos<'a>,
+    seed: u64,
+    fingerprint: &'a str,
+    chaos_digest: &'a str,
+    version: &'a str,
+    /// What follows `# seed N: ` in the recipe: what the seed fixes and what it repeats.
+    seed_note: &'a str,
+}
+
+/// The `## Re-run` block, up to and including the opening of the `## Data` fence: the command, the
+/// notes on what it cannot repeat, the seed, the fingerprint (files only), the chaos and the version.
+fn rerun(md: &mut String, c: &Recipe<'_>) {
+    let (rec, chaos) = (c.rec, c.chaos);
+    let _ = write!(md, "## Re-run\n\n```bash\n{}\n", c.command);
     if rec.inline_profile.is_some() {
         md.push_str(
             "# profile.yaml: recipe.inline_profile in the Data block below (JSON is YAML)\n",
@@ -131,17 +182,16 @@ pub(crate) fn sweep_report(rec: &RunRecord, version: &str) -> Result<SweepReport
     }
     let _ = write!(
         md,
-        "# seed {seed}: every point draws the same random numbers, so the same seed on the same design repeats the curve\n\
+        "# seed {}: {}\n\
          # fingerprint {}: SHA-256 of the design files the build read, comments and whitespace aside; it does not cover the chaos in force (here: {}; chaos digest {}): the same fingerprint, the same chaos digest and the same seed mean the same numbers, the fingerprint alone does not\n\
          # kaanal {}\n```\n\n## Data\n\n```json\n",
-        clean(fingerprint),
+        c.seed,
+        c.seed_note,
+        clean(c.fingerprint),
         chaos.describe(clean),
-        clean(chaos_digest),
-        clean(version)
+        clean(c.chaos_digest),
+        clean(c.version)
     );
-    md.push_str(&json_text(&json));
-    md.push_str("\n```\n");
-    Ok(SweepReport { markdown: md, json })
 }
 
 /// The chaos a sweep ran under, as the report names it.

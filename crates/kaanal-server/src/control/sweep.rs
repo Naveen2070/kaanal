@@ -10,7 +10,7 @@
 use super::sim::{Applied, accepted, applied_inputs, busy, from_sim, parse_profile};
 use super::*;
 use crate::sim::profile::{Profile, RunRequest, first_profile, to_sim};
-use crate::sim::report::{ReportError, sweep_report};
+use crate::sim::report::{ReportError, report};
 use crate::sim::run::{Job, Slot, execute_sweep};
 use crate::sim::store::{LiveChaos, SweepMeta};
 use kaanal_core::fingerprint::{canonical_digest, combine};
@@ -46,27 +46,37 @@ pub struct SweepBody {
     max_factor: Option<f64>,
 }
 
-/// **Private.** The sweep options from a body, each limit checked.
-fn options(b: &SweepBody) -> Result<Options, Reject> {
+/// **Private.** The pass line from a body's `p99_ms` (default 1000) and `error_pct` (default 1),
+/// each checked (the sweep and the plan share it).
+pub(super) fn limit(p99_ms: Option<f64>, error_pct: Option<f64>) -> Result<Limit, Reject> {
     let bad = |m: &str| reject(StatusCode::BAD_REQUEST, m);
     // a zero Duration also catches a p99 too small to be a nanosecond
-    let p99 = Duration::try_from_secs_f64(b.p99_ms.unwrap_or(1000.0) / 1000.0)
+    let p99 = Duration::try_from_secs_f64(p99_ms.unwrap_or(1000.0) / 1000.0)
         .ok()
         .filter(|d| !d.is_zero())
         .ok_or_else(|| bad("p99_ms must be a number of milliseconds above 0"))?;
-    let error_pct = b.error_pct.unwrap_or(1.0);
+    let error_pct = error_pct.unwrap_or(1.0);
     if !(0.0..=100.0).contains(&error_pct) {
         return Err(bad("error_pct must be a percentage, 0 to 100"));
     }
+    Ok(Limit {
+        p99,
+        error_rate: error_pct / 100.0,
+    })
+}
+
+/// **Private.** The sweep options from a body, each limit checked.
+fn options(b: &SweepBody) -> Result<Options, Reject> {
+    let limit = limit(b.p99_ms, b.error_pct)?;
     let max_factor = b.max_factor.unwrap_or(8.0);
     if !(1.0..=MAX_FACTOR).contains(&max_factor) {
-        return Err(bad(&format!("max_factor must be 1 to {MAX_FACTOR}")));
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            &format!("max_factor must be 1 to {MAX_FACTOR}"),
+        ));
     }
     Ok(Options {
-        limit: Limit {
-            p99,
-            error_rate: error_pct / 100.0,
-        },
+        limit,
         max_factor,
         ..Options::default()
     })
@@ -125,7 +135,7 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
             req.scenario.as_deref(),
             SweepMeta {
                 seed: b.seed.unwrap_or(g.seed),
-                max_factor: opts.max_factor,
+                max_factor: Some(opts.max_factor),
                 fingerprint: g.fingerprint.clone(),
                 inline_profile,
                 live_chaos: snap.map(|e| live_chaos(&g, &e)),
@@ -156,7 +166,7 @@ pub async fn post_sweep(State(st): State<Arc<AppState>>, body: Bytes) -> Result<
 /// order they were set in nor the config's node order (ids) changes the digest. The digest is the
 /// fingerprint's form: 12 hex digits of SHA-256 (`canonical_digest`, `combine`). It does not cover
 /// the active scenarios' definitions (a scenario redefined through the API keeps its name).
-fn live_chaos(g: &Generation, snap: &Effective) -> LiveChaos {
+pub(super) fn live_chaos(g: &Generation, snap: &Effective) -> LiveChaos {
     let live = snap.stack.live();
     let mut items: Vec<String> = live
         .entries()
@@ -188,7 +198,7 @@ fn live_chaos(g: &Generation, snap: &Effective) -> LiveChaos {
 /// that changes the effect changes the digest, and two stacks compiled to the same effect, which
 /// give the same numbers, share it). The keys are a set: their texts are sorted, then hashed as the
 /// fingerprint is (`canonical_digest`, `combine`).
-fn chaos_digest(g: &Generation, chaos: &EffectiveChaos) -> String {
+pub(super) fn chaos_digest(g: &Generation, chaos: &EffectiveChaos) -> String {
     let ns = |d: Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
     let resolved = |r: &Resolved| {
         let faults: Vec<Value> = r
@@ -232,13 +242,13 @@ pub struct ReportQuery {
     format: Option<String>,
 }
 
-/// `GET /__kaanal/sim/runs/{id}/report` — a finished sweep's report: the Markdown
+/// `GET /__kaanal/sim/runs/{id}/report` — a finished sweep's or plan's report (its `kind` decides): the Markdown
 /// (`text/markdown; charset=utf-8`), or with `?format=json` its data alone.
 ///
 /// # Errors
-/// 400 for a bad `format`; 404 for an unknown id; 409 while the sweep runs, for a failed sweep
-/// (the body carries why) and for a plain run; 500 for a sweep record missing its recipe.
-pub async fn get_sweep_report(
+/// 400 for a bad `format`; 404 for an unknown id; 409 while the sweep or plan runs, for a failed one
+/// (the body carries why) and for a plain run; 500 for a done record missing its recipe.
+pub async fn get_run_report(
     State(st): State<Arc<AppState>>,
     Path(id): Path<String>,
     q: Result<Query<ReportQuery>, QueryRejection>,
@@ -260,19 +270,23 @@ pub async fn get_sweep_report(
             "no such run (only the last eight are kept)",
         )
     })?;
-    let rep = sweep_report(&rec, env!("CARGO_PKG_VERSION")).map_err(|e| match e {
-        ReportError::NotASweep => reject(
+    // the record's kind names what it is that has no report yet
+    let what = if rec.kind == "plan" { "plan" } else { "sweep" };
+    let rep = report(&rec, env!("CARGO_PKG_VERSION")).map_err(|e| match e {
+        ReportError::NotAReport => reject(
             StatusCode::CONFLICT,
-            "run reports are made in Studio; only a sweep has a report here",
+            "run reports are made in Studio; only a sweep or a plan has a report here",
         ),
-        ReportError::Running => reject(StatusCode::CONFLICT, "the sweep is not finished"),
+        ReportError::Running => {
+            reject(StatusCode::CONFLICT, &format!("the {what} is not finished"))
+        }
         ReportError::Failed(why) => reject(
             StatusCode::CONFLICT,
-            &format!("the sweep failed and has no report: {why}"),
+            &format!("the {what} failed and has no report: {why}"),
         ),
         ReportError::Internal(field) => reject(
             StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("the sweep record has no {field}"),
+            &format!("the {what} record has no {field}"),
         ),
     })?;
     Ok(if json_form {

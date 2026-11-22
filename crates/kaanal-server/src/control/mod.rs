@@ -45,6 +45,7 @@ mod lease;
 #[cfg(test)]
 mod manifest;
 mod payload;
+mod plan;
 mod prices;
 mod save;
 mod scenario;
@@ -68,13 +69,14 @@ pub use lease::lease_task;
 pub use payload::{
     delete as delete_payload, list as list_payloads, preview as payload_preview, put as put_payload,
 };
+pub use plan::{get_plan_draft, post_plan};
 pub use prices::{get_price_regions, get_prices, get_storage_prices};
 pub use save::save_scenario;
 pub use sim::{get_run, get_run_log, list_runs, post_run, post_sample};
 pub use skeleton::get_skeleton;
 pub use stage_file::stage_file;
 pub use studio::{studio, studio_asset};
-pub use sweep::{get_sweep_report, post_sweep};
+pub use sweep::{get_run_report, post_sweep};
 // What only the unit tests reach by `super::`.
 #[cfg(test)]
 use chaos::ChaosPatch;

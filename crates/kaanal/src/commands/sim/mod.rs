@@ -1,6 +1,7 @@
 //! `kaanal sim`, `kaanal sample` and `kaanal skeleton`: thin clients of the simulation routes
 //! (`docs/web/simulation.md`). All the logic is the server's; this reads the answers aloud.
 
+mod plan;
 mod print;
 
 use crate::cli::SimCmd;
@@ -61,6 +62,7 @@ pub(crate) fn sim(cmd: SimCmd) -> Result<(), Fail> {
                 report.as_deref().map(|f| (f, force)),
             )
         }
+        SimCmd::Plan(a) => plan::plan(a),
         SimCmd::List => list(),
         SimCmd::Show { id } => show(&id),
         SimCmd::Report { id, output, force } => report_cmd(&id, output.as_deref(), force),
@@ -335,6 +337,8 @@ fn show(id: &str) -> Result<(), Fail> {
     output::emit(&v, || {
         if v["kind"] == "sweep" {
             print_sweep(&v);
+        } else if v["kind"] == "plan" {
+            plan::print_plan(&v);
         } else {
             print_run(&v);
         }

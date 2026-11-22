@@ -15,6 +15,7 @@ mod project;
 mod remote;
 mod scenario;
 mod sim;
+mod sim_plan;
 mod startup;
 mod status;
 mod studio;

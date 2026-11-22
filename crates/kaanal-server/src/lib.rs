@@ -377,12 +377,17 @@ fn router(st: Arc<state::AppState>) -> Router {
         .route("/__kaanal/sample", post(control::post_sample))
         .route("/__kaanal/sim/run", post(control::post_run))
         .route("/__kaanal/sim/sweep", post(control::post_sweep))
+        .route("/__kaanal/sim/plan", post(control::post_plan))
         .route("/__kaanal/sim/runs", get(control::list_runs))
         .route("/__kaanal/sim/runs/{id}", get(control::get_run))
         .route("/__kaanal/sim/runs/{id}/log", get(control::get_run_log))
         .route(
+            "/__kaanal/sim/runs/{id}/draft",
+            get(control::get_plan_draft),
+        )
+        .route(
             "/__kaanal/sim/runs/{id}/report",
-            get(control::get_sweep_report),
+            get(control::get_run_report),
         )
         .route("/__kaanal/reset", post(control::reset))
         .route("/__kaanal/shutdown", post(control::shutdown))

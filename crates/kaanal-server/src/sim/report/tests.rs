@@ -76,6 +76,9 @@ fn rec() -> RunRecord {
             dominant_cause: Some("overflow"),
             warnings: vec!["at 4.000x the p99 rests on 900 requests".into()],
         }),
+        plan_steps: Vec::new(),
+        plan: None,
+        proposed_draft: None,
         seed: Some(42),
         max_factor: Some(8.0),
         fingerprint: Some("0123456789ab".into()),
@@ -153,7 +156,10 @@ fn a_running_failed_or_run_record_is_refused() {
         kind: "run",
         ..rec()
     };
-    assert_eq!(sweep_report(&run, "v").unwrap_err(), ReportError::NotASweep);
+    assert_eq!(
+        sweep_report(&run, "v").unwrap_err(),
+        ReportError::NotAReport
+    );
     // a done sweep without the recipe fields is a server bug, refused, not a panic
     for broken in [
         RunRecord {

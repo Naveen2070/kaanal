@@ -6,7 +6,7 @@ use crate::{Duration, Value, clean};
 
 /// **Private.** A share (0 to 1) as a percentage, `1%`, `0.5%`; `<0.01%` for a share too small
 /// for two decimals, so a row never says `0%` and over a limit of zero at once.
-fn pct(v: &Value) -> String {
+pub(super) fn pct(v: &Value) -> String {
     let p = v.as_f64().unwrap_or(0.0) * 100.0;
     if p > 0.0 && p < 0.005 {
         return "<0.01%".into();
@@ -126,7 +126,7 @@ pub(super) fn print_sweep(v: &Value) {
 /// **Private.** The chaos a sweep record ran under, as the report words it: `scenario NAME`, `none`,
 /// or `live chaos: [active scenarios a, b; ]N entries, digest X`, then a runtime mark and
 /// `; chaos digest C` when the record has them; `None` for a record without it.
-fn chaos_line(v: &Value) -> Option<String> {
+pub(super) fn chaos_line(v: &Value) -> Option<String> {
     let mut line = chaos_words(v)?;
     let runtime: Vec<String> = v["runtime_scenarios"]
         .as_array()
@@ -177,7 +177,7 @@ fn chaos_words(v: &Value) -> Option<String> {
 }
 
 /// **Private.** A number from an answer, one decimal.
-fn ms(v: &Value) -> String {
+pub(super) fn ms(v: &Value) -> String {
     format!("{:.1}", v.as_f64().unwrap_or(0.0))
 }
 

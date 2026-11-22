@@ -119,6 +119,15 @@ impl Slot {
         self.done = true;
         self.st.sims.finish_sweep(&self.id, result);
     }
+
+    /// Records the plan and its proposed draft, and releases the slot.
+    pub(crate) fn finish_plan(
+        mut self,
+        result: Result<(super::plan_draft::PlanDoc, String), String>,
+    ) {
+        self.done = true;
+        self.st.sims.finish_plan(&self.id, result);
+    }
 }
 
 impl Drop for Slot {
@@ -126,7 +135,7 @@ impl Drop for Slot {
         if !self.done {
             self.st.sims.finish(
                 &self.id,
-                Err("the run or sweep stopped unexpectedly".into()),
+                Err("the run, sweep or plan stopped unexpectedly".into()),
             );
         }
     }

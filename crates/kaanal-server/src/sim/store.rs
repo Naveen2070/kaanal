@@ -1,5 +1,6 @@
 //! The runs Studio started: one at a time, the last eight kept, summaries and a log sample. A
-//! load sweep is a record of kind `sweep` under the same slot, its points kept as they finish.
+//! load sweep is a record of kind `sweep` under the same slot, its points kept as they finish, and a
+//! sizing plan one of kind `plan`, its steps kept as they are taken.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -8,10 +9,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use kaanal_core::cost::CostReport;
 use kaanal_sim::Summary;
+use kaanal_sim::plan::Step;
 use kaanal_sim::sweep::{Point, SweepResult};
 use serde::Serialize;
 
 use super::log::LogSample;
+use super::plan_draft::PlanDoc;
 
 /// Runs kept, oldest dropped first.
 const KEEP: usize = 8;
@@ -21,7 +24,7 @@ const KEEP: usize = 8;
 pub struct RunRecord {
     /// `s1`, `s2`, ...; never reused.
     pub id: String,
-    /// `run` (`POST /sim/run`) or `sweep` (`POST /sim/sweep`).
+    /// `run` (`POST /sim/run`), `sweep` (`POST /sim/sweep`) or `plan` (`POST /sim/plan`).
     pub kind: &'static str,
     /// `running`, `done` or `failed`.
     pub state: &'static str,
@@ -50,7 +53,19 @@ pub struct RunRecord {
     pub sweep_points: Vec<Point>,
     /// A sweep's finding, when `done`.
     pub sweep: Option<SweepResult>,
-    /// A sweep's seed: the body's, else the config's. `None` for a run.
+    /// A plan's steps as they are taken, growing while it runs; kept when it fails and once it is
+    /// done (`plan.steps` is the answer: it differs when the plan branches off an earlier menu).
+    /// Absent for a run and a sweep.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plan_steps: Vec<Step>,
+    /// A plan's answer, when `done`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<PlanDoc>,
+    /// A plan's proposed draft, when `done`: the applied text with the plan's steps patched in.
+    /// Heavy, so `list()` strips it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposed_draft: Option<String>,
+    /// A sweep's or a plan's seed: the body's, else the config's. `None` for a run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
     /// A sweep's highest load factor, as checked. `None` for a run.
@@ -93,12 +108,12 @@ pub struct LiveChaos {
     pub digest: String,
 }
 
-/// What a sweep record keeps besides the run's own fields.
+/// What a sweep or plan record keeps besides the run's own fields.
 pub struct SweepMeta {
     /// The seed the draws used.
     pub seed: u64,
-    /// The highest load factor on the ladder.
-    pub max_factor: f64,
+    /// A sweep's highest load factor on the ladder; `None` for a plan.
+    pub max_factor: Option<f64>,
     /// The design fingerprint of the system in force.
     pub fingerprint: String,
     /// The posted profile when it was written out (label `inline`).
@@ -147,7 +162,9 @@ impl SimStore {
         source: &'static str,
         draft_rev: Option<u64>,
     ) -> Result<String, String> {
-        self.begin_kind(generation, profile, scenario, source, draft_rev, None)
+        self.begin_kind(
+            generation, profile, scenario, source, draft_rev, "run", None,
+        )
     }
 
     /// Starts a sweep record (always on the system in force) and takes the same single slot.
@@ -161,11 +178,45 @@ impl SimStore {
         scenario: Option<&str>,
         meta: SweepMeta,
     ) -> Result<String, String> {
-        self.begin_kind(generation, profile, scenario, "applied", None, Some(meta))
+        self.begin_kind(
+            generation,
+            profile,
+            scenario,
+            "applied",
+            None,
+            "sweep",
+            Some(meta),
+        )
     }
 
-    /// Creates the record under one lock: a sweep (`meta` given) carries its fields from the
-    /// first poll on.
+    /// Starts a plan record (always on the system in force) and takes the same single slot.
+    ///
+    /// # Errors
+    /// The id of the run that already holds the slot.
+    pub fn begin_plan(
+        &self,
+        generation: u64,
+        profile: &str,
+        scenario: Option<&str>,
+        meta: SweepMeta,
+    ) -> Result<String, String> {
+        self.begin_kind(
+            generation,
+            profile,
+            scenario,
+            "applied",
+            None,
+            "plan",
+            Some(meta),
+        )
+    }
+
+    /// Creates the record under one lock: a sweep or a plan (`meta` given) carries its fields from
+    /// the first poll on.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one private constructor of three kinds"
+    )]
     fn begin_kind(
         &self,
         generation: u64,
@@ -173,9 +224,9 @@ impl SimStore {
         scenario: Option<&str>,
         source: &'static str,
         draft_rev: Option<u64>,
+        kind: &'static str,
         meta: Option<SweepMeta>,
     ) -> Result<String, String> {
-        let kind = if meta.is_some() { "sweep" } else { "run" };
         let mut i = self.lock();
         if let Some(id) = &i.running {
             return Err(id.clone());
@@ -202,8 +253,11 @@ impl SimStore {
             error: None,
             sweep_points: Vec::new(),
             sweep: None,
+            plan_steps: Vec::new(),
+            plan: None,
+            proposed_draft: None,
             seed: meta.as_ref().map(|m| m.seed),
-            max_factor: meta.as_ref().map(|m| m.max_factor),
+            max_factor: meta.as_ref().and_then(|m| m.max_factor),
             fingerprint: meta.as_ref().map(|m| m.fingerprint.clone()),
             live_chaos: meta.as_ref().and_then(|m| m.live_chaos.clone()),
             chaos_digest: meta.as_ref().map(|m| m.chaos_digest.clone()),
@@ -247,6 +301,29 @@ impl SimStore {
         });
     }
 
+    /// The id of the run, sweep or plan that holds the slot, if one does (a cheap check before
+    /// work a refused request should not pay for; `begin_*` still decides).
+    pub fn running(&self) -> Option<String> {
+        self.lock().running.clone()
+    }
+
+    /// Adds a step taken to plan `id`.
+    pub fn plan_step(&self, id: &str, s: Step) {
+        if let Some(r) = self.lock().runs.iter_mut().find(|r| r.id == id) {
+            r.plan_steps.push(s);
+        }
+    }
+
+    /// Ends plan `id` with its answer and proposed draft, and frees the slot.
+    pub fn finish_plan(&self, id: &str, result: Result<(PlanDoc, String), String>) {
+        self.end(id, |r| match result {
+            // the progress is kept (the spec says only that it grows and survives a failure);
+            // `plan.steps` is the answer, and differs when the plan branches off an earlier menu
+            Ok((p, text)) => (r.state, r.plan, r.proposed_draft) = ("done", Some(p), Some(text)),
+            Err(e) => (r.state, r.error) = ("failed", Some(e)),
+        });
+    }
+
     /// Frees the slot if `id` holds it, and stamps and fills its record if it is still kept.
     fn end(&self, id: &str, fill: impl FnOnce(&mut RunRecord)) {
         let mut i = self.lock();
@@ -264,7 +341,7 @@ impl SimStore {
         self.lock().runs.iter().find(|r| r.id == id).cloned()
     }
 
-    /// The kept runs, oldest first, without their summaries or sweep points.
+    /// The kept runs, oldest first, without their summaries, sweep points or plans.
     pub fn list(&self) -> Vec<RunRecord> {
         self.lock()
             .runs
@@ -275,6 +352,9 @@ impl SimStore {
                 sweep_points: Vec::new(),
                 sweep: None,
                 inline_profile: None,
+                plan_steps: Vec::new(),
+                plan: None,
+                proposed_draft: None,
                 log: Arc::default(),
                 ..r.clone()
             })
@@ -311,7 +391,7 @@ mod tests {
     fn meta() -> SweepMeta {
         SweepMeta {
             seed: 7,
-            max_factor: 8.0,
+            max_factor: Some(8.0),
             fingerprint: "0123456789ab".into(),
             inline_profile: Some(serde_json::json!({ "rps": 1 })),
             live_chaos: Some(LiveChaos {
@@ -362,6 +442,63 @@ mod tests {
         let r = s.get(&id).unwrap();
         assert_eq!(r.seed, Some(7));
         assert!(r.inline_profile.is_none());
+    }
+
+    #[test]
+    fn a_plan_keeps_its_steps_when_it_fails_and_the_list_strips_them() {
+        use kaanal_core::resize::{Move, MoveKind};
+        use kaanal_sim::plan::Effect;
+        let s = SimStore::default();
+        let id = s
+            .begin_plan(
+                1,
+                "peak",
+                None,
+                SweepMeta {
+                    max_factor: None,
+                    ..meta()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            s.begin(1, "p", None, "applied", None),
+            Err(id.clone()),
+            "one slot"
+        );
+        let e = Effect {
+            p99_ms: 1.0,
+            error_rate: 0.0,
+            capacity_req_s: None,
+        };
+        s.plan_step(
+            &id,
+            Step {
+                mv: Move {
+                    node: "db".into(),
+                    kind: MoveKind::Copies { from: 1, to: 2 },
+                },
+                price_micro_usd_hr: None,
+                price_delta_micro_usd_hr: None,
+                before: e.clone(),
+                after: e,
+                menu: Vec::new(),
+                note: None,
+            },
+        );
+        let r = s.get(&id).unwrap();
+        assert_eq!(
+            (r.kind, r.max_factor, r.plan_steps.len()),
+            ("plan", None, 1)
+        );
+        assert!(s.list()[0].plan_steps.is_empty(), "the list strips them");
+        s.finish_plan(&id, Err("boom".into()));
+        let r = s.get(&id).unwrap();
+        assert_eq!(
+            (r.state, r.plan_steps.len()),
+            ("failed", 1),
+            "kept on failure"
+        );
+        assert!(r.plan.is_none() && r.proposed_draft.is_none());
     }
 
     fn point(k: f64) -> Point {
