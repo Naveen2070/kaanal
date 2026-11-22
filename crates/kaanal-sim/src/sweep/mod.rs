@@ -3,7 +3,7 @@
 //! [`sweep`] runs the topology at a ladder of load factors (`point`), finds the first crossing of
 //! a [`Limit`] (`search`, pure) and reports the knee, the first node to saturate and the main cause.
 
-mod point;
+pub(crate) mod point;
 pub mod search;
 
 use std::cmp::Ordering;

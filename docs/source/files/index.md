@@ -112,6 +112,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/engine.rs` | [kaanal-sim/engine.md](kaanal-sim/engine.md)   | The event loop: arrivals, FIFO slots, report                                |
 | `src/summary/`  | [kaanal-sim/summary.md](kaanal-sim/summary.md) | The Studio report: percentiles, per node, replica and link load, saturation |
 | `src/sweep/`    | [kaanal-sim/sweep.md](kaanal-sim/sweep.md)     | Load sweep: a run per `k`, ladder, bisection, verdict, first to saturate    |
+| `src/plan/`     | [kaanal-sim/plan.md](kaanal-sim/plan.md)       | Sizing planner: the check of one plan at a target load                      |
 
 ## [kaanal](kaanal/) (binary)
 

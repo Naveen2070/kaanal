@@ -9,6 +9,7 @@
 #![warn(missing_docs)]
 
 mod engine;
+pub mod plan;
 mod summary;
 pub mod sweep;
 
