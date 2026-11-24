@@ -58,6 +58,11 @@ jobs:
         run: bash scripts/release-info.sh | tee -a "$GITHUB_OUTPUT"
         shell: bash
 
+      # The notices travel in every archive and npm package; a changed lock file means they may be stale.
+      - name: Check THIRD_PARTY_LICENSES.md against the lock files
+        run: node scripts/third-party-licenses.mjs --check
+        shell: bash
+
       - name: Refuse to publish from another branch or over an existing tag
         if: inputs.publish
         env:
@@ -171,7 +176,7 @@ jobs:
           mkdir "$name"
           bin=target/$TARGET/release/kaanal
           [ -f "$bin.exe" ] && bin=$bin.exe
-          cp "$bin" LICENSE README.md "$name"/
+          cp "$bin" LICENSE THIRD_PARTY_LICENSES.md README.md "$name"/
           if [ "${{ matrix.ext }}" = zip ]; then
             7z a -tzip "$name.zip" "$name" > /dev/null
           else

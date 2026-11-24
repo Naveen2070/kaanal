@@ -18,6 +18,9 @@ import { fileURLToPath } from "node:url";
 /** The npm scope of the platform packages; the launcher in npm/kaanal/bin/kaanal.js names the same one. */
 export const SCOPE = "@kaanal";
 
+/** Shipped in every package next to the binary (RULES 150). */
+export const NOTICES = ["LICENSE", "THIRD_PARTY_LICENSES.md"];
+
 /** One entry per archive release.yml builds. `key` is `process.platform-process.arch`. */
 export const PLATFORMS = [
   { target: "x86_64-unknown-linux-gnu", key: "linux-x64", os: "linux", cpu: "x64", ext: "tar.gz", exe: "kaanal" },
@@ -58,7 +61,7 @@ export function build({ tag, archives, out }) {
     const bin = join(dir, "bin", p.exe);
     cpSync(join(scratch, `kaanal-${tag}-${p.target}`, p.exe), bin);
     if (p.os !== "win32") chmodSync(bin, 0o755);
-    cpSync(join(root, "LICENSE"), join(dir, "LICENSE"));
+    for (const f of NOTICES) cpSync(join(root, f), join(dir, f));
     rmSync(scratch, { recursive: true, force: true });
     writeFileSync(
       join(dir, "package.json"),
@@ -69,7 +72,7 @@ export function build({ tag, archives, out }) {
           description: `The kaanal binary for ${p.os} ${p.cpu}. Install \`kaanal\` instead.`,
           os: [p.os],
           cpu: [p.cpu],
-          files: ["bin/", "LICENSE"],
+          files: ["bin/", ...NOTICES],
           ...common,
         },
         null,
@@ -80,7 +83,7 @@ export function build({ tag, archives, out }) {
   }
   const wrapper = join(out, "kaanal");
   cpSync(join(root, "npm", "kaanal"), wrapper, { recursive: true });
-  cpSync(join(root, "LICENSE"), join(wrapper, "LICENSE"));
+  for (const f of NOTICES) cpSync(join(root, f), join(wrapper, f));
   writeFileSync(
     join(wrapper, "package.json"),
     JSON.stringify(
@@ -90,7 +93,7 @@ export function build({ tag, archives, out }) {
         description: "Kaanal: a mirage of your backend. Mock APIs, chaos, and what-if simulation in one binary.",
         keywords: ["mock", "openapi", "chaos", "simulation", "api"],
         bin: { kaanal: "bin/kaanal.js" },
-        files: ["bin/", "README.md", "LICENSE"],
+        files: ["bin/", "README.md", ...NOTICES],
         engines: { node: ">=18" },
         optionalDependencies: Object.fromEntries(PLATFORMS.map((p) => [`${SCOPE}/${p.key}`, version])),
         ...common,

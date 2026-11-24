@@ -10,6 +10,8 @@
     "target/**",
     ".git/**",
     "internal/**",
+    "THIRD_PARTY_LICENSES.md",
+    "licenses/**",
     "crates/*/tests/golden/**"
   ],
   "plugins": [

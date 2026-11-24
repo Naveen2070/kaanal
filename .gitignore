@@ -20,3 +20,6 @@ ui/node_modules
 ui/dist
 /crates/kaanal-server/ui-dist/*
 !/crates/kaanal-server/ui-dist/.gitkeep
+
+# Launch-video output (large; goes on a release or the site)
+brag-output*/

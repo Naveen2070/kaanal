@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { PLATFORMS, SCOPE, build, local } from "./npm-pack.mjs";
+import { NOTICES, PLATFORMS, SCOPE, build, local } from "./npm-pack.mjs";
 
 function fakeArchives(tag) {
   const dir = mkdtempSync(join(tmpdir(), "npm-pack-"));
@@ -33,10 +33,14 @@ test("builds_one_package_per_platform_and_a_wrapper_that_depends_on_them_all", (
     assert.deepEqual([pkg.os, pkg.cpu], [[p.os], [p.cpu]]);
     assert.equal(readFileSync(join(dirs[i], "bin", p.exe), "utf8"), `binary for ${p.key}`);
     if (p.os !== "win32" && process.platform !== "win32") assert.ok(statSync(join(dirs[i], "bin", p.exe)).mode & 0o100, "executable");
+    for (const f of NOTICES) assert.ok(statSync(join(dirs[i], f)).size > 0, `${f} is in ${p.key}`);
+    assert.ok(pkg.files.includes("THIRD_PARTY_LICENSES.md"));
     assert.equal(pkg.repository.url, "git+https://github.com/Naveen2070/kaanal.git");
   }
   const w = json(dirs.at(-1));
   assert.equal(w.name, "kaanal");
+  for (const f of NOTICES) assert.ok(statSync(join(dirs.at(-1), f)).size > 0, `${f} is in the wrapper`);
+  assert.ok(w.files.includes("THIRD_PARTY_LICENSES.md"));
   assert.deepEqual(
     w.optionalDependencies,
     Object.fromEntries(PLATFORMS.map((p) => [`${SCOPE}/${p.key}`, "1.2.3"])),

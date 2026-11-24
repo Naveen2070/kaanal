@@ -70,7 +70,7 @@ Releases are manual (R1.60, RULES 148). Nothing is published to crates.io or npm
 
 1. Set the version in `Cargo.toml` (`[workspace.package]`) and write `RELEASE.md`: the first line is `Tag: vX.Y.Z`, which must equal that version, and the rest is the release notes. `bash scripts/release-info.sh` checks both locally.
 2. Merge it to `main`.
-3. Run the **Release** workflow on `main` with "publish" ticked. It builds Linux x86_64, macOS arm64 and Windows x86_64 archives (macOS x86_64 is skipped), then creates the tag and a GitHub release (a pre-release below 1.0) with the archives and `SHA256SUMS`. Each archive holds the `kaanal` binary, `LICENSE` and `README.md`.
+3. Run the **Release** workflow on `main` with "publish" ticked. It builds Linux x86_64, macOS arm64 and Windows x86_64 archives (macOS x86_64 is skipped), then creates the tag and a GitHub release (a pre-release below 1.0) with the archives and `SHA256SUMS`. Each archive holds the `kaanal` binary, `LICENSE`, `THIRD_PARTY_LICENSES.md` and `README.md`.
 4. The same run then publishes the six crates to crates.io (`crates` job) and the npm packages (`npm` job), by trusted publishing: no registry token is stored in the repository, each registry accepts the run's GitHub identity. The `npm` job builds one package per platform plus the `kaanal` wrapper with `scripts/npm-pack.mjs` (checked by `node --test scripts/npm-pack.test.mjs`), and `kaanal-server` ships Studio's bundle inside the crate, which the `crates` job checks first. A failed registry job can be re-run from the Actions page.
 5. To try it first, run the workflow with "publish" off: it only builds, and keeps the archives as artifacts for a week.
 
@@ -85,11 +85,19 @@ Releases are manual (R1.60, RULES 148). Nothing is published to crates.io or npm
 
 **To do before a public release.**
 
-- Add a generated `THIRD_PARTY_LICENSES` file to each archive (for example with `cargo-about`): the binary contains MIT, Apache and BSD crates whose notices should travel with it. Decide whether a `NOTICE` file is needed.
 - Tune the release profile (above) once it has been measured.
 - Pin the GitHub Actions to commit SHAs, with Dependabot to keep them current.
 - Optional: signed checksums or build attestations; Linux musl and arm64 builds; macOS x86_64.
 - Install channels (Homebrew, Scoop, winget, Docker) are M4.
+
+## Third-party licenses
+
+`THIRD_PARTY_LICENSES.md` (repo root, committed, generated) holds the notices for what ships in a release: the Rust crates of the `kaanal` binary (`cargo-about`, with `about.toml` listing the accepted licences and `about.hbs` the layout), Studio's production JavaScript libraries (`pnpm licenses`), the three fonts (`licenses/fonts/`, the OFL texts from the pinned Fontsource packages) and a note on the price data. It goes in every archive and every npm package.
+
+- Regenerate after any change to `Cargo.lock` or `ui/pnpm-lock.yaml`: `cargo install cargo-about --locked --features cli` once, `cd ui && pnpm install`, then `node scripts/third-party-licenses.mjs`. It takes a few minutes. A licence cargo-about does not accept fails the run: read it, then add it to `about.toml`.
+- `node scripts/third-party-licenses.mjs --check` compares the lock-file hashes in the file's first line with the current ones (no tools needed); the Release workflow runs it first and stops a stale file.
+- A new font needs its OFL text in `licenses/fonts/` as well as a row in `ui/FONTS.md`.
+- `dprint` skips the file and `licenses/`: the texts must stay verbatim.
 
 ## Debugging tips
 
