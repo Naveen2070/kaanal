@@ -28,6 +28,18 @@ test("typing_is_kept_when_the_box_loses_focus_not_on_every_key", async () => {
   expect(notesOf()[0]?.text).toBe("queue sits before the db");
 });
 
+test("a_new_text_prop_while_the_box_is_focused_keeps_what_was_typed_and_a_blurred_box_follows_it", () => {
+  const { rerender } = render(<NoteCard {...props("a")} />);
+  const box = screen.getByLabelText("Note") as HTMLTextAreaElement;
+  box.focus();
+  fireEvent.change(box, { target: { value: "typing..." } });
+  rerender(<NoteCard {...props("from the server")} />);
+  expect(box.value).toBe("typing...");
+  box.blur();
+  rerender(<NoteCard {...props("from a reload")} />);
+  expect(box.value).toBe("from a reload");
+});
+
 test("the_box_is_marked_so_selecting_text_does_not_drag_the_card_or_zoom_the_canvas", () => {
   render(<NoteCard {...props("hello")} />);
   const box = screen.getByLabelText("Note");

@@ -4,6 +4,7 @@ import { useHistory } from "../data/store/history";
 import { notesOf, seedDraft } from "../test/notesDraft";
 import {
   addNoteAt,
+  importBrowserNotes,
   isNoteId,
   MAX_NOTE_CHARS,
   MAX_NOTES,
@@ -13,7 +14,13 @@ import {
   setNoteText,
 } from "./notes";
 
-afterEach(() => vi.unstubAllGlobals());
+import { useToasts } from "../shell/toast/toasts";
+import type { Note } from "../data/api/types";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
 const settle = () => useDraft.getState().settled();
 
@@ -109,4 +116,157 @@ test("storage_is_not_trusted_a_bad_entry_is_dropped_and_a_bad_file_is_empty", ()
   const notes = parseNotes(raw);
   expect(notes.map((n) => n.id)).toEqual(["note:1", "note:5"]);
   expect(notes[1]?.text).toHaveLength(MAX_NOTE_CHARS);
+});
+
+const browser = [{ id: "note:1", text: "from the browser", at: [5, 6] }];
+let n = 0;
+/** A project id nobody imported yet (the once-per-project memory lives for the page). */
+const fresh = async (notes?: Note[], file: Note[] = []) => {
+  const sent = await seedDraft(file);
+  const project = `p${n++}`;
+  useDraft.setState((s) => ({
+    view: s.view && {
+      ...s.view,
+      project_id: project,
+      canvas_notes: notes === undefined ? undefined : file,
+    },
+  }));
+  return { sent, project };
+};
+const keyOf = (p: string) => `kaanal-notes-${p}`;
+const view = () => useDraft.getState().view;
+
+test("imports_browser_notes_when_the_file_has_none", async () => {
+  const { sent, project } = await fresh([]);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.body).toEqual({ canvas_notes: browser });
+  expect(notesOf()).toEqual(browser);
+});
+
+test("file_notes_win_over_the_browser", async () => {
+  const file = [{ id: "note:9", text: "from the file", at: [0, 0] as [number, number] }];
+  const { sent, project } = await fresh(file, file);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toEqual([]);
+  expect(notesOf()).toEqual(file);
+});
+
+test("an_import_is_sent_once_and_the_flag_waits_for_a_save", async () => {
+  const { sent, project } = await fresh([]);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  importBrowserNotes(view());
+  await settle();
+  const flag = `kaanal-notes-imported-${project}`;
+  const dirty = (layout_dirty: boolean) =>
+    useDraft.setState((s) => ({
+      view: s.view && { ...s.view, project_id: project, layout_dirty, canvas_notes: [] },
+    }));
+  dirty(true); // the answer to the PUT: not saved yet
+  importBrowserNotes(view());
+  expect(localStorage.getItem(flag)).toBeNull(); // a restart now would try again
+  dirty(false); // saved (even if the user deleted the notes first)
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toHaveLength(1);
+  expect(localStorage.getItem(flag)).toBe("1");
+});
+
+test("an_import_that_was_never_saved_is_tried_again_on_a_new_boot", async () => {
+  const { sent, project } = await fresh([]);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  importBrowserNotes(view());
+  await settle();
+  useDraft.setState((s) => ({
+    view: s.view && {
+      ...s.view,
+      project_id: project,
+      boot: "b2",
+      layout_dirty: false,
+      canvas_notes: [],
+    },
+  })); // the server restarted before a Save
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toHaveLength(2);
+});
+
+test("a_refused_import_is_not_flagged_and_can_be_tried_again", async () => {
+  const { project } = await fresh([]);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response('{"error":"no"}', { status: 400 })),
+  );
+  importBrowserNotes(view());
+  await settle();
+  await Promise.resolve();
+  expect(localStorage.getItem(`kaanal-notes-imported-${project}`)).toBeNull();
+});
+
+test("the_browser_list_is_filtered_by_the_servers_rules", () => {
+  const raw = JSON.stringify([
+    { id: "note:1", text: "a", at: [0, 0] },
+    { id: "note:1", text: "duplicate id", at: [0, 0] },
+    { id: `note:${"x".repeat(60)}`, text: "id over 64 bytes", at: [0, 0] },
+    { id: "note:2", text: "too far", at: [2e6, 0] },
+    { id: "note:3", text: "edge", at: [1e6, -1e6] },
+  ]);
+  expect(parseNotes(raw).map((n) => n.id)).toEqual(["note:1", "note:3"]);
+});
+
+test("a_later_session_does_not_bring_back_notes_the_user_deleted", async () => {
+  const { sent, project } = await fresh([]);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  localStorage.setItem(`kaanal-notes-imported-${project}`, "1"); // an earlier session imported
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toEqual([]);
+});
+
+test("import_ignores_malformed_or_foreign_project_storage", async () => {
+  const { sent, project } = await fresh([]);
+  localStorage.setItem(keyOf(project), "not json");
+  localStorage.setItem("kaanal-notes-other", JSON.stringify(browser));
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toEqual([]);
+});
+
+test("the_browser_copy_is_never_deleted", async () => {
+  const { project } = await fresh([]);
+  const raw = JSON.stringify(browser);
+  localStorage.setItem(keyOf(project), raw);
+  importBrowserNotes(view());
+  await settle();
+  expect(localStorage.getItem(keyOf(project))).toBe(raw);
+});
+
+test("blocked_storage_imports_nothing", async () => {
+  const { sent } = await fresh([]);
+  vi.stubGlobal("localStorage", {
+    getItem: () => {
+      throw new Error("blocked");
+    },
+    setItem: () => {
+      throw new Error("blocked");
+    },
+  });
+  importBrowserNotes(view());
+  await settle();
+  expect(sent).toEqual([]);
+});
+
+test("an_older_server_without_notes_imports_nothing_and_refuses_an_added_note_with_a_notice", async () => {
+  const { sent, project } = await fresh(undefined);
+  localStorage.setItem(keyOf(project), JSON.stringify(browser));
+  importBrowserNotes(view());
+  expect(addNoteAt([0, 0])).toBeNull();
+  await settle();
+  expect(sent).toEqual([]); // nothing was sent
+  expect(useToasts.getState().toasts.some((t) => /too old/.test(t.text))).toBe(true);
 });

@@ -56,6 +56,8 @@ function stepDone(word: string) {
   notify.info(word, "history-step");
 }
 
+export const OLD_SERVER_NOTES = "This server is too old to save notes. Update kaanal to keep them.";
+
 export type ConnectResult = { ok: true; warning?: string } | { ok: false; message: string };
 
 function replay(confirmed: DraftView, pending: Edit[]): DraftView {
@@ -154,7 +156,14 @@ export const useDraft = create<DraftState>((set, get) => {
     },
     settled: () => tail,
     replaceText: (text) => enqueue({ kind: "text", text }),
-    setNotes: (notes) => enqueue({ kind: "notes", notes }),
+    setNotes(notes) {
+      // an older server drops the list without a word: say so rather than lose the note
+      if (get().view && get().view?.canvas_notes === undefined) {
+        notify.warn(OLD_SERVER_NOTES, "notes-old-server");
+        return Promise.resolve(false);
+      }
+      return enqueue({ kind: "notes", notes });
+    },
     async patch(ops, positions, opts) {
       const before = get().view;
       const inverse = before && opts?.record !== false ? invertOps(before, ops) : null;

@@ -4,10 +4,17 @@
 
 import type { NodeProps } from "@xyflow/react";
 import { X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { MAX_NOTE_CHARS, removeNote, setNoteText } from "./notes";
 
 export function NoteCard({ id, data }: NodeProps) {
   const text = (data as { text?: string }).text ?? "";
+  const box = useRef<HTMLTextAreaElement>(null);
+  // a reload or a refused edit changes `text`: show it, unless the user is typing (keystrokes not yet blurred stay)
+  useEffect(() => {
+    const el = box.current;
+    if (el && el !== document.activeElement && el.value !== text) el.value = text;
+  }, [text]);
   return (
     <div className="group relative w-52 rounded-xl border border-dashed border-control bg-raised p-2 shadow-float">
       <textarea
@@ -17,8 +24,8 @@ export function NoteCard({ id, data }: NodeProps) {
         aria-label="Note"
         placeholder="Write a note..."
         maxLength={MAX_NOTE_CHARS}
+        ref={box}
         defaultValue={text}
-        key={text}
         onBlur={(e) => {
           if (e.currentTarget.value !== text) setNoteText(id, e.currentTarget.value);
         }}

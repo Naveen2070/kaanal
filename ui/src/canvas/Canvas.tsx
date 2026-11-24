@@ -28,7 +28,7 @@ import { StarterList } from "./StarterList";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { NoteCard } from "./NoteCard";
-import { isNoteId, moveNote, useNotes } from "./notes";
+import { importBrowserNotes, isNoteId, moveNote, useNotes } from "./notes";
 import { canvasBridge } from "./bridge";
 import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
@@ -79,6 +79,10 @@ function Flow() {
   const layout = view?.layout;
   // captions are part of the draft view, saved with the positions
   const notes = useNotes();
+  // notes an older build kept in this browser come into the draft, until a Save has written them
+  const noteKey = `${view?.project_id}|${view?.boot}|${view?.layout_dirty}|${view?.canvas_notes !== undefined}`;
+  // eslint-disable-next-line react/exhaustive-deps
+  useEffect(() => importBrowserNotes(useDraft.getState().view), [noteKey]);
 
   // the view is fitted once, on load (the `fitView` prop). A node added later never changes the zoom:
   // the view only moves, and only when the new card would land behind a panel or off screen
