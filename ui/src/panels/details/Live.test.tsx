@@ -134,6 +134,18 @@ test("turning_a_scenario_on_sends_the_lease_and_off_sends_a_deactivate", async (
   await vi.waitFor(() => expect(seen.map((s) => s.key)).toContain("DELETE /scenarios"));
 });
 
+test("the_save_box_is_there_with_and_without_scenarios", async () => {
+  serve(system);
+  render(<Live />);
+  await screen.findByText("db-down");
+  expect(screen.getByRole("button", { name: "Save live" })).toBeTruthy();
+  cleanup();
+  serve({ ...system, "GET /scenarios": { json: [] } });
+  render(<Live />);
+  expect(await screen.findByText(/None are defined/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save live" })).toBeTruthy();
+});
+
 test("a_pin_the_api_would_refuse_is_explained_and_never_sent", async () => {
   const seen = serve(system);
   render(<Live />);

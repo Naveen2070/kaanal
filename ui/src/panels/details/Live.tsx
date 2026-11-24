@@ -10,6 +10,7 @@ import { runNow } from "../../data/store/loopRuntime";
 import { notify } from "../../shell/toast/toasts";
 import { Section, UnitInput } from "./Field";
 import { Sample } from "./Sample";
+import { SaveScenario } from "./SaveScenario";
 import { TIME_UNITS } from "./units";
 import {
   applyAndStart,
@@ -123,7 +124,8 @@ export function Live() {
         </p>
         {data.scenarios.length === 0 ? (
           <p className="text-xs text-muted">
-            None are defined. Put them in kaanal.yaml or in a scenarios/ folder beside it.
+            None are defined. Put them in kaanal.yaml or in a scenarios/ folder beside it, or save
+            what you set live below.
           </p>
         ) : (
           <>
@@ -187,6 +189,7 @@ export function Live() {
             </ul>
           </>
         )}
+        <SaveScenario onSaved={load} />
       </Section>
 
       <Section title="Pins">

@@ -18,6 +18,7 @@ import type {
   SaveBody,
   SampleResult,
   SaveResult,
+  SaveScenarioResult,
   ScenarioRow,
   Topology,
   ValidateResult,
@@ -144,6 +145,14 @@ export const api = {
     ),
   deactivateScenario: (name: string, o: Opts = {}) =>
     call<unknown>("POST", `/scenarios/${encodeURIComponent(name)}/deactivate`, undefined, o),
+  /** Writes the live chaos and pins to `scenarios/NAME.yaml`; 409 when it exists and `force` is not set. */
+  saveScenario: (name: string, opts: { force?: boolean } = {}, o: Opts = {}) =>
+    call<SaveScenarioResult>(
+      "POST",
+      "/scenarios/save",
+      { name, from: "live", ...(opts.force ? { force: true } : {}) },
+      o,
+    ),
   clearScenarios: (o: Opts = {}) => call<unknown>("DELETE", "/scenarios", undefined, o),
   getPins: (o: Opts = {}) => call<PinsView>("GET", "/pins", undefined, o),
   putPin: (body: PinBody, o: Opts = {}) => call<LivePin>("PUT", "/pins", body, o),

@@ -469,6 +469,13 @@ export interface LogPage {
 }
 
 /** One row of `GET /scenarios`: a named list of chaos entries and pins. */
+/** What `POST /scenarios/save` answers. `warnings` counts leased live fields the file makes permanent. */
+export interface SaveScenarioResult {
+  name: string;
+  path: string;
+  warnings: string[];
+}
+
 export interface ScenarioRow {
   name: string;
   /** `inline` (kaanal.yaml), `file` (scenarios/NAME.yaml) or `runtime` (defined through the API). */
