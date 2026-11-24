@@ -10,10 +10,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.100"
 license = "Apache-2.0"
+repository = "https://github.com/Naveen2070/kaanal"
+readme = "README.md"
+keywords = ["mock", "openapi", "chaos", "simulation", "api"]
+categories = ["development-tools::testing", "simulation"]
 
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
@@ -60,11 +64,11 @@ url = "2.5.8"
 jsonwebtoken = { version = "11.1.0", default-features = false, features = [
     "rust_crypto",
 ] }
-kaanal-core = { path = "crates/kaanal-core" }
-kaanal-data = { path = "crates/kaanal-data" }
-kaanal-server = { path = "crates/kaanal-server" }
-kaanal-sim = { path = "crates/kaanal-sim" }
-kaanal-winhandle = { path = "crates/kaanal-winhandle" }
+kaanal-core = { path = "crates/kaanal-core", version = "0.1.0" }
+kaanal-data = { path = "crates/kaanal-data", version = "0.1.0" }
+kaanal-server = { path = "crates/kaanal-server", version = "0.1.0" }
+kaanal-sim = { path = "crates/kaanal-sim", version = "0.1.0" }
+kaanal-winhandle = { path = "crates/kaanal-winhandle", version = "0.1.0" }
 
 # Lint policy for every crate (each opts in with `[lints] workspace = true`).
 # Enforced by the pre-commit hook: clippy runs with `-D warnings`.

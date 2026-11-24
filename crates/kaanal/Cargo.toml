@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Kaanal: a mirage of your backend. Mock APIs, chaos, and what-if simulation in one binary."
 homepage = "https://kaanal.naveenr.in"
 

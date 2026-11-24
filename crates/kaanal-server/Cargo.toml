@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# `ui-dist/` is git-ignored (the release builds it), and a packaged crate ships it only if it is listed here.
+include = ["src/**", "demo/**", "build.rs", "ui-dist/**", "Cargo.toml"]
 description = "Kaanal HTTP layer: mock ingress, control API, embedded UI"
 
 [dependencies]

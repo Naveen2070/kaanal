@@ -1,94 +1,37 @@
-Tag: v0.0.1
+Tag: v0.1.0
 
-# Kaanal v0.0.1 (pre-release)
+# Kaanal v0.1.0
 
-The first pre-release of Kaanal, a single binary that pretends to be your backend: OpenAPI 3.0 mocks with generated
-data, simulated service and database timing, and live chaos.
+Kaanal (கானல், "mirage") is a single binary that pretends to be your backend. Give it an OpenAPI 3.0 file and a small YAML topology, and it serves realistic mock data with the timing and failures of the system behind it. Studio, its graphical editor, lets you build that system, break it, run load against it and see where it gives way.
 
-This is an early build. Expect breaking changes between `0.0.x` releases.
+This is the first public release. Versions below 1.0 may change between releases.
 
-## Live: a continuous simulation in Studio
+## Highlights
 
-Studio opens in **Live** (the default; **Batch** keeps the seeded, repeatable run). When the file is valid it runs traffic from its first `traffic:` profile all the time on the engine the mocks run on: sampled request dots move along the wires, a queue piles up at a busy component, drops show a cross, and the strip counts what arrives, what is dropped this second, p50 and p99. One continuous timeline carries a mark for every change you make. A setting you change (cores, slots, copies, bandwidth, rate limits, times, chaos) acts at once on the running system and on any frontend calling the mocks, keeping queues and running work; adding or removing a component or wire waits for Apply and restarts the run. Real speed with Pause (a hidden page pauses after 60 seconds); the timeline keeps 5 minutes, up to 30. The mocks now choose copies by their live queues (`least-conn`, `p2c`) and plan with a clock, so `from_ms` and `detect` apply to real requests. Server-sent events at `/__kaanal/live`.
-
-## CPUs: work slows when more runs than there are cores
-
-Off unless written (`cpu: { cores: N }` on a gateway, service, monolith, database, auth or load balancer; Studio: **CPUs** in a component's Settings). A node's own work (its `proc` and operations) is shared among the requests running it, so with `n` at once each runs at `min(1, N / n)` of its speed: processor sharing, checked against M/G/1 and Erlang C to within about 2%. Slots (`concurrency`) still decide how many are admitted. Waiting on callees, the wire and wait steps are not stretched. The summary gains `cpu_load`, `cpu_capacity_per_s` and `saturates_by`, and Results says **CPU bound**. The live mock shares the cores too: it runs every request through the same engine. Memory, disk and instance presets are planned.
-
-## How failure is costed: retries, abandon, breakers and detect
-
-All off unless written (`retry`, `abandon`, `breaker`, `detect` on an edge). A retry loads the callee again and waits a
-jittered, growing backoff; `retry.budget` is gRPC's retry throttling; `abandon: continue` lets a timed-out call's work
-run on, which with retries is the metastable retry storm; `breaker` is resilience4j's count-based breaker (a refused
-call is a 503 that never reaches the callee, counted as `short_circuited`); `detect` is the delay before a balancer
-notices a downed copy (`from_ms` on a scenario entry says when it went down). Circuit breakers, `from_ms` and `detect` act in the
-simulator and in the live mock alike: the mock runs every request on the same engine (a refused call is a 503 flagged `CB`) and plans with the time since the system started.
-
-## Studio: easier controls
-
-Settings, Trace, Results and Try live are the four tabs. Controls come in three layers (quick setups, a few basics,
-folded groups that show their value when closed, with a jump box), every term has a help button that opens its
-glossary entry, Results opens with a plain verdict and shows the retry funnel and breaker timeline, Try live starts
-from an Apply button, and a gateway has a **Steps** group that edits each route's chain: calls, cache lookups and
-parallel blocks, with a retry of their own on a call. The server's trace marks each retry (`retry=2/3`) and the
-draft API has a `swap` operation that exchanges two list items without losing their comments.
-
-## How loss and compression are costed
-
-Both are off unless an edge says `loss` (a probability, 0.01 is 1%) or `compress` (the share of a response kept on the
-wire, 0.3 sends 30%). A lossy transfer pays fast retransmits and retransmission timeouts, a long one runs at the TCP
-rate of RFC 5348, and a lost SYN waits 1 s; an edge with no `net` pays nothing. Compression only shrinks the bytes on
-the wire, so a store's own time is unchanged.
-
-## How a streamed response is costed
-
-A write to a storage node streams its request the same way (the store works while the bytes arrive). A read of a storage node now streams: its bytes cross a wire or card with a `bandwidth` while the store is still
-reading, so the call takes the first byte plus the size over the slowest stage, not the stages added. This only moves
-figures with a `bandwidth`. `stream: false` on the edge or the `call:` step restores the old sum; `stream: true` turns
-it on for both directions of any callee, or `stream: request` / `stream: response` for one.
-
-## How a new connection is costed
-
-An edge with a `net` (its round trip) opens a new connection for 1 call in `keepalive` (default 1000); that call
-pays the TCP handshake (1 round trip), TLS if `tls` is set (1 for 1.3, 2 for 1.2), and TCP slow start for a body
-that does not fit the first 14,600 B window. Reused connections pay nothing. An edge without `net` pays nothing.
-Existing files with a `net` therefore move by about 1 call in 1000; set `keepalive: 1000000` to leave it out.
-
-## How body sizes are costed
-
-Sizes only matter when a topology has a `bandwidth` (on an edge or a node), a `per_kb`, or a storage `throughput`.
-Then:
-
-- **Headers count.** Every wire transfer and every HTTP node's `per_kb` carries 600 B on a request and 400 B on a
-  response, an estimate of real HTTP headers. Write `header_bytes: 0` to leave them out, or a size, or
-  `{ request, response }`, to change them.
-- **Direction follows the operation.** A write (`PUT`, an insert) counts the request body, a read (`GET`) and a scan
-  count the response body, and a service counts both. This is how HTTP and object stores move data; there is no
-  switch for it.
-- **A call can carry its own sizes.** `sends:` and `returns:` on an edge or a `call:` step say what that call
-  carries (a 5 MB upload that becomes a 200 KB call to storage); without them the incoming size is passed on.
-- **Transfers share a pipe fairly** instead of queueing, so a big upload no longer blocks a small call.
-
-A file that has a `bandwidth`, a `per_kb` or a `throughput` therefore reports different times from an earlier
-build: the headers add to every transfer, and a write no longer pays for the reply it never sends.
-`kaanal validate` also warns when an OpenAPI route takes or returns a file, because the spec does not give its size.
+- **Mocks that feel real.** Coherent synthetic data in seven built-in locales (or your own pack), deterministic for a given seed, with a per-request latency trace in `X-Kaanal-Trace`.
+- **A system, not just endpoints.** Gateways, services, databases, caches, load balancers, stores, auth and external APIs, with slots, queues, rate limits, CPUs, memory, retries, breakers and replicas.
+- **Chaos on demand.** Latency, error rates, a node or a link down, from the CLI, the HTTP API or Studio. Named scenarios stack, can be saved from Studio (**Save live**), and reset in one call. Pins force an endpoint to answer as loading, empty, error or slow.
+- **Studio.** `kaanal up` prints the link. Live mode runs traffic continuously and shows requests, queues and drops as you change settings; Batch mode gives a seeded, repeatable run; Admin mode puts your real frontend in the numbers and lets you rewrite a route's response. Canvas notes are saved in `kaanal.layout.json`.
+- **Find where it breaks.** A load sweep finds the knee and the first node to saturate, and writes a shareable Markdown report with a fingerprint of the design. `kaanal sim plan` sizes the system for a target load, and `--cheapest` searches for the cheapest design that holds it, with a what-if across AWS, GCP and Azure prices (a relative estimate, not a quote).
+- **Cost.** Per-node prices from a bundled catalogue of about 3,300 instance types, with managed database, cache and storage classes.
+- **Scriptable.** A control API under `/__kaanal/`, `kaanal logs`, `trace`, `status`, `up -d` and `down` for CI, and a JSON output flag on read commands.
+- **Local and private.** Binds to 127.0.0.1, token-protected control API, no real data, one instance per directory.
 
 ## Install
 
-Download the archive for your system, check it against `SHA256SUMS`, unpack it and run `kaanal --help`.
+Download the archive for your system from this release (Linux x86_64, macOS arm64, Windows x86_64) and check it against `SHA256SUMS`. With Rust 1.100 or newer you can also build from source: `cargo install --path crates/kaanal` after `cd ui && pnpm build`.
 
-| System  | Archive                                         |
-| ------- | ----------------------------------------------- |
-| Linux   | `kaanal-v0.0.1-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS   | `kaanal-v0.0.1-aarch64-apple-darwin.tar.gz`     |
-| Windows | `kaanal-v0.0.1-x86_64-pc-windows-msvc.zip`      |
+Then:
 
-Try it with `kaanal demo`.
+```bash
+kaanal demo                       # a demo shop with a chaos bar in your browser
+kaanal up -c examples/nginx-server/kaanal.yaml
+```
 
-<!--
-Maintainer notes (an HTML comment, so it does not show in the published release):
-- The UI build is part of a release: release.yml builds `ui/` and fails before `cargo build` if
-  `crates/kaanal-server/ui-dist/{index.html,app.js,app.css}` is missing. Nothing to do by hand.
-- [ ] crates.io step, when there is one: `cargo package` drops git-ignored files, so `ui-dist/` must be built
-  and included in the package first (Cargo.toml has no `include` list on purpose). Until then, do not publish.
--->
+The README has a short tour; the full documentation is in `docs/web/`.
+
+## Known limits
+
+- A simulation is a relative what-if on a model, not a prediction of production. Treat price and capacity figures as estimates.
+- Studio needs a modern browser; the by-hand accessibility passes (screen reader, narrow window) are still in progress.
+- No macOS x86_64 build yet.

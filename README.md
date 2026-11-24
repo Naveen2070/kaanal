@@ -2,7 +2,7 @@
 
 _Kaanal_ (கானல், Tamil for "mirage") is a single binary that pretends to be your backend: OpenAPI mocks with realistic data, simulated service → database timing (with an optional gateway in front), and live chaos.
 
-Status: M1 (pre-release). Site: [https://kaanal.naveenr.in](https://kaanal.naveenr.in)
+Status: v0.1 (first public release; expect changes below 1.0). Site: [https://kaanal.naveenr.in](https://kaanal.naveenr.in)
 
 ```mermaid
 flowchart TD
@@ -75,20 +75,41 @@ Kaanal solves this with a **single YAML topology file** and an **OpenAPI 3.0 spe
 
 ---
 
+## Install
+
+- **A release archive:** download the one for your system (Linux x86_64, macOS arm64, Windows x86_64) from the [releases page](https://github.com/Naveen2070/kaanal/releases), check it against `SHA256SUMS`, and put `kaanal` on your PATH.
+- **From source** (Rust 1.100 or newer): build Studio once, then install.
+
+  ```bash
+  git clone https://github.com/Naveen2070/kaanal && cd kaanal
+  (cd ui && pnpm install && pnpm build)
+  cargo install --path crates/kaanal
+  ```
+
+  Without the Studio build the binary still runs; `/__kaanal/studio` then shows the status page.
+
 ## Try it
 
-Needs Rust 1.100 or newer.
+The quickest look is the demo shop, with a chaos bar in your browser:
 
 ```bash
-cargo run -p kaanal -- up -c examples/nginx-server/kaanal.yaml
+kaanal demo
+```
+
+Or run a bundled example (from a checkout of this repository):
+
+```bash
+kaanal up -c examples/nginx-server/kaanal.yaml
 ```
 
 `kaanal up` binds to `127.0.0.1:8080` (or the next free port up to 8100) and prints:
 
 ```text
 Mocks: http://localhost:8080
-UI:    http://localhost:8080/__kaanal/ui#token=<64-character hex token>
+UI:    http://localhost:8080/__kaanal/studio?mode=admin#token=<64-character hex token>
 ```
+
+The link opens [Studio](docs/web/studio.md), the graphical editor; `kaanal up -d` runs it in the background and `kaanal down` stops it. `/__kaanal/ui` is a small status page that needs no token.
 
 ### 1. Test a mock request
 
@@ -121,16 +142,16 @@ Notice:
 
 ```bash
 # Force the database node to fail with 503
-cargo run -p kaanal -- chaos set db --error-rate 100% --error 503
+kaanal chaos set db --error-rate 100% --error 503
 
 # Next request fails at the database hop after gateway and service latency
 curl -i http://localhost:8080/users/42
 
 # Check status of the running instance
-cargo run -p kaanal -- status
+kaanal status
 
 # Clear chaos back to normal
-cargo run -p kaanal -- chaos clear
+kaanal chaos clear
 ```
 
 ### 3. Run automated verification
@@ -140,6 +161,28 @@ To test stable responses, trace headers, chaos 503, and automatic recovery in on
 ```bash
 bash examples/nginx-server/check.sh      # or: pwsh examples/nginx-server/check.ps1
 ```
+
+---
+
+## Studio, simulation and planning
+
+Studio is the graphical side of Kaanal (see [docs/web/studio.md](docs/web/studio.md)):
+
+- **Build and edit** a system on a canvas: components, wires, settings, canvas notes. Apply makes it the running system; Save writes `kaanal.yaml`.
+- **Live** runs traffic all the time, so a change shows at once; **Batch** gives a seeded, repeatable run; **Admin** puts your real frontend in the numbers and lets you rewrite a route's response ([admin-mode.md](docs/web/admin-mode.md)).
+- **Chaos and scenarios** from the page; **Save live** keeps what you set as a scenario file.
+- **Find where it breaks:** a load sweep reports the knee and the first node to saturate, as a shareable Markdown report ([simulation.md](docs/web/simulation.md)).
+- **Plan a size:** what the design needs to hold a target load, and the cheapest design that does, with a what-if across AWS, GCP and Azure prices.
+
+The same engine runs from the CLI:
+
+```bash
+kaanal sim run -p steady                    # one seeded run of the example's traffic profile, then the report
+kaanal sim sweep -p steady --report sweep.md # raise the load until it breaks, and write the report
+kaanal sim plan -p steady --target 3x --cheapest   # size it, then search for the cheapest
+```
+
+A simulation is a relative what-if on a model, not a prediction of production. Prices and capacities are estimates.
 
 ---
 
@@ -197,7 +240,7 @@ Every node kind and field is documented in [docs/web/nodes.md](docs/web/nodes.md
 Check configs without starting:
 
 ```bash
-cargo run -p kaanal -- validate -c kaanal.yaml
+kaanal validate -c kaanal.yaml
 ```
 
 ---
@@ -210,6 +253,14 @@ All CLI commands run from the project directory where `kaanal up` was executed:
 | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `kaanal up [-c config] [--port port] [--host host]`                                | Start the mock server in foreground.                                                                                                   |
 | `kaanal validate [-c config]`                                                      | Validate topology, YAML syntax, and OpenAPI specs.                                                                                     |
+| `kaanal studio`                                                                    | Start blank and open the browser: build a system in Studio.                                                                            |
+| `kaanal demo`                                                                      | A demo shop with a chaos bar in your browser.                                                                                          |
+| `kaanal init FILE_OR_URL`                                                          | Create a starter `kaanal.yaml` from an OpenAPI 3.0 file.                                                                               |
+| `kaanal down`                                                                      | Stop the running instance (`up -d` starts one in the background).                                                                      |
+| `kaanal sim run\|sweep\|plan\|list\|show\|report`                                  | The simulator: a run, a load sweep, a sizing plan, and their reports. See [simulation](docs/web/simulation.md).                        |
+| `kaanal draft show\|set\|validate\|apply\|save`                                    | Read, replace, check, apply and save the running instance's `kaanal.yaml` text.                                                        |
+| `kaanal logs [-f]`, `kaanal trace ID`                                              | The last finished requests, and one request as a per-hop waterfall.                                                                    |
+| `kaanal node down\|up\|list`                                                       | Take a node down (`node down db --for 30s`), bring it back, or list nodes with their state.                                            |
 | `kaanal schema [config\|dictionary\|pack]`                                         | Print the JSON Schema for editor autocomplete: `kaanal.yaml`, a `data.yaml` dictionary or a `locales/<tag>.yaml` pack.                 |
 | `kaanal endpoints [--write]`                                                       | Add skeleton entries for spec routes to the endpoints file (append-only).                                                              |
 | `kaanal status`                                                                    | Show running nodes, the effective chaos and the active scenarios.                                                                      |
@@ -229,7 +280,7 @@ Exit codes: `0` (success), `1` (error), `2` (no running instance found).
 - **Strict File Isolation**: Holds an exclusive OS lock on `.kaanal/lock` using `std::fs::File::try_lock` ensuring exactly one instance per directory. `.kaanal/run.json` is protected with private permissions (Unix `0700`/`0600`, Windows ACLs restricted to the current user SID).
 - **Synthetic Data Safety**: All emails use `@example.com` (RFC 2606); no real user data is ever generated or queried.
 - **Signing Key**: The auth signing key lives outside the project, readable only by you.
-- **Embedded Web UI**: Self-contained vanilla HTML/JS served at `/__kaanal/ui` with strict Content Security Policy (`frame-ancestors 'none'`, `no-referrer`, DOM manipulation via `textContent` only).
+- **Embedded UI**: Studio and the status page are built into the binary and make no outside requests. Both are served with a strict Content Security Policy (`frame-ancestors 'none'`, `connect-src 'self'`); the status page at `/__kaanal/ui` needs no token and shows no secrets.
 
 ---
 

@@ -1239,7 +1239,7 @@ dependencies = [
 
 [[package]]
 name = "kaanal"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "kaanal-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "humantime-serde",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "kaanal-data"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "jsonschema",
  "rand 0.10.3",
@@ -1295,7 +1295,7 @@ dependencies = [
 
 [[package]]
 name = "kaanal-server"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "kaanal-sim"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kaanal-core",
  "rand 0.10.3",
@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "kaanal-winhandle"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "windows-sys 0.61.2",
 ]

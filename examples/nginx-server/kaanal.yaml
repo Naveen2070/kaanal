@@ -13,3 +13,8 @@ edges:
   - { from: app,   to: db,  net: { p50: 1ms, p99: 2ms } }
 endpoints:
   "GET /health": { override: { status: 200, body: { ok: true } } }
+traffic:                 # what `kaanal sim` sends: 80 requests a second to one route
+  steady:
+    rps: 80
+    journeys:
+      - { endpoint: "GET /users/{id}", weight: 1 }
