@@ -169,6 +169,7 @@ pub(super) fn doc() -> PlanDoc {
             budget_micro_usd_hr: Some(2_000_000),
             keep: vec!["cache".into()],
             max_steps: 30,
+            cheapest: None,
         },
         verdict: PlanVerdict::Holds,
         budget_check: Some(BudgetCheck {
@@ -204,6 +205,10 @@ pub(super) fn doc() -> PlanDoc {
             req_s: 262.0,
         }),
         sweep_error: None,
+        cheapest_note: None,
+        search: None,
+        providers: None,
+        comparison: None,
     }
 }
 

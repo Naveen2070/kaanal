@@ -1,8 +1,12 @@
 //! Unit tests of [`super::walk_by`] with scripted runs, and of the ranking (split from `walk.rs`
 //! to keep it under the size seam).
 
+use std::collections::BTreeMap;
+
+use kaanal_core::cost::estimate;
+
 use super::*;
-use crate::sweep::{NodePoint, Over};
+use crate::sweep::{Limit, NodePoint, Over, Point};
 
 fn key(gain: f64, delta: Option<i64>, size: f64, total: u64, label: &str) -> Key {
     Key {

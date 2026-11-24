@@ -13,6 +13,7 @@ use kaanal_sim::plan::{Candidate, Effect, PlanVerdict};
 use kaanal_sim::sweep::Verdict;
 use serde_json::json;
 
+use super::plan_cheapest as cheapest;
 use super::{
     REPORT_VERSION, Recipe, ReportError, SweepReport, chaos_in_force, json_text, limit_pct,
     row_pct, shell, text,
@@ -75,13 +76,27 @@ pub(crate) fn plan_report(rec: &RunRecord, version: &str) -> Result<SweepReport,
         text(p.label),
         super::clean(&rec.id)
     );
+    cheapest::label(&mut md, p);
     target(&mut md, rec, p);
     now(&mut md, p);
-    steps(&mut md, p);
-    menu(&mut md, p);
-    families(&mut md, p);
+    if p.search.is_some() {
+        cheapest::search(&mut md, p);
+        cheapest::comparison(&mut md, p);
+        cheapest::changes(&mut md, p);
+    } else {
+        steps(&mut md, p);
+    }
+    // a cheapest plan's collapsed steps have no menu: only the walk's own steps do
+    if p.search.is_none() || p.steps.iter().any(|s| !s.menu.is_empty()) {
+        menu(&mut md, p);
+    }
+    // a cheapest plan has no database-family what-ifs: its what-ifs are the provider sections
+    if p.search.is_none() {
+        families(&mut md, p);
+    }
     verdict(&mut md, p);
     checked(&mut md, p);
+    cheapest::sections(&mut md, p);
     super::rerun(
         &mut md,
         &Recipe {
@@ -101,7 +116,7 @@ pub(crate) fn plan_report(rec: &RunRecord, version: &str) -> Result<SweepReport,
 }
 
 /// `1234567` micro-USD as `1.234567`, at least two decimals, no float: `840000` is `0.84`, `3500` is `0.0035`.
-fn dollars(micro: u64) -> String {
+pub(super) fn dollars(micro: u64) -> String {
     let mut frac = format!("{:06}", micro % 1_000_000);
     while frac.len() > 2 && frac.ends_with('0') {
         frac.pop();
@@ -110,7 +125,7 @@ fn dollars(micro: u64) -> String {
 }
 
 /// An hourly price, `$0.84/h`, or `not priced`.
-fn price(micro: Option<u64>) -> String {
+pub(super) fn price(micro: Option<u64>) -> String {
     micro.map_or("not priced".into(), |m| format!("${}/h", dollars(m)))
 }
 
@@ -126,7 +141,7 @@ fn capacity(c: Option<f64>) -> String {
 }
 
 /// One run's figures in words.
-fn effect(e: &Effect) -> String {
+pub(super) fn effect(e: &Effect) -> String {
     format!(
         "p99 {} ms, errors {}, capacity est. {}",
         n(e.p99_ms),
@@ -149,7 +164,7 @@ fn bytes(b: u64) -> String {
 }
 
 /// A move in words.
-fn change(mv: &Move) -> String {
+pub(super) fn change(mv: &Move) -> String {
     match &mv.kind {
         MoveKind::Class { from, to } => {
             format!("instance class {} to {}", text(from), text(to))
@@ -333,7 +348,7 @@ fn families(md: &mut String, p: &PlanDoc) {
 }
 
 /// A walk's ending in plain words; `shown` is the plan's price and `budget` the request's ceiling.
-fn verdict_words(
+pub(super) fn verdict_words(
     v: &PlanVerdict,
     max_steps: u32,
     family: bool,
@@ -390,17 +405,24 @@ fn verdict_words(
 
 /// The `## Verdict` section.
 fn verdict(md: &mut String, p: &PlanDoc) {
-    let _ = write!(
-        md,
-        "## Verdict\n\n{}\n\n",
-        verdict_words(
+    let words = match &p.search {
+        Some(i) => cheapest::words(
+            "The design in force",
+            &p.verdict,
+            i,
+            p.request.max_steps,
+            p.price_after,
+            p.request.budget_micro_usd_hr,
+        ),
+        None => verdict_words(
             &p.verdict,
             p.request.max_steps,
             false,
             p.price_after,
-            p.request.budget_micro_usd_hr
-        )
-    );
+            p.request.budget_micro_usd_hr,
+        ),
+    };
+    let _ = write!(md, "## Verdict\n\n{words}\n\n");
     if let Some(b) = &p.budget_check {
         md.push_str(&budget_line(b));
         md.push_str("\n\n");
@@ -418,7 +440,7 @@ fn verdict(md: &mut String, p: &PlanDoc) {
 
 /// The budget judged with per-use prices: what the plan shown costs against the budget, and whether
 /// those prices turned a holding plan into an over-budget one.
-fn budget_line(b: &BudgetCheck) -> String {
+pub(super) fn budget_line(b: &BudgetCheck) -> String {
     let (cost, budget) = (b.cost_micro_usd_hr, b.budget_micro_usd_hr);
     let against = if cost > budget {
         format!(
@@ -509,13 +531,19 @@ fn command(rec: &RunRecord, p: &PlanDoc, seed: u64) -> Result<String, ReportErro
     for k in &r.keep {
         let _ = write!(c, " --keep={}", shell(k));
     }
-    let _ = write!(c, " --max-steps {} --seed {seed}", r.max_steps);
+    let _ = write!(c, " --max-steps {}", r.max_steps);
+    if let Some(ch) = &r.cheapest {
+        c.push_str(&cheapest::flags(ch));
+    }
+    let _ = write!(c, " --seed {seed}");
     if let Some(sc) = &rec.scenario {
         let _ = write!(c, " --scenario={}", shell(sc));
     }
     Ok(c)
 }
 
+#[cfg(test)]
+mod cheapest_tests;
 #[cfg(test)]
 mod recipe_tests;
 #[cfg(test)]

@@ -16,12 +16,13 @@ use crate::sim::plan_draft::{
     FAMILY_MAX_STEPS, FamilySection, LABEL, PlanAsked, PlanDoc, TargetAsked, judge_budget,
     proposed_text, round_trip, same_design, verify,
 };
+use crate::sim::plan_search::{Cheapest, cheapest_asked, run_cheapest};
 use crate::sim::profile::{Profile, RunRequest, first_profile, to_sim};
 use crate::sim::run::{Job, Slot, execute_sweep};
 use crate::sim::store::{RunRecord, SweepMeta};
 use kaanal_core::NodeKind;
 use kaanal_core::resize::alternatives;
-use kaanal_sim::plan::{FamilyAnswer, PlanVerdict, Request, Target, walk};
+use kaanal_sim::plan::{CHEAPEST_NOTE, FamilyAnswer, PlanVerdict, Request, Step, Target, walk};
 use kaanal_sim::sweep::Options;
 use kaanal_sim::{Limits, MAX_RATE_PER_S, SimConfig};
 
@@ -62,6 +63,18 @@ pub struct PlanBody {
     /// The most steps, up to 100 (default 30).
     #[serde(default)]
     max_steps: Option<u32>,
+    /// Search for the cheapest design that holds, with provider sections (Step 9c-2; default false).
+    #[serde(default)]
+    cheapest: bool,
+    /// The whole time limit of a cheapest plan, seconds (1 to 600, default 150).
+    #[serde(default)]
+    time_limit_s: Option<u32>,
+    /// The most runs per search (1 to 2000, default 200).
+    #[serde(default)]
+    run_cap: Option<u32>,
+    /// The providers to compare (`aws`, `gcp`, `azure`, or `["none"]`).
+    #[serde(default)]
+    providers: Option<Vec<String>>,
 }
 
 fn bad(m: &str) -> Reject {
@@ -182,11 +195,14 @@ pub async fn post_plan(State(st): State<Arc<AppState>>, body: Bytes) -> Result<R
         snap,
         runtime,
     } = applied_inputs(&st, &req)?;
-    if let Some(k) = b.keep.iter().find(|k| !g.config.nodes.contains_key(*k)) {
+    let cfg = &g.config;
+    if let Some(k) = b.keep.iter().find(|k| !cfg.nodes.contains_key(*k)) {
         return Err(bad(&format!(
             "keep: '{k}' is not a node of the design in force"
         )));
     }
+    let (secs, cap, provs) = (b.time_limit_s, b.run_cap, b.providers);
+    let cheapest = cheapest_asked(b.cheapest, secs, cap, provs, cfg).map_err(|e| bad(&e))?;
     let (label, inline_profile) = if let Some((label, profile)) = parsed {
         let inline = match profile {
             Profile::Inline(_) => posted,
@@ -211,6 +227,7 @@ pub async fn post_plan(State(st): State<Arc<AppState>>, body: Bytes) -> Result<R
         budget_micro_usd_hr,
         keep: b.keep,
         max_steps,
+        cheapest,
     };
     let applied = ready_to_start(&st, &g).await?;
     let id = st
@@ -272,18 +289,27 @@ fn run_plan(
     let internal = |e: String| format!("internal: {e}");
     // again: an Apply may have run since the route checked (not internal: the message says retry)
     same_design(st, applied, g)?;
-    let plan = walk(
-        &g.config,
-        &g.endpoints,
-        &job.chaos,
-        &job.cfg,
-        req,
-        &Limits::server(),
-        &mut |s| {
-            st.sims.plan_step(id, s.clone());
-        },
-    )?;
-    let families = families(job, req);
+    let on_step = &mut |s: &Step| st.sims.plan_step(id, s.clone());
+    // a cheapest plan (Step 9c-2) replaces the walk and the family what-ifs with the search and the
+    // provider sections; the tail below is the same for both
+    let (plan, families, search, providers) = match &asked.cheapest {
+        None => {
+            let plan = walk(
+                &g.config,
+                &g.endpoints,
+                &job.chaos,
+                &job.cfg,
+                req,
+                &Limits::server(),
+                on_step,
+            )?;
+            (plan, families(job, req), None, None)
+        }
+        Some(c) => {
+            let Cheapest { main, providers } = run_cheapest(job, req, c, k, on_step)?;
+            (main.plan, Vec::new(), Some(main.info), Some(providers))
+        }
+    };
     let text = proposed_text(applied, &plan.steps)
         .map_err(|e| internal(format!("the proposed draft cannot be written: {e}")))?;
     let (verify, proposed) =
@@ -326,7 +352,7 @@ fn run_plan(
         asked.budget_micro_usd_hr,
         verify.cost.total_micro_usd_hr,
     );
-    let doc = PlanDoc {
+    let mut doc = PlanDoc {
         label: LABEL,
         request: asked,
         verdict,
@@ -341,7 +367,12 @@ fn run_plan(
         verify,
         measured_knee,
         sweep_error,
+        cheapest_note: search.is_some().then_some(CHEAPEST_NOTE),
+        search,
+        providers,
+        comparison: None,
     };
+    doc.comparison = crate::sim::report::compare(&doc);
     Ok((doc, text))
 }
 
@@ -521,9 +552,11 @@ mod tests {
         Arc::new(AppState::build(&cfg, &dir, String::new(), 0).unwrap())
     }
 
-    async fn post_status(st: &Arc<AppState>) -> StatusCode {
-        let body = Bytes::from(r#"{ "target": { "multiple": 2 } }"#);
-        match post_plan(State(Arc::clone(st)), body).await {
+    const PLAIN: &str = r#"{ "target": { "multiple": 2 } }"#;
+    const CHEAPEST: &str = r#"{ "target": { "multiple": 2 }, "cheapest": true, "run_cap": 5 }"#;
+
+    async fn post_status(st: &Arc<AppState>, body: &'static str) -> StatusCode {
+        match post_plan(State(Arc::clone(st)), Bytes::from(body)).await {
             Ok(r) => r.status(),
             Err((code, _)) => code,
         }
@@ -537,9 +570,14 @@ mod tests {
         let held = Arc::clone(&st.work)
             .try_acquire_many_owned(u32::try_from(crate::sim::WORK_PERMITS).unwrap())
             .unwrap();
-        assert_eq!(post_status(&st).await, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(post_status(&st, PLAIN).await, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            post_status(&st, CHEAPEST).await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "a cheapest plan keeps the order"
+        );
         drop(held);
-        assert_ne!(post_status(&st).await, StatusCode::TOO_MANY_REQUESTS);
+        assert_ne!(post_status(&st, PLAIN).await, StatusCode::TOO_MANY_REQUESTS);
     }
 
     /// Busy comes first: a plan while the slot is held is 409, even with no permit free.
@@ -550,6 +588,7 @@ mod tests {
             .try_acquire_many_owned(u32::try_from(crate::sim::WORK_PERMITS).unwrap())
             .unwrap();
         let _run = st.sims.begin(1, "peak", None, "applied", None).unwrap();
-        assert_eq!(post_status(&st).await, StatusCode::CONFLICT);
+        assert_eq!(post_status(&st, PLAIN).await, StatusCode::CONFLICT);
+        assert_eq!(post_status(&st, CHEAPEST).await, StatusCode::CONFLICT);
     }
 }

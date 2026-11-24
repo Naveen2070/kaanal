@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as Yaml;
 
+use super::plan_search::{CheapestAsked, ProviderSection};
 use super::run::{Job, execute_run};
 use crate::draft::apply::build_draft;
 use crate::draft::patch::{self, Op};
@@ -62,6 +63,9 @@ pub struct PlanAsked {
     pub keep: Vec<String>,
     /// The most steps.
     pub max_steps: u32,
+    /// The cheapest search's fields (Step 9c-2); `None` for a plain plan, and then not serialised.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cheapest: Option<CheapestAsked>,
 }
 
 /// One entry of the database-family section: the walk on one flavor of the other family, or why a
@@ -182,6 +186,20 @@ pub struct PlanDoc {
     /// Why the sweep of the proposed design did not run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sweep_error: Option<String>,
+    /// A cheapest plan's [`kaanal_sim::plan::CHEAPEST_NOTE`] (Step 9c-2); `label` stays.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cheapest_note: Option<&'static str>,
+    /// How the main search ran; `None` for a plain plan (the 9c-1 walk).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<kaanal_sim::plan::SearchInfo>,
+    /// The provider what-ifs of a cheapest plan, in `PROVIDERS` order (`[]` when none ran);
+    /// `None` for a plain plan, and then not serialised.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<ProviderSection>>,
+    /// The design in force against each provider what-if, built once ([`crate::sim::report::compare`])
+    /// so the Markdown report and the CLI say the same; `None` when no provider section ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comparison: Option<crate::sim::report::Comparison>,
 }
 
 /// The applied text with `steps` written in, one patch operation per step: `set` when the key is in
@@ -327,7 +345,7 @@ pub(crate) fn same_design(st: &AppState, applied: &str, g: &Generation) -> Resul
 
 /// **Private.** `base` at `k` times every stream's rate, its window the profile's or the one that
 /// gives about [`PRICE_REQUESTS`] requests, whichever is shorter (at least a second); warmup a tenth.
-fn price_cfg(base: &SimConfig, k: f64) -> SimConfig {
+pub(crate) fn price_cfg(base: &SimConfig, k: f64) -> SimConfig {
     let streams: Vec<Stream> = base
         .streams
         .iter()

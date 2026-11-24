@@ -22,17 +22,19 @@
 //! run. A greedy walk: it finds *a* plan, not the cheapest (that is the 9c-2 search).
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 
-use kaanal_core::cost::{CostReport, estimate};
 use kaanal_core::resize::{
-    Move, MoveKind, apply, copies_only_reason, moves_for, moves_for_oom, why_fixed,
+    Move, MoveKind, copies_only_reason, moves_for, moves_for_oom, why_fixed,
 };
 use kaanal_core::{Config, EffectiveChaos, Endpoints, Topology};
 
+use super::common::{
+    Refusal, State, delta, effect, fail_text, fixed_cause, gain, label, margin, node_priced, price,
+    priced_verdict, shown, try_move,
+};
 use super::types::{Candidate, Effect, Plan, PlanVerdict, Request, Step};
 use super::{Check, check};
-use crate::sweep::{Limit, Point, PointFail};
+use crate::sweep::PointFail;
 use crate::{Limits, SimConfig};
 
 /// A margin drop at or under this is no gain (float noise, not progress).
@@ -65,14 +67,6 @@ pub fn walk(
     )
 }
 
-/// **Private.** One design the walk stands on or tried.
-#[derive(Clone)]
-struct State {
-    cfg: Config,
-    check: Check,
-    cost: CostReport,
-}
-
 /// **Private.** The cheapest holding design seen in any menu, with the steps that reach it.
 struct Best {
     total: u64,
@@ -80,13 +74,13 @@ struct Best {
     state: State,
 }
 
-/// **Private.** [`walk`] with the run injected, so the rules can be tested without the engine.
+/// [`walk`] with the run injected, so the rules can be tested without the engine.
 ///
 /// A step goes to `on_step` once a step at or after it gains, or when the walk ends with it in the
 /// plan, so the two steps a `NoProgress` plan drops are never sent. A plan that branches off an
 /// earlier menu (its cheapest holding candidate) supersedes the steps sent past the branch point:
 /// `Plan.steps` is the answer, the sent steps are progress.
-fn walk_by(
+pub(super) fn walk_by(
     cfg: &Config,
     req: &Request,
     run: &mut dyn FnMut(&Topology) -> Result<Check, PointFail>,
@@ -188,30 +182,6 @@ fn walk_by(
     Ok(plan(verdict, path, end, start, price_before))
 }
 
-/// **Private.** A cause more size cannot fix (spec: a limit the developer set, or chaos, ends the
-/// plan instead of sizing an unrelated node). Looked at only when the errors are over the plain limit
-/// and the most common failure cause is a rate limit (named when one node has one), chaos, or a
-/// deadline while no node saturates (a deadline with a saturated node is a queue a size step can
-/// shorten). The node, when known, and the reason.
-fn fixed_cause(cfg: &Config, c: &Check, limit: &Limit) -> Option<(Option<String>, String)> {
-    if !limit.over(&c.point).errors {
-        return None;
-    }
-    match c.point.cause? {
-        "rate_limit" => {
-            let mut limited = cfg.nodes.iter().filter(|(_, n)| n.rate_limit().is_some());
-            let node = match (limited.next(), limited.next()) {
-                (Some((name, _)), None) => Some(name.clone()),
-                _ => None,
-            };
-            Some((node, "most failed requests at the target are turned away by a rate limit you set; a plan never raises it, and more size cannot".into()))
-        }
-        "chaos" => Some((None, "most failed requests at the target fail from the chaos in force; more size cannot remove it".into())),
-        "deadline" if !c.point.nodes.iter().any(|n| n.saturated) => Some((None, "most failed requests at the target run out a deadline you set while no node saturates; more size cannot lengthen it".into())),
-        _ => None,
-    }
-}
-
 /// **Private.** Where the walk ends, with how many of its steps the steps already sent share.
 fn settle(
     verdict: PlanVerdict,
@@ -264,17 +234,6 @@ fn plan(
             .collect(),
         config: st.cfg,
         families: Vec::new(),
-    }
-}
-
-/// **Private.** `Holds` for a holding design within `budget` (or with none), else `OverBudget`.
-fn priced_verdict(total: u64, budget: Option<u64>) -> PlanVerdict {
-    match budget {
-        Some(b) if total > b => PlanVerdict::OverBudget {
-            over_by_micro_usd_hr: total - b,
-            holds: true,
-        },
-        _ => PlanVerdict::Holds,
     }
 }
 
@@ -383,95 +342,6 @@ impl Menu {
     }
 }
 
-/// **Private.** Why a candidate has no run.
-enum Refusal {
-    /// Dropped from the menu with a note: too large to run, or a move the design refuses.
-    Size(String),
-    /// Ends the walk.
-    Fatal(String),
-}
-
-/// **Private.** `mv` applied to a clone of `cfg`, built and run.
-fn try_move(
-    cfg: &Config,
-    mv: &Move,
-    run: &mut dyn FnMut(&Topology) -> Result<Check, PointFail>,
-) -> Result<State, Refusal> {
-    let mut c = cfg.clone();
-    apply(&mut c, mv).map_err(Refusal::Size)?;
-    let topo = Topology::build(&c).map_err(|e| Refusal::Size(e.to_string()))?;
-    let check = run(&topo).map_err(|e| match e {
-        PointFail::TooLarge(e) => Refusal::Size(format!("too large to run: {e}")),
-        PointFail::Other(e) => Refusal::Fatal(e),
-    })?;
-    let cost = price(&c);
-    Ok(State {
-        cfg: c,
-        check,
-        cost,
-    })
-}
-
-fn fail_text(e: &PointFail) -> &str {
-    match e {
-        PointFail::TooLarge(s) | PointFail::Other(s) => s,
-    }
-}
-
-fn price(cfg: &Config) -> CostReport {
-    estimate(cfg, &BTreeMap::new())
-}
-
-/// **Private.** The priced total, `None` when no node is priced.
-fn shown(c: &CostReport) -> Option<u64> {
-    (c.priced > 0).then_some(c.total_micro_usd_hr)
-}
-
-fn node_priced(c: &CostReport, node: &str) -> bool {
-    c.nodes
-        .iter()
-        .any(|n| n.name == node && n.total_micro_usd_hr.is_some())
-}
-
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "hourly micro-USD totals are far below 2^63"
-)]
-fn delta(after: &CostReport, before: &CostReport) -> i64 {
-    after.total_micro_usd_hr as i64 - before.total_micro_usd_hr as i64
-}
-
-fn effect(c: &Check) -> Effect {
-    Effect {
-        p99_ms: c.point.p99_ms,
-        error_rate: c.point.error_rate,
-        capacity_req_s: c.capacity_req_s,
-    }
-}
-
-/// **Private.** How far over the line a point is: the larger of p99 / limit and errors / limit (1 is
-/// on the line). A NaN figure, or one over a zero limit, is infinitely over.
-fn margin(l: &Limit, p: &Point) -> f64 {
-    let frac = |x: f64, lim: f64| {
-        if x.is_nan() {
-            f64::INFINITY
-        } else if lim > 0.0 {
-            x / lim
-        } else if x > 0.0 {
-            f64::INFINITY
-        } else {
-            0.0
-        }
-    };
-    frac(p.p99_ms, l.p99.as_secs_f64() * 1000.0).max(frac(p.error_rate, l.error_rate))
-}
-
-/// **Private.** The margin drop, at least 0 (infinity minus infinity is no gain).
-fn gain(before: f64, after: f64) -> f64 {
-    let g = before - after;
-    if g.is_nan() { 0.0 } else { g.max(0.0) }
-}
-
 /// **Private.** What a move adds: cores or copies; a class or memory step counts as one.
 fn size(k: &MoveKind) -> f64 {
     match k {
@@ -479,16 +349,6 @@ fn size(k: &MoveKind) -> f64 {
         MoveKind::Copies { from, to } => f64::from(to.saturating_sub(*from)),
         MoveKind::Class { .. } | MoveKind::Memory { .. } => 1.0,
     }
-}
-
-fn label(mv: &Move) -> String {
-    let what = match &mv.kind {
-        MoveKind::Class { from, to } => format!("class {from} -> {to}"),
-        MoveKind::Cores { from, to } => format!("cores {from} -> {to}"),
-        MoveKind::Memory { from, to } => format!("memory {from} -> {to} bytes"),
-        MoveKind::Copies { from, to } => format!("copies {from} -> {to}"),
-    };
-    format!("'{}' {what}", mv.node)
 }
 
 /// **Private.** What the choice of a move looks at.

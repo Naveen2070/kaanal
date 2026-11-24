@@ -1,4 +1,4 @@
-//! Running the simulator for the control API. [`execute_run`] and [`execute_sweep`] are the only
+//! Running the simulator for the control API. [`execute_run`], [`price_design`] and [`execute_sweep`] are the only
 //! places the server calls `kaanal_sim` to run: moving the simulator into its own process later
 //! (see `internal/docs/suggestions/2026-10-28-process-isolation.md`) replaces their bodies and
 //! nothing else.
@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use kaanal_core::EffectiveChaos;
 use kaanal_core::cost::{CostReport, egress_flows, estimate_with_egress};
+use kaanal_core::{Config, EffectiveChaos, Endpoints, Topology};
 use kaanal_sim::sweep::{Options, Point, SweepResult, sweep};
 use kaanal_sim::{Limits, SimConfig, Summary, run_with_limits, summarize};
 
@@ -49,6 +49,41 @@ pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample, CostReport),
     )?;
     let log = sample(&report, &job.g.topo, &job.g.endpoints, &job.cfg);
     let summary = summarize(&job.g.topo, &job.g.endpoints, &job.cfg, &report);
+    let cost = cost_of(
+        &job.g.config,
+        &job.g.topo,
+        &job.g.endpoints,
+        &job.cfg,
+        &summary,
+    );
+    Ok((summary, log, cost))
+}
+
+/// What design `config` costs an hour with per-use prices at the visits of one run under `cfg`
+/// (Step 9c-2: a provider section is priced as the main plan's re-check is). No log, no summary kept.
+///
+/// # Errors
+/// The design does not build, or the simulator's message.
+pub(crate) fn price_design(
+    config: &Config,
+    endpoints: &Endpoints,
+    chaos: &EffectiveChaos,
+    cfg: &SimConfig,
+) -> Result<CostReport, String> {
+    let topo = Topology::build(config).map_err(|e| e.to_string())?;
+    let report = run_with_limits(&topo, endpoints, chaos, cfg, &Limits::server())?;
+    let summary = summarize(&topo, endpoints, cfg, &report);
+    Ok(cost_of(config, &topo, endpoints, cfg, &summary))
+}
+
+/// **Private.** The cost of `config` at the visits `summary` measured.
+fn cost_of(
+    config: &Config,
+    topo: &Topology,
+    endpoints: &Endpoints,
+    cfg: &SimConfig,
+    summary: &Summary,
+) -> CostReport {
     // an object store's requests are priced at what this run sent it
     let visits: BTreeMap<String, f64> = summary
         .nodes
@@ -57,16 +92,15 @@ pub(crate) fn execute_run(job: &Job) -> Result<(Summary, LogSample, CostReport),
         .collect();
     // and what its streams send out to the internet: rate x response size, by the cloud of the entry node
     let flows = egress_flows(
-        &job.g.config,
-        &job.g.topo,
-        &job.g.endpoints,
-        job.cfg.streams.iter().map(|s| {
+        config,
+        topo,
+        endpoints,
+        cfg.streams.iter().map(|s| {
             #[allow(clippy::cast_precision_loss)]
             (s.endpoint_key.as_str(), s.rate_per_s * s.resp_bytes as f64)
         }),
     );
-    let cost = estimate_with_egress(&job.g.config, &visits, &flows);
-    Ok((summary, log, cost))
+    estimate_with_egress(config, &visits, &flows)
 }
 
 /// Sweeps `job` under the server caps; `job.cfg`'s duration and warmup are ignored (each point

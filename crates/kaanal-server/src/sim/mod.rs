@@ -5,6 +5,7 @@
 pub(crate) mod draft_run;
 pub(crate) mod log;
 pub(crate) mod plan_draft;
+pub(crate) mod plan_search;
 pub(crate) mod profile;
 pub(crate) mod report;
 pub(crate) mod run;

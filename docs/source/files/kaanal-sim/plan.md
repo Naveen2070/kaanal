@@ -1,6 +1,6 @@
-# `kaanal-sim/src/plan/` (Step 9c-1, sizing planner)
+# `kaanal-sim/src/plan/` (Step 9c-1 sizing planner, Step 9c-2 cheapest search)
 
-The check a candidate plan must pass, and the walk. `plan/mod.rs` re-exports; `plan/check.rs`, `plan/types.rs` and `plan/walk.rs` hold the code. Tests are in `tests/plan_check.rs` (M/M/1: capacity estimate within 5 percent of mu) and `tests/plan_walk.rs` (M/M/c: the copies the walk picks are the fewest Erlang C allows, capacity after the walk within 5 percent of c x mu), plus unit tests of the ranking and of the walk's rules on scripted runs in `plan/walk_tests.rs` (a `#[cfg(test)]` module of `walk.rs`, split out to keep it under the size seam).
+The check a candidate plan must pass, the walk, and the cheapest search. `plan/mod.rs` re-exports; `plan/check.rs`, `plan/types.rs`, `plan/common.rs`, `plan/walk.rs`, `plan/search_types.rs` and `plan/search.rs` hold the code. Tests are in `tests/plan_check.rs` (M/M/1: capacity estimate within 5 percent of mu) and `tests/plan_walk.rs` (M/M/c: the copies the walk picks are the fewest Erlang C allows, capacity after the walk within 5 percent of c x mu), plus unit tests of the ranking and of the walk's rules on scripted runs in `plan/walk_tests.rs` (a `#[cfg(test)]` module of `walk.rs`, split out to keep it under the size seam). The search is tested in `tests/plan_search.rs` (Erlang C: 8 copies at 250 req/s shrink to c* = 3, capacity within 5 percent of c* x mu) and `plan/search_tests.rs` (scripted runs and an injected clock).
 
 ## `plan/check.rs`
 
@@ -15,6 +15,22 @@ The check a candidate plan must pass, and the walk. `plan/mod.rs` re-exports; `p
 - `PlanVerdict { AlreadyHolds, Holds, CannotHold { node: Option<String>, reason }, OverBudget { over_by_micro_usd_hr }, NoProgress { node }, StepCap }` (serialised with a `kind` tag).
 - `Plan { verdict, steps, start, end, price_before, price_after, unpriced_nodes, config, families }`: `config` (the plan's design) is not serialised; `families` (`FamilyAnswer { node, flavor, plan, notes }`) is filled by the server, empty from `walk`.
 - Prices are micro-USD an hour of the priced nodes only (`None` when the moved node, or for the plan no node, is priced), estimates.
+
+## `plan/common.rs`
+
+The walk's helpers that the cheapest search also needs, moved out of `walk.rs` unchanged and `pub(super)` (visible to `plan` only): `State { cfg, check, cost }`, `price`, `shown`, `node_priced`, `delta`, `effect`, `margin`, `gain`, `label`, `try_move` with `Refusal { Size, Fatal }`, `fail_text`, `priced_verdict`, `fixed_cause`.
+
+## `plan/search_types.rs`
+
+- `SearchOptions { time_limit, run_cap }` (`Default`: 150 s, 200 runs), `StopReason { Exhausted, RunCap, TimeLimit }` (snake case), `SearchInfo { stop, runs, elapsed_ms, limit_ms, run_cap, design_in_force_holds, notes }` (`notes`: candidates refused for size), `Searched { plan, info }`, `CHEAPEST_NOTE` ("cheapest found within the limit, not proven cheapest").
+- `split_time(limit, sections) -> (main, Vec<section>)`: half to the main search when there are sections, all of it otherwise; the rest split equally; nothing carried over.
+
+## `plan/search.rs` (tests in `plan/search_tests.rs`)
+
+- `search(cfg, endpoints, chaos, base, &Request, &SearchOptions, &Limits, now, on_step) -> Result<Searched, String>`: the 9c-1 walk (its first run is the check of the design in force); a walk with no holding design is returned as is (`Exhausted`, no invented step). Then a coordinate descent: passes over the priced nodes (most expensive first, ties by name; a node with no price is never shrunk), and per node and knob (class, copies) a bisection of that knob's `cheaper_moves` for the first candidate that holds. Assumes "holds" is monotone along each list (what `CHEAPEST_NOTE` names); a holding design is only replaced by another that holds.
+- Stops: a pass that takes nothing (`Exhausted`), `run_cap` runs, the walk's included (`RunCap`), or `now()` at or past `time_limit` read before a descent run (`TimeLimit`); a holding candidate already found is kept. The limits bind the walk too: checked before every run but the first, so `runs` never passes `run_cap` and the time overshoot is at most one run; once one fires every further run is refused as "search limit reached" (the walk drops it as a refused candidate and ends on what it has seen) and the stop reason names the limit.
+- The plan: the walk's steps, then the moves collapsed per (node, knob) (`from` the first value, `to` the last, no menu, note "cheaper by $X an hour and still holds" ($X is exact dollars, at least two decimals: a saving of 3500 micro-USD reads `$0.0035`, never `$0.00`)); verdict `AlreadyHolds`/the walk's when nothing was taken, else the 9c-1 budget rule (`priced_verdict`). `on_step` gets each move taken, uncollapsed. A kept node has no candidate and is never changed.
+- `walk_by` is `pub(super)` so the search reuses it.
 
 ## `plan/walk.rs` (tests in `plan/walk_tests.rs`)
 

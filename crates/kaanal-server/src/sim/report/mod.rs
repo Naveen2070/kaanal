@@ -18,7 +18,10 @@ use serde_json::{Value, json};
 use super::store::{LiveChaos, RunRecord};
 
 mod plan;
+mod plan_cheapest;
 pub(crate) use plan::plan_report;
+pub use plan_cheapest::Comparison;
+pub(crate) use plan_cheapest::compare;
 
 /// The `report_version` of the JSON: bump it when a field changes meaning or goes away.
 const REPORT_VERSION: u32 = 1;

@@ -10,6 +10,8 @@ mod common;
 mod draft_run;
 mod log;
 mod plan;
+mod plan_cheapest;
+mod plan_cheapest_report;
 mod plan_report;
 mod run;
 mod sample;
