@@ -23,6 +23,7 @@ pub(super) fn plan(a: PlanArgs) -> Result<(), Fail> {
     if let Some(n) = a.max_steps {
         body["max_steps"] = json!(n);
     }
+    super::plan_cheapest::body(&a, &mut body)?;
     if a.force && a.report.is_none() && a.output.is_none() {
         return Err(Fail::usage("--force needs --report or -o"));
     }
@@ -122,7 +123,7 @@ fn budget(b: &str) -> Result<f64, Fail> {
 /// `dollars`): integers only, the digits as they are, two decimals at least (`840000` is
 /// `$0.84`, `3500` is `$0.0035`, `1005000` is `$1.005`), so the text and the report never
 /// round apart.
-fn usd(micro: u64) -> String {
+pub(super) fn usd(micro: u64) -> String {
     let mut frac = format!("{:06}", micro % 1_000_000);
     while frac.len() > 2 && frac.ends_with('0') {
         frac.pop();
@@ -137,7 +138,7 @@ fn delta(micro: i64) -> String {
 }
 
 /// **Private.** A price in the record, or `price n/a`.
-fn price(v: &Value) -> String {
+pub(super) fn price(v: &Value) -> String {
     v.as_u64()
         .map_or("price n/a".into(), |m| format!("{}/h", usd(m)))
 }
@@ -333,7 +334,11 @@ fn text_of(v: &Value, out: &mut String) {
     let vd = &p["verdict"];
     let budget = r["budget_micro_usd_hr"].as_u64();
     let steps = p["steps"].as_array().map_or(&[][..], Vec::as_slice);
+    let cheapest_line = super::plan_cheapest::verdict_line(p);
     match vd["kind"].as_str().unwrap_or("") {
+        _ if cheapest_line.is_some() => {
+            let _ = writeln!(out, "{}", cheapest_line.unwrap_or_default());
+        }
         "already_holds" => drop(writeln!(out, "{}", verdict_words(vd, req_s, budget, false))),
         "holds" => drop(writeln!(
             out,
@@ -365,6 +370,7 @@ fn text_of(v: &Value, out: &mut String) {
     print_checked(p, v, out);
     print_families(p, req_s, out);
     let _ = writeln!(out, "{}", clean(p["label"].as_str().unwrap_or("")));
+    super::plan_cheapest::print(p, out);
 }
 
 /// **Private.** One row per step, its note, then the menu of each step that had a choice.

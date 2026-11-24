@@ -2,6 +2,7 @@
 //! (`docs/web/simulation.md`). All the logic is the server's; this reads the answers aloud.
 
 mod plan;
+mod plan_cheapest;
 mod print;
 
 use crate::cli::SimCmd;

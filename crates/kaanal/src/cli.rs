@@ -441,6 +441,23 @@ pub(crate) struct PlanArgs {
     /// Overwrite the --report and -o files if they exist
     #[arg(long)]
     pub(crate) force: bool,
+    /// Search for the cheapest design that holds the target within a limit (not proven cheapest)
+    #[arg(long)]
+    pub(crate) cheapest: bool,
+    /// With --cheapest: the time limit of the search, 1s to 10m, rounded up to whole seconds (default 150s)
+    #[arg(long, requires = "cheapest")]
+    pub(crate) time: Option<String>,
+    /// With --cheapest: the most runs per search, 1 to 2000 (default 200)
+    #[arg(long, requires = "cheapest")]
+    pub(crate) run_cap: Option<u32>,
+    /// With --cheapest: provider what-ifs to run, aws,gcp,azure or none (default: those the design does not use)
+    #[arg(
+        long,
+        requires = "cheapest",
+        value_delimiter = ',',
+        value_name = "LIST"
+    )]
+    pub(crate) providers: Option<Vec<String>>,
 }
 
 /// **Private.** `draft save --fix-scenarios` values.

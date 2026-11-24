@@ -16,6 +16,7 @@ mod remote;
 mod scenario;
 mod sim;
 mod sim_plan;
+mod sim_plan_cheapest;
 mod startup;
 mod status;
 mod studio;
