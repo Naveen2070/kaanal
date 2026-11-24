@@ -6,9 +6,11 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./main.css";
 import { initTheme } from "./look/theme/theme";
+import { applyStartMode } from "./data/store/mode";
 import { captureToken } from "./token";
 
 captureToken(window);
+applyStartMode(window);
 // boot.js already did this before the first paint; this covers a dev page without it
 initTheme();
 

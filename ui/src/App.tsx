@@ -31,6 +31,7 @@ import { KpiStrip } from "./shell/topbar/KpiStrip";
 import { AdminStrip } from "./shell/topbar/AdminStrip";
 import { LiveStrip } from "./shell/topbar/LiveStrip";
 import { TrafficHost } from "./panels/traffic/TrafficHost";
+import { PlanHost } from "./panels/plan/PlanHost";
 import { TopBar, TopTools } from "./shell/topbar/TopBar";
 import { startNotifications } from "./shell/toast/bind";
 import { ToastHost } from "./shell/toast/ToastHost";
@@ -84,6 +85,7 @@ export function App() {
               <PaletteHost />
               <GuideHost />
               <TrafficHost />
+              <PlanHost />
             </>
           }
           topRight={<TopTools />}

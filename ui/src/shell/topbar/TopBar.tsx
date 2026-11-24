@@ -11,6 +11,7 @@ import { useDraft } from "../../data/store/draft";
 import { useLive } from "../../data/store/live";
 import { isLive, useMode, type Mode } from "../../data/store/mode";
 import { useRun } from "../../data/store/run";
+import { PlanButton, PlanMark } from "./PlanButton";
 import { RegionMenu } from "./RegionMenu";
 import { SaveFlow } from "./SaveFlow";
 import { ThemeToggle } from "./ThemeToggle";
@@ -77,7 +78,11 @@ export function TopBar({ onRun }: { onRun: () => void }) {
         </h1>
         <UndoRedo />
       </div>
-      <ModeSwitch />
+      <div className="flex items-center gap-2">
+        <ModeSwitch />
+        <PlanButton />
+      </div>
+      <PlanMark />
       {isLive(mode) && pendingStructure ? (
         <output className="block text-xs text-muted">
           Parameter edits run at once. Added or removed components and wires wait for Apply, which

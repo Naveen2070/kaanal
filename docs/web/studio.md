@@ -22,7 +22,7 @@ Studio can be used end to end today: build a system on the canvas (or load the s
 kaanal studio
 ```
 
-Starts a blank instance (like `kaanal up --blank`) and opens your browser on `http://localhost:<port>/__kaanal/studio#token=<64 hex chars>`. `--no-open` only prints the URL. `kaanal up` keeps printing the status page URL.
+Starts a blank instance (like `kaanal up --blank`) and opens your browser on `http://localhost:<port>/__kaanal/studio#token=<64 hex chars>`. `--no-open` only prints the URL. `kaanal up` prints the Studio link too, with `?mode=admin` when a project is loaded (Studio reads it once and opens on the Admin tab; a blank start has no system to administer, so no mode is asked for).
 
 The token rides in the URL **fragment**, which browsers never send to a server. Studio reads it, keeps it in `sessionStorage` for that tab and removes it from the address bar.
 
@@ -42,7 +42,7 @@ Files are sent with the right `Content-Type`, `nosniff`, a long `immutable` cach
 The frontend lives in `ui/` (Vite+, React, TypeScript). `cargo build` never runs Node or pnpm. `crates/kaanal-server/build.rs` looks for `crates/kaanal-server/ui-dist/.vite/manifest.json` (written by the UI build) and embeds exactly the files that manifest references, under `assets/`:
 
 - The manifest exists: those files, with their `.br` and `.gz` siblings when present, are compiled into the binary (`include_bytes!`) and served as above. A file the manifest names that is missing fails the build, so a half-built bundle never ships.
-- No manifest: `cargo build` prints a warning, and `/__kaanal/studio` serves the same page as `/__kaanal/ui`. Every Rust build and test works without Node.
+- No manifest: `cargo build` prints a warning, and `/__kaanal/studio` serves the same page as `/__kaanal/ui` (the status page, with a notice that the build has no Studio). Every Rust build and test works without Node.
 
 `index.html`, dot files, source maps and the manifest itself are never served from the assets route.
 

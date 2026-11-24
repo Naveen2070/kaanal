@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import type { FeedRow } from "./logFeed";
 import type { PayloadEdit, PayloadPreview } from "./payload";
+import type { PlanBody } from "./types.plan";
 
 const ROOT = "/__kaanal";
 
@@ -211,6 +212,21 @@ export const api = {
   /** Starts a load sweep; busy is a result, as for `startRun`. */
   async startSweep(body: SweepBody, o: Opts = {}): Promise<StartRun> {
     return started(await send("POST", "/sim/sweep", body, o));
+  },
+  /** Starts a sizing plan; busy is a result, as for `startRun`. */
+  async startPlan(body: PlanBody, o: Opts = {}): Promise<StartRun> {
+    return started(await send("POST", "/sim/plan", body, o));
+  },
+  /** A finished plan as Markdown (the same sentences `words` carries, in full). */
+  async getPlanReport(id: string, o: Opts = {}): Promise<string> {
+    const { status, json, text } = await send(
+      "GET",
+      `/sim/runs/${encodeURIComponent(id)}/report`,
+      undefined,
+      o,
+    );
+    if (status < 200 || status > 299) throw fail(status, json);
+    return text;
   },
   /** A finished sweep as Markdown. */
   async getSweepReport(id: string, o: Opts = {}): Promise<string> {
