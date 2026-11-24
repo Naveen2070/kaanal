@@ -111,6 +111,23 @@ pub(super) fn words(
     }
 }
 
+/// The verdict of one provider section in words (Markdown): about "the translated design".
+pub(super) fn section_words(
+    p: &PlanDoc,
+    v: &PlanVerdict,
+    shown: Option<u64>,
+    i: &SearchInfo,
+) -> String {
+    words(
+        "The translated design",
+        v,
+        i,
+        p.request.max_steps,
+        shown,
+        p.request.budget_micro_usd_hr,
+    )
+}
+
 /// The lines every search block has: why it stopped, runs, time, and the candidates refused for size.
 fn search_lines(md: &mut String, i: &SearchInfo, share: &str) {
     let _ = writeln!(md, "- Stopped because {}.", stop_words(i.stop));
@@ -476,18 +493,10 @@ pub(super) fn sections(md: &mut String, p: &PlanDoc) {
             "## If it ran on {name}\n\n*{}*\n\nThis what-if {PROVIDER_NOTE}.\n\n",
             text(CHEAPEST_NOTE)
         );
-        let max = p.request.max_steps;
         let _ = write!(
             md,
             "{}\n\n",
-            words(
-                "The translated design",
-                &plan.verdict,
-                info,
-                max,
-                plan.price_after,
-                p.request.budget_micro_usd_hr
-            )
+            section_words(p, &plan.verdict, plan.price_after, info)
         );
         if let Some(b) = budget_check {
             let _ = write!(md, "{}\n\n", budget_line(b));

@@ -11,7 +11,9 @@ use kaanal_sim::plan::{Candidate, Effect, FamilyAnswer, Plan, PlanVerdict, Step}
 use kaanal_sim::sweep::{Limit, Over, Point, Verdict};
 
 use super::*;
-use crate::sim::plan_draft::{BudgetCheck, LABEL, PlanAsked, SATURATED_COST, TargetAsked, Verify};
+use crate::sim::plan_draft::{
+    BudgetCheck, LABEL, PlanAsked, SATURATED_COST, TargetAsked, Verify, Words,
+};
 use crate::sim::store::LiveChaos;
 
 const GOLDEN: &str = include_str!("../../../../tests/golden/plan-report.md");
@@ -156,7 +158,7 @@ fn family_plan() -> Plan {
 }
 
 pub(super) fn doc() -> PlanDoc {
-    PlanDoc {
+    let mut p = PlanDoc {
         label: LABEL,
         request: PlanAsked {
             target: TargetAsked {
@@ -209,7 +211,10 @@ pub(super) fn doc() -> PlanDoc {
         search: None,
         providers: None,
         comparison: None,
-    }
+        words: Words::default(),
+    };
+    p.words = words_of(&p);
+    p
 }
 
 /// A finished plan record.
@@ -262,7 +267,15 @@ pub(super) fn block<'a>(md: &'a str, fence: &str) -> &'a str {
 }
 
 pub(super) fn md(r: &RunRecord) -> String {
-    plan_report(r, "9.9.9").unwrap().markdown
+    // the server sets `words` when it builds the doc; a test that changes the doc afterwards gets
+    // them redone here, as the server would have
+    let mut r = r.clone();
+    if let Some(p) = r.plan.as_mut() {
+        let w = words_of(p);
+        p.words = w;
+        p.comparison = crate::sim::report::compare(p);
+    }
+    plan_report(&r, "9.9.9").unwrap().markdown
 }
 
 #[test]
@@ -736,4 +749,41 @@ fn a_family_walk_at_its_step_cap_names_its_own_cap() {
         })];
     }));
     assert!(r.contains("stops after 10 steps, the step cap"), "{r}");
+}
+
+/// Step 9c-3: the record's sentences are the report's, as plain text.
+#[test]
+fn the_words_of_a_plan_are_the_reports_sentences() {
+    let p = doc();
+    let md = md(&rec());
+    assert_ne!(p.words.verdict, "");
+    assert!(md.contains(&p.words.verdict), "{md}");
+    assert_eq!(
+        p.words.budget.as_deref(),
+        p.budget_check
+            .as_ref()
+            .map(|b| plain(&budget_line(b)))
+            .as_deref()
+    );
+    assert!(p.words.sections.is_empty(), "a plain plan has no sections");
+}
+
+#[test]
+fn plain_undoes_text() {
+    for s in [
+        "db_1",
+        "a*b",
+        "[x](y)",
+        "<img src=x onerror=alert(1)>",
+        "1. first",
+        "- dash",
+        "back\\slash",
+        "a|b~c&d",
+        r"a\*",
+        r"x\\",
+        r"\\\\",
+        r"\_end",
+    ] {
+        assert_eq!(plain(&text(s)), s, "{s}");
+    }
 }

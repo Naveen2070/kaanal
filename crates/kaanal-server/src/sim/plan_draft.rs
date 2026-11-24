@@ -153,6 +153,18 @@ pub(crate) fn judge_budget(
     (v, Some(check))
 }
 
+/// The sentences of a plan in plain text, the ones the Markdown report prints, so a screen shows
+/// them without wording a verdict itself (Step 9c-3).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Words {
+    /// The verdict of the plan (cheapest-aware).
+    pub verdict: String,
+    /// The budget check line, when a budget was asked for.
+    pub budget: Option<String>,
+    /// The verdict of each provider section in `providers` order; `""` for a skipped one. `[]` for a plain plan.
+    pub sections: Vec<String>,
+}
+
 /// A finished plan, as the record carries it.
 #[derive(Debug, Clone, Serialize)]
 pub struct PlanDoc {
@@ -200,6 +212,8 @@ pub struct PlanDoc {
     /// so the Markdown report and the CLI say the same; `None` when no provider section ran.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comparison: Option<crate::sim::report::Comparison>,
+    /// The report's sentences in plain text ([`Words`]); set when the doc is built.
+    pub words: Words,
 }
 
 /// The applied text with `steps` written in, one patch operation per step: `set` when the key is in

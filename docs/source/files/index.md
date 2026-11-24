@@ -103,7 +103,7 @@ One page per source file: what the file does and what each function/type in it d
 | `src/record/mod.rs`                                      | [kaanal-server/record.md](kaanal-server/record.md)           | Trace text, log entry, flags and the bus event                                                                                                                              |
 | `src/log_api.rs`                                         | [kaanal-server/log_api.md](kaanal-server/log_api.md)         | `/logs` and `/trace/{id}` routes                                                                                                                                            |
 | `src/shutdown.rs`                                        | [kaanal-server/shutdown.md](kaanal-server/shutdown.md)       | The graceful stop: deadline handle, cutting listener                                                                                                                        |
-| `src/ui.html`                                            | [../../web/web-ui.md](../../web/web-ui.md)                   | Embedded status page (documented with the web docs)                                                                                                                         |
+| `src/ui.html`                                            | [../../web/web-ui.md](../../web/web-ui.md)                   | Status page: a token-less health dashboard (documented with the web docs)                                                                                                   |
 
 ## [kaanal-sim](kaanal-sim/) (discrete-event simulator)
 

@@ -20,6 +20,7 @@ use super::store::{LiveChaos, RunRecord};
 mod plan;
 mod plan_cheapest;
 pub(crate) use plan::plan_report;
+pub(crate) use plan::words_of;
 pub use plan_cheapest::Comparison;
 pub(crate) use plan_cheapest::compare;
 
@@ -484,6 +485,22 @@ fn text(s: &str) -> String {
         out.insert(0, '\\');
     } else if (1..=9).contains(&digits) && out[digits..].starts_with(['.', ')']) {
         out.insert(digits, '\\');
+    }
+    out
+}
+
+/// The inverse of [`text`]: a Markdown sentence as plain text (a backslash before an ASCII
+/// punctuation mark is dropped), for the words a record carries to a screen that is not Markdown.
+fn plain(md: &str) -> String {
+    let mut out = String::with_capacity(md.len());
+    let mut it = md.chars().peekable();
+    while let Some(c) = it.next() {
+        // a backslash before punctuation is an escape: keep the escaped mark, which may itself be a backslash
+        if c == '\\' && it.peek().is_some_and(char::is_ascii_punctuation) {
+            out.extend(it.next());
+        } else {
+            out.push(c);
+        }
     }
     out
 }

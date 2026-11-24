@@ -254,7 +254,7 @@ flowchart LR
     Guard -->|Valid Request| Dispatcher{"Route Dispatcher"}
 
     Dispatcher -->|GET /__kaanal/health| Health["Health Probe (No Auth)"]
-    Dispatcher -->|GET /__kaanal/ui| UI["Embedded Web UI (No Auth)"]
+    Dispatcher -->|GET /__kaanal/ui| UI["Status page (No Auth)"]
     Dispatcher -->|GET /__kaanal/topology| Topo["Topology Manifest"]
     Dispatcher -->|GET,PUT,DELETE /__kaanal/chaos| Chaos["Chaos State API"]
     Dispatcher -->|GET /__kaanal/events| SSE["SSE Broadcast Stream"]
@@ -272,15 +272,15 @@ The `guard` middleware executes before any axum request extractor:
 
 ---
 
-## 8. Embedded Web UI Architecture
+## 8. Status Page Architecture
 
-Served at `/__kaanal/ui`, the Web UI is a self-contained single-page dashboard embedded directly into the binary via `include_str!`:
+Served at `/__kaanal/ui`, the status page is a self-contained health dashboard embedded in the binary via `include_str!` (`ui.html`). Studio (`/__kaanal/studio`) is the real UI; this page is what answers when nothing needs the token, and what the Studio address answers in a binary built without the Studio bundle.
 
-- **Zero Assets, Zero Build Step**: Vanilla HTML, CSS, and modern JavaScript.
-- **Fragment Token Transport**: The access token is read strictly from the URL fragment (`#__kaanal/ui#token=...`). Browsers never transmit URL fragments to servers, keeping the token out of server access logs.
-- **XSS Immunity**: The UI constructs dynamic DOM nodes exclusively via `element.textContent`, never `innerHTML` or `eval()`.
-- **Content Security Policy (CSP)**: Served with `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`.
-- **Bounded Resource Usage**: Real-time traffic rate (rps) and error percentages (err%) use fixed-size 10-second bucket counters, ensuring memory usage remains constant under high request rates.
+- **No token, one call**: the page asks only `GET /__kaanal/health` (`ok`, `version`, `uptime_s`, `system`), every two seconds (ten while hidden). The route says nothing a token guards.
+- **Fragment token pass-through**: a token in the URL fragment (never sent to a server) is only copied onto the "Open Studio" link, which opens Studio on the Admin tab when a project is loaded.
+- **XSS immunity**: server values are shown through `textContent` only, never `innerHTML` or `eval()`.
+- **Content Security Policy (CSP)**: served with `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`.
+- **Bounded resource use**: the answer-time chart keeps the last 60 samples.
 
 ---
 

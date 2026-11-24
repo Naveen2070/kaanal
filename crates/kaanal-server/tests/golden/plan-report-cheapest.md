@@ -118,6 +118,36 @@ kaanal sim plan --profile=peak --target=2.5x --p99 1s --errors 1% --budget=2.00 
       "rejudged": false
     },
     "cheapest_note": "cheapest found within the limit, not proven cheapest",
+    "comparison": {
+      "comparable": true,
+      "conclusion": "Winner: the design translated to GCP, $0.892/h. It is the cheapest design that holds the target found within the limit, not proven cheapest.",
+      "not_compared": [
+        {
+          "provider": "Azure",
+          "reason": "db: no managed postgres class for azure in the price table"
+        }
+      ],
+      "rows": [
+        {
+          "holds": true,
+          "name": "the design translated to GCP",
+          "outcome": "holds",
+          "price_micro_usd_hr": 892000,
+          "rank": 1,
+          "unpriced": 1,
+          "unpriced_nodes": []
+        },
+        {
+          "holds": true,
+          "name": "the design in force, with the changes above",
+          "outcome": "holds",
+          "price_micro_usd_hr": 940000,
+          "rank": 2,
+          "unpriced": 1,
+          "unpriced_nodes": []
+        }
+      ]
+    },
     "end": {
       "capacity_req_s": 255.0,
       "error_rate": 0.001,
@@ -347,6 +377,14 @@ kaanal sim plan --profile=peak --target=2.5x --p99 1s --errors 1% --budget=2.00 
       "error_rate": 0.001,
       "holds": true,
       "p99_ms": 520.0
+    },
+    "words": {
+      "budget": "Budget check, with per-use prices counted at the target run's visits: the plan shown costs $0.94/h, within the budget of $2.00/h.",
+      "sections": [
+        "The plan holds the target.",
+        ""
+      ],
+      "verdict": "The plan holds the target."
     }
   },
   "recipe": {

@@ -198,6 +198,8 @@ pub struct AppState {
     /// The Studio bundle served at `/__kaanal/studio` and its assets: the one compiled in, unless
     /// `serve_with_studio` passed another (tests). `None`: the status page, no assets.
     pub studio: Option<crate::control::Bundle>,
+    /// When this process built its state: the uptime the health probe reports.
+    pub started: std::time::Instant,
 }
 
 impl AppState {
@@ -339,6 +341,7 @@ impl AppState {
             ids,
             log,
             shutdown: crate::shutdown::Shutdown::new(),
+            started: std::time::Instant::now(),
         }
     }
 

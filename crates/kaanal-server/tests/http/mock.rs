@@ -102,6 +102,20 @@ async fn health_needs_no_token_and_has_no_cors() {
     assert!(r.headers().get("access-control-allow-origin").is_none());
 }
 
+/// The status page's three facts, and nothing a token guards.
+#[tokio::test]
+async fn health_says_version_uptime_and_whether_a_system_is_loaded_and_nothing_more() {
+    let s = start().await;
+    let v: Value = s.get("/__kaanal/health").await.json().await.unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    assert!(v["uptime_s"].as_u64().is_some(), "{v}");
+    assert_eq!(v["system"], true);
+    let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["ok", "system", "uptime_s", "version"]);
+}
+
 #[tokio::test]
 async fn control_namespace_never_gets_cors_even_for_404_and_preflight() {
     let s = start().await;

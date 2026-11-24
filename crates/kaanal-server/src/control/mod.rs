@@ -58,7 +58,7 @@ mod sweep;
 mod tests;
 mod view;
 
-pub use admin::{events, reset, shutdown, ui};
+pub use admin::{events, health, reset, shutdown, ui};
 pub use assets::{Asset, Bundle};
 pub use chaos::{clear_keyed, clear_node, get_chaos, set_chaos, set_chaos_keyed, topology};
 pub use doc::get_demo;

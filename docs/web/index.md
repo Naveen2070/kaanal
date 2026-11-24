@@ -6,11 +6,11 @@ This folder holds the **user-facing documentation** — the content of Kaanal's 
 
 | Page                                 | Audience                      | Contents                                                                                  |
 | ------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------- |
-| [user-guide.md](user-guide.md)       | Everyone                      | Install, `kaanal.yaml`, CLI, the embedded status page                                     |
+| [user-guide.md](user-guide.md)       | Everyone                      | Install, `kaanal.yaml`, CLI, the status page                                              |
 | [control-api.md](control-api.md)     | Test authors, tooling writers | The `/__kaanal/*` HTTP API, request/response reference                                    |
 | [nodes.md](nodes.md)                 | Everyone                      | Every node kind, its fields, the edge table and presets                                   |
 | [concepts.md](concepts.md)           | Everyone                      | Topology, call chains, chaos, determinism — what Kaanal actually simulates                |
-| [web-ui.md](web-ui.md)               | Users of the status page      | The embedded `/__kaanal/ui` page, feature by feature                                      |
+| [web-ui.md](web-ui.md)               | Users of the status page      | The `/__kaanal/ui` health dashboard (no token)                                            |
 | [studio.md](studio.md)               | Everyone                      | `kaanal studio`: the graphical editor, how it is served and built                         |
 | [endpoints.md](endpoints.md)         | Everyone                      | Endpoint chains, error maps, determinism and kaanal endpoints                             |
 | [auth.md](auth.md)                   | Everyone                      | Login and JWKS from an auth node: config, tokens, keys, limits                            |

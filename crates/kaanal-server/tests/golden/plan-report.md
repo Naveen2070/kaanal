@@ -344,6 +344,11 @@ kaanal sim plan --profile=peak --target=2.5x --p99 1s --errors 1% --budget=2.00 
       "error_rate": 0.0,
       "holds": true,
       "p99_ms": 300.0
+    },
+    "words": {
+      "budget": "Budget check, with per-use prices counted at the target run's visits: the plan shown costs $1.6345/h, within the budget of $2.00/h.",
+      "sections": [],
+      "verdict": "The plan holds the target."
     }
   },
   "recipe": {

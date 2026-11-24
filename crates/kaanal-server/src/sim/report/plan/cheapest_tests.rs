@@ -12,6 +12,8 @@ use super::*;
 use crate::sim::plan_draft::{BudgetCheck, SATURATED_COST};
 use crate::sim::plan_search::{CheapestAsked, PROVIDER_NOTE, ProviderSection};
 
+use crate::sim::report::compare;
+
 const GOLDEN: &str = include_str!("../../../../tests/golden/plan-report-cheapest.md");
 const PLAIN: &str = include_str!("../../../../tests/golden/plan-report.md");
 
@@ -148,6 +150,8 @@ fn cheapest_doc() -> PlanDoc {
     p.cheapest_note = Some(CHEAPEST_NOTE);
     p.search = Some(info(StopReason::Exhausted, 64, 31_800, 75_000));
     p.providers = Some(vec![gcp(880_000, &PlanVerdict::Holds), azure_skipped()]);
+    p.comparison = compare(&p);
+    p.words = words_of(&p);
     p
 }
 
@@ -696,4 +700,18 @@ fn an_over_budget_design_that_does_not_hold_after_a_cut_says_none_found() {
         "{m}"
     );
     assert!(!m.contains("no holding design within the budget"), "{m}");
+}
+
+/// Step 9c-3: one sentence per provider section, aligned with `providers`, and the section's own words.
+#[test]
+fn the_words_of_a_cheapest_plan_cover_its_sections() {
+    let p = cheapest_doc();
+    let w = &p.words;
+    assert_eq!(w.sections.len(), 2, "{w:?}");
+    assert_eq!(w.sections[0], "The plan holds the target.");
+    assert_eq!(w.sections[1], "", "a skipped section has no sentence");
+    let m = md(&crec(|_| {}));
+    assert!(m.contains(&w.verdict), "{m}");
+    assert!(m.contains(&w.sections[0]), "{m}");
+    assert!(w.budget.is_some());
 }

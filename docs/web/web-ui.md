@@ -1,55 +1,34 @@
-# The embedded status page (`/__kaanal/ui`)
+# The status page (`/__kaanal/ui`)
 
-A single self-contained HTML page served by the binary — no build step, no external assets, no frameworks. Open the full URL printed by `kaanal up`:
+A single self-contained HTML page served by the binary: a health dashboard for the running instance. It needs **no token** and makes **one call**, `GET /__kaanal/health`, every two seconds from your browser (every ten while the tab is hidden). It follows your system's light or dark theme and uses the same palette as Studio.
 
-```
-http://localhost:8080/__kaanal/ui#token=<64 hex chars>
-```
-
-The token rides in the URL **fragment** (`#…`), which browsers never send to any server; the page reads it with `location.hash` and uses it for its API calls.
+`kaanal up` no longer prints this address. It prints the Studio link; the status page stays served for a quick look at whether the instance is up, and for anything that wants a page to point at without a token.
 
 ## What it shows
 
-**Node table** — one row per topology node:
+| Part                                 | Meaning                                                                                                                                                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Healthy / Checking / Unreachable** | The state, in words and in a shape (a pulsing dot, a plain dot, a square), announced to a screen reader only when it changes. Two missed checks in a row make it Unreachable; it says how long it has been silent.             |
+| **Uptime**                           | How long the process has run, from the last answer and counted on locally between answers; shown as `-` while unreachable.                                                                                                     |
+| **Version**                          | The `kaanal` version.                                                                                                                                                                                                          |
+| **System**                           | "Project loaded", or "Blank: none yet" for `up --blank` / `kaanal studio` before the first Apply.                                                                                                                              |
+| **Answer time**                      | The last round trip, and a small chart of the last minute: a line for answers, red ticks for misses, with the fastest and slowest.                                                                                             |
+| **Open Studio**                      | A link to `/__kaanal/studio`, on the Admin tab when a project is loaded. It carries the token from this page's address (`#token=…`) when it has one. Without it the page says Studio needs the token that `kaanal up` printed. |
 
-| Column        | Meaning                                                                  |
-| ------------- | ------------------------------------------------------------------------ |
-| Node / Type   | Name, kind and flavor (`database · postgres`).                           |
-| rps / err %   | Rolling 10-second window, recomputed every second from the event stream. |
-| Latency +ms   | Extra latency input (0–300 000).                                         |
-| Error %       | Failure probability input (0–100).                                       |
-| Kind          | Failure kind select (status, reset, hang, malformed); sent with Apply.   |
-| Status        | Failure status select (500–504).                                         |
-| Down          | Hard-outage checkbox.                                                    |
-| Apply / Clear | PUTs the merged chaos patch for that row, or DELETEs it.                 |
+The page shows nothing a token guards: no node names, endpoints, requests or figures. What the health route says without a token is only `ok`, `version`, `uptime_s` and `system` (see [control-api.md](control-api.md)).
 
-**Request log** — newest first, capped at 200 rows: time, method, path, status, ms (measured), and the node that failed (rows with 5xx are highlighted).
+## When Studio is not built in
 
-Two message lines sit at the top: one for API errors (role `alert`), one for stream status (role `status`), so one never hides the other.
-
-## Behaviour details
-
-- **Live updates** come from `GET /__kaanal/events` (SSE) using `?token=` — the one endpoint where a query token is allowed.
-- **Reconnect handling**: if the stream drops, the page retries and reloads the node table on reconnect (chaos may have changed meanwhile). If Kaanal restarted (new token), it tells you to open the new link.
-- **Lagged stream**: if events arrive faster than the page can display, it says how many were skipped instead of falling behind silently.
-- **Light/dark**: follows the OS via `color-scheme`.
-- **Accessibility**: every chaos control has an aria-label naming its node (table headers aren't associated with inputs).
+A binary compiled without the Studio bundle (no `ui/` build before `cargo build`) answers `/__kaanal/studio` with this same page and a notice, "This build has no Studio", saying how to build it. The Open Studio button is then off.
 
 ## Security rules the page follows
 
-These are enforced by static tests in `crates/kaanal-server/tests/http.rs`:
+These are enforced by static tests in `crates/kaanal-server/tests/http/events_ui.rs`:
 
-- Every dynamic value (paths, node names, API errors) goes through `textContent` — never `innerHTML` or friends.
-- No `eval`, no inline event handlers, no `localStorage`, no external URLs.
-- The token exists only in a JS variable: sent as a header on API calls and as `?token=` on the event stream. It is never stored or logged.
-- Served with a strict CSP (inline script/style only, `connect-src 'self'`, `frame-ancestors 'none'`) and `Referrer-Policy: no-referrer`.
-- Node names are used as `Map` keys, never plain object keys (a node literally named `__proto__` can't break the page).
-- The rps/error% window is fixed-size counter buckets — memory stays flat no matter how fast requests arrive.
+- The page asks only `/__kaanal/health`: no event stream, no bearer header, no control route, no storage of any kind.
+- Every value from the server goes through `textContent`; no `innerHTML` or friends, no `eval`, no inline event handlers, no external URLs.
+- A token in the address fragment (never sent to a server) is only copied onto the Studio link and is never stored or logged.
+- Served with a strict CSP (inline script and style only, `connect-src 'self'`, `frame-ancestors 'none'`) and `Referrer-Policy: no-referrer`.
+- It works without colour (words and shapes), respects `prefers-reduced-motion` and forced colours, and fits a phone.
 
-## Known limitations
-
-- The page shows and edits **only the chaos you set by hand** (the live layer, `GET /__kaanal/chaos`). Chaos that comes from an active [scenario](scenarios.md) is not in the table; a scenario panel arrives with the M2 UI. Use `kaanal status` or `GET /__kaanal/scenarios/active` to see the effective result. The page ignores `scenario` events.
-- Chaos set from the **CLI** shows in the page only after a Clear or a stream reconnect — there is no polling of `/__kaanal/chaos`.
-- Each open tab holds one SSE connection; browsers allow ~6 connections per host over HTTP/1.1, so many tabs can stall other requests to the port. Close extra tabs.
-
-> Contributor pointer: the page source is `crates/kaanal-server/src/ui.html`, served by `control::ui` with its CSP headers — see [../source/files/kaanal-server/control.md](../source/files/kaanal-server/control.md).
+> Contributor pointer: the page source is `crates/kaanal-server/src/ui.html`, served by `control::ui` with its CSP headers; the health route is `control::health`. See [../source/files/kaanal-server/control.md](../source/files/kaanal-server/control.md).

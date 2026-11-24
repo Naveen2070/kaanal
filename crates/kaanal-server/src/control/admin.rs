@@ -178,10 +178,25 @@ pub async fn events(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-/// The page reads the token from the URL fragment, which browsers never send to a server.
-/// `no-referrer` keeps even the page URL out of any outgoing request. The CSP allows only the
-/// page's own inline script/style and same-origin calls, and `frame-ancestors 'none'` stops
-/// another site from framing the page and tricking a click on a chaos button.
+/// `GET /__kaanal/health` — liveness, no token. Besides `ok` it tells whoever can reach the port the
+/// little the status page shows: the version, the uptime in whole seconds, and whether a system is
+/// loaded (a blank start has none yet). No node names, counts, paths or figures: the control token
+/// is what opens those. Additive: a probe that only looks at the status code or `ok` is unaffected.
+pub async fn health(State(st): State<Arc<AppState>>) -> Json<Value> {
+    Json(serde_json::json!({
+        "ok": true,
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_s": st.started.elapsed().as_secs(),
+        "system": st.generation().is_some(),
+    }))
+}
+
+/// `GET /__kaanal/ui` — the status page: a health dashboard that needs no token and makes no call
+/// but `GET /__kaanal/health`. It is also what `/__kaanal/studio` answers when no Studio bundle is
+/// compiled in. A token in the URL fragment (which browsers never send to a server) is only carried
+/// over to the "Open Studio" link. `no-referrer` keeps even the page URL out of any outgoing request;
+/// the CSP allows only the page's own inline script and style and same-origin calls, and
+/// `frame-ancestors 'none'` stops another site from framing it.
 pub async fn ui() -> impl IntoResponse {
     (
         [

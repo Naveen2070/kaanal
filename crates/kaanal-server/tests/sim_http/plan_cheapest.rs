@@ -338,7 +338,8 @@ async fn a_plain_plan_is_unchanged() {
             "steps",
             "unpriced_nodes",
             "verdict",
-            "verify"
+            "verify",
+            "words"
         ],
         "{done}"
     );

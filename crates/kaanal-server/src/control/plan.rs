@@ -13,7 +13,7 @@ use super::sim::{Applied, accepted, applied_inputs, busy, from_sim, parse_profil
 use super::sweep::{chaos_digest, limit, live_chaos};
 use super::*;
 use crate::sim::plan_draft::{
-    FAMILY_MAX_STEPS, FamilySection, LABEL, PlanAsked, PlanDoc, TargetAsked, judge_budget,
+    FAMILY_MAX_STEPS, FamilySection, LABEL, PlanAsked, PlanDoc, TargetAsked, Words, judge_budget,
     proposed_text, round_trip, same_design, verify,
 };
 use crate::sim::plan_search::{Cheapest, cheapest_asked, run_cheapest};
@@ -371,8 +371,10 @@ fn run_plan(
         search,
         providers,
         comparison: None,
+        words: Words::default(),
     };
     doc.comparison = crate::sim::report::compare(&doc);
+    doc.words = crate::sim::report::words_of(&doc);
     Ok((doc, text))
 }
 

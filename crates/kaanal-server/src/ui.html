@@ -3,187 +3,226 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kaanal</title>
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>Kaanal status</title>
 <style>
-  :root { color-scheme: light dark; --bg:#fafaf9; --fg:#1c1917; --muted:#78716c; --line:#e7e5e4; --bad:#b91c1c; --badbg:#fef2f2; --accent:#0f766e; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c; --bad:#f87171; --badbg:#3f1d1d; --accent:#2dd4bf; } }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
-  h1 { font-size:18px; margin:0 0 12px; } h1 span { color:var(--muted); font-weight:400; }
-  h2 { font-size:15px; }
-  table { border-collapse:collapse; width:100%; margin-bottom:20px; }
-  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
-  th { color:var(--muted); font-weight:500; }
-  input[type=number] { width:70px; } select, input, button { font:inherit; }
-  button { cursor:pointer; } .bad { color:var(--bad); } tr.bad td { background:var(--badbg); }
-  #log { max-height:50vh; overflow:auto; } #err { color:var(--bad); min-height:1.4em; margin:0 0 4px; }
-  #note { color:var(--muted); min-height:1.4em; margin:0 0 8px; }
-  #log td:nth-child(3) { word-break:break-all; }
-  .wrap { overflow-x:auto; }
+  /* The same palette as Studio (ui/src/look/theme/tokens.css): warm paper in light, neutral charcoal in dark. */
+  :root {
+    color-scheme: light dark;
+    --ground: light-dark(#ece7de, #161616);
+    --sheet: light-dark(#f8f5ef, #1f1f1f);
+    --card: light-dark(#fffdf9, #282828);
+    --border: light-dark(#cbc2b2, #363636);
+    --rule: light-dark(#e3ddd1, #2c2c2c);
+    --control: light-dark(#80786b, #858585);
+    --text: light-dark(#211e19, #ececec);
+    --muted: light-dark(#554f46, #adadad);
+    --accent: light-dark(#2d5cc4, #7ba3ff);
+    --positive: light-dark(#1d7549, #5ccb92);
+    --warn: light-dark(#8f5200, #e8ae4d);
+    --negative: light-dark(#b5212f, #f07088);
+    --ok-fill: light-dark(#2c9467, #45b985);
+    --warn-fill: light-dark(#bf7506, #dc9a35);
+    --bad-fill: light-dark(#cf3342, #e85b74);
+    --primary: light-dark(#211e19, #ececec);
+    --on-primary: light-dark(#f8f5ef, #161616);
+    --shadow: light-dark(0 1px 2px rgb(33 30 25 / .08), 0 1px 2px rgb(0 0 0 / .5));
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ground); }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: clamp(16px, 6vh, 64px) 16px;
+    background: var(--ground); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { width: min(100%, 44rem); display: grid; gap: 16px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header svg { width: 36px; height: 36px; color: var(--accent); flex: none; }
+  h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+  h1 small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .sheet { background: var(--sheet); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 20px; }
+  .state { display: flex; align-items: center; gap: 14px; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--warn-fill); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn-fill) 22%, transparent); }
+  [data-state="ok"] .dot { background: var(--ok-fill); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok-fill) 22%, transparent); animation: pulse 2.4s ease-out infinite; }
+  [data-state="down"] .dot { background: var(--bad-fill); border-radius: 3px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad-fill) 22%, transparent); }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok-fill) 50%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+  .state h2 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  [data-state="ok"] h2 { color: var(--positive); } [data-state="down"] h2 { color: var(--negative); } [data-state="wait"] h2 { color: var(--warn); }
+  .state p { margin: 2px 0 0; color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 12px; margin: 18px 0 0; padding: 0; }
+  .tiles div { background: var(--card); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  dt { font-size: 12px; color: var(--muted); }
+  dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  dd.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 15px; }
+  figure { margin: 18px 0 0; }
+  figcaption { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .spark { width: 100%; height: 56px; display: block; background: var(--card); border: 1px solid var(--rule); border-radius: 12px; }
+  .spark .line { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .spark .miss { stroke: var(--bad-fill); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none; }
+  .button:hover { filter: brightness(1.12); }
+  .button[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .note { margin: 0; color: var(--muted); font-size: 13px; }
+  .notice { border-color: var(--warn); background: color-mix(in srgb, var(--warn-fill) 12%, var(--sheet)); }
+  .notice p { margin: 0; } .notice p + p { margin-top: 6px; }
+  code { white-space: nowrap; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .92em; background: var(--card); border: 1px solid var(--rule); border-radius: 5px; padding: 1px 5px; }
+  [hidden] { display: none !important; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #studio-note { margin-top: 12px; }
+  footer { color: var(--muted); font-size: 12px; }
+  @media (prefers-reduced-motion: reduce) { [data-state="ok"] .dot { animation: none; } }
+  @media (forced-colors: active) { .dot { forced-color-adjust: none; background: CanvasText; } .spark .line { stroke: CanvasText; } .spark .miss { stroke: Mark; } }
 </style>
 </head>
 <body>
-<h1>Kaanal <span>local control</span></h1>
-<p id="err" role="alert"></p>
-<p id="note" role="status"></p>
-<div class="wrap"><table>
-  <thead><tr><th>Node</th><th>Type</th><th>rps</th><th>err %</th><th>Latency +ms</th><th>Error %</th><th>Status</th><th>Kind</th><th>Down</th><th></th></tr></thead>
-  <tbody id="nodes"></tbody>
-</table></div>
-<h2>Requests</h2>
-<div class="wrap" id="log"><table>
-  <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>ms</th><th>Failed at</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table></div>
+<main>
+  <header>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><clipPath id="sun"><path d="M2 9A6 6 0 0 1 14 9Z"/></clipPath><g fill="currentColor" clip-path="url(#sun)"><rect x="0.8" y="3" width="14.4" height="3"/><rect x="0.8" y="7" width="14.4" height="2"/></g><rect x="4" y="10.5" width="8" height="2.5" rx="1.25" fill="currentColor" opacity="0.7"/></svg>
+    <h1>Kaanal <small>Status</small></h1>
+  </header>
+
+  <section id="nostudio" class="sheet notice" hidden>
+    <p><strong>This build has no Studio.</strong> The Studio bundle was not compiled into this binary, so this status page answers at the Studio address.</p>
+    <p>Build it with <code>pnpm build</code> in <code>ui/</code>, then rebuild Kaanal. See <code>docs/web/studio.md</code>.</p>
+  </section>
+
+  <section class="sheet" id="card" data-state="wait" aria-labelledby="state-title">
+    <div class="state">
+      <span class="dot" aria-hidden="true"></span>
+      <div>
+        <h2 id="state-title">Checking</h2>
+        <p id="state-detail">Waiting for the first answer from <code>/__kaanal/health</code>.</p>
+      </div>
+    </div>
+    <output id="announce" class="sr" aria-live="polite"></output>
+    <dl class="tiles">
+      <div><dt>Uptime</dt><dd id="uptime">-</dd></div>
+      <div><dt>Version</dt><dd id="version" class="mono">-</dd></div>
+      <div><dt>System</dt><dd id="system">-</dd></div>
+      <div><dt>Answer time</dt><dd id="latency">-</dd></div>
+    </dl>
+    <figure>
+      <figcaption><span>Answer time, last minute</span><span id="range"></span></figcaption>
+      <svg class="spark" viewBox="0 0 240 56" preserveAspectRatio="none" role="img" aria-label="Answer time of the last health checks">
+        <polyline id="line" class="line" points=""/>
+        <path id="miss" class="miss" d=""/>
+      </svg>
+    </figure>
+  </section>
+
+  <section class="sheet">
+    <div class="actions">
+      <a id="studio" class="button" href="/__kaanal/studio">Open Studio</a>
+      <a href="/__kaanal/health">Raw health check</a>
+    </div>
+    <p class="note" id="studio-note">Studio needs the control token, which this page does not. Use the link <code>kaanal up</code> printed, or run <code>kaanal up</code> again to see it.</p>
+  </section>
+
+  <footer>This page asks <code>/__kaanal/health</code> every two seconds from your browser and keeps nothing. It shows no node names, requests or figures: those are behind the control token.</footer>
+</main>
 <script>
 'use strict';
-// Security: every dynamic value (paths, node names, API errors) goes through textContent.
-// The token lives only in this variable: header on API calls, ?token= on the event stream.
-const token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
-const err = document.getElementById('err');
-// Two separate lines so one message never hides the other: `say` = API errors (alert), `note` = event stream status.
-const say = msg => { err.textContent = msg; };
-const noteEl = document.getElementById('note');
-const note = msg => { noteEl.textContent = msg; };
-if (!token) say('No token in the URL. Open the link printed by `kaanal up`.');
+// Security: the page makes one call, GET /__kaanal/health, which needs no token, and shows only the
+// fields it gets (version, uptime, whether a system is loaded) through textContent. A token in the
+// URL fragment (never sent to a server) is only copied onto the "Open Studio" link, never stored.
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const card = $('card'), SAMPLES = 60, EVERY_MS = 2000, HIDDEN_MS = 10000, TIMEOUT_MS = 3000;
+  const samples = []; // { ms } for an answer, { ms: null } for a miss
+  let state = 'wait', fails = 0, last = null, lastAt = 0, timer = 0;
 
-const MAX_LATENCY_MS = 300000, WINDOW_MS = 10000, MAX_ROWS = 200;
+  const say = (id, text) => { $(id).textContent = text; };
+  const dur = (s) => {
+    s = Math.max(0, Math.floor(s));
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+    return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'm' : m ? m + 'm ' + (s % 60) + 's' : s + 's';
+  };
 
-async function api(path, opts = {}) {
-  const headers = { 'Authorization': 'Bearer ' + token };
-  if (opts.body) headers['Content-Type'] = 'application/json';
-  const r = await fetch(path, { ...opts, headers, cache: 'no-store' });
-  if (r.status === 204) return null;
-  let body = null;
-  try { body = await r.json(); } catch (_) { /* non-JSON body */ }
-  if (!r.ok) throw new Error(body && typeof body.error === 'string' ? body.error : path + ': HTTP ' + r.status);
-  return body;
-}
-
-const el = (tag, text, cls) => {
-  const e = document.createElement(tag);
-  if (text !== undefined) e.textContent = String(text);
-  if (cls) e.className = cls;
-  return e;
-};
-const numInput = (min, max, value) => {
-  const i = el('input'); i.type = 'number'; i.min = min; i.max = max; i.step = 1; i.value = value; return i;
-};
-
-// rps and err% are sums over the last WINDOW_MS, kept as one counter bucket per second and node.
-// Cost per event is O(nodes touched) and memory is fixed, however fast requests arrive.
-// Maps, not plain objects: node names come from config and could be `__proto__`.
-const BUCKETS = WINDOW_MS / 1000;
-const buckets = Array.from({ length: BUCKETS }, () => new Map()); // node name -> {hits, bad}
-let cur = 0;
-const stats = new Map(); // node name -> {rps, er} cells
-
-function count(ev) {
-  const b = buckets[cur];
-  for (const name of Array.isArray(ev.nodes) ? ev.nodes : []) {
-    let c = b.get(name);
-    if (!c) { c = { hits: 0, bad: 0 }; b.set(name, c); }
-    c.hits++;
-    if (ev.status >= 500 || ev.failed_node) c.bad++; // a reset or cut-off body is a failure although it answers 200
+  function setState(next, title, detail) {
+    if (next !== state) { state = next; card.dataset.state = next; say('announce', title); }
+    say('state-title', title);
+    say('state-detail', detail);
   }
-}
 
-async function loadNodes() {
-  const [topo, all] = await Promise.all([api('/__kaanal/topology'), api('/__kaanal/chaos')]);
-  const chaos = all.nodes; // endpoint and node-at-endpoint chaos is CLI/API only
-  const body = document.getElementById('nodes'); body.replaceChildren();
-  stats.clear();
-  for (const n of topo.nodes) {
-    const c = Object.hasOwn(chaos, n.name) ? chaos[n.name] : { latency_ms: 0, error_rate: 0, error_status: 503, error_kind: 'status', down: false };
-    const tr = el('tr');
-    tr.append(el('td', n.name), el('td', n.type + (n.flavor ? ' · ' + n.flavor : '')));
-    const rps = el('td', '0.0'), er = el('td', '0'); tr.append(rps, er); stats.set(n.name, { rps, er });
-    const lat = numInput(0, MAX_LATENCY_MS, c.latency_ms);
-    const rate = numInput(0, 100, Math.round(c.error_rate * 100));
-    const status = el('select');
-    for (const s of [500, 501, 502, 503, 504]) { const o = el('option', s); o.value = s; o.selected = s === c.error_status; status.append(o); }
-    const kind = el('select');
-    for (const k of ['status', 'reset', 'hang', 'malformed']) { const o = el('option', k); o.value = k; o.selected = k === c.error_kind; kind.append(o); }
-    const down = el('input'); down.type = 'checkbox'; down.checked = c.down;
-    const apply = el('button', 'Apply'), clear = el('button', 'Clear');
-    // Accessible names: the column headings are not associated with these controls.
-    lat.setAttribute('aria-label', n.name + ': extra latency in ms');
-    rate.setAttribute('aria-label', n.name + ': error percent');
-    status.setAttribute('aria-label', n.name + ': error status');
-    kind.setAttribute('aria-label', n.name + ': error kind');
-    down.setAttribute('aria-label', n.name + ': down');
-    apply.setAttribute('aria-label', 'Apply chaos to ' + n.name);
-    clear.setAttribute('aria-label', 'Clear chaos on ' + n.name);
-    const url = '/__kaanal/chaos/' + encodeURIComponent(n.name);
-    apply.addEventListener('click', () => {
-      const ms = Number(lat.value), pct = Number(rate.value);
-      if (!Number.isInteger(ms) || ms < 0 || ms > MAX_LATENCY_MS) return say('Latency must be a whole number from 0 to ' + MAX_LATENCY_MS + ' ms.');
-      if (!Number.isFinite(pct) || pct < 0 || pct > 100) return say('Error % must be from 0 to 100.');
-      api(url, { method: 'PUT', body: JSON.stringify({ latency_ms: ms, error_rate: pct / 100, error_status: Number(status.value), error_kind: kind.value, down: down.checked }) })
-        .then(() => say('')).catch(e => say(e.message));
+  function draw() {
+    const ok = samples.filter((s) => s.ms !== null).map((s) => s.ms).sort((a, b) => a - b);
+    const top = Math.max(20, ok.length ? ok[Math.floor(ok.length * 0.95)] || ok[ok.length - 1] : 20);
+    const step = 240 / (SAMPLES - 1); // the newest sample is at the right edge
+    let line = '', miss = '';
+    samples.forEach((s, i) => {
+      const px = Math.min(239.5, Math.max(0.5, 240 - (samples.length - 1 - i) * step));
+      if (s.ms === null) miss += 'M' + px.toFixed(1) + ' 44V55';
+      else line += px.toFixed(1) + ',' + (52 - Math.min(1, s.ms / top) * 44).toFixed(1) + ' ';
     });
-    clear.addEventListener('click', () => api(url, { method: 'DELETE' }).then(() => { say(''); return loadNodes(); }).catch(e => say(e.message)));
-    for (const x of [lat, rate, status, kind, down]) { const td = el('td'); td.append(x); tr.append(td); }
-    const td = el('td'); td.append(apply, ' ', clear); tr.append(td);
-    body.append(tr);
+    $('line').setAttribute('points', line.trim());
+    $('miss').setAttribute('d', miss);
+    say('range', ok.length ? 'fastest ' + ok[0] + ' ms, slowest ' + ok[ok.length - 1] + ' ms' : 'no answer yet');
   }
-}
 
-function addRow(ev) {
-  const rows = document.getElementById('rows');
-  const tr = el('tr', undefined, ev.status >= 500 || ev.failed_node ? 'bad' : '');
-  tr.append(el('td', new Date(ev.ts_ms).toLocaleTimeString()), el('td', ev.method), el('td', ev.path),
-            el('td', ev.status), el('td', ev.ms), el('td', ev.failed_node ? ev.failed_node + (ev.kind ? ' (' + ev.kind + ')' : '') : ''));
-  rows.prepend(tr);
-  while (rows.children.length > MAX_ROWS) rows.lastChild.remove();
-}
+  function tick() {
+    if (last) say('uptime', state === 'down' ? '-' : dur(last.uptime_s + (Date.now() - lastAt) / 1000));
+    if (state === 'down' && lastAt) say('state-detail', 'No answer for ' + dur((Date.now() - lastAt) / 1000) + '. Is kaanal running?');
+  }
 
-setInterval(() => {
-  cur = (cur + 1) % BUCKETS;
-  buckets[cur] = new Map(); // the oldest second drops out of the window
-  for (const [name, cells] of stats) {
-    let hits = 0, bad = 0;
-    for (const b of buckets) {
-      const c = b.get(name);
-      if (c) { hits += c.hits; bad += c.bad; }
+  async function probe() {
+    const began = performance.now(), ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch('/__kaanal/health', { cache: 'no-store', signal: ctl.signal });
+      if (!res.ok) throw new Error('status ' + res.status);
+      const body = await res.json();
+      if (body.ok !== true) throw new Error('not ok');
+      const ms = Math.max(1, Math.round(performance.now() - began));
+      const restarted = last && body.uptime_s + 2 < last.uptime_s;
+      last = body; lastAt = Date.now(); fails = 0;
+      samples.push({ ms });
+      setState('ok', 'Healthy', restarted ? 'Kaanal restarted since the last check.' : 'Kaanal answers, in ' + ms + ' ms.');
+      say('version', typeof body.version === 'string' ? 'v' + body.version : '-');
+      say('system', body.system === true ? 'Project loaded' : 'Blank: none yet');
+      say('latency', ms + ' ms');
+      tick();
+      linkStudio(body.system === true);
+    } catch (e) {
+      fails += 1;
+      samples.push({ ms: null });
+      if (fails >= 2 || state === 'down') setState('down', 'Unreachable', 'No answer from /__kaanal/health.');
+      else setState(state, state === 'ok' ? 'Healthy' : 'Checking', 'One check missed; trying again.');
+      say('latency', '-');
+      tick();
+    } finally {
+      clearTimeout(kill);
+      while (samples.length > SAMPLES) samples.shift();
+      draw();
+      timer = setTimeout(probe, document.hidden ? HIDDEN_MS : EVERY_MS);
     }
-    cells.rps.textContent = (hits * 1000 / WINDOW_MS).toFixed(1);
-    cells.er.textContent = hits ? Math.round(100 * bad / hits) : 0;
-    cells.er.className = bad ? 'bad' : '';
   }
-}, 1000);
 
-// limitations: (1) Chaos set from the CLI shows here only after Clear or a reconnect; there is no
-// polling. Poll /__kaanal/chaos every few seconds if that confuses people. (2) Each open tab keeps one event
-// stream open; over HTTP/1.1 browsers allow ~6 connections per host, so many tabs can stall other requests
-// to this port. Close extra tabs.
-if (token) {
-  loadNodes().catch(e => say(e.message));
-  const es = new EventSource('/__kaanal/events?token=' + encodeURIComponent(token));
-  let lost = false;
-  es.addEventListener('open', () => {
-    // Reconnected after a drop: chaos may have changed meanwhile, so reload it.
-    if (lost) { lost = false; note(''); loadNodes().catch(e => say(e.message)); }
-  });
-  es.addEventListener('request', m => {
-    let ev;
-    try { ev = JSON.parse(m.data); } catch (_) { return; }
-    count(ev);
-    addRow(ev);
-  });
-  es.addEventListener('lagged', m => note('Log skipped ' + m.data + ' events (too fast to display).'));
-  es.addEventListener('shutdown', () => {
-    // The server announced its stop and ends the stream: do not reconnect-loop against nothing.
-    es.close();
-    note('Server stopped. Start kaanal again and open the new link it prints.');
-  });
-  es.addEventListener('error', () => {
-    lost = true;
-    // CLOSED means the browser gave up (e.g. 401 after kaanal restarted with a new token).
-    note(es.readyState === EventSource.CLOSED
-      ? 'Disconnected from kaanal. If it restarted, open the new link it printed.'
-      : 'Lost connection to kaanal, retrying...');
-  });
-}
+  // "Open Studio": the same origin, on the Admin tab when a project is loaded, carrying the token
+  // from this page's fragment when it has one (kaanal up prints the link with it).
+  function linkStudio(project) {
+    const a = $('studio');
+    a.href = '/__kaanal/studio' + (project ? '?mode=admin' : '') + location.hash;
+    const hasToken = /(^|[#&])token=/.test(location.hash);
+    $('studio-note').hidden = hasToken;
+  }
+
+  if (/\/studio\/?$/.test(location.pathname)) {
+    // no bundle compiled in: this page is what the Studio address answers
+    $('nostudio').hidden = false;
+    $('studio').setAttribute('aria-disabled', 'true');
+    $('studio').removeAttribute('href');
+    $('studio-note').hidden = true;
+  } else {
+    linkStudio(false);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(timer); probe(); } });
+  setInterval(tick, 1000);
+  probe();
+})();
 </script>
 </body>
 </html>

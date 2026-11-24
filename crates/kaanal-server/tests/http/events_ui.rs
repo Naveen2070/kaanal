@@ -127,7 +127,7 @@ async fn ui_page_cannot_be_framed_and_sends_no_referrer() {
 }
 
 #[tokio::test]
-async fn ui_page_is_served_without_token() {
+async fn ui_page_is_served_without_token_and_asks_only_the_health_route() {
     let s = start().await;
     let r = s.get("/__kaanal/ui").await;
     assert_eq!(r.status(), 200);
@@ -138,8 +138,26 @@ async fn ui_page_is_served_without_token() {
             .starts_with("text/html")
     );
     let html = r.text().await.unwrap();
-    assert!(
-        html.contains("Kaanal") && html.contains("EventSource") && html.contains("location.hash")
+    assert!(html.contains("Kaanal") && html.contains("/__kaanal/health"));
+    // a token on the address only rides on the Studio link
+    assert!(html.contains("location.hash"));
+    // nothing behind the token: no control call, no event stream, no bearer header, no storage
+    for bad in [
+        "EventSource",
+        "Authorization",
+        "Bearer",
+        "sessionStorage",
+        "/__kaanal/topology",
+        "/__kaanal/chaos",
+        "/__kaanal/logs",
+        "/__kaanal/draft",
+    ] {
+        assert!(!html.contains(bad), "page contains {bad}");
+    }
+    assert_eq!(
+        html.matches("fetch(").count(),
+        1,
+        "one call, the health route"
     );
 }
 
@@ -165,25 +183,32 @@ async fn ui_page_avoids_unsafe_dom_apis_and_external_assets() {
 }
 
 #[tokio::test]
-async fn ui_controls_have_accessible_names_and_dark_form_controls() {
+async fn ui_page_follows_the_system_theme_and_is_readable_without_colour_or_motion() {
     let s = start().await;
     let html = s.get("/__kaanal/ui").await.text().await.unwrap();
-    assert!(html.contains("color-scheme: light dark"));
-    for needle in ["setAttribute('aria-label'", "role=\"alert\""] {
+    assert!(html.contains("color-scheme: light dark") && html.contains("light-dark("));
+    // a state is words as well as a colour, announced politely when it changes
+    for needle in [
+        "aria-live=\"polite\"",
+        "aria-labelledby=\"state-title\"",
+        "prefers-reduced-motion",
+        "forced-colors",
+        "role=\"img\"",
+        "<h1>",
+    ] {
         assert!(html.contains(needle), "missing {needle}");
+    }
+    for state in ["Healthy", "Unreachable", "Checking"] {
+        assert!(html.contains(state), "missing {state}");
     }
 }
 
 #[tokio::test]
-async fn ui_keeps_stream_status_and_api_errors_on_separate_lines_and_uses_counters() {
+async fn ui_page_names_what_a_build_without_studio_answers_at_the_studio_address() {
     let s = start().await;
     let html = s.get("/__kaanal/ui").await.text().await.unwrap();
-    assert!(html.contains("id=\"note\"") && html.contains("role=\"status\""));
-    assert!(html.contains("const note = ") && html.contains("const say = "));
-    // fixed-size counters, not a growing event list filtered every second
-    assert!(html.contains("const buckets = ") && !html.contains("recent.filter"));
-    // node names are used as Map keys, never as plain object keys
-    assert!(!html.contains("stats[") && html.contains("new Map()"));
+    assert!(html.contains("This build has no Studio"), "{html}");
+    assert!(html.contains("/studio"), "it tells the two addresses apart");
 }
 
 #[tokio::test]

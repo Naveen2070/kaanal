@@ -15,10 +15,11 @@ use serde_json::json;
 
 use super::plan_cheapest as cheapest;
 use super::{
-    REPORT_VERSION, Recipe, ReportError, SweepReport, chaos_in_force, json_text, limit_pct,
+    REPORT_VERSION, Recipe, ReportError, SweepReport, chaos_in_force, json_text, limit_pct, plain,
     row_pct, shell, text,
 };
-use crate::sim::plan_draft::{BudgetCheck, FAMILY_MAX_STEPS, FamilySection, PlanDoc};
+use crate::sim::plan_draft::{BudgetCheck, FAMILY_MAX_STEPS, FamilySection, PlanDoc, Words};
+use crate::sim::plan_search::ProviderSection;
 use crate::sim::store::RunRecord;
 
 /// The report of the finished plan `rec`; `version` is the `kaanal` version the recipe names.
@@ -403,9 +404,10 @@ pub(super) fn verdict_words(
     }
 }
 
-/// The `## Verdict` section.
-fn verdict(md: &mut String, p: &PlanDoc) {
-    let words = match &p.search {
+/// The verdict of the plan in words (Markdown), cheapest-aware: the sentence the report's Verdict
+/// section prints and the record's `words.verdict` carries.
+fn verdict_sentence(p: &PlanDoc) -> String {
+    match &p.search {
         Some(i) => cheapest::words(
             "The design in force",
             &p.verdict,
@@ -421,7 +423,35 @@ fn verdict(md: &mut String, p: &PlanDoc) {
             p.price_after,
             p.request.budget_micro_usd_hr,
         ),
-    };
+    }
+}
+
+/// The sentences a plan record carries, as plain text: the same ones the report prints, so a screen
+/// never words a verdict on its own (Step 9c-3).
+pub(crate) fn words_of(p: &PlanDoc) -> Words {
+    Words {
+        verdict: plain(&verdict_sentence(p)),
+        budget: p.budget_check.as_ref().map(|b| plain(&budget_line(b))),
+        sections: p
+            .providers
+            .iter()
+            .flatten()
+            .map(|s| match s {
+                ProviderSection::Answer { plan, info, .. } => plain(&cheapest::section_words(
+                    p,
+                    &plan.verdict,
+                    plan.price_after,
+                    info,
+                )),
+                ProviderSection::Skipped { .. } => String::new(),
+            })
+            .collect(),
+    }
+}
+
+/// The `## Verdict` section.
+fn verdict(md: &mut String, p: &PlanDoc) {
+    let words = verdict_sentence(p);
     let _ = write!(md, "## Verdict\n\n{words}\n\n");
     if let Some(b) = &p.budget_check {
         md.push_str(&budget_line(b));

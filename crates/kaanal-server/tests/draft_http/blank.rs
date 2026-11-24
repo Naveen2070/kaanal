@@ -30,7 +30,13 @@ async fn a_blank_server_serves_only_the_control_api() {
     assert_eq!(r.status(), 404);
     let v: Value = r.json().await.unwrap();
     assert_eq!(v["error"], "no system applied yet");
-    assert_eq!(s.get("/__kaanal/health").await.status(), 200);
+    let health = s.get("/__kaanal/health").await;
+    assert_eq!(health.status(), 200);
+    let h: Value = health.json().await.unwrap();
+    assert_eq!(
+        h["system"], false,
+        "a blank start says it has no system yet"
+    );
     assert_eq!(s.get("/__kaanal/ui").await.status(), 200);
     // what needs a system says so
     for path in ["/__kaanal/topology", "/__kaanal/chaos", "/__kaanal/pins"] {

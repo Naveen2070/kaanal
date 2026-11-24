@@ -296,10 +296,7 @@ async fn bind(host: IpAddr, port: u16) -> Result<tokio::net::TcpListener, String
 #[expect(clippy::too_many_lines, reason = "one flat table of routes")]
 fn router(st: Arc<state::AppState>) -> Router {
     Router::new()
-        .route(
-            "/__kaanal/health",
-            get(|| async { axum::Json(serde_json::json!({ "ok": true })) }),
-        )
+        .route("/__kaanal/health", get(control::health))
         .route("/__kaanal/topology", get(control::topology))
         .route(
             "/__kaanal/chaos",

@@ -17,7 +17,7 @@ flowchart TD
             Router{"Path Router"}
             Guard["Host & Bearer Token Guard"]
             ControlAPI["Control API (/__kaanal/*)"]
-            WebUI["Embedded Web UI (/__kaanal/ui)"]
+            WebUI["Status page (/__kaanal/ui)"]
             MockHandler["Mock Handler (Fallback)"]
         end
 
