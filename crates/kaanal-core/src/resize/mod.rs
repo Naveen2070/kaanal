@@ -2,8 +2,12 @@
 //! is applied to a cloned [`crate::Config`]. Nothing here runs a simulation or reads a file; the
 //! check and the walk live in `kaanal-sim`.
 
+mod cheaper;
 mod family;
 mod moves;
+mod provider;
 
+pub use cheaper::cheaper_moves;
 pub use family::{Alternative, Alternatives, Family, alternatives, family_of};
 pub use moves::{Move, MoveKind, apply, copies_only_reason, moves_for, moves_for_oom, why_fixed};
+pub use provider::{Translation, providers_of, translate};

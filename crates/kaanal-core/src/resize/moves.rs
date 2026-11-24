@@ -66,7 +66,7 @@ pub struct Move {
 }
 
 /// **Private.** The core counts a `Cores` move steps along, in millicores.
-const CORE_STEPS: [u32; 7] = [1000, 2000, 4000, 8000, 16_000, 32_000, 64_000];
+pub(super) const CORE_STEPS: [u32; 7] = [1000, 2000, 4000, 8000, 16_000, 32_000, 64_000];
 
 /// The moves `node` offers for load: its size knob (class or cores) and one more copy, each when
 /// the rules allow. Empty for a node in `keep`, an unknown node, an external API or an object store.
@@ -134,7 +134,7 @@ pub fn apply(cfg: &mut Config, mv: &Move) -> Result<(), String> {
 }
 
 /// **Private.** The node the rules look at, or why there is none to look at.
-fn target<'a>(
+pub(super) fn target<'a>(
     cfg: &'a Config,
     node: &str,
     keep: &[String],
@@ -254,10 +254,18 @@ fn copies(cfg: &Config, node: &str, n: &NodeConfig) -> Result<MoveKind, &'static
     if from >= MAX_REPLICAS {
         return Err("at the most copies (64)");
     }
+    if let Some(why) = copies_blocked(cfg, node, n) {
+        return Err(why);
+    }
+    Ok(MoveKind::Copies { from, to: from + 1 })
+}
+
+/// **Private.** Why the copy count of `node` may not change either way, or `None`.
+pub(super) fn copies_blocked(cfg: &Config, node: &str, n: &NodeConfig) -> Option<&'static str> {
     // each copy has its own limiter, so a copy would raise the limit the user set (spec: a plan
-    // never raises a user-set rate limit)
+    // never raises a user-set rate limit), and one fewer would lower it
     if n.rate_limit().is_some() {
-        return Err("it has a rate limit you set, and each copy would add its own");
+        return Some("it has a rate limit you set, and each copy would add its own");
     }
     let weighted = |b: Option<&Balance>| matches!(b, Some(Balance::Weighted(_)));
     if weighted(n.balance())
@@ -266,9 +274,9 @@ fn copies(cfg: &Config, node: &str, n: &NodeConfig) -> Result<MoveKind, &'static
             .iter()
             .any(|e| e.to == node && weighted(e.balance.as_ref()))
     {
-        return Err("a weighted balance names each copy: one more needs a weight from you");
+        return Some("a weighted balance names each copy: one more needs a weight from you");
     }
-    Ok(MoveKind::Copies { from, to: from + 1 })
+    None
 }
 
 /// **Private.** Writes `kind` into `n` after checking its `from` is what `n` has.
@@ -313,7 +321,7 @@ fn set(n: &mut NodeConfig, kind: &MoveKind) -> Result<(), &'static str> {
 /// **Private.** `fn $name(&mut NodeConfig) -> Option<&mut $t>`: the field on the kinds that have it.
 macro_rules! slot {
     ($name:ident, $field:ident, $t:ty, [$($k:ident),*]) => {
-        fn $name(n: &mut NodeConfig) -> Option<&mut $t> {
+        pub(super) fn $name(n: &mut NodeConfig) -> Option<&mut $t> {
             match n {
                 $(NodeConfig::$k(c) => Some(&mut c.$field),)*
                 _ => None,
