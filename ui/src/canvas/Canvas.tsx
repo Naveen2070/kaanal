@@ -28,7 +28,7 @@ import { StarterList } from "./StarterList";
 import { LoadEdge } from "./LoadEdge";
 import { NodeCard, type CardData } from "./NodeCard";
 import { NoteCard } from "./NoteCard";
-import { isNoteId, useNotes } from "./notes";
+import { isNoteId, moveNote, useNotes } from "./notes";
 import { canvasBridge } from "./bridge";
 import { nudge, NOT_FOR_NUDGE } from "./nudge";
 import { KIND_MIME } from "./Palette";
@@ -77,12 +77,8 @@ function Flow() {
 
   const doc = view?.doc ?? null;
   const layout = view?.layout;
-  // captions are kept per project in this browser; they load once the project is known
-  const notes = useNotes((s) => s.notes);
-  const projectId = view?.project_id;
-  useEffect(() => {
-    if (projectId) useNotes.getState().load(projectId);
-  }, [projectId]);
+  // captions are part of the draft view, saved with the positions
+  const notes = useNotes();
 
   // the view is fitted once, on load (the `fitView` prop). A node added later never changes the zoom:
   // the view only moves, and only when the new card would land behind a panel or off screen
@@ -309,8 +305,7 @@ function Flow() {
   /** The drag is over: save where React Flow says the dragged nodes ended, in one request. */
   const onDragStop = (dragged: Node[]) => {
     setLive({});
-    for (const n of dragged)
-      if (isNoteId(n.id)) useNotes.getState().move(n.id, [n.position.x, n.position.y]);
+    for (const n of dragged) if (isNoteId(n.id)) moveNote(n.id, [n.position.x, n.position.y]);
     dragged = dragged.filter((n) => !isNoteId(n.id));
     if (dragged.length === 0) return;
     void setLayout(

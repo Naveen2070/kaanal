@@ -5,7 +5,6 @@ import type { DraftView } from "../data/api/types";
 import { mockFetch } from "../test/fetch";
 import { useDraft } from "../data/store/draft";
 import { Canvas } from "./Canvas";
-import { useNotes } from "./notes";
 import { KIND_MIME, Palette } from "./Palette";
 
 // React Flow needs a real layout engine; the canvas's own behaviour is what is tested, through the
@@ -336,13 +335,8 @@ test("a_wire_picked_on_the_canvas_stays_selected_so_delete_can_find_it", async (
 });
 
 test("captions_are_drawn_beside_the_cards_move_with_a_drag_and_are_never_the_selected_component", async () => {
-  localStorage.clear();
-  useNotes.setState({ project: null, notes: [] });
-  localStorage.setItem(
-    "kaanal-notes-proj",
-    JSON.stringify([{ id: "note:1", text: "the only entry", at: [50, 60] }]),
-  );
-  await show(view({ project_id: "proj" }));
+  const caption = { id: "note:1", text: "the only entry", at: [50, 60] as [number, number] };
+  await show(view({ project_id: "proj", canvas_notes: [caption] }));
   const note = flow.nodes.find((n) => n.id === "note:1") as unknown as {
     type: string;
     position: { x: number; y: number };
@@ -360,12 +354,15 @@ test("captions_are_drawn_beside_the_cards_move_with_a_drag_and_are_never_the_sel
     flow.onNodesChange([{ type: "position", id: "note:1", position: { x: 70, y: 80 } }]),
   );
   expect(flow.nodes.find((n) => n.id === "note:1")?.position).toEqual({ x: 70, y: 80 });
-  const sent = mockFetch([{ json: view() }]);
+  const moved = { ...caption, at: [70, 80] as [number, number] };
+  const sent = mockFetch([{ json: view({ canvas_notes: [moved] }) }]);
   await act(async () =>
     flow.onNodeDragStop({}, {}, [{ id: "note:1", position: { x: 70, y: 80 } }]),
   );
-  expect(useNotes.getState().notes[0]?.at).toEqual([70, 80]);
-  expect(sent).toHaveLength(0); // a caption is not part of the layout file
+  // one request, the notes alone: a caption is not in the positions
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.body).toEqual({ canvas_notes: [moved] });
+  expect(useDraft.getState().view?.canvas_notes).toEqual([moved]);
   // clicking it does not select a component named "note:1"
   await act(async () => flow.onNodeClick({}, { id: "note:1" }));
   expect(new URLSearchParams(location.search).get("node")).toBeNull();

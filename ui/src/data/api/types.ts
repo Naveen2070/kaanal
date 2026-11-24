@@ -69,6 +69,11 @@ export interface DraftView {
   layout: Layout;
   layout_note: string | null;
   layout_dirty: boolean;
+  /**
+   * The canvas notes, kept in the layout sidecar beside the positions. Absent from an older
+   * server: Studio then has none to show (and cannot save any).
+   */
+  canvas_notes?: Note[];
   /** The text equals what Save last read or wrote and the layout is as saved. */
   saved: boolean;
   /** `rename_node` edits made since the text was set, in order: what `fix_scenarios: rewrite` follows. */
@@ -87,7 +92,19 @@ export type Op =
   | { op: "add_node"; name: string; kind: string }
   | { op: "rename_node"; from: string; to: string };
 
-export type PutBody = { text: string } | { patch: Op[]; layout?: Layout } | { layout: Layout };
+/** A caption pinned to the canvas. */
+export interface Note {
+  id: string;
+  text: string;
+  /** Top-left corner, in flow coordinates. */
+  at: [number, number];
+}
+
+export type PutBody =
+  | { text: string }
+  | { patch: Op[]; layout?: Layout }
+  | { layout: Layout }
+  | { canvas_notes: Note[] };
 
 export interface ValidateResult {
   ok: boolean;

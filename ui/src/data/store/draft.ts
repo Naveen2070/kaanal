@@ -5,7 +5,7 @@
 import { useLive } from "./live";
 import { create } from "zustand";
 import { ApiError, api } from "../api/client";
-import type { DraftView, Layout, Op } from "../api/types";
+import type { DraftView, Layout, Note, Op } from "../api/types";
 import { connectOps, lastEdgeIndex, uniqueName } from "../../canvas/edges";
 import { setKindRules } from "../../canvas/rules";
 import { notify } from "../../shell/toast/toasts";
@@ -16,6 +16,7 @@ import { applyOps } from "./optimistic";
 type Edit =
   | { kind: "patch"; ops: Op[]; layout?: Layout }
   | { kind: "layout"; layout: Layout }
+  | { kind: "notes"; notes: Note[] }
   | { kind: "text"; text: string };
 
 interface DraftState {
@@ -31,6 +32,8 @@ interface DraftState {
   patch: (ops: Op[], positions?: Layout, opts?: { record?: boolean }) => Promise<boolean>;
   /** Moves nodes: `positions` replaces the entries of those names; the whole map is sent. */
   setLayout: (positions: Layout) => Promise<boolean>;
+  /** Replaces the whole list of canvas notes (kept in the layout file; not an edit to undo). */
+  setNotes: (notes: Note[]) => Promise<boolean>;
   /** Replaces the whole draft text (the demo), after every edit already queued. */
   replaceText: (text: string) => Promise<boolean>;
   /** Adds a node of `kind` under a name not used yet; returns the name, or null when refused. */
@@ -59,6 +62,7 @@ function replay(confirmed: DraftView, pending: Edit[]): DraftView {
   return pending.reduce((v, e) => {
     // a whole-text replace has no local preview: the view keeps the old text until the answer
     if (e.kind === "text") return v;
+    if (e.kind === "notes") return { ...v, canvas_notes: e.notes };
     const next = e.kind === "patch" ? applyOps(v, e.ops) : v;
     return e.layout ? { ...next, layout: e.layout } : next;
   }, confirmed);
@@ -90,7 +94,9 @@ export const useDraft = create<DraftState>((set, get) => {
             ? { patch: edit.ops, ...(edit.layout && { layout: edit.layout }) }
             : edit.kind === "text"
               ? { text: edit.text }
-              : { layout: edit.layout },
+              : edit.kind === "notes"
+                ? { canvas_notes: edit.notes }
+                : { layout: edit.layout },
         );
         pending = pending.filter((e) => e !== edit);
         // the server stores any text, so an edit can leave a draft that is not a config at all and
@@ -148,6 +154,7 @@ export const useDraft = create<DraftState>((set, get) => {
     },
     settled: () => tail,
     replaceText: (text) => enqueue({ kind: "text", text }),
+    setNotes: (notes) => enqueue({ kind: "notes", notes }),
     async patch(ops, positions, opts) {
       const before = get().view;
       const inverse = before && opts?.record !== false ? invertOps(before, ops) : null;

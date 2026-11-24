@@ -3,14 +3,15 @@
 use super::*;
 use crate::draft::MAX_DRAFT_BYTES;
 use crate::draft::apply::{self as apply_mod, ApplyError};
-use crate::draft::layout::Layout;
+use crate::draft::layout::{self, Layout};
+use crate::draft::notes::Notes;
 use crate::draft::patch::{self, Op};
 use crate::draft::rename;
 use crate::draft::save::{self as draft_save, Plan, SaveError};
 
 /// **Private.** The draft as the API shows it: `{ text, dirty, generation, lost, rev, doc,
-/// doc_error, project_id, project_name, kind_defaults, kinds, boot, layout, layout_note, layout_dirty, saved, renames }` (`layout_dirty`: the
-/// positions differ from the sidecar, so a Save would write them) (`generation` is 0 before the first Apply of a blank
+/// doc_error, project_id, project_name, kind_defaults, kinds, boot, layout, layout_note, layout_dirty, canvas_notes, saved, renames }`
+/// (`layout_dirty`: the positions or the notes differ from the sidecar, so a Save would write them) (`generation` is 0 before the first Apply of a blank
 /// start; `doc` is the text as JSON, or null with `doc_error` saying why).
 fn view(st: &AppState) -> Json<Value> {
     // copy what the view needs and let go of the lock before parsing, so a big draft does not
@@ -25,6 +26,7 @@ fn view(st: &AppState) -> Json<Value> {
         mut layout,
         layout_note,
         layout_dirty,
+        canvas_notes,
         saved,
         renames,
         cached,
@@ -40,6 +42,7 @@ fn view(st: &AppState) -> Json<Value> {
             d.layout.clone(),
             d.layout_note.clone(),
             d.layout_dirty(),
+            d.notes.clone(),
             d.saved(),
             d.renames.clone(),
             d.doc_cache
@@ -75,6 +78,7 @@ fn view(st: &AppState) -> Json<Value> {
         "project_name": doc::project_name(file.as_deref()), "kind_defaults": doc::kind_defaults(),
         "kinds": doc::kinds(),
         "layout": layout, "layout_note": layout_note, "layout_dirty": layout_dirty,
+        "canvas_notes": canvas_notes,
         "saved": saved, "renames": renames,
     }))
 }
@@ -92,26 +96,31 @@ pub struct DraftBody {
 }
 
 /// The accepted body of `PUT /__kaanal/draft`: the whole new `text`, or a `patch` of edits, and/or
-/// a `layout` (node name to `[x, y]`, replacing the whole map).
+/// a `layout` (node name to `[x, y]`, replacing the whole map) and/or `canvas_notes` (replacing the
+/// whole list).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PutBody {
     text: Option<String>,
     patch: Option<Vec<Op>>,
     layout: Option<Layout>,
+    canvas_notes: Option<Notes>,
 }
 
 /// `PUT /__kaanal/draft` — replaces the draft text, or applies a `patch` to it (`[{ op: set |
 /// insert | remove, path, value }]`, kept to the bytes it touches so comments and style survive),
 /// and/or replaces the `layout`, and returns the new view. What a patch could not keep is in
 /// `lost`; a `rename_node` moves the node's position too. The text is not validated (a half-typed
-/// file must be savable); `POST /draft/validate` does that. A layout change never bumps `rev`.
+/// file must be savable); `POST /draft/validate` does that. A layout or notes change never bumps
+/// `rev`.
 ///
 /// # Errors
 /// 400 for a body with both `text` and `patch` or none of `text`, `patch` and `layout`, a text
 /// over 1 MiB (1048576 bytes), a patch that cannot be made (nothing at the path, a key already
 /// there, a draft that is not YAML), or a layout that cannot be kept (over 2000 positions, an
-/// empty name, a coordinate beyond ±1e6, over 256 KiB as a file); the draft is unchanged.
+/// empty name, a coordinate beyond ±1e6, over 256 KiB as a file with the notes), or notes that cannot be
+/// kept (over 50, a bad or repeated id, a text over 500 characters, a coordinate beyond ±1e6); the
+/// draft is unchanged.
 pub async fn put_draft(
     State(st): State<Arc<AppState>>,
     payload: Result<Json<PutBody>, JsonRejection>,
@@ -123,18 +132,29 @@ pub async fn put_draft(
             "send either `text` or `patch`, not both",
         ));
     }
-    if b.text.is_none() && b.patch.is_none() && b.layout.is_none() {
+    if b.text.is_none() && b.patch.is_none() && b.layout.is_none() && b.canvas_notes.is_none() {
         return Err(reject(
             StatusCode::BAD_REQUEST,
-            "send `text` or `patch`, and/or `layout`",
+            "send `text` or `patch`, and/or `layout` or `canvas_notes`",
         ));
     }
     if let Some(l) = &b.layout {
         l.check().map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
     }
+    if let Some(n) = &b.canvas_notes {
+        n.check().map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
+    }
     let (rev_before, edited, extra) = {
         let mut d = st.draft.lock().unwrap_or_else(PoisonError::into_inner);
         let rev_before = d.rev;
+        // positions and notes share one file: together they must fit it (nothing is changed if not)
+        if b.layout.is_some() || b.canvas_notes.is_some() {
+            layout::check_size(
+                b.layout.as_ref().unwrap_or(&d.layout),
+                b.canvas_notes.as_ref().unwrap_or(&d.notes),
+            )
+            .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
+        }
         let mut extra = None;
         match (b.text, b.patch) {
             (Some(t), None) if t.len() > MAX_DRAFT_BYTES => return Err(too_large(t.len())),
@@ -152,6 +172,15 @@ pub async fn put_draft(
                 if out.text.len() > MAX_DRAFT_BYTES {
                     return Err(too_large(out.text.len()));
                 }
+                // a longer name makes the file longer: judged before anything is changed
+                if b.layout.is_none() && !out.renamed.is_empty() {
+                    let mut moved = d.layout.clone();
+                    for (from, to) in &out.renamed {
+                        moved.rename(from, to);
+                    }
+                    layout::check_size(&moved, b.canvas_notes.as_ref().unwrap_or(&d.notes))
+                        .map_err(|m| reject(StatusCode::BAD_REQUEST, &m))?;
+                }
                 if d.text != out.text {
                     d.rev += 1;
                 }
@@ -168,6 +197,9 @@ pub async fn put_draft(
         }
         if let Some(l) = b.layout {
             d.layout = l;
+        }
+        if let Some(n) = b.canvas_notes {
+            d.notes = n;
         }
         (rev_before, d.rev, extra)
     };
@@ -368,7 +400,7 @@ pub async fn reload_draft(State(st): State<Arc<AppState>>) -> Result<Json<Value>
         })?;
     // a config that is a link is read through, as Save writes through it
     let target = file.canonicalize().unwrap_or_else(|_| file.clone());
-    let (text, layout) = tokio::task::spawn_blocking(move || {
+    let (text, sidecar) = tokio::task::spawn_blocking(move || {
         let text = std::fs::read_to_string(&target).map_err(|e| e.to_string())?;
         Ok::<_, String>((text, file.parent().map(crate::draft::layout::load)))
     })
@@ -392,9 +424,12 @@ pub async fn reload_draft(State(st): State<Arc<AppState>>) -> Result<Json<Value>
         d.base = Some(text);
         d.lost.clear();
         d.renames.clear();
-        if let Some((l, note)) = layout {
+        if let Some((l, n, note)) = sidecar {
+            d.sidecar_unusable.clone_from(&note);
             d.layout = l.clone();
             d.saved_layout = l;
+            d.notes = n.clone();
+            d.saved_notes = n;
             d.layout_note = note;
         }
     }

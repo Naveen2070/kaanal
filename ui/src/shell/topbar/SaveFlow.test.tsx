@@ -72,7 +72,7 @@ test("save_checks_the_draft_then_writes_the_file_and_says_what_was_written", asy
   ]);
   expect(sent[1]?.body).toEqual({});
   expect(screen.getByText(/Written: kaanal.yaml/)).toBeTruthy();
-  expect(screen.getByText(/Positions saved beside it/)).toBeTruthy();
+  expect(screen.getByText(/Positions and notes saved beside it/)).toBeTruthy();
 });
 
 test("a_draft_that_would_not_start_asks_before_it_is_written", async () => {

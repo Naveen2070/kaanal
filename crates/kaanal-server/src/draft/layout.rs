@@ -6,6 +6,7 @@
 //! [`FILE`]. A sidecar that is a link or not a regular file is neither followed on load nor
 //! replaced on Save. Last writer wins: positions are low-stakes, so there is no conflict check.
 
+use super::notes::Notes;
 use super::save::{Change, commit};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -26,17 +27,20 @@ pub const MAX_COORD: f64 = 1e6;
 #[serde(transparent)]
 pub struct Layout(pub BTreeMap<String, [f64; 2]>);
 
-/// **Private.** The file's shape: `{"version":1,"nodes":{...}}`.
+/// **Private.** The file's shape: `{"version":1,"nodes":{...},"notes":[...]}`; `notes` is left out
+/// when there are none, so a project without notes has the file it always had.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OnDisk {
     version: u32,
     nodes: Layout,
+    #[serde(default, skip_serializing_if = "Notes::is_empty")]
+    notes: Notes,
 }
 
 impl Layout {
-    /// Whether this layout may be kept: at most [`MAX_ENTRIES`] positions, no empty name, every
-    /// coordinate finite and within ±[`MAX_COORD`], and a file of at most [`MAX_FILE_BYTES`].
+    /// Whether this layout may be kept: at most [`MAX_ENTRIES`] positions, no empty name, and every
+    /// coordinate finite and within ±[`MAX_COORD`]. The file size is [`check_size`]'s.
     ///
     /// # Errors
     /// What is wrong, in words.
@@ -56,12 +60,6 @@ impl Layout {
                     "layout: the position of '{name}' must be finite and within ±{MAX_COORD}"
                 ));
             }
-        }
-        if self.file_text().len() as u64 > MAX_FILE_BYTES {
-            return Err(format!(
-                "layout: larger than {} KiB as a file",
-                MAX_FILE_BYTES / 1024
-            ));
         }
         Ok(())
     }
@@ -87,26 +85,57 @@ impl Layout {
             Err(_) => self.clone(),
         }
     }
-
-    /// **Private.** The file's text.
-    fn file_text(&self) -> String {
-        let disk = OnDisk {
-            version: 1,
-            nodes: self.clone(),
-        };
-        serde_json::to_string_pretty(&disk).unwrap_or_default() + "\n"
-    }
 }
 
-/// The layout in `dir`'s sidecar, and a note when there is a file but it was not used (never an
-/// error: a missing, unreadable, corrupt, oversized or linked file means no positions).
-pub fn load(dir: &Path) -> (Layout, Option<String>) {
+/// Whether the positions and the notes together fit the file limit.
+///
+/// # Errors
+/// What is wrong, in words.
+pub fn check_both(layout: &Layout, notes: &Notes) -> Result<(), String> {
+    layout.check()?;
+    notes.check()?;
+    check_size(layout, notes)
+}
+
+/// Whether the file the positions and notes would make is at most [`MAX_FILE_BYTES`] (the one
+/// serialisation of a check that is otherwise made of cheap tests).
+///
+/// # Errors
+/// What is wrong, in words.
+pub fn check_size(layout: &Layout, notes: &Notes) -> Result<(), String> {
+    if file_text(layout, notes).len() as u64 > MAX_FILE_BYTES {
+        return Err(format!(
+            "positions and notes: larger than {} KiB as a file",
+            MAX_FILE_BYTES / 1024
+        ));
+    }
+    Ok(())
+}
+
+/// **Private.** The file's text.
+fn file_text(layout: &Layout, notes: &Notes) -> String {
+    let disk = OnDisk {
+        version: 1,
+        nodes: layout.clone(),
+        notes: notes.clone(),
+    };
+    serde_json::to_string_pretty(&disk).unwrap_or_default() + "\n"
+}
+
+/// The positions and notes in `dir`'s sidecar, and a note when there is a file but it was not used
+/// (never an error: a missing, unreadable, corrupt, oversized, linked or invalid file means no
+/// positions and no notes).
+pub fn load(dir: &Path) -> (Layout, Notes, Option<String>) {
     match read(&dir.join(FILE)) {
-        Ok(l) => (l.unwrap_or_default(), None),
+        Ok(l) => {
+            let (layout, notes) = l.unwrap_or_default();
+            (layout, notes, None)
+        }
         Err(why) => (
             Layout::default(),
+            Notes::default(),
             Some(format!(
-                "{FILE} was not used ({why}); positions start empty"
+                "{FILE} was not used ({why}); positions and notes start empty"
             )),
         ),
     }
@@ -116,7 +145,7 @@ pub fn load(dir: &Path) -> (Layout, Option<String>) {
 /// following a link, then opened and judged by its own handle, so a link swapped in between is
 /// caught: on Windows the open does not follow a reparse point, on Unix the handle must be the
 /// very file that was looked at.
-fn read(path: &Path) -> Result<Option<Layout>, String> {
+fn read(path: &Path) -> Result<Option<(Layout, Notes)>, String> {
     let seen = match std::fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -155,8 +184,8 @@ fn read(path: &Path) -> Result<Option<Layout>, String> {
     if disk.version != 1 {
         return Err(format!("version {} (only 1 is known)", disk.version));
     }
-    disk.nodes.check()?;
-    Ok(Some(disk.nodes))
+    check_both(&disk.nodes, &disk.notes)?;
+    Ok(Some((disk.nodes, disk.notes)))
 }
 
 #[cfg(windows)]
@@ -190,18 +219,32 @@ fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
 /// Writes `layout` (only the nodes `text` defines) to the sidecar beside `config`, after Save
 /// wrote the config. `dir_before` is the config folder's real path taken before the config was
 /// written: the sidecar goes there only if the folder still resolves to it. Answers whether it was
-/// written and, when not, why. An empty layout writes nothing and removes nothing.
+/// written and, when not, why. Nothing to write (no positions, no notes) writes nothing and
+/// removes nothing, unless `had_notes`: the file held notes that are now all deleted, so it is
+/// rewritten without them. `unusable`: why the file was not used when it was read (invalid, locked,
+/// too big), so what is on disk was never loaded: it is not replaced, whatever the draft holds.
 pub fn save(
     config: &Path,
     dir_before: Option<&Path>,
     layout: &Layout,
+    notes: &Notes,
     text: &str,
+    had_notes: bool,
+    unusable: Option<&str>,
 ) -> (bool, Option<String>) {
-    let kept = layout.of_nodes_in(text);
-    if kept.0.is_empty() {
+    if let Some(why) = unusable {
         return (
             false,
-            Some(format!("no positions to save; {FILE} left as it was")),
+            Some(format!(
+                "{FILE} was not replaced ({why}), so what it holds is kept; fix or delete it, then Reload"
+            )),
+        );
+    }
+    let kept = layout.of_nodes_in(text);
+    if kept.0.is_empty() && notes.is_empty() && !had_notes {
+        return (
+            false,
+            Some(format!("nothing to save; {FILE} left as it was")),
         );
     }
     let not = |why: String| (false, Some(format!("{FILE} was not written: {why}")));
@@ -224,9 +267,10 @@ pub fn save(
         Err(e) => return not(e.to_string()),
     }
     // the rename replaces the name itself: even a link planted after the check is not followed
-    match commit(&[Change::Write(path, kept.file_text())], |from, to| {
-        std::fs::rename(from, to)
-    }) {
+    match commit(
+        &[Change::Write(path, file_text(&kept, notes))],
+        |from, to| std::fs::rename(from, to),
+    ) {
         Ok(()) => (true, None),
         Err(e) => not(e.to_string()),
     }

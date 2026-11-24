@@ -6,7 +6,7 @@ import { useDraft } from "../data/store/draft";
 import { NODE_KINDS } from "./nodeKinds";
 import { Palette } from "./Palette";
 import { useGuide } from "../overlays/guide/store";
-import { useNotes } from "./notes";
+import { notesOf, seedDraft } from "../test/notesDraft";
 
 afterEach(() => {
   cleanup();
@@ -84,18 +84,20 @@ test("an_icon_has_a_card_with_the_description_and_a_glossary_link", () => {
   useGuide.getState().hide();
 });
 
-test("add_a_note_pins_a_caption_in_both_layouts", () => {
+test("add_a_note_pins_a_caption_in_both_layouts", async () => {
   vi.stubGlobal("innerWidth", 1440);
-  useNotes.setState({ project: null, notes: [] });
+  await seedDraft();
+  vi.stubGlobal("innerWidth", 1440);
   const { unmount } = render(<Palette onAdd={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: /Add a note/ }));
-  expect(useNotes.getState().notes).toHaveLength(1);
+  expect(notesOf()).toHaveLength(1);
   unmount();
+  await useDraft.getState().settled();
+  await seedDraft();
   vi.stubGlobal("innerWidth", 1000);
-  useNotes.setState({ project: null, notes: [] });
   render(<Palette onAdd={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
-  expect(useNotes.getState().notes).toHaveLength(1);
+  expect(notesOf()).toHaveLength(1);
 });
 
 test("storage_is_offered_with_its_one_line_description", () => {

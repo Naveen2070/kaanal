@@ -127,14 +127,14 @@ export function Palette({ onAdd }: { onAdd: (kind: string) => void }) {
           <RailCard
             id={`${base}-note`}
             label="Add a note"
-            description="Pin a caption to the canvas. Notes are kept in this browser, not in the file."
+            description="Pin a caption to the canvas. Notes are saved with the project (kaanal.layout.json)."
             at={at}
           />
         </div>
       ) : (
         <button
           type="button"
-          title="Pin a caption to the canvas. Notes are kept in this browser, not in the file."
+          title="Pin a caption to the canvas. Notes are saved with the project (kaanal.layout.json)."
           onClick={() => void addNote()}
           className="mt-1 flex min-h-9 w-full items-center gap-2.5 rounded-lg px-1.5 text-left text-sm hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
         >

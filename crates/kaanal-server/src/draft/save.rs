@@ -77,7 +77,7 @@ pub fn save(
     plan: impl FnOnce(&str, &[(String, String)]) -> Result<Plan, String>,
 ) -> Result<Saved, SaveError> {
     let _one = once.lock().unwrap_or_else(PoisonError::into_inner);
-    let (file, text, base, lost, renames, layout) = {
+    let (file, text, base, lost, renames, layout, notes, had_notes, unusable) = {
         let d = draft.lock().unwrap_or_else(PoisonError::into_inner);
         let file = d.file.clone().ok_or(SaveError::NoFile)?;
         (
@@ -87,6 +87,9 @@ pub fn save(
             d.lost.clone(),
             d.renames.clone(),
             d.layout.clone(),
+            d.notes.clone(),
+            !d.saved_notes.is_empty(),
+            d.sidecar_unusable.clone(),
         )
     };
     if !lost.is_empty() && !confirm_loss {
@@ -113,13 +116,21 @@ pub fn save(
     commit(&changes, |from, to| std::fs::rename(from, to))
         .map_err(|e| SaveError::Io(e.to_string()))?;
     // after the config: a sidecar that cannot be written is a note, the config stands
-    let (layout_written, layout_note) =
-        super::layout::save(&file, dir_before.as_deref(), &layout, &text);
+    let (layout_written, layout_note) = super::layout::save(
+        &file,
+        dir_before.as_deref(),
+        &layout,
+        &notes,
+        &text,
+        had_notes,
+        unusable.as_deref(),
+    );
     {
         let mut d = draft.lock().unwrap_or_else(PoisonError::into_inner);
         if layout_written {
             d.layout_note = None;
             d.saved_layout = layout;
+            d.saved_notes = notes;
         }
         if d.text == text {
             d.lost.clear();

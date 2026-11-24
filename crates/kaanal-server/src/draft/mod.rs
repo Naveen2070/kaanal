@@ -5,6 +5,7 @@
 pub(crate) mod apply;
 pub(crate) mod gate;
 pub mod layout;
+pub mod notes;
 pub(crate) mod patch;
 pub(crate) mod remap;
 pub(crate) mod rename;
@@ -58,6 +59,13 @@ pub struct Draft {
     pub layout_note: Option<String>,
     /// The layout as last read from or written to the sidecar: `layout_dirty` is the difference.
     pub saved_layout: layout::Layout,
+    /// The canvas notes, kept in the same sidecar; like the layout they never change `rev`.
+    pub notes: notes::Notes,
+    /// The notes as last read from or written to the sidecar (`layout_dirty` counts the difference).
+    pub saved_notes: notes::Notes,
+    /// Why the sidecar was there but not used when it was read (`layout_note`'s text then): Save
+    /// does not replace it, so notes and positions it holds that were never loaded are kept.
+    pub sidecar_unusable: Option<String>,
     /// The text parsed as JSON for `GET /draft`, with the `rev` it was parsed at: polling reads
     /// it instead of parsing again. A change of `text` always bumps `rev`, which drops it.
     pub doc_cache: Option<(u64, std::sync::Arc<DocParse>)>,
@@ -74,7 +82,7 @@ impl Draft {
         };
         // absolute, so a later change of the working directory cannot move it
         let file = std::path::absolute(&s.file).unwrap_or(s.file);
-        let (layout, layout_note) = file.parent().map_or_default(layout::load);
+        let (layout, notes, layout_note) = file.parent().map_or_default(layout::load);
         Draft {
             applied: s.text.clone(),
             base: Some(s.text.clone()),
@@ -85,6 +93,9 @@ impl Draft {
             rev: 0,
             saved_layout: layout.clone(),
             layout,
+            saved_notes: notes.clone(),
+            notes,
+            sidecar_unusable: layout_note.clone(),
             layout_note,
             doc_cache: None,
         }
@@ -95,7 +106,7 @@ impl Draft {
     /// refuses if it changed meanwhile, and replaces an existing file only if nobody touched it.
     pub fn blank(file: &std::path::Path) -> Draft {
         let abs = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-        let (layout, layout_note) = abs.parent().map_or_default(layout::load);
+        let (layout, notes, layout_note) = abs.parent().map_or_default(layout::load);
         Draft {
             text: BLANK_TEXT.to_string(),
             applied: String::new(),
@@ -106,14 +117,17 @@ impl Draft {
             rev: 0,
             saved_layout: layout.clone(),
             layout,
+            saved_notes: notes.clone(),
+            notes,
+            sidecar_unusable: layout_note.clone(),
             layout_note,
             doc_cache: None,
         }
     }
 
-    /// Whether the layout differs from what the sidecar holds (a Save would write it).
+    /// Whether the layout or the notes differ from what the sidecar holds (a Save would write it).
     pub fn layout_dirty(&self) -> bool {
-        self.layout != self.saved_layout
+        self.layout != self.saved_layout || self.notes != self.saved_notes
     }
 
     /// Whether a Save would change nothing: the draft has a file, its text is what the file held

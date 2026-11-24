@@ -315,8 +315,8 @@ export function SaveFlow({ lead, run }: { lead?: ReactNode; run: RunWord }) {
           ) : null}
           <p className="text-xs text-muted">
             {dialog.result.layout_written
-              ? "Positions saved beside it (kaanal.layout.json)."
-              : (dialog.result.layout_note ?? "Positions were not changed.")}
+              ? "Positions and notes saved beside it (kaanal.layout.json)."
+              : (dialog.result.layout_note ?? "Positions and notes were not changed.")}
           </p>
           <button
             type="button"

@@ -9,6 +9,7 @@ mod fix;
 mod hardening;
 mod layout;
 mod live;
+mod notes;
 mod paths;
 mod payload;
 mod remap;
