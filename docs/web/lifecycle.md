@@ -23,7 +23,7 @@ kaanal down       # drains, stops, exit 0 (also when nothing is running)
 ```
 $ kaanal up -d
 Mocks: http://localhost:8080
-UI:    http://localhost:8080/__kaanal/ui#token=e494a4b6367a8c22d1acea651459c806e484be471aa6962d3a2c2826ff647eb6
+UI:    http://localhost:8080/__kaanal/studio?mode=admin#token=e494a4b6367a8c22d1acea651459c806e484be471aa6962d3a2c2826ff647eb6
 Log: C:\work\shop\.kaanal\kaanal.log
 Stop: kaanal down
 ```
@@ -56,7 +56,7 @@ A process that is still not ready at the deadline is asked to shut down and, if 
 ```
 $ kaanal up -d
 Mocks: http://localhost:8080
-UI:    http://localhost:8080/__kaanal/ui#token=e494...
+UI:    http://localhost:8080/__kaanal/studio?mode=admin#token=e494...
 already running (pid 29228)
 ```
 
@@ -170,7 +170,7 @@ Stopping (a signal, `down`, or the API) starts a **drain** with a budget (5 s un
 - At the end of the budget every connection still open is cut. This is what a client sees when a server goes away mid-request: the connection closes with no response. A request held by `hang` chaos, a 30 s latency or a `loading` pin is cut this way. If nothing is in flight the process exits as soon as the drain starts.
 - The process then removes `run.json` (only if it still holds this instance's token, so an instance started in the meantime is never touched) and exits 0.
 
-**Event streams.** Open [`/__kaanal/events`](control-api.md#get-__kaanalevents) streams (a status page tab, `kaanal logs -f`) would otherwise hold the drain open for the whole budget. So when the drain starts, each of them receives one last message and ends:
+**Event streams.** Open [`/__kaanal/events`](control-api.md#get-__kaanalevents) streams (a Studio tab, `kaanal logs -f`) would otherwise hold the drain open for the whole budget. So when the drain starts, each of them receives one last message and ends:
 
 ```
 event: shutdown

@@ -76,5 +76,8 @@ fn studio_prints_the_studio_route_and_up_keeps_the_status_page() {
         line.expect("a UI: line")
     };
     assert!(ui_line(&["studio", "--no-open"]).contains("/__kaanal/studio#token="));
-    assert!(ui_line(&["up", "--blank"]).contains("/__kaanal/ui#token="));
+    // a blank start has no system to administer: no Admin deep link, and never the old page
+    let blank = ui_line(&["up", "--blank"]);
+    assert!(blank.contains("/__kaanal/studio#token="), "{blank}");
+    assert!(!blank.contains("mode="), "{blank}");
 }

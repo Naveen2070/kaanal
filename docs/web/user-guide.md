@@ -13,11 +13,11 @@ kaanal up                   # reads ./kaanal.yaml, serves on http://localhost:80
 
 ```
 Mocks: http://localhost:8080
-UI:    http://localhost:8080/__kaanal/ui#token=<64 hex chars>
+UI:    http://localhost:8080/__kaanal/studio?mode=admin#token=<64 hex chars>
 Auth:  POST http://localhost:8080/login, JWKS http://localhost:8080/.well-known/jwks.json, 1 user
 ```
 
-Point your frontend's `API_BASE_URL` at the mocks URL. Open the UI URL to watch requests and flip chaos. Only one instance per project directory; a second `kaanal up` tells you it's already running. Ctrl+C stops it. For scripts and CI, `kaanal up -d` starts it in the background and `kaanal down` stops it: see [lifecycle.md](lifecycle.md).
+Point your frontend's `API_BASE_URL` at the mocks URL. Open the UI URL: it is [Studio](studio.md), on its Admin tab when a project is loaded (a blank start opens it as usual), where you watch requests, flip chaos and rewrite what a route answers. Only one instance per project directory; a second `kaanal up` tells you it's already running. Ctrl+C stops it. For scripts and CI, `kaanal up -d` starts it in the background and `kaanal down` stops it: see [lifecycle.md](lifecycle.md).
 
 **Log in from your frontend.** With an `auth` node, `POST /login` returns a signed JWT. Send `Content-Type: application/json` (a `fetch` with `JSON.stringify` and no header sends `text/plain` and gets 415). See [auth.md](auth.md).
 
@@ -320,7 +320,7 @@ Failures propagate upstream the way real ones do: a failing database makes the r
 
 ## The status page
 
-Open the UI URL printed by `kaanal up`. It shows a node table with live rps/error% and chaos controls (latency, error %, status, down), plus a live request log. Details: [web-ui.md](web-ui.md).
+Open `http://localhost:8080/__kaanal/ui` (no token needed). It is a small health dashboard: whether the instance is up, its uptime and version, whether a system is loaded, and how fast it answers. Everything else (chaos, requests, the design) is in [Studio](studio.md), which needs the token. Details: [web-ui.md](web-ui.md).
 
 ## Safety notes
 

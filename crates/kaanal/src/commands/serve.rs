@@ -85,12 +85,11 @@ fn start(
         lock,
         |s| {
             let port = s.port;
-            let page = if studio.is_some() { "studio" } else { "ui" };
             println!("Mocks: http://localhost:{port}");
             if detached {
-                println!("UI:    http://localhost:{port}/__kaanal/{page}");
+                println!("UI:    {}", studio_url(port, !blank, None));
             } else {
-                let ui = format!("http://localhost:{port}/__kaanal/{page}#token={}", s.token);
+                let ui = studio_url(port, !blank, Some(s.token));
                 println!("UI:    {ui}");
                 if studio == Some(true) {
                     open_browser(&ui);
@@ -110,6 +109,16 @@ fn start(
             }
         },
     )
+}
+
+/// **Private.** The Studio link `up` prints. A project that was loaded opens on the Admin tab
+/// (`?mode=admin`, which Studio reads once at load); a blank start has no system to administer and
+/// opens as usual. The token goes in the fragment, which a browser never sends to a server, and only
+/// when the caller's own terminal gets it (not the detached child's log).
+pub(crate) fn studio_url(port: u16, project: bool, token: Option<&str>) -> String {
+    let mode = if project { "?mode=admin" } else { "" };
+    let frag = token.map_or(String::new(), |t| format!("#token={t}"));
+    format!("http://localhost:{port}/__kaanal/studio{mode}{frag}")
 }
 
 /// **Private.** How [`serve_locked`] starts: as `up -d`'s background child (`detached`: the token
@@ -203,7 +212,7 @@ pub(crate) fn serve_locked(
         write_run_file(
             server.addr,
             &token,
-            &json!({ "auth": auth, "seed": server.drawn_seed, "warnings": server.warnings }),
+            &json!({ "auth": auth, "seed": server.drawn_seed, "warnings": server.warnings, "blank": blank }),
         )?;
         announce(&Started {
             port,
@@ -285,8 +294,8 @@ pub(crate) fn print_started(run: &lifecycle::Run) {
     let port = run.addr.port();
     println!("Mocks: http://localhost:{port}");
     println!(
-        "UI:    http://localhost:{port}/__kaanal/ui#token={}",
-        run.token
+        "UI:    {}",
+        studio_url(port, !run.startup.blank, Some(&run.token))
     );
     if let Some(a) = &run.startup.auth {
         println!("Auth:  {}", clean(a));

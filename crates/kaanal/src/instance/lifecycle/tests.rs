@@ -612,10 +612,11 @@ fn run_json_without_startup_still_parses() {
     assert_eq!(run.startup, Startup::default());
     std::fs::write(
         d.join("run.json"),
-        r#"{"port":4000,"token":"t","startup":{"auth":"a","seed":5,"warnings":["w"]}}"#,
+        r#"{"port":4000,"token":"t","startup":{"auth":"a","seed":5,"warnings":["w"],"blank":true}}"#,
     )
     .unwrap();
     let run = read_run(&d).unwrap();
+    assert!(run.startup.blank);
     assert_eq!(run.addr.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
     assert_eq!(run.startup.seed, Some(5));
     assert_eq!(run.startup.warnings, ["w"]);

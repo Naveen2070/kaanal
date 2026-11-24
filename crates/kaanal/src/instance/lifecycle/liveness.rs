@@ -17,6 +17,8 @@ pub struct Startup {
     pub auth: Option<String>,
     pub seed: Option<u64>,
     pub warnings: Vec<String>,
+    /// Started with no system (`up --blank`, `studio`): its UI link has no Admin tab to open on.
+    pub blank: bool,
 }
 
 /// **Private.** The parsed `run.json`.
@@ -106,6 +108,7 @@ pub fn read_run(state_dir: &Path) -> Option<Run> {
                 .flatten()
                 .filter_map(|w| w.as_str().map(str::to_string))
                 .collect(),
+            blank: s["blank"].as_bool().unwrap_or(false),
         },
     })
 }

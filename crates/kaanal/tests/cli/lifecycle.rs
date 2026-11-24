@@ -93,7 +93,8 @@ fn detached_flag_prints_ui_url_without_token() {
         .find(|l| l.starts_with("UI:"));
     stop(child);
     let ui = ui.expect("up prints a UI: line");
-    assert!(ui.ends_with("/__kaanal/ui"), "{ui}");
+    // a loaded project opens on Studio's Admin tab; the detached child's output carries no token
+    assert!(ui.ends_with("/__kaanal/studio?mode=admin"), "{ui}");
     assert!(!ui.contains("token"), "{ui}");
 }
 
@@ -113,7 +114,7 @@ fn foreground_up_keeps_the_token_in_the_ui_url() {
         .map(Result::unwrap)
         .find(|l| l.starts_with("UI:"));
     stop(child);
-    assert!(ui.unwrap().contains("/__kaanal/ui#token="));
+    assert!(ui.unwrap().contains("/__kaanal/studio?mode=admin#token="));
 }
 
 #[test]
