@@ -66,12 +66,20 @@ Users do this in `kaanal.yaml` under `endpoints:` (`"GET /health": { override: {
 
 ## Cut a release
 
-Releases are manual (R1.60). The repo is private for now and nothing is published to crates.io yet.
+Releases are manual (R1.60, RULES 148). Nothing is published to crates.io or npm until the repo is public.
 
 1. Set the version in `Cargo.toml` (`[workspace.package]`) and write `RELEASE.md`: the first line is `Tag: vX.Y.Z`, which must equal that version, and the rest is the release notes. `bash scripts/release-info.sh` checks both locally.
 2. Merge it to `main`.
 3. Run the **Release** workflow on `main` with "publish" ticked. It builds Linux x86_64, macOS arm64 and Windows x86_64 archives (macOS x86_64 is skipped), then creates the tag and a GitHub release (a pre-release below 1.0) with the archives and `SHA256SUMS`. Each archive holds the `kaanal` binary, `LICENSE` and `README.md`.
-4. To try it first, run the workflow with "publish" off: it only builds, and keeps the archives as artifacts for a week.
+4. The same run then publishes the six crates to crates.io (`crates` job) and the npm packages (`npm` job), by trusted publishing: no registry token is stored in the repository, each registry accepts the run's GitHub identity. The `npm` job builds one package per platform plus the `kaanal` wrapper with `scripts/npm-pack.mjs` (checked by `node --test scripts/npm-pack.test.mjs`), and `kaanal-server` ships Studio's bundle inside the crate, which the `crates` job checks first. A failed registry job can be re-run from the Actions page.
+5. To try it first, run the workflow with "publish" off: it only builds, and keeps the archives as artifacts for a week.
+
+**One-time setup for trusted publishing** (the header of `release.yml` has the exact fields).
+
+- GitHub: environments `crates-io` and `npm`.
+- crates.io has no "pending publisher": publish each of the six crates once by hand with an API token (`cargo publish --workspace` after `cd ui && pnpm build`), then add the trusted publisher to each crate: repository `Naveen2070/kaanal`, workflow `release.yml`, environment `crates-io`.
+- npm is the same: publish `kaanal`, `@kaanal/linux-x64`, `@kaanal/darwin-arm64` and `@kaanal/win32-x64` once by hand (the `@kaanal` org must exist), then add the trusted publisher to each package: workflow `release.yml`, environment `npm`. npm does not check the entry when you save it.
+- The first hand-published version cannot also be the CI one, so either publish a placeholder (`0.0.0`) of each first and let the workflow publish `0.1.0`, or publish `0.1.0` by hand and use the workflow from `0.1.1`.
 
 **What the binaries are.** `Cargo.toml` has no `[profile.release]` section, so they are default release builds: not stripped, no LTO, no size tuning. They are larger than they could be. A size and speed tuning pass (`strip`, `lto`, `codegen-units`, `panic = "abort"`) is a separate job and needs measuring first (`scripts/bench.sh` for speed, the archive sizes for size).
 
@@ -81,7 +89,6 @@ Releases are manual (R1.60). The repo is private for now and nothing is publishe
 - Tune the release profile (above) once it has been measured.
 - Pin the GitHub Actions to commit SHAs, with Dependabot to keep them current.
 - Optional: signed checksums or build attestations; Linux musl and arm64 builds; macOS x86_64.
-- crates.io: publish the six crates (`kaanal-winhandle`, `kaanal-core`, `kaanal-data`, `kaanal-sim`, `kaanal-server`, `kaanal`) in that order. The internal path dependencies need versions first, `cargo publish --dry-run` must pass, and the `repository` link needs a public repo. Publishing is permanent and makes the source public.
 - Install channels (Homebrew, Scoop, winget, Docker) are M4.
 
 ## Debugging tips
