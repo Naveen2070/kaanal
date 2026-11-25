@@ -1,6 +1,6 @@
 # Failures: kinds, timeouts, keyed chaos and scenarios
 
-How Kaanal makes things fail (B2a failures, B2b-1 scenarios; rules R1.17, R1.18, R1.38, R1.39). For the user-facing view see [../web/concepts.md](../web/concepts.md#chaos) and [../web/control-api.md](../web/control-api.md); the code is in [files/kaanal-core/chaos.md](files/kaanal-core/chaos.md), [files/kaanal-core/scenario.md](files/kaanal-core/scenario.md), [files/kaanal-server/control.md](files/kaanal-server/control.md), [files/kaanal-core/exec.md](files/kaanal-core/exec.md), [files/kaanal-core/replay.md](files/kaanal-core/replay.md) and [files/kaanal-server/mock.md](files/kaanal-server/mock.md).
+How Kaanal makes things fail (B2a failures, B2b-1 scenarios; rules R1.17, R1.18, R1.38, R1.39). For the user-facing view see [concepts guide](https://kaanal.naveenr.in/docs/how-it-works/) and [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/); the code is in [files/kaanal-core/chaos.md](files/kaanal-core/chaos.md), [files/kaanal-core/scenario.md](files/kaanal-core/scenario.md), [files/kaanal-server/control.md](files/kaanal-server/control.md), [files/kaanal-core/exec.md](files/kaanal-core/exec.md), [files/kaanal-core/replay.md](files/kaanal-core/replay.md) and [files/kaanal-server/mock.md](files/kaanal-server/mock.md).
 
 ## Failure kinds
 
@@ -203,7 +203,7 @@ Unchanged: one fault is `u < rate` bit for bit, `down` as a 503 on every visit, 
 
 ## Control API and CLI
 
-Additive, with one breaking change (Z16, B2a), and the B2b-1 routes on top (full reference: [../web/control-api.md](../web/control-api.md), user view: [../web/scenarios.md](../web/scenarios.md)):
+Additive, with one breaking change (Z16, B2a), and the B2b-1 routes on top (full reference: [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/), user view: [scenarios guide](https://kaanal.naveenr.in/docs/guides/break/scenarios/)):
 
 - `error_kind` and `mode` on `PUT /__kaanal/chaos/{node}`; `PUT /__kaanal/chaos` with `{node?, endpoint?, ...patch}` (node, endpoint or both). Unknown node or endpoint 404, the method is upper-cased, a malformed endpoint (not `METHOD /path`) or a body with neither is 400. The response is the stored layer's view plus `effective` and `warnings`.
 - `DELETE /__kaanal/chaos?node=&endpoint=` removes exactly that live key; no query wipes the **live layer only**; an unknown query key is 400 and wipes nothing. Scenarios are untouched.

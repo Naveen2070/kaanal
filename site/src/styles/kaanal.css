@@ -1,0 +1,62 @@
+/* Studio tokens (ui/src/look/theme/tokens.css) mapped onto Starlight's variables. Fonts: ui/FONTS.md. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial");
+  size-adjust: 107.4%;
+  ascent-override: 90.2%;
+  descent-override: 22.5%;
+  line-gap-override: 0%;
+}
+
+:root {
+  --sl-font: "Inter", "Inter Fallback", system-ui, sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+/* dark is Starlight's default theme */
+:root {
+  --sl-color-bg: #161616;
+  --sl-color-bg-nav: #1f1f1f;
+  --sl-color-bg-sidebar: #1f1f1f;
+  --sl-color-bg-inline-code: #282828;
+  --sl-color-hairline: #363636;
+  --sl-color-text: #ececec;
+  --sl-color-text-accent: #7ba3ff;
+  --sl-color-accent-low: #1c2a4d;
+  --sl-color-accent: #3f6fe0;
+  --sl-color-accent-high: #aac3ff;
+}
+
+:root[data-theme="light"] {
+  --sl-color-bg: #ece7de;
+  --sl-color-bg-nav: #f8f5ef;
+  --sl-color-bg-sidebar: #f8f5ef;
+  --sl-color-bg-inline-code: #f0ebe3;
+  --sl-color-hairline: #cbc2b2;
+  --sl-color-text: #211e19;
+  --sl-color-text-accent: #2d5cc4;
+  --sl-color-accent-low: #d7e1f8;
+  --sl-color-accent: #2d5cc4;
+  --sl-color-accent-high: #1d3f8f;
+}
+
+/* tables scroll inside their block on a narrow screen, the page does not */
+.sl-markdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}

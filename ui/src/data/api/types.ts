@@ -1,4 +1,4 @@
-// Mirrors of the control API's JSON (docs/web/control-api.md). The server owns these shapes; a
+// Mirrors of the control API's JSON (https://kaanal.naveenr.in/docs/reference/control-api/). The server owns these shapes; a
 // field is optional here only when the server may leave it out or send null.
 
 /** Node name to `[x, y]`. */

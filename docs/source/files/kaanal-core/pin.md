@@ -1,6 +1,6 @@
 # `crates/kaanal-core/src/pin.rs`
 
-UI-state pins: force an endpoint to answer as `loading`, `empty`, `error`, `slow` or `success`, layered like chaos (scenarios, then the live layer on top). Pure data and rules. The chain still runs under a pin; the server decides the response from the `Outcome` of `resolve` ([../kaanal-server/pins.md](../kaanal-server/pins.md), [../kaanal-server/mock.md](../kaanal-server/mock.md)). For users: [../../../web/pins.md](../../../web/pins.md).
+UI-state pins: force an endpoint to answer as `loading`, `empty`, `error`, `slow` or `success`, layered like chaos (scenarios, then the live layer on top). Pure data and rules. The chain still runs under a pin; the server decides the response from the `Outcome` of `resolve` ([../kaanal-server/pins.md](../kaanal-server/pins.md), [../kaanal-server/mock.md](../kaanal-server/mock.md)). For users: [pins guide](https://kaanal.naveenr.in/docs/guides/break/pins/).
 
 ## Items
 

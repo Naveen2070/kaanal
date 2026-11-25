@@ -1,6 +1,6 @@
 # `crates/kaanal-data/src/empty.rs`
 
-The "no data" form of a response body, for UI-state pins (the `empty` state). Pure functions over `serde_json::Value`; the server decides when to call them ([../kaanal-server/pins.md](../kaanal-server/pins.md)). The user-facing rules are on [../../../web/pins.md](../../../web/pins.md#how-empty-is-built).
+The "no data" form of a response body, for UI-state pins (the `empty` state). Pure functions over `serde_json::Value`; the server decides when to call them ([../kaanal-server/pins.md](../kaanal-server/pins.md)). The user-facing rules are on [pins guide](https://kaanal.naveenr.in/docs/guides/break/pins/).
 
 ## Items
 

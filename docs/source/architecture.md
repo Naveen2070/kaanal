@@ -314,7 +314,7 @@ flowchart TD
 - **OS File Lock (Rule R6.7)**: `kaanal up` opens `.kaanal/lock` and calls `std::fs::File::try_lock()` (Rust 1.89+). If another instance holds the lock, it retries for about 200 ms (a status probe holds the lock for an instant) and then exits with code 1.
 - **Crash Safety**: Operating system file locks are released by the kernel upon process termination. Stale lock files never occur after abnormal termination or `kill -9`.
 - **Atomic State Persistence**: Server metadata (`host`, `port`, `token`, `pid` and a token-free `startup` object) is written to `.kaanal/run.json` via a temporary file and atomic rename.
-- **The lock is the liveness signal**: a `run.json` whose lock is free is stale and is never trusted; every command that needs an instance checks the lock first (exit 2 and the file removed). `kaanal down` and `kaanal up -d` are built on the same check. User-facing description: [../web/lifecycle.md](../web/lifecycle.md); code: [files/kaanal/lifecycle.md](files/kaanal/lifecycle.md).
+- **The lock is the liveness signal**: a `run.json` whose lock is free is stale and is never trusted; every command that needs an instance checks the lock first (exit 2 and the file removed). `kaanal down` and `kaanal up -d` are built on the same check. User-facing description: [lifecycle guide](https://kaanal.naveenr.in/docs/guides/observe/lifecycle/); code: [files/kaanal/lifecycle.md](files/kaanal/lifecycle.md).
 - **Graceful stop**: a signal or `POST /__kaanal/shutdown` starts a drain with a fixed deadline ([files/kaanal-server/shutdown.md](files/kaanal-server/shutdown.md)); the listener is wrapped so that connections still open at the deadline fail their I/O, which makes hyper drop the in-flight handlers.
 
 ---

@@ -1,6 +1,6 @@
 # `crates/kaanal-core/src/instances.rs`
 
-Cloud instance presets (step 8P, RULES 102 b, 110). For users: [../../../web/nodes.md](../../../web/nodes.md#cloud-instances-instance).
+Cloud instance presets (step 8P, RULES 102 b, 110). For users: [nodes guide](https://kaanal.naveenr.in/docs/reference/nodes/).
 
 ## What it does
 

@@ -6,7 +6,7 @@ The one crate in the workspace that may contain `unsafe` code (rule R1.46). It e
 
 Rust's `std::process::Command` always creates processes with `bInheritHandles = TRUE`. A daemon started by `kaanal up -d` would therefore inherit the caller's stdin, stdout and stderr handles. When those are pipes (`$(kaanal up -d)`, a CI step, Node's `execFileSync`), the daemon keeps the write end open for as long as it lives and the reader never sees end-of-file. The fix is to mark the three standard handles non-inheritable around the spawn, which is `SetHandleInformation`, which is `unsafe`. The workspace forbids `unsafe` (`unsafe_code` in `[workspace.lints]`), so the call lives here, alone, instead of loosening the rule everywhere.
 
-User-facing note: [../../../web/lifecycle.md](../../../web/lifecycle.md#windows-pipes-and-kaanal-winhandle).
+User-facing note: [lifecycle guide](https://kaanal.naveenr.in/docs/guides/observe/lifecycle/).
 
 ## Items
 

@@ -28,7 +28,7 @@ kaanal demo                       # a demo shop with a chaos bar in your browser
 kaanal up -c examples/nginx-server/kaanal.yaml
 ```
 
-The README has a short tour; the full documentation is in `docs/web/`.
+The README has a short tour; the full documentation is at <https://kaanal.naveenr.in/docs/>.
 
 ## Known limits
 

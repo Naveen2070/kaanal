@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/control/{studio,assets,manifest}.rs` and `crates/kaanal-server/build.rs`
 
-Serves Studio's built bundle (the page and its hashed, code-split files), or the status page when there is none. User page: [../../../web/studio.md](../../../web/studio.md).
+Serves Studio's built bundle (the page and its hashed, code-split files), or the status page when there is none. User page: [studio guide](https://kaanal.naveenr.in/docs/guides/simulate/studio/).
 
 ## What it does
 

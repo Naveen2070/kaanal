@@ -1,6 +1,6 @@
 # `crates/kaanal/src/commands/draft.rs`
 
-`kaanal draft`: show, replace, check, apply and save the running instance's draft (the text of its `kaanal.yaml`, kept apart from the running system until Apply). The overview of the commands is in [main.md](main.md); the HTTP contract is [docs/web/control-api.md](../../../web/control-api.md#draft).
+`kaanal draft`: show, replace, check, apply and save the running instance's draft (the text of its `kaanal.yaml`, kept apart from the running system until Apply). The overview of the commands is in [main.md](main.md); the HTTP contract is [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/draft/).
 
 ## Functions
 

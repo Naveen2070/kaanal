@@ -1601,7 +1601,7 @@ See [generation](files/kaanal-server/generation.md).
 
 ## `crates/kaanal-server/tests/draft_http/` — the draft API, validate, apply, remap and hardening
 
-See [draft](files/kaanal-server/draft.md) and [control-api](../web/control-api.md#draft).
+See [draft](files/kaanal-server/draft.md) and [control-api](https://kaanal.naveenr.in/docs/reference/control-api/).
 
 | Test                                                                        | What it proves                                                                                                                                                                                    |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

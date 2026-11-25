@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/site.rs`
 
-The `site:` folder: static files served from the same origin as the mocks (spec C11). User page: [../../../web/static-site.md](../../../web/static-site.md).
+The `site:` folder: static files served from the same origin as the mocks (spec C11). User page: [static-site guide](https://kaanal.naveenr.in/docs/guides/mock/static-site/).
 
 ## What it does
 

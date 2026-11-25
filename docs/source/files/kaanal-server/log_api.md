@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/log_api.rs`
 
-The log control routes: `GET /__kaanal/logs` and `GET /__kaanal/trace/{id}`. Both sit behind the control guard (token, `Host`, no CORS) like every other control route, and both read the ring under its lock only long enough to clone what they return. Neither writes anything, so neither goes through `lock` / `commit` / `emit` of [control.md](control.md). Reference for users: [../../../web/control-api.md](../../../web/control-api.md#get-__kaanallogs).
+The log control routes: `GET /__kaanal/logs` and `GET /__kaanal/trace/{id}`. Both sit behind the control guard (token, `Host`, no CORS) like every other control route, and both read the ring under its lock only long enough to clone what they return. Neither writes anything, so neither goes through `lock` / `commit` / `emit` of [control.md](control.md). Reference for users: [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/).
 
 ## Handlers
 

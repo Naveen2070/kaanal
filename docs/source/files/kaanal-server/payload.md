@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/payload.rs` and `control/payload.rs`
 
-Live response edits (step 8A, RULES 108): rewrite the status, headers and JSON body one route answers, while a frontend calls it. For users: [../../../web/admin-mode.md](../../../web/admin-mode.md); the routes: [../../../web/control-api.md](../../../web/control-api.md#payload-edits).
+Live response edits (step 8A, RULES 108): rewrite the status, headers and JSON body one route answers, while a frontend calls it. For users: [admin-mode guide](https://kaanal.naveenr.in/docs/guides/break/admin-mode/); the routes: [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/).
 
 ## `payload.rs`
 

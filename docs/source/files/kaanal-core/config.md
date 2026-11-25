@@ -110,11 +110,11 @@ Steps, `parallel` branches, `error_map` values and `endpoints:` are read by hand
 
 This file only _parses_ and checks single values. Field placement (`ops` on a service, `spec` on a gateway) is now a parse error, since each kind has its own strict struct. Semantic validation (edge table, optional gateway, DAG, ops that presets must complete) lives in [topology.md](topology.md); route/spec wiring happens in [state.md](../kaanal-server/state.md). Errors inside a node are positioned at the start of `nodes:` by serde for now.
 
-User-facing field reference: [nodes.md](../../../web/nodes.md). Every node a chain reaches is charged; see [endpoints.md](../../../web/endpoints.md).
+User-facing field reference: [nodes guide](https://kaanal.naveenr.in/docs/reference/nodes/). Every node a chain reaches is charged; see [endpoints guide](https://kaanal.naveenr.in/docs/guides/mock/endpoints/).
 
 ## `traffic.rs`: load profiles
 
-`Config.traffic` is an `IndexMap<String, TrafficConfig>`. `TrafficConfig { rps, journeys, duration, warmup }` and `JourneyConfig { endpoint, weight, req_bytes, resp_bytes }` use `deny_unknown_fields`. `rps` (1e-6 to 1e6) and `weight` (above 0, finite) are checked in their `deserialize_with` so serde places the error at the value; `check_traffic`, called from `Config::from_yaml`, places what serde cannot: the profile name (the scenario-name rule), 1 to 64 journeys, a repeated endpoint (at that journey's `endpoint`), and `req_bytes`/`resp_bytes` over 1 GiB (both read by the [units](units.md) parser, so `2KB` is 2048; the limit applies to the converted number). Whether an endpoint exists is checked later, where the endpoints are compiled (the server). User page: `docs/web/traffic.md`.
+`Config.traffic` is an `IndexMap<String, TrafficConfig>`. `TrafficConfig { rps, journeys, duration, warmup }` and `JourneyConfig { endpoint, weight, req_bytes, resp_bytes }` use `deny_unknown_fields`. `rps` (1e-6 to 1e6) and `weight` (above 0, finite) are checked in their `deserialize_with` so serde places the error at the value; `check_traffic`, called from `Config::from_yaml`, places what serde cannot: the profile name (the scenario-name rule), 1 to 64 journeys, a repeated endpoint (at that journey's `endpoint`), and `req_bytes`/`resp_bytes` over 1 GiB (both read by the [units](units.md) parser, so `2KB` is 2048; the limit applies to the converted number). Whether an endpoint exists is checked later, where the endpoints are compiled (the server). User page: `https://kaanal.naveenr.in/docs/guides/simulate/traffic/`.
 
 ## `hosting.rs`: where a component runs (RULES 122)
 

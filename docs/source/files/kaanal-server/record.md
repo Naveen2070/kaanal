@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/record/`
 
-What one finished request leaves behind: the `X-Kaanal-Trace` text, the `LogEntry` for the request log ([log.md](log.md)) and the bus `Event`, all built from the same plan and `Finished`, so the header, the entry and the event cannot disagree. It is the adapter between the engine and plan types and the pure log types. User reference: [../../../web/observability.md](../../../web/observability.md).
+What one finished request leaves behind: the `X-Kaanal-Trace` text, the `LogEntry` for the request log ([log.md](log.md)) and the bus `Event`, all built from the same plan and `Finished`, so the header, the entry and the event cannot disagree. It is the adapter between the engine and plan types and the pure log types. User reference: [observability guide](https://kaanal.naveenr.in/docs/guides/observe/observability/).
 
 Secrets never get here: only names, times, statuses and the path (no query string, no headers, no bodies).
 

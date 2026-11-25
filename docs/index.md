@@ -2,7 +2,7 @@
 
 Kaanal is a single Rust binary that pretends to be your whole backend: it serves mock HTTP APIs from an OpenAPI spec, with realistic generated data, realistic per-hop timing, and chaos controls (latency, errors, node outages) you can flip live from a CLI or a small web page.
 
-This documentation has three parts.
+This folder has the contributor documentation; the user docs are on the site.
 
 ## Table of contents
 
@@ -22,18 +22,9 @@ This documentation has three parts.
 | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
 | [coding-guide/index.md](coding-guide/index.md) | Coding style, project rules, commit style, and a "I want to change X → read Y" table |
 
-### `web/` — user-facing documentation (for the docs site)
+### The user docs site
 
-| Doc                                      | What it covers                                                               |
-| ---------------------------------------- | ---------------------------------------------------------------------------- |
-| [web/index.md](web/index.md)             | What the docs site is and how it is organised                                |
-| [web/user-guide.md](web/user-guide.md)   | Install, `kaanal.yaml`, CLI commands, the embedded UI                        |
-| [web/control-api.md](web/control-api.md) | The `/__kaanal/*` HTTP control API reference                                 |
-| [web/scenarios.md](web/scenarios.md)     | Named chaos scenarios: YAML, stacking, CLI, API, test recipes                |
-| [web/concepts.md](web/concepts.md)       | Topology, call chains, chaos, determinism — explained for users              |
-| [web/web-ui.md](web/web-ui.md)           | Embedded status page guide, live counters, security rules                    |
-| [web/paging.md](web/paging.md)           | Paged list routes: styles, headers, `total:`, envelopes, limits              |
-| [web/admin-mode.md](web/admin-mode.md)   | Studio's Admin mode: a real frontend in the live numbers, rewrite a response |
+The user-facing documentation is published at <https://kaanal.naveenr.in/docs/>; its Markdown lives in `site/src/content/docs/docs/` (see `site/README.md`).
 
 ## The 30-second version
 

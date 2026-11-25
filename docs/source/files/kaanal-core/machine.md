@@ -1,6 +1,6 @@
 # `crates/kaanal-core/src/config/machine.rs`
 
-Your own instance types (`instances:` at the top of `kaanal.yaml`, RULES 113). For users: [../../../web/nodes.md](../../../web/nodes.md#your-own-machines-instances).
+Your own instance types (`instances:` at the top of `kaanal.yaml`, RULES 113). For users: [nodes guide](https://kaanal.naveenr.in/docs/reference/nodes/).
 
 ## What it does
 

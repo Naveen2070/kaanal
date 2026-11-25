@@ -1,7 +1,7 @@
 // Quick setups for a wire: a named patch of a few keys, so a new user starts from "Lossy link" or
 // "Circuit breaker" instead of an empty form, and a power user gets the standard values in one click.
 // Basic setups change how the link behaves; advanced ones switch on a failure mechanism. Every value
-// is one the docs or the loader give (docs/web/nodes.md, RULES 68, 69, 86, 90); the one estimate is
+// is one the docs or the loader give (https://kaanal.naveenr.in/docs/reference/nodes/, RULES 68, 69, 86, 90); the one estimate is
 // the slow link's 1 MB/s, which the label says. A setup writes only its own keys (Typical clears
 // them all), and the chip shows as pressed when the wire matches it exactly.
 

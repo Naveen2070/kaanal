@@ -15,7 +15,7 @@ Split from one 574-line file in D2 Task 1; public paths (`kaanal_data::Dictionar
 
 ## What it does
 
-`data/dictionary.yaml` (about 150 names, compiled in) and a project's `data.yaml` share one parser, `Dictionary::parse`. A dictionary cannot run code: `Gen` is a tagged enum (`gen:` names the variant, the other keys are its parameters) with `deny_unknown_fields`, so an unknown generator or parameter is an error listing the valid ones. User guide: [docs/web/data-packs.md](../../../web/data-packs.md#writing-a-dictionary).
+`data/dictionary.yaml` (about 150 names, compiled in) and a project's `data.yaml` share one parser, `Dictionary::parse`. A dictionary cannot run code: `Gen` is a tagged enum (`gen:` names the variant, the other keys are its parameters) with `deny_unknown_fields`, so an unknown generator or parameter is an error listing the valid ones. User guide: [data-packs guide](https://kaanal.naveenr.in/docs/guides/mock/data-packs/).
 
 ## Types
 

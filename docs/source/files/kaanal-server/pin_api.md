@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/pin_api.rs`
 
-The pin control routes: `GET|PUT|DELETE /__kaanal/pins` and `POST /__kaanal/cycle`. Every write goes through `lock` / `commit` / `emit` of [control.md](control.md), like the chaos routes, so it is atomic with scenario writes (S11) and the publish clears the scoped cache. Reference for users: [../../../web/control-api.md](../../../web/control-api.md#pins).
+The pin control routes: `GET|PUT|DELETE /__kaanal/pins` and `POST /__kaanal/cycle`. Every write goes through `lock` / `commit` / `emit` of [control.md](control.md), like the chaos routes, so it is atomic with scenario writes (S11) and the publish clears the scoped cache. Reference for users: [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/).
 
 ## Handlers
 

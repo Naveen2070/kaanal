@@ -1,7 +1,7 @@
 // Help for the wire, retry, breaker and storage settings (steps 5 to 7). One source: the help
 // popover says `what`, `example` and `hint`; the glossary chapter "Wire settings" is built from the
 // same objects (`more` and `real` add to it), so the two never differ. Every figure in an example is
-// worked from the model in docs/web/nodes.md or from a published source named there (RULES 66); a
+// worked from the model in https://kaanal.naveenr.in/docs/reference/nodes/ or from a published source named there (RULES 66); a
 // default quoted here is the loader's.
 
 import type { Help } from "./copy";

@@ -1,6 +1,6 @@
 # `crates/kaanal/src/commands/demo/mod.rs` and `commands/demo/files.rs` (private)
 
-`kaanal demo`: the embedded e-commerce project, written to `.kaanal/demo/` and run through the same code as `up` (M1-F spec C1, C3, C4, C10, C12, C13). User page: [../../../web/demo.md](../../../web/demo.md).
+`kaanal demo`: the embedded e-commerce project, written to `.kaanal/demo/` and run through the same code as `up` (M1-F spec C1, C3, C4, C10, C12, C13). User page: [demo guide](https://kaanal.naveenr.in/docs/start/tour/).
 
 ## Flow
 

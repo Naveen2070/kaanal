@@ -377,7 +377,7 @@ function Flow() {
           fitViewOptions={fitOptions}
           minZoom={0.2}
           maxZoom={2}
-          // the developer chose to hide the corner credit (2026-11-01); React Flow is MIT, and it is credited in docs/web/studio.md
+          // the developer chose to hide the corner credit (2026-11-01); React Flow is MIT, and it is credited in https://kaanal.naveenr.in/docs/guides/simulate/studio/
           proOptions={{ hideAttribution: true }}
           onMove={(_, vp) => useZoom.setState({ zoom: vp.zoom })}
         >

@@ -6,7 +6,7 @@ The graceful stop: one `Shutdown` handle per server, asked by `POST /__kaanal/sh
 
 The first request fixes a deadline (`now + budget`); later requests never move it. Until the deadline the server **drains**: `axum::serve(..).with_graceful_shutdown(requested())` stops accepting, and in-flight requests finish. At the deadline every connection still open is **cut**.
 
-Cutting needs a trick. axum spawns each accepted connection on its own task, so aborting the serve task (what `BoundServer::wait` does at the deadline) would leave those tasks running and their clients attached. Instead the listener is wrapped in `Cut`, whose connections fail every read and write with `ConnectionAborted` once the deadline has passed. hyper treats that like a client disconnect: the handler future is dropped, and the request log's drop guard records `client-gone` (the process is about to exit, so nothing keeps that entry). User-facing description: [../../../web/lifecycle.md](../../../web/lifecycle.md#the-drain).
+Cutting needs a trick. axum spawns each accepted connection on its own task, so aborting the serve task (what `BoundServer::wait` does at the deadline) would leave those tasks running and their clients attached. Instead the listener is wrapped in `Cut`, whose connections fail every read and write with `ConnectionAborted` once the deadline has passed. hyper treats that like a client disconnect: the handler future is dropped, and the request log's drop guard records `client-gone` (the process is about to exit, so nothing keeps that entry). User-facing description: [lifecycle guide](https://kaanal.naveenr.in/docs/guides/observe/lifecycle/).
 
 ## Items
 
@@ -24,7 +24,7 @@ Cutting needs a trick. axum spawns each accepted connection on its own task, so 
 
 ## Behaviour to know
 
-- A tiny budget (a few milliseconds) can cut the connection that carried the shutdown request before its `202` is flushed: the deadline is fixed before the handler answers. `kaanal down` reads a transport error with the instance lock held as "the drain is running". Documented on [`control::shutdown`](control.md) and in [control-api.md](../../../web/control-api.md#post-__kaanalshutdown).
+- A tiny budget (a few milliseconds) can cut the connection that carried the shutdown request before its `202` is flushed: the deadline is fixed before the handler answers. `kaanal down` reads a transport error with the instance lock held as "the drain is running". Documented on [`control::shutdown`](control.md) and in [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/).
 - `/__kaanal/events` streams end at the request with a final `shutdown` message instead of holding the drain for the whole budget; the events of the requests that are cut therefore reach nobody.
 - The deadline uses `tokio::time::Instant`, so the unit tests run on the paused clock.
 

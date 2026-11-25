@@ -1,0 +1,107 @@
+# The docs site (site/, Starlight). Build and link check on every site change, then a Vercel deploy.
+name: site
+
+on:
+  push:
+    branches: [main, dev]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["site/**", ".github/workflows/site.yml"]
+  # Deploys production from main by hand (for example right after the secrets are added).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and link check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      # Node 26 does not ship corepack; the version is the one in site/package.json (packageManager).
+      - name: Install pnpm
+        run: npm install -g pnpm@12.23.0
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Fails on a broken internal link or anchor (starlight-links-validator) and indexes search (Pagefind).
+      - name: Build
+        run: pnpm build
+
+      - name: Keep the site
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-dist
+          path: site/dist
+
+  # Production on a push to main, a preview on a pull request. Needs three repository secrets (see
+  # docs/source/how-to.md, "Docs site"); with any of them missing (a fork pull request, or before setup) the
+  # job says so and stops without failing. The Vercel project's Root Directory is empty: everything runs in site/.
+  deploy:
+    name: Deploy to Vercel
+    needs: build
+    if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main') || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: site-deploy-${{ github.ref }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        working-directory: site
+    env:
+      VERCEL_CLI: vercel@66.6.0
+    steps:
+      - name: Check the secrets
+        id: secrets
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::VERCEL_TOKEN, VERCEL_ORG_ID or VERCEL_PROJECT_ID is not available here; skipping the deploy."
+          fi
+
+      - name: Checkout repository
+        if: steps.secrets.outputs.have == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        if: steps.secrets.outputs.have == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      # vercel build installs and builds with the lockfile's package manager, so pnpm must exist on the runner.
+      - name: Install pnpm
+        if: steps.secrets.outputs.have == 'true'
+        run: npm install -g pnpm@12.23.0
+
+      - name: Deploy
+        if: steps.secrets.outputs.have == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then env=production; flag=--prod; else env=preview; flag=; fi
+          npx --yes "$VERCEL_CLI" pull --yes --environment="$env"
+          npx --yes "$VERCEL_CLI" build $flag
+          url=$(npx --yes "$VERCEL_CLI" deploy --prebuilt $flag)
+          echo "Deployed ($env): $url" >> "$GITHUB_STEP_SUMMARY"

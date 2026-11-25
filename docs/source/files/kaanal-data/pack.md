@@ -4,7 +4,7 @@ Locale packs: the names, places, phone shape, currency and country the generator
 
 ## What it does
 
-A pack is one YAML file. The seven built-in packs (`en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES`, `pt-BR`) (`crates/kaanal-data/data/locales/`) are compiled in with `include_str!` and load through the same `Pack::parse` as a project's `locales/<tag>.yaml`, so there is one parser and one set of checks. Users write packs with [docs/web/data-packs.md](../../../web/data-packs.md).
+A pack is one YAML file. The seven built-in packs (`en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES`, `pt-BR`) (`crates/kaanal-data/data/locales/`) are compiled in with `include_str!` and load through the same `Pack::parse` as a project's `locales/<tag>.yaml`, so there is one parser and one set of checks. Users write packs with [data-packs guide](https://kaanal.naveenr.in/docs/guides/mock/data-packs/).
 
 ## Types
 

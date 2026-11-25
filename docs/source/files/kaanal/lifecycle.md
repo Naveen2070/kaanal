@@ -1,6 +1,6 @@
 # `crates/kaanal/src/instance/lifecycle/` (private)
 
-Is an instance running, and how to start one in the background and stop one: the lock-based liveness check, the `run.json` reader, the stop path of `down`, the stop signals, and the pieces of `up -d`. Every function takes the state directory (`.kaanal`) as an argument, so the unit tests use a temp dir. User-facing description: [../../../web/lifecycle.md](../../../web/lifecycle.md).
+Is an instance running, and how to start one in the background and stop one: the lock-based liveness check, the `run.json` reader, the stop path of `down`, the stop signals, and the pieces of `up -d`. Every function takes the state directory (`.kaanal`) as an argument, so the unit tests use a temp dir. User-facing description: [lifecycle guide](https://kaanal.naveenr.in/docs/guides/observe/lifecycle/).
 
 ## Liveness: the lock decides
 

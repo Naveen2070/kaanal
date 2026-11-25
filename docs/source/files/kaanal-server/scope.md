@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/scope.rs`
 
-Per-request scenario scoping: the `X-Kaanal-Scenario` header (B2b-3). User-facing behaviour: [../../../web/scenarios.md](../../../web/scenarios.md#parallel-test-workers).
+Per-request scenario scoping: the `X-Kaanal-Scenario` header (B2b-3). User-facing behaviour: [scenarios guide](https://kaanal.naveenr.in/docs/guides/break/scenarios/).
 
 ## What it does
 
@@ -54,7 +54,7 @@ An empty name (`a,,b`, `a,`, `,a`), an invalid name and a non-ASCII value are 40
 
 ## What scoping does not isolate
 
-Only chaos. Route counters, rate limits, queues and pools are shared (they model shared infrastructure), so a seeded run is exactly reproducible only when one worker runs alone. See the caveat in [scenarios.md](../../../web/scenarios.md#parallel-test-workers).
+Only chaos. Route counters, rate limits, queues and pools are shared (they model shared infrastructure), so a seeded run is exactly reproducible only when one worker runs alone. See the caveat in [scenarios guide](https://kaanal.naveenr.in/docs/guides/break/scenarios/).
 
 ## Known limitations
 

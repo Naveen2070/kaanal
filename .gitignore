@@ -23,3 +23,7 @@ ui/dist
 
 # Launch-video output (large; goes on a release or the site)
 brag-output*/
+site/node_modules
+site/dist
+site/.astro
+site/.vercel

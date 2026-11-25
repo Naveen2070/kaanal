@@ -65,14 +65,14 @@ The order that makes it safe: `enter` counts itself in first and reads the flag 
 
 What a client gets back never shows the machine's layout: `Diagnostic.file`, the `flagged` files and the project folder inside messages and warnings (`scrub`, in both the spelling given and the loader's canonical one) are made relative (`relative`, which also understands the canonical folder), and the CLI cleans a server-supplied file name like every other string.
 
-The routes are in [control.md](control.md) (`draft.rs`); the HTTP contract is in [docs/web/control-api.md](../../../web/control-api.md#draft).
+The routes are in [control.md](control.md) (`draft.rs`); the HTTP contract is in [control-api guide](https://kaanal.naveenr.in/docs/reference/control-api/draft/).
 
 ## Blank start, add_node and rename_node
 
 - `BLANK_TEXT` (`version: 1\nnodes: {}\n`) is the draft of a blank start; `Draft::blank(file)` makes it: nothing applied (so it is dirty), `file` made absolute, `base` what `file` holds now (`None` when it does not exist, so a file that appears before Save is a conflict). `serve_blank(base_dir, file, opts)` (see [lib](lib.md)) starts with `AppState::blank`.
 - `Draft.renames` records the `rename_node` operations since the text was set (a whole-text `PUT` clears it, so does a Save that rewrote files). Save's `fix_scenarios: rewrite` applies them.
 - `patch.rs`: `Op` also takes `name`, `kind` (`add_node`) and `from`, `to` (`rename_node`); `apply` now runs the operations one at a time, each on the text the last left (a rename needs it), and returns `Applied { text, lost, touched, notes, renamed }`. `add_node` is an `Insert` under `nodes` of `presets::starter(kind)`. A rename whose edits report anything in `lost` (an anchored reference) is refused whole.
-- `rename.rs`: `plan(text, from, to)` lists the places a node name is written (see the [control API](../../../web/control-api.md#draft)) from `splice::scalar_paths` and returns the edits (`RenameKey` for the `nodes:` key and `error_map` keys, `Set` for the references), a label for each, and notes for files it does not reach. `rewrite_scenario(text, renames)` applies recorded renames, in order, to a scenario file's `chaos[].node` and `chaos[].edge` ends; `None` when it names none of them, an error when a name is in an anchored value.
+- `rename.rs`: `plan(text, from, to)` lists the places a node name is written (see the [control API](https://kaanal.naveenr.in/docs/reference/control-api/)) from `splice::scalar_paths` and returns the edits (`RenameKey` for the `nodes:` key and `error_map` keys, `Set` for the references), a label for each, and notes for files it does not reach. `rewrite_scenario(text, renames)` applies recorded renames, in order, to a scenario file's `chaos[].node` and `chaos[].edge` ends; `None` when it names none of them, an error when a name is in an anchored value.
 - `save.rs`: `Plan { remove, rewrite }` is what a Save does besides the config; `plan` now also gets the renames. Rewritten files are listed in `written` as `scenarios/NAME`.
 
 ## The layout sidecar (`draft/layout.rs`)

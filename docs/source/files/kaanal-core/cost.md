@@ -1,6 +1,6 @@
 # `crates/kaanal-core/src/cost.rs`
 
-The cost estimate as arithmetic (RULES 121, 123 to 126, 131). For users: [../../../web/nodes.md](../../../web/nodes.md#cloud-instances-instance) and [simulation.md](../../../web/simulation.md).
+The cost estimate as arithmetic (RULES 121, 123 to 126, 131). For users: [nodes guide](https://kaanal.naveenr.in/docs/reference/nodes/) and [simulation guide](https://kaanal.naveenr.in/docs/guides/simulate/simulation/).
 
 ## What it does
 

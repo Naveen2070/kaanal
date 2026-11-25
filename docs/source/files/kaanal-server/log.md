@@ -1,6 +1,6 @@
 # `crates/kaanal-server/src/log.rs`
 
-The request log: short ids, a bounded ring of finished requests, and the query filters. Pure data and logic (no `.await`, no HTTP types). `mock.rs` builds a `LogEntry` per request (through [record.md](record.md)) and pushes it, [log_api.md](log_api.md) reads the ring, and the CLI reuses `Filter` for `logs -f`. User reference: [../../../web/observability.md](../../../web/observability.md).
+The request log: short ids, a bounded ring of finished requests, and the query filters. Pure data and logic (no `.await`, no HTTP types). `mock.rs` builds a `LogEntry` per request (through [record.md](record.md)) and pushes it, [log_api.md](log_api.md) reads the ring, and the CLI reuses `Filter` for `logs -f`. User reference: [observability guide](https://kaanal.naveenr.in/docs/guides/observe/observability/).
 
 ## Two orders, on purpose
 

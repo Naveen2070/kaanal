@@ -66,9 +66,11 @@ When developing frontends, mobile apps, or microservices:
 3. **Failures are hard to test on demand**: Taking down a real database or simulating a 504 gateway timeout is cumbersome.
 4. **Mock data looks fake**: Seeing `"string"` and `0` in every field makes UI layouts meaningless.
 
+It is also a hands-on way to learn system design: draw a gateway, services, a database and a cache, then watch latency, queues and failures behave, with seeded runs you can repeat and compare.
+
 Kaanal solves this with a **single YAML topology file** and an **OpenAPI 3.0 specification**:
 
-- Serves realistic, coherent synthetic JSON (names, emails, phones, addresses, dates) in your locale (built-in `en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES` and `pt-BR`, or your own pack), with an editable field dictionary: see [data packs](docs/web/data-packs.md).
+- Serves realistic, coherent synthetic JSON (names, emails, phones, addresses, dates) in your locale (built-in `en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES` and `pt-BR`, or your own pack), with an editable field dictionary: see [data packs](https://kaanal.naveenr.in/docs/guides/mock/data-packs/).
 - Simulates multi-hop latency (`gateway.proc` + `network` + `service.proc` + `database.op`).
 - Injects live chaos (latency, error rates, node down) via CLI, HTTP API, or an embedded Web UI.
 - Remains **100% deterministic** for a given seed — tests run reproducibly on CI and local workstations.
@@ -109,7 +111,7 @@ Mocks: http://localhost:8080
 UI:    http://localhost:8080/__kaanal/studio?mode=admin#token=<64-character hex token>
 ```
 
-The link opens [Studio](docs/web/studio.md), the graphical editor; `kaanal up -d` runs it in the background and `kaanal down` stops it. `/__kaanal/ui` is a small status page that needs no token.
+The link opens [Studio](https://kaanal.naveenr.in/docs/guides/simulate/studio/), the graphical editor; `kaanal up -d` runs it in the background and `kaanal down` stops it. `/__kaanal/ui` is a small status page that needs no token.
 
 ### 1. Test a mock request
 
@@ -166,12 +168,12 @@ bash examples/nginx-server/check.sh      # or: pwsh examples/nginx-server/check.
 
 ## Studio, simulation and planning
 
-Studio is the graphical side of Kaanal (see [docs/web/studio.md](docs/web/studio.md)):
+Studio is the graphical side of Kaanal (see [Studio guide](https://kaanal.naveenr.in/docs/guides/simulate/studio/)):
 
 - **Build and edit** a system on a canvas: components, wires, settings, canvas notes. Apply makes it the running system; Save writes `kaanal.yaml`.
-- **Live** runs traffic all the time, so a change shows at once; **Batch** gives a seeded, repeatable run; **Admin** puts your real frontend in the numbers and lets you rewrite a route's response ([admin-mode.md](docs/web/admin-mode.md)).
+- **Live** runs traffic all the time, so a change shows at once; **Batch** gives a seeded, repeatable run; **Admin** puts your real frontend in the numbers and lets you rewrite a route's response ([Admin mode](https://kaanal.naveenr.in/docs/guides/break/admin-mode/)).
 - **Chaos and scenarios** from the page; **Save live** keeps what you set as a scenario file.
-- **Find where it breaks:** a load sweep reports the knee and the first node to saturate, as a shareable Markdown report ([simulation.md](docs/web/simulation.md)).
+- **Find where it breaks:** a load sweep reports the knee and the first node to saturate, as a shareable Markdown report ([Simulation guide](https://kaanal.naveenr.in/docs/guides/simulate/simulation/)).
 - **Plan a size:** what the design needs to hold a target load, and the cheapest design that does, with a what-if across AWS, GCP and Azure prices.
 
 The same engine runs from the CLI:
@@ -216,10 +218,10 @@ endpoints:               # Optional per-endpoint overrides
   - `database`: Data store with configured costs for `read`, `write`, and `scan` operations; `flavor: postgres | mysql | mariadb | mongodb | neo4j | cassandra | dynamodb` fills the ones you leave out (estimates).
   - `cache`: Hit ratio plus hit and miss costs; `flavor: redis | memcached`.
   - `external-api`: A third-party HTTP API with its own response time.
-  - `auth`: An identity provider: `POST /login` returns a signed RS256 JWT for its test users, `GET /.well-known/jwks.json` serves the key (see [auth.md](docs/web/auth.md)). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
+  - `auth`: An identity provider: `POST /login` returns a signed RS256 JWT for its test users, `GET /.well-known/jwks.json` serves the key (see [Auth guide](https://kaanal.naveenr.in/docs/guides/mock/auth/)). Costs can be fixed (`5ms`), fitted lognormal percentiles (`{ p50: 4ms, p99: 20ms }`) or exponential (`{ mean: 5ms }`).
 - Any node may set `concurrency: N` (how many requests it serves at once). Live mode and the simulator both enforce it: extra requests queue.
-- Rate limits, connection pools and queues that behave under load, live and in the simulator (see [capacity.md](docs/web/capacity.md)).
-- **`edges`**: Directed dependency graph, limited to an edge table (see [nodes.md](docs/web/nodes.md)). No cycles; `calls: N` sets calls per request. Each request follows its endpoint's chain: by default every node reachable from the owner is charged; `endpoints:` customises it (see [endpoints.md](docs/web/endpoints.md)).
+- Rate limits, connection pools and queues that behave under load, live and in the simulator (see [Capacity guide](https://kaanal.naveenr.in/docs/guides/simulate/capacity/)).
+- **`edges`**: Directed dependency graph, limited to an edge table (see [Nodes reference](https://kaanal.naveenr.in/docs/reference/nodes/)). No cycles; `calls: N` sets calls per request. Each request follows its endpoint's chain: by default every node reachable from the owner is charged; `endpoints:` customises it (see [endpoints.md](https://kaanal.naveenr.in/docs/guides/mock/endpoints/)).
 
 A gateway-less example lives in `examples/gatewayless`:
 
@@ -233,7 +235,7 @@ edges:
   - { from: app, to: db, net: { p50: 1ms, p99: 2ms } }
 ```
 
-Every node kind and field is documented in [docs/web/nodes.md](docs/web/nodes.md).
+Every node kind and field is documented in [Nodes reference](https://kaanal.naveenr.in/docs/reference/nodes/).
 
 - **`endpoints`**: An entry with `override` is a fixed response that takes precedence over generated OpenAPI schemas; one with no owning service is a static endpoint and needs a gateway.
 
@@ -249,26 +251,26 @@ kaanal validate -c kaanal.yaml
 
 All CLI commands run from the project directory where `kaanal up` was executed:
 
-| Command                                                                            | Description                                                                                                                            |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `kaanal up [-c config] [--port port] [--host host]`                                | Start the mock server in foreground.                                                                                                   |
-| `kaanal validate [-c config]`                                                      | Validate topology, YAML syntax, and OpenAPI specs.                                                                                     |
-| `kaanal studio`                                                                    | Start blank and open the browser: build a system in Studio.                                                                            |
-| `kaanal demo`                                                                      | A demo shop with a chaos bar in your browser.                                                                                          |
-| `kaanal init FILE_OR_URL`                                                          | Create a starter `kaanal.yaml` from an OpenAPI 3.0 file.                                                                               |
-| `kaanal down`                                                                      | Stop the running instance (`up -d` starts one in the background).                                                                      |
-| `kaanal sim run\|sweep\|plan\|list\|show\|report`                                  | The simulator: a run, a load sweep, a sizing plan, and their reports. See [simulation](docs/web/simulation.md).                        |
-| `kaanal draft show\|set\|validate\|apply\|save`                                    | Read, replace, check, apply and save the running instance's `kaanal.yaml` text.                                                        |
-| `kaanal logs [-f]`, `kaanal trace ID`                                              | The last finished requests, and one request as a per-hop waterfall.                                                                    |
-| `kaanal node down\|up\|list`                                                       | Take a node down (`node down db --for 30s`), bring it back, or list nodes with their state.                                            |
-| `kaanal schema [config\|dictionary\|pack]`                                         | Print the JSON Schema for editor autocomplete: `kaanal.yaml`, a `data.yaml` dictionary or a `locales/<tag>.yaml` pack.                 |
-| `kaanal endpoints [--write]`                                                       | Add skeleton entries for spec routes to the endpoints file (append-only).                                                              |
-| `kaanal status`                                                                    | Show running nodes, the effective chaos and the active scenarios.                                                                      |
-| `kaanal chaos set [node] [flags]`                                                  | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--route "GET /x"`, `--down`).                     |
-| `kaanal chaos clear [node] [--route KEY]`                                          | Clear live chaos on one node, one endpoint, or all (scenarios stay).                                                                   |
-| `kaanal scenario list\|show\|activate\|deactivate\|set\|clear\|active\|load\|save` | Named chaos scenarios from `scenarios:` or `scenarios/*.yaml`: switch on and off, stack, save. See [scenarios](docs/web/scenarios.md). |
-| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                     | Pin an endpoint to the next UI state (loading, empty, error, slow, success). `kaanal pins` lists them.                                 |
-| `kaanal reset`                                                                     | Clean slate for tests: scenarios off, runtime-defined scenarios undefined, live chaos cleared, counters and rate limits reset.         |
+| Command                                                                            | Description                                                                                                                                                             |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kaanal up [-c config] [--port port] [--host host]`                                | Start the mock server in foreground.                                                                                                                                    |
+| `kaanal validate [-c config]`                                                      | Validate topology, YAML syntax, and OpenAPI specs.                                                                                                                      |
+| `kaanal studio`                                                                    | Start blank and open the browser: build a system in Studio.                                                                                                             |
+| `kaanal demo`                                                                      | A demo shop with a chaos bar in your browser.                                                                                                                           |
+| `kaanal init FILE_OR_URL`                                                          | Create a starter `kaanal.yaml` from an OpenAPI 3.0 file.                                                                                                                |
+| `kaanal down`                                                                      | Stop the running instance (`up -d` starts one in the background).                                                                                                       |
+| `kaanal sim run\|sweep\|plan\|list\|show\|report`                                  | The simulator: a run, a load sweep, a sizing plan, and their reports. See [simulation](https://kaanal.naveenr.in/docs/guides/simulate/simulation/).                     |
+| `kaanal draft show\|set\|validate\|apply\|save`                                    | Read, replace, check, apply and save the running instance's `kaanal.yaml` text.                                                                                         |
+| `kaanal logs [-f]`, `kaanal trace ID`                                              | The last finished requests, and one request as a per-hop waterfall.                                                                                                     |
+| `kaanal node down\|up\|list`                                                       | Take a node down (`node down db --for 30s`), bring it back, or list nodes with their state.                                                                             |
+| `kaanal schema [config\|dictionary\|pack]`                                         | Print the JSON Schema for editor autocomplete: `kaanal.yaml`, a `data.yaml` dictionary or a `locales/<tag>.yaml` pack.                                                  |
+| `kaanal endpoints [--write]`                                                       | Add skeleton entries for spec routes to the endpoints file (append-only).                                                                                               |
+| `kaanal status`                                                                    | Show running nodes, the effective chaos and the active scenarios.                                                                                                       |
+| `kaanal chaos set [node] [flags]`                                                  | Modify chaos (`--latency 300ms`, `--error-rate 10%`, `--error 503`, `--kind reset`, `--route "GET /x"`, `--down`).                                                      |
+| `kaanal chaos clear [node] [--route KEY]`                                          | Clear live chaos on one node, one endpoint, or all (scenarios stay).                                                                                                    |
+| `kaanal scenario list\|show\|activate\|deactivate\|set\|clear\|active\|load\|save` | Named chaos scenarios from `scenarios:` or `scenarios/*.yaml`: switch on and off, stack, save. See [scenarios](https://kaanal.naveenr.in/docs/guides/break/scenarios/). |
+| `kaanal cycle EP [--state S] [--status N] [--delay D] [--off]`                     | Pin an endpoint to the next UI state (loading, empty, error, slow, success). `kaanal pins` lists them.                                                                  |
+| `kaanal reset`                                                                     | Clean slate for tests: scenarios off, runtime-defined scenarios undefined, live chaos cleared, counters and rate limits reset.                                          |
 
 Exit codes: `0` (success), `1` (error), `2` (no running instance found).
 
@@ -286,19 +288,19 @@ Exit codes: `0` (success), `1` (error), `2` (no running instance found).
 
 ## Documentation
 
-Full documentation is located in the [`docs/`](docs/) directory:
+The user documentation is at **<https://kaanal.naveenr.in/docs/>**:
+
+- [Why Kaanal](https://kaanal.naveenr.in/docs/), [Install](https://kaanal.naveenr.in/docs/start/install/) and [Quick start](https://kaanal.naveenr.in/docs/start/quick-start/).
+- [How-to guides](https://kaanal.naveenr.in/docs/guides/): mocks, chaos and scenarios, Studio and simulation, logs and CI.
+- [How it works](https://kaanal.naveenr.in/docs/how-it-works/): topology, call chains, chaos and determinism.
+- [Reference](https://kaanal.naveenr.in/docs/reference/): `kaanal.yaml`, the CLI, nodes, and the `/__kaanal/*` control API.
+
+For contributors, in the [`docs/`](docs/) directory:
 
 - [Architecture Overview](docs/source/architecture.md) — System decomposition, request flows, determinism model, and threading.
-- [How-To Guide](docs/source/how-to.md) — Recipes for building, adding node types, subcommands, and endpoints.
+- [How-To Guide](docs/source/how-to.md) — Recipes for building, adding node types, subcommands, endpoints, and the docs site.
 - [Tests Guide](docs/source/tests.md) — Detailed catalog of all workspace integration and unit tests.
 - [Per-File Code Reference](docs/source/files/index.md) — Deep walkthrough of every crate source file.
-- [User Guide](docs/web/user-guide.md) — End-user operational guide and configuration reference.
-- [Control API Reference](docs/web/control-api.md) — HTTP reference for `/__kaanal/*`.
-- [Scenarios](docs/web/scenarios.md) — Named chaos bundles: YAML, stacking, CLI, API, and a Playwright `beforeEach` recipe.
-- [Data Packs](docs/web/data-packs.md) — Locale packs, the field dictionary, `kaanal schema`, and how to contribute a pack.
-- [Pins](docs/web/pins.md) — Force an endpoint to answer as loading, empty, error or slow; `kaanal cycle`.
-- [Core Concepts](docs/web/concepts.md) — Topology DAGs, cost models, and chaos propagation explained.
-- [Web UI Guide](docs/web/web-ui.md) — Live status page features, telemetry counters, and security rules.
 - [Contributor Coding Guide](docs/coding-guide/index.md) — Architectural invariants, coding standards, and lint policies.
 
 ---

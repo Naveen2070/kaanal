@@ -1,6 +1,6 @@
 # `crates/kaanal/src/util/logview/mod.rs`
 
-Pure rendering and filtering for `kaanal logs` and `kaanal trace`: log lines, the ASCII waterfall, the follow de-dup set and printer loop, the client-side filter and the SSE line parser. No network (the commands in [main.md](main.md) do the fetching), so all of it is unit tested with golden strings. User reference: [../../../web/observability.md](../../../web/observability.md).
+Pure rendering and filtering for `kaanal logs` and `kaanal trace`: log lines, the ASCII waterfall, the follow de-dup set and printer loop, the client-side filter and the SSE line parser. No network (the commands in [main.md](main.md) do the fetching), so all of it is unit tested with golden strings. User reference: [observability guide](https://kaanal.naveenr.in/docs/guides/observe/observability/).
 
 Every piece of text that came from the server (node names, paths, client ids, causes) goes through `clean` first, which replaces control characters with `?`. A node called `\x1b[31m` can neither recolor nor move the terminal.
 

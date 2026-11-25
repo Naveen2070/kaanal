@@ -85,6 +85,7 @@ Releases are manual (R1.60, RULES 148). Nothing is published to crates.io or npm
 
 **To do before a public release.**
 
+- **The docs site must answer before you tag.** The crates.io and npm metadata, the README and several error messages point at <https://kaanal.naveenr.in>; a published version cannot be fixed. Check `/docs/start/install/` and `/docs/guides/simulate/traffic/` load (the Vercel secrets, domain and DNS are in "Docs site" below), then run the Release workflow.
 - Tune the release profile (above) once it has been measured.
 - Pin the GitHub Actions to commit SHAs, with Dependabot to keep them current.
 - Optional: signed checksums or build attestations; Linux musl and arm64 builds; macOS x86_64.
@@ -99,9 +100,21 @@ Releases are manual (R1.60, RULES 148). Nothing is published to crates.io or npm
 - A new font needs its OFL text in `licenses/fonts/` as well as a row in `ui/FONTS.md`.
 - `dprint` skips the file and `licenses/`: the texts must stay verbatim.
 
+## Docs site
+
+The user docs are a Starlight site in `site/`, published at <https://kaanal.naveenr.in> (`docs/web/` no longer exists).
+
+- **Edit a page:** the Markdown is in `site/src/content/docs/docs/`; see `site/README.md`. `pnpm build` in `site/` fails on a broken internal link or anchor, so run it before you push.
+- **Deploy:** `.github/workflows/site.yml` builds on every site change; a push to `main` deploys to production and a pull request gets a preview URL (in the job summary). The deploy job skips itself, with a notice, when the secrets are missing (a fork pull request, or before setup).
+- **One-time setup (the maintainer):**
+  1. In Vercel, create a project from this repository. Leave **Root Directory empty** (the workflow runs the Vercel commands from `site/`), framework Astro, and turn off Vercel's own Git deploys so only the workflow deploys.
+  2. Add three repository secrets: `VERCEL_TOKEN` (an account token), `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (both in `.vercel/project.json` after `npx vercel link` in `site/`, or in the project settings).
+  3. Add the domain `kaanal.naveenr.in` to the Vercel project and create the DNS record Vercel shows (a CNAME for the `kaanal` subdomain).
+- The Vercel Hobby plan is for non-commercial use; check the plan if Kaanal is ever sold or sponsored.
+
 ## Debugging tips
 
 - Every mock response carries `X-Kaanal-Trace` with the per-hop waterfall, e.g. `nginx.proc=1.0ms,net=1.0ms,app.proc=1.0ms,net=1.0ms,db.read=1.0ms`.
 - `GET /__kaanal/events` (SSE, needs `?token=`) streams every request as it happens.
-- Every mock response also carries `X-Request-Id`. `kaanal trace <id>` shows that request hop by hop (flags, the cause of a failure, queue waits), `kaanal logs` lists the last 1000; both read the in-memory ring in `server/src/log.rs`. To change what a flag means, edit `record.rs::build_entry`/`hop_recs` and its tests, and the table in `docs/web/observability.md`.
+- Every mock response also carries `X-Request-Id`. `kaanal trace <id>` shows that request hop by hop (flags, the cause of a failure, queue waits), `kaanal logs` lists the last 1000; both read the in-memory ring in `server/src/log.rs`. To change what a flag means, edit `record.rs::build_entry`/`hop_recs` and its tests, and the table in the Observability guide (`site/src/content/docs/docs/guides/observe/observability.md`).
 - On Windows, sleeps under ~15 ms round up to the OS timer tick — measured latency can exceed the simulated sum. That is a known platform limitation, not a bug in your change.
