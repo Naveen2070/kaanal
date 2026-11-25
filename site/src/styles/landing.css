@@ -352,6 +352,18 @@ html[data-theme="light"] .theme-label [data-to="light"] {
   letter-spacing: -0.03em;
 }
 
+/* the product name leads the headline, like a product site: accent colour on the name */
+.hero-name {
+  color: var(--accent);
+}
+
+.hero-tagline {
+  margin: 0 0 0.75rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 .hero-sub {
   margin: 0 0 1.5rem;
   font-size: 1.05rem;

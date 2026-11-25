@@ -60,17 +60,17 @@ An edge may also set `prob` (above 0, at most 1): the share of requests that tak
 
 ## Steps
 
-| Step                    | What it does                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `call: node`            | Charge the edge's `net`, then the callee's work. The edge must exist                                                                        |
-| `repeat: N`             | On a `call`: N sequential calls, each sampled on its own (default: the edge's `calls`)                                                      |
-| `prob: p`               | On a `call`: the share of requests that take it, above 0 and at most 1 (default: the edge's `prob`, else 1). One draw covers every `repeat` |
-| `op: read\|write\|scan` | On a `call` to a database or monolith: use this op for this step only                                                                       |
-| `chain: [ ... ]`        | On a `call` to a service or monolith: the steps it runs, written inline                                                                     |
-| `with: name`            | On a `call`: run a named chain from the callee's `chains:` (below)                                                                          |
-| `via: "GET /x"`         | On a `call`: run what another endpoint of the callee does, with that endpoint's op                                                          |
-| `cache: node`           | Look the key up in a cache node                                                                                                             |
-| `parallel: [ ... ]`     | Run branches at the same time                                                                                                               |
+| Step                | What it does                                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call: node`        | Charge the edge's `net`, then the callee's work. The edge must exist                                                                        |
+| `repeat: N`         | On a `call`: N sequential calls, each sampled on its own (default: the edge's `calls`)                                                      |
+| `prob: p`           | On a `call`: the share of requests that take it, above 0 and at most 1 (default: the edge's `prob`, else 1). One draw covers every `repeat` |
+| `op: OP`            | On a `call` to a database or monolith: use this op (`read`, `write` or `scan`) for this step only                                           |
+| `chain: [ ... ]`    | On a `call` to a service or monolith: the steps it runs, written inline                                                                     |
+| `with: name`        | On a `call`: run a named chain from the callee's `chains:` (below)                                                                          |
+| `via: "GET /x"`     | On a `call`: run what another endpoint of the callee does, with that endpoint's op                                                          |
+| `cache: node`       | Look the key up in a cache node                                                                                                             |
+| `parallel: [ ... ]` | Run branches at the same time                                                                                                               |
 
 `chain`, `with` and `via` are mutually exclusive. A bare `- call: node` is the usual form. A `parallel` branch is one step or a list of steps.
 
@@ -87,10 +87,12 @@ nodes:
 
 ## How steps behave
 
-- **Cache hit.** A hit ends the sequence the `cache:` step is in (a call's body, a parallel branch, or the endpoint's chain); the caller carries on with its next step. A miss charges the miss cost and continues. A cache that is down or failing counts as a miss.
-- **Ops flow down.** The endpoint's `op` applies to every database step below it. `op:` on a step changes that one step. `via:` uses the op of the endpoint it names.
-- **`parallel`.** Branches start together and the block ends when the slowest one does. The earliest failure (in time) fails the block and the other branches stop at that moment. Ties go to the first branch.
-- **Failures.** A failing step stops its sequence and the failure reaches the client. There are no retries.
+| Topic         | Behaviour                                                                                                                                                                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cache hit     | A hit ends the sequence the `cache:` step is in (a call's body, a parallel branch, or the endpoint's chain); the caller carries on with its next step. A miss charges the miss cost and continues. A cache that is down or failing counts as a miss. |
+| Ops flow down | The endpoint's `op` applies to every database step below it. `op:` on a step changes that one step. `via:` uses the op of the endpoint it names.                                                                                                     |
+| `parallel`    | Branches start together and the block ends when the slowest one does. The earliest failure (in time) fails the block and the other branches stop at that moment. Ties go to the first branch.                                                        |
+| Failures      | A failing step stops its sequence and the failure reaches the client. There are no retries.                                                                                                                                                          |
 
 ## Error mapping
 
@@ -167,10 +169,12 @@ Prints one skeleton line for each spec route with no entry yet, sorted, under a 
 
 It only ever adds. With `--write`:
 
-- If `endpoints:` names a file, the lines are appended to it. Your existing text and line endings are untouched.
-- If `endpoints:` names a file that is one flow-style `{ ... }` map, it is refused and left alone (lines cannot be appended to a flow map); rewrite it in block style, or paste the lines in yourself.
-- If `endpoints:` is a map inside `kaanal.yaml`, nothing is written (Kaanal never rewrites that file); paste the printed lines below `endpoints:` (they are already indented).
-- If there is no `endpoints:` key, `kaanal.endpoints.yaml` is created and the command tells you the line to add to `kaanal.yaml`.
+| If                                                             | Then                                                                                                                              |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoints:` names a file                                      | The lines are appended to it. Your existing text and line endings are untouched.                                                  |
+| `endpoints:` names a file that is one flow-style `{ ... }` map | It is refused and left alone (lines cannot be appended to a flow map); rewrite it in block style, or paste the lines in yourself. |
+| `endpoints:` is a map inside `kaanal.yaml`                     | Nothing is written (Kaanal never rewrites that file); paste the printed lines below `endpoints:` (they are already indented).     |
+| There is no `endpoints:` key                                   | `kaanal.endpoints.yaml` is created and the command tells you the line to add to `kaanal.yaml`.                                    |
 
 Run it again and it says `nothing to add`.
 

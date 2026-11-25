@@ -18,9 +18,12 @@ Your frontend has more than a happy path: a spinner while data loads, an "nothin
 
 A pin entry is `{ endpoint, state, status?, delay? }`:
 
-- `status` sets the response status: 400 to 599 on `error` (4xx is fine), 200 to 299 on `empty`. `loading`, `slow` and `success` take none.
-- `delay` replaces the default delay (above 0, at most 5 min). `success` takes none.
-- A pinned `429` or `503` also carries `Retry-After: 1`.
+| Field    | Meaning                                                                                                                          |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `status` | Sets the response status: 400 to 599 on `error` (4xx is fine), 200 to 299 on `empty`. `loading`, `slow` and `success` take none. |
+| `delay`  | Replaces the default delay (above 0, at most 5 min). `success` takes none.                                                       |
+
+A pinned `429` or `503` also carries `Retry-After: 1`.
 
 You can change what a state answers for one endpoint with [`states:`](/docs/guides/mock/endpoints/#states-what-a-pin-answers); a value in the pin itself beats `states:`, which beats the defaults above.
 
@@ -165,15 +168,19 @@ A `states.empty.body` is returned **verbatim** (no `{id}` path substitution) and
 
 Special cases:
 
-- **204 and 304 routes.** A route that normally answers 204 or 304 has no body, so `empty` on it keeps the status and sends no body, with no `states:` needed. A 204 or 304 status never carries a body, whether the route normally answers it or a pin sets it (`--status 204`, `states.empty.status: 204`).
-- **Built-in routes:** `auth` login and JWKS routes have no `empty` form by default (`cycle` skips `empty`), unless you add `states.empty.body` or `override:`.
-- **`override:` routes.** An endpoint with an `override:` body (static or on a spec route) derives `empty` from that body, not from the schema.
+| Case               | What happens                                                                                                                                                                                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 204 and 304 routes | A route that normally answers 204 or 304 has no body, so `empty` on it keeps the status and sends no body, with no `states:` needed. A 204 or 304 status never carries a body, whether the route normally answers it or a pin sets it (`--status 204`, `states.empty.status: 204`). |
+| Built-in routes    | `auth` login and JWKS routes have no `empty` form by default (`cycle` skips `empty`), unless you add `states.empty.body` or `override:`.                                                                                                                                            |
+| `override:` routes | An endpoint with an `override:` body (static or on a spec route) derives `empty` from that body, not from the schema.                                                                                                                                                               |
 
 ## HEAD, 4xx and the rest
 
-- **HEAD.** A `HEAD` request follows its `GET`'s pin: same status, same `Retry-After`, same delay, `pinned=` in the trace, and no body. A `HEAD` that is only the automatic copy of a `GET` cannot be pinned on its own (pin the `GET`).
-- **Errors.** `error` takes any status from 400 to 599, so a pinned `404`, `409` or `422` is fine. The body is `states.error.body` if you set one, else `{"error":"pinned","state":"error"}`. `429` and `503` add `Retry-After: 1`. `error_map` never applies to a pin.
-- **Static routes** need a gateway (or an owner node) to be pinnable, like chaos on them; one without an entry node is refused.
+| Case          | What happens                                                                                                                                                                                                                                              |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HEAD`        | A `HEAD` request follows its `GET`'s pin: same status, same `Retry-After`, same delay, `pinned=` in the trace, and no body. A `HEAD` that is only the automatic copy of a `GET` cannot be pinned on its own (pin the `GET`).                              |
+| Errors        | `error` takes any status from 400 to 599, so a pinned `404`, `409` or `422` is fine. The body is `states.error.body` if you set one, else `{"error":"pinned","state":"error"}`. `429` and `503` add `Retry-After: 1`. `error_map` never applies to a pin. |
+| Static routes | Need a gateway (or an owner node) to be pinnable, like chaos on them; one without an entry node is refused.                                                                                                                                               |
 
 ## Limits worth knowing
 

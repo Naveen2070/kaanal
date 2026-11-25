@@ -66,10 +66,12 @@ Next:  cd kaanal-demo && kaanal up
 
 The ejected project is a standard Kaanal project with a starter `peak` traffic profile (`100` rps for `30s`), so both `kaanal up` and `kaanal sim run -p peak` work out of the box.
 
-- **`.gitignore`:** adds `.kaanal/` (created if missing; non-fatal warning if unwritable).
-- **Target directory:** creates new folders; existing folders must be empty unless `--force` is passed (which only overwrites demo files). Symlinks and junctions are refused.
-- **Flags:** `--locale TAG` sets the config locale (unknown tags exit `64`). `--force` without `--eject`, or `--eject` with `--port`/`--open`, exits `64`.
-- **`--json`:** prints `{ root, written, next }`.
+| Topic            | Behaviour                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.gitignore`     | Adds `.kaanal/` (created if missing; non-fatal warning if unwritable).                                                                                 |
+| Target directory | Creates new folders; existing folders must be empty unless `--force` is passed (which only overwrites demo files). Symlinks and junctions are refused. |
+| Flags            | `--locale TAG` sets the config locale (unknown tags exit `64`). `--force` without `--eject`, or `--eject` with `--port`/`--open`, exits `64`.          |
+| `--json`         | Prints `{ root, written, next }`.                                                                                                                      |
 
 ## Options
 

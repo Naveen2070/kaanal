@@ -4,7 +4,7 @@ sidebar:
   order: 3
 ---
 
-A single self-contained HTML page served by the binary: a health dashboard for the running instance. It needs **no token** and makes **one call**, `GET /__kaanal/health`, every two seconds from your browser (every ten while the tab is hidden). It follows your system's light or dark theme and uses the same palette as Studio.
+A single self-contained HTML page served by the binary at `http://localhost:8080/__kaanal/ui` (default port): a health dashboard for the running instance. It needs **no token** and makes **one call**, `GET /__kaanal/health`, every two seconds from your browser (every ten while the tab is hidden). It follows your system's light or dark theme and uses the same palette as Studio.
 
 `kaanal up` no longer prints this address. It prints the Studio link; the status page stays served for a quick look at whether the instance is up, and for anything that wants a page to point at without a token.
 

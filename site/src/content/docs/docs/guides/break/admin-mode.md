@@ -26,7 +26,7 @@ Press **Edit response** on any feed row to set **status**, **headers**, and **bo
 | **Back to normal**    | Removes the edit.                                                                                                                                  |
 | **Stage in the file** | Writes `override:` into the draft (then **Save** writes `kaanal.yaml`). If `endpoints:` points to another file, writes that file directly instead. |
 
-Validation flags invalid status (`200`–`599`), invalid JSON, bodies on `204`/`205`/`304`, reserved Kaanal/connection headers, header values `> 4096 B`, bodies `> 1 MiB`, or `> 32` headers.
+Validation flags invalid status (`200`–`599`), invalid JSON, bodies on `204`/`205`/`304`, a header Kaanal sets itself (`content-length`, `content-type`, `content-encoding`, `access-control-*`, `x-request-id`, `x-kaanal-*` and the connection headers), header values `> 4096 B`, bodies `> 1 MiB`, or `> 32` headers.
 
 Tick **Answer one request only** to make the edit a one-shot: the next request gets it, then the route is back to normal. A one-shot is live only (it is not staged into the file).
 

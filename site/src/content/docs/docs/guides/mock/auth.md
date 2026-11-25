@@ -32,13 +32,15 @@ nodes:
 
 Rules, all checked when the file loads (errors carry `line:col`):
 
-- At most one `auth` node.
-- Claim names `sub`, `iss`, `exp`, `iat`, `jti`, `roles` and `scope` are reserved and cannot be set.
-- A claim value is a string, a number or a boolean.
-- At most 32 claims (per node and per user), 32 roles and 32 scopes per user, and 1000 users. Names, roles, scopes, usernames and passwords are at most 256 bytes. A username cannot be empty.
-- Scopes are OAuth scope tokens: printable ASCII without spaces, `"` or `\`.
-- `token_ttl` is whole seconds from 1s to 1 day.
-- A password must be text. A number such as `4711`, or `true` or `null`, is rejected with `must be text` at that line and column (the value is never printed): put it in quotes (`"4711"`). Text with leading zeros such as `007` is kept as it is.
+| Rule         | Detail                                                                                                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Count        | At most one `auth` node.                                                                                                                                                                                                               |
+| Reserved     | Claim names `sub`, `iss`, `exp`, `iat`, `jti`, `roles` and `scope` are reserved and cannot be set.                                                                                                                                     |
+| Claim values | A string, a number or a boolean.                                                                                                                                                                                                       |
+| Limits       | At most 32 claims (per node and per user), 32 roles and 32 scopes per user, and 1000 users. Names, roles, scopes, usernames and passwords are at most 256 bytes. A username cannot be empty.                                           |
+| Scopes       | OAuth scope tokens: printable ASCII without spaces, `"` or `\`.                                                                                                                                                                        |
+| `token_ttl`  | Whole seconds from 1s to 1 day.                                                                                                                                                                                                        |
+| Password     | Must be text. A number such as `4711`, or `true` or `null`, is rejected with `must be text` at that line and column (the value is never printed): put it in quotes (`"4711"`). Text with leading zeros such as `007` is kept as it is. |
 
 An auth node with no users loads with a warning: every login would answer 401.
 
@@ -98,15 +100,17 @@ An `endpoints:` entry for `"POST /login"` (or the JWKS key) can set `chain`, `er
 
 ## The signing key
 
-- One RSA 2048 key per project, created on the first `kaanal up` (it prints `Generating signing key...`) and reused after that.
-- It is stored outside the project, in your per-user local config folder: `%LOCALAPPDATA%\kaanal\keys` on Windows, `~/.config/kaanal/keys` on Linux, `~/Library/Application Support/kaanal/keys` on macOS. Only you can read it.
-- `KAANAL_CONFIG_DIR` changes the base folder (for containers and CI). A shared, writable `XDG_CONFIG_HOME` is not supported.
-- The key belongs to the folder of `kaanal.yaml`. **Moving or renaming the project creates a new key**: old tokens stop verifying, and you can delete the old file by hand.
-- A corrupt key file stops `up` and names the file. Delete it to get a new key.
-- On Linux and macOS a key file that others can read is refused (`chmod 600` fixes it).
-- On Windows, `up` also removes explicit grants to Everyone, Users and Authenticated Users from the keys folder and the files in it.
-- On a filesystem without hard links the key is created directly instead.
-- A crash can leave a `*.tmp` file in the keys folder. It is safe to delete.
+| Topic           | Detail                                                                                                                                                                                                            |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Key             | One RSA 2048 key per project, created on the first `kaanal up` (it prints `Generating signing key...`) and reused after that.                                                                                     |
+| Location        | Outside the project, in your per-user local config folder: `%LOCALAPPDATA%\kaanal\keys` on Windows, `~/.config/kaanal/keys` on Linux, `~/Library/Application Support/kaanal/keys` on macOS. Only you can read it. |
+| Base folder     | `KAANAL_CONFIG_DIR` changes the base folder (for containers and CI). A shared, writable `XDG_CONFIG_HOME` is not supported.                                                                                       |
+| Ownership       | The key belongs to the folder of `kaanal.yaml`. **Moving or renaming the project creates a new key**: old tokens stop verifying, and you can delete the old file by hand.                                         |
+| Corrupt file    | A corrupt key file stops `up` and names the file. Delete it to get a new key.                                                                                                                                     |
+| Linux and macOS | A key file that others can read is refused (`chmod 600` fixes it).                                                                                                                                                |
+| Windows         | `up` also removes explicit grants to Everyone, Users and Authenticated Users from the keys folder and the files in it.                                                                                            |
+| No hard links   | On a filesystem without hard links the key is created directly instead.                                                                                                                                           |
+| Leftover files  | A crash can leave a `*.tmp` file in the keys folder. It is safe to delete.                                                                                                                                        |
 
 `kaanal validate` never creates or reads keys.
 

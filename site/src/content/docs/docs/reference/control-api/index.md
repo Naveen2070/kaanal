@@ -8,11 +8,13 @@ Everything under `/__kaanal/` — the single control plane used by the CLI, the 
 
 ## Authentication & transport rules
 
-- **Token**: every endpoint except `health` and `ui` requires `Authorization: Bearer <token>`. The token is printed by `kaanal up` and stored in `.kaanal/run.json`. On `/__kaanal/events` only, `?token=` is accepted (browser `EventSource` can't set headers).
-- **Host guard**: the `Host` header must be `localhost`, `127.0.0.1` or `[::1]`, with the bound port (or none). Anything else → `403`. This blocks DNS-rebinding attacks from browsers.
-- **No CORS** on this namespace, ever — browsers on other origins cannot call it.
-- Responses carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
-- Errors are always JSON: `{ "error": "message" }`.
+| Rule             | Detail                                                                                                                                                                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Token**        | Every endpoint except `health` and `ui` requires `Authorization: Bearer <token>`. The token is printed by `kaanal up` and stored in `.kaanal/run.json`. On `/__kaanal/events` only, `?token=` is accepted (browser `EventSource` can't set headers). |
+| **Host guard**   | The `Host` header must be `localhost`, `127.0.0.1` or `[::1]`, with the bound port (or none). Anything else returns `403`. This blocks DNS-rebinding attacks from browsers.                                                                          |
+| **CORS**         | None on this namespace, ever: browsers on other origins cannot call it.                                                                                                                                                                              |
+| **Headers**      | Responses carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.                                                                                                                                                                     |
+| **Error format** | Errors are always JSON: `{ "error": "message" }`.                                                                                                                                                                                                    |
 
 ## Endpoints
 

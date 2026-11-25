@@ -97,11 +97,13 @@ A cursor is `base64url("k1:" + offset)` with no padding. Treat it as opaque; onl
 
 Every paged route has a fixed number of records, **seeded from the route** (so it is the same on every run and every machine, see [determinism](/docs/guides/mock/endpoints/)). The numbers:
 
-- **Total**: between 23 and 137 records, picked per route. This is not a round number on purpose, so the last page is partial.
-- `minItems` / `maxItems` on the paged array in your spec bound the total. If `minItems` is larger than `maxItems`, `minItems` wins (as it does for any array Kaanal generates).
-- The total never exceeds **10 000**.
-- **Record `i` is the same record** whatever the page size, style or position you reach it by. Changing `limit` or switching from `page` to `cursor` never changes a record's content.
-- The `total:` key on the route's [`endpoints:`](/docs/guides/mock/endpoints/) entry sets the total yourself, 0 to 10 000. `total: 0` gives the empty state.
+| Topic                 | Rule                                                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Total                 | Between 23 and 137 records, picked per route. This is not a round number on purpose, so the last page is partial.                                                                    |
+| `minItems`/`maxItems` | `minItems` / `maxItems` on the paged array in your spec bound the total. If `minItems` is larger than `maxItems`, `minItems` wins (as it does for any array Kaanal generates).       |
+| Ceiling               | The total never exceeds **10 000**.                                                                                                                                                  |
+| Same record           | **Record `i` is the same record** whatever the page size, style or position you reach it by. Changing `limit` or switching from `page` to `cursor` never changes a record's content. |
+| `total:`              | The `total:` key on the route's [`endpoints:`](/docs/guides/mock/endpoints/) entry sets the total yourself, 0 to 10 000. `total: 0` gives the empty state.                           |
 
 ```yaml
 endpoints:
@@ -112,9 +114,11 @@ endpoints:
 
 Kaanal looks at the response schema of the route:
 
-- **An array**: the body is the page; the totals travel in headers.
-- **An object with an array property**: that array is the page, and the other fields are filled to agree with it. The array is the property named `items`, `data`, `results`, `content` or `records`; if there is none of those, the **first array property in key order** (keys are sorted alphabetically, not in the order you wrote them in the spec).
-- An object with no array property is not paged.
+| Response schema                  | What is the page                                                                                                                                                                                                                                                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An array                         | The body is the page; the totals travel in headers.                                                                                                                                                                                                                                                               |
+| An object with an array property | That array is the page, and the other fields are filled to agree with it. The array is the property named `items`, `data`, `results`, `content` or `records`; if there is none of those, the **first array property in key order** (keys are sorted alphabetically, not in the order you wrote them in the spec). |
+| An object with no array property | Not paged.                                                                                                                                                                                                                                                                                                        |
 
 The sibling fields of an object envelope are matched by name (case, `_` and `-` ignored) **and** type:
 
@@ -156,8 +160,10 @@ $ curl -s 'localhost:8080/events?limit=3&cursor=azE6Mw'
 
 A paged response carries:
 
-- `X-Total-Count`: the total number of records.
-- `Link` ([RFC 8288](https://www.rfc-editor.org/rfc/rfc8288)): relative URLs with the index parameter replaced and your other query parameters kept. Page and offset styles give `first`, `prev` (not on the first page), `next` (not on the last) and `last`; a page past the end links back to real pages; an empty list has only `first`. The cursor style gives only `next`, and none on the last page.
+| Header          | Contents                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `X-Total-Count` | The total number of records.                                                                                                                                                                                                                                                                                                                                                                                |
+| `Link`          | Defined by [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288). Relative URLs with the index parameter replaced and your other query parameters kept. Page and offset styles give `first`, `prev` (not on the first page), `next` (not on the last) and `last`; a page past the end links back to real pages; an empty list has only `first`. The cursor style gives only `next`, and none on the last page. |
 
 Both are listed in `Access-Control-Expose-Headers`, so a browser app on another origin can read them.
 

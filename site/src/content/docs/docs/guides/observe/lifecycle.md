@@ -120,7 +120,15 @@ The refusals are exit 1 with the reason, and nothing is killed: `kaanal did not 
 
 **A second `down` while draining.** A running drain (e.g. `down --timeout 60s`) is not shortened or extended by a later `down`; the server returns the remaining drain time, and `down` waits for `max(own --timeout, remaining) + 2s` before considering a kill.
 
-**Exit codes of `down`:** 0 stopped or not running, 1 it could not stop it (or would not kill), 64 a bad `--timeout`. It never exits 2.
+**Exit codes of `down`:**
+
+| Code | Meaning                                  |
+| ---- | ---------------------------------------- |
+| 0    | Stopped, or not running                  |
+| 1    | It could not stop it (or would not kill) |
+| 64   | A bad `--timeout`                        |
+
+It never exits 2.
 
 ### Remote down
 
@@ -204,15 +212,17 @@ Only those three standard handles are covered; extra inheritable handles passed 
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                                                                                                                              |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0    | Success. Also: `down` when it stopped the instance or nothing was running, `up -d` when it was already running, `--help` and `--version`.                                                                                                                                            |
-| 1    | Error: a bad config, a startup failure, a value the server refused (HTTP 400), an instance that is running but does not answer or is still starting, a `down` that could not or would not kill. In remote mode (`--endpoint`): cannot reach the instance, or the token was rejected. |
-| 2    | Not running: a command that needs a local instance found none, or only stale state. `down` and `up -d` never return it, and neither does any command in remote mode.                                                                                                                 |
-| 3    | Reserved for assertion failures. No command returns it yet.                                                                                                                                                                                                                          |
-| 64   | Usage error: the command line is wrong, found before any request was sent. In remote mode: a bad `--endpoint`, a missing token, `--token` without an endpoint, `up` with an endpoint.                                                                                                |
+| Code | Meaning     | Includes                                                                                                                                                                                |
+| ---- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success     | `down` when it stopped the instance or nothing was running, `up -d` when it was already running, `--help` and `--version`                                                               |
+| 1    | Error       | A bad config, a startup failure, a value the server refused (HTTP 400), an instance that is running but does not answer or is still starting, a `down` that could not or would not kill |
+| 2    | Not running | A command that needs a local instance found none, or only stale state. `down` and `up -d` never return it, and neither does any command in remote mode                                  |
+| 3    | Reserved    | Assertion failures. No command returns it yet                                                                                                                                           |
+| 64   | Usage error | The command line is wrong, found before any request was sent                                                                                                                            |
 
-**What is a 64 (`EX_USAGE`).** All clap validation errors plus local CLI checks before sending a request: bad durations/rates, `--ttl`, `--state`, `--delay`, `--from`, `-n` outside `1..1000`, bad `--since`/`--status`, empty `chaos set`, or invalid scenario/file names.
+In remote mode (`--endpoint`), code 1 also covers: cannot reach the instance, or the token was rejected. Code 64 also covers: a bad `--endpoint`, a missing token, `--token` without an endpoint, `up` with an endpoint.
+
+**What is a 64 (`EX_USAGE` from `sysexits.h`).** All clap validation errors plus local CLI checks before sending a request: bad durations/rates, `--ttl`, `--state`, `--delay`, `--from`, `-n` outside `1..1000`, bad `--since`/`--status`, empty `chaos set`, or invalid scenario/file names.
 
 **Remote mode is never a 2.** Exit `2` means "no local instance in this folder". With `--endpoint`, connection failures and rejected tokens exit `1`. Flag misuse (non-`http://HOST:PORT`, missing token, `--token` without `--endpoint`, or `up`/`up -d` with an endpoint) exits `64`.
 

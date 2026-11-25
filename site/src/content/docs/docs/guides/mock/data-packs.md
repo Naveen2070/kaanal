@@ -92,12 +92,14 @@ A project pack with the same tag as a built-in replaces it wholesale; there is n
 
 Kaanal lists `locales/` next to the config. The rules are the same as for scenario files:
 
-- Only regular files named exactly `*.yaml` are packs. Subdirectories, dotfiles and `*~` editor files are ignored silently.
-- Symlinks are skipped with a warning ("symlinks are not followed"). So are `.yml` and `.YAML` files ("pack files must end in .yaml").
-- At most 64 pack files, each at most 1 MiB. More files is an error at the `locales/` directory.
-- A file name must be a locale tag (such as `de-DE.yaml`) and equal the `tag:` inside. A mismatch is an error at the `tag:` value.
-- Two packs whose tags differ only in case (`de-de` next to `de-DE`) are an error naming both. Tags are looked up exactly; an unknown `locale:` that matches one in a different case gets `did you mean de-DE?`.
-- **Every file in `locales/` is loaded and checked at startup**, not only the ones a `locale:` names, so a broken pack fails `kaanal validate` and `kaanal up` even if nothing uses it.
+| Rule                 | Detail                                                                                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What counts as pack  | Only regular files named exactly `*.yaml` are packs. Subdirectories, dotfiles and `*~` editor files are ignored silently.                                                                                      |
+| Skipped with warning | Symlinks are skipped with a warning ("symlinks are not followed"). So are `.yml` and `.YAML` files ("pack files must end in .yaml").                                                                           |
+| Size limits          | At most 64 pack files, each at most 1 MiB. More files is an error at the `locales/` directory.                                                                                                                 |
+| File name            | A file name must be a locale tag (such as `de-DE.yaml`) and equal the `tag:` inside. A mismatch is an error at the `tag:` value.                                                                               |
+| Case                 | Two packs whose tags differ only in case (`de-de` next to `de-DE`) are an error naming both. Tags are looked up exactly; an unknown `locale:` that matches one in a different case gets `did you mean de-DE?`. |
+| Loading              | **Every file in `locales/` is loaded and checked at startup**, not only the ones a `locale:` names, so a broken pack fails `kaanal validate` and `kaanal up` even if nothing uses it.                          |
 
 A tag is never turned into a path: `locale:` must match `^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$` (`en`, `en-IN`, `zh-Hant-TW`) and is looked up among the loaded packs only. `../x` and `en_IN` are rejected.
 
@@ -124,11 +126,13 @@ An empty `data.yaml` is fine.
 
 ### Keys
 
-- Names are normalised: lower-case, with `_` and `-` removed. `userEmail`, `user_email` and `User-Email` share one key.
-- A key starting with `*` is a **suffix** key. It matches the last **whole words** of a field name, where words are split at `_`, `-` and case changes. `*id` matches `userId`, `user_id` and `ID`, but never `valid`, `paid` or `android`. An all-lower-case compound such as `unitprice` is one word, so `*price` does not match it (`unitPrice` and `unit_price` do).
-- An exact key beats a suffix key. Among suffix keys the longer one beats the shorter one.
-- Two keys in your file that normalise alike (`user_email` and `userEmail`) are a warning; the later one wins.
-- Quote suffix keys in YAML: `"*id"`.
+| Rule          | Detail                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Normalisation | Names are normalised: lower-case, with `_` and `-` removed. `userEmail`, `user_email` and `User-Email` share one key.                                                                                                                                                                                                                                                  |
+| Suffix keys   | A key starting with `*` is a **suffix** key. It matches the last **whole words** of a field name, where words are split at `_`, `-` and case changes. `*id` matches `userId`, `user_id` and `ID`, but never `valid`, `paid` or `android`. An all-lower-case compound such as `unitprice` is one word, so `*price` does not match it (`unitPrice` and `unit_price` do). |
+| Precedence    | An exact key beats a suffix key. Among suffix keys the longer one beats the shorter one.                                                                                                                                                                                                                                                                               |
+| Duplicates    | Two keys in your file that normalise alike (`user_email` and `userEmail`) are a warning; the later one wins.                                                                                                                                                                                                                                                           |
+| Quoting       | Quote suffix keys in YAML: `"*id"`.                                                                                                                                                                                                                                                                                                                                    |
 
 ### Generators
 
@@ -156,10 +160,12 @@ An entry is `{ gen: <name>, ...parameters }`. The set is closed: a dictionary ca
 
 Real data is lumpy, so the built-in dictionary is too (all of it can be changed in your `data.yaml`):
 
-- **Prices:** skewed cheap (`dist: decade`) and ending like shop prices (`style: retail`: `.99` 50%, `.00` 25%, else `.95`/`.49` on `price`/`*price`/`cost`). Retail endings are dropped if they violate bounds, integer prices are unchanged, ranges `<= 0` draw uniformly, and `dist: uniform, style: plain` turns both off.
-- **Weighted choices (`weights`):** maps value text (`paid`, `true`, `4`) to positive weights (unlisted = `1`, at least one `> 0`). Built-ins favour happy-path statuses (`8` active/paid/delivered, `3` pending/shipped, `1` cancelled/failed), `true` flags (`4:1`), positive ratings, and small quantities (`1–3`). Built-in weights also apply to OpenAPI `enum`s unless overridden in `data.yaml`.
-- **Timestamps** lean recent: two thirds of values fall in the most recent third of the window (`days`, default 365, back from 2026-01-01).
-- **Ages** (`age`) come from four bands over 18 to 80 weighted 25/30/25/20, so most people are between 33 and 64; the birth date then follows the age (see Records that add up).
+| Topic                        | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prices                       | Skewed cheap (`dist: decade`) and ending like shop prices (`style: retail`: `.99` 50%, `.00` 25%, else `.95`/`.49` on `price`/`*price`/`cost`). Retail endings are dropped if they violate bounds, integer prices are unchanged, ranges `<= 0` draw uniformly, and `dist: uniform, style: plain` turns both off.                                                                                                                                                                                                                                                                                          |
+| Weighted choices (`weights`) | Maps value text (`paid`, `true`, `4`) to positive weights (unlisted = `1`, at least one `> 0`). Built-ins favour happy-path statuses (`status`, `*status`, `order_status`, `payment_status`: `8` active/paid/delivered, `3` pending/shipped, `1` cancelled/failed), `true` flags (`active`, `enabled`, `verified`: 4 in 5), positive `rating` and `stars`, and small quantities (`quantity`: mostly `1–3`). Weights also apply to an `enum` on a field with that name (weighted, never limited). An entry of your own for the same name, without `weights`, turns the built-in weights off for that name. |
+| Timestamps                   | Lean recent: two thirds of values fall in the most recent third of the window (`days`, default 365, back from 2026-01-01).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Ages (`age`)                 | Come from four bands over 18 to 80 weighted 25/30/25/20, so most people are between 33 and 64; the birth date then follows the age (see Records that add up).                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ### An entry can be a list
 
@@ -173,7 +179,7 @@ The generators are tried in order and **the first whose output fits the field's 
 
 Timestamps on one object stay ordered: `createdAt → updatedAt/modifiedAt → deletedAt`, `startAt/startDate → endAt/endDate`, `orderedAt → paidAt → shippedAt → deliveredAt`, and `issuedAt → dueAt`.
 
-Each later field draws between the previous one and `2026-01-01` (adding `updatedAt` never shifts `createdAt`). Fields pinned by `example`/`enum`/`const`/`static`/`pick` stay fixed, and mixed date/date-time chains are left alone.
+Each later field draws between the previous one and `2026-01-01` (adding `updatedAt` never shifts `createdAt`). A member with an `example`, `enum`, `const` or a `static`/`pick` entry of yours is never changed, and later members follow it. Mixed date/date-time chains are left alone.
 
 Add your own chains, or switch built-in ones off, in `data.yaml`:
 
@@ -188,9 +194,11 @@ chains_off: [created_at]      # drops every built-in chain that contains this na
 
 Related fields on one object stay mathematically and semantically consistent:
 
-- **Orders:** line items (price × quantity) set exact-cent lineTotal, subtotal, 	ax, shipping, discount (<= subtotal), and 	otal = subtotal + tax + shipping - discount (all-integer schemas stay integers). A bare 	otal only sums when typed umber or alongside subtotal/	ax/shipping/discount (otherwise an integer 	otal is a list count).
-- **Demographics:** ge and dateOfBirth/dob/irthday match to the year (without ge, birth dates are 18–80 years before 6-01-01). locale and language match the node's locale (n-IN and n).
-- **Pinned fields:** xample, num, const, static, and pick values are never rewritten.
+| Group         | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Orders        | Line items (price × quantity) set exact-cent `lineTotal`, `subtotal`, `tax`, `shipping`, `discount` (<= subtotal), and `total` = subtotal + tax + shipping - discount. `tax` is a fraction of the subtotal. Sums are exact cents (never `59.970000000000006`); all-integer schemas stay integers. A bare `total` only sums when typed `number` or alongside `subtotal`/`tax`/`shipping`/`discount` (otherwise an integer `total` is a list count). A plain list such as `{ items: [{name, price}], total: 3 }` is never rewritten. |
+| Demographics  | `age` and `dateOfBirth`/`dob`/`birthday` match to the year (without `age`, birth dates are 18–80 years before 2026-01-01). `locale` and `language` match the node's locale (`en-IN` and `en`).                                                                                                                                                                                                                                                                                                                                     |
+| Pinned fields | A field you pinned with an `example`, `enum`, `const` or `static`/`pick` entry is never rewritten.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ### Precedence and fit
 
@@ -214,9 +222,9 @@ The schema's type and bounds always beat a dictionary entry. An entry applies on
 - `pick` and `static` values that do not fit the type or the numeric bounds are not used;
 - a string generator on an integer field (or the reverse) does not fit.
 
-Unfitting entries fall through to the next layer. A misfit in **your** `data.yaml` warns on `kaanal validate` and `kaanal up` (built-in misfits skip silently).
+Unfitting entries fall through to the next layer. A misfit in **your** `data.yaml` warns on `kaanal validate` and `kaanal up`, naming the endpoint and field (`GET /users .age: project dictionary entry for age does not fit...`). Built-in misfits skip silently, because they were only a guess from the field name.
 
-Your own `static`, `pick`, and `template` strings are sent verbatim even if they fall outside `minLength`/`maxLength` (with a startup warning); built-in ones skip silently and fit the length.
+Your own `static`, `pick`, and `template` strings are sent verbatim even if they fall outside `minLength`/`maxLength` (with a startup warning such as `GET /items .sku: project dictionary value for sku can fall outside its minLength/maxLength; it is sent as written`); built-in ones skip silently and fit the length. A template's length is known because its placeholders have fixed widths.
 
 `pick`, `static` and `template` values are your own data and are not checked for being synthetic; the built-in packs and dictionary are, and so should anything you contribute (below).
 

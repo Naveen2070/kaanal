@@ -26,7 +26,13 @@ traffic:
 
 ## Journeys & payload sizes
 
-Each journey specifies an `endpoint` (`"METHOD /path"`, appearing once per profile), a `weight > 0` (default `1`), and optional `req_bytes` / `resp_bytes` (up to `1 GiB` each).
+Each journey specifies:
+
+| Field                     | Meaning                                       |
+| ------------------------- | --------------------------------------------- |
+| `endpoint`                | `"METHOD /path"`, appearing once per profile. |
+| `weight`                  | `weight > 0` (default `1`).                   |
+| `req_bytes`, `resp_bytes` | Optional payload sizes, up to `1 GiB` each.   |
 
 - **Size units:** whole bytes (`2048`) or text with units (`2KB`, `1.5 MB`, `512B`, `KiB`/`MiB`/`GiB`; **KB = 1024 bytes**, fractional values round to nearest byte). No `/s` suffix; negative, missing, or unknown units fail load.
 - **When bytes matter:** only when an edge/node has `bandwidth`, a node has `per_kb`, or a storage node has `throughput`.

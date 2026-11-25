@@ -77,9 +77,9 @@ kaanal init https://example.com/api/openapi.yaml
 
 `init` downloads the spec next to `kaanal.yaml`, named after the last URL path segment when ending in `.yaml`, `.yml`, or `.json` (otherwise `openapi.yaml`; invalid chars become `_`, and Windows device names or >100-char names fall back to `openapi.yaml`).
 
-- **Existing files**: stops with exit `64` unless `--force` is passed (backs up to `<name>.kaanal-old` during download; refuses if that backup exists).
-- **Download rules**: single `GET` (no cookies/credentials; `user:pass@` exits `64`); `https` for any host, plain `http` only for `localhost`/`127.0.0.0/8`/`::1`; max `3` redirects (never `https` → `http`); `10s` / `10 MB` cap; must be OpenAPI 3.0 (else exit `1`).
-- **Proxies & TLS**: `https` honours `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`; `http` skips proxies. Failures clean up downloaded/backup files without printing response bodies or query strings. (`https` requires the default `https` Cargo feature.)
+- **Existing files**: stops with exit `64` unless `--force` is passed (`--force` replaces it and prints `Replaced the existing openapi.yaml`; with `--json`, a `replaced` list; the old file is kept as `<name>.kaanal-old` during download; refuses if that backup exists).
+- **Download rules**: single `GET` (no cookies/credentials; a URL with a user name or password such as `https://user:pass@...` exits `64`); `https` for any host, plain `http` only for `localhost`/`127.0.0.0/8`/`::1`; max `3` redirects (never `https` → `http`); `10s` / `10 MB` cap; must be OpenAPI 3.0 (else exit `1`).
+- **Proxies & TLS**: `https` honours `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`; `http` skips proxies. Failures clean up downloaded/backup files without printing response bodies or query strings. (`https` requires the default `https` Cargo feature: rustls with the `ring` crypto provider and the Mozilla root certificates from `webpki-roots`, and a C compiler to build; a build with `--no-default-features` has no TLS, refuses an `https://` URL with exit `64`, and needs the file downloaded first and its path passed instead.)
 
 ## Output
 

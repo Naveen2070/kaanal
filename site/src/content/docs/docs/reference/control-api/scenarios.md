@@ -56,9 +56,18 @@ It is checked exactly like a file: names against your topology, limits, duplicat
 { "name": "flaky-db", "from": "live", "force": false, "clear_live": true }
 ```
 
-- `name` is required; `from` is `"live"` (default), `"effective"`, or `{ "scenario": "other" }` (`422` otherwise).
-- `clear_live: true` clears live chaos after writing so activating the saved scenario does not double-count it.
-- `warnings` reports leased fields written as permanent (`"N fields have a ttl; the file has none"`).
-- **Errors**: `400` (bad name, inline name even with `force`, nothing to save, `mode: override` with `from: "live"`, or `from: "effective"` with stacked failure kinds/mixed node+node-at-endpoint), `404` (missing `from` scenario), `409` (exists without `force: true`), `500` (write error).
+| Field        | Rules                                                                                                     |
+| ------------ | --------------------------------------------------------------------------------------------------------- |
+| `name`       | Required.                                                                                                 |
+| `from`       | `"live"` (default), `"effective"`, or `{ "scenario": "other" }` (`422` otherwise).                        |
+| `clear_live` | `true` clears live chaos after writing so activating the saved scenario does not double-count it.         |
+| `warnings`   | In the response: reports leased fields written as permanent (`"N fields have a ttl; the file has none"`). |
+
+| Status  | When                                                                                                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **400** | Bad name, inline name even with `force`, nothing to save, `mode: override` with `from: "live"`, or `from: "effective"` with stacked failure kinds/mixed node+node-at-endpoint. |
+| **404** | Missing `from` scenario.                                                                                                                                                       |
+| **409** | Exists without `force: true`.                                                                                                                                                  |
+| **500** | Write error.                                                                                                                                                                   |
 
 **Reset.** `POST /__kaanal/reset` deactivates all scenarios, undefines runtime scenarios (inline/file stay), clears live chaos, zeroes route counters, refills rate-limit buckets, and empties [collections](/docs/guides/mock/collections/), [response edits](/docs/reference/control-api/payload-edits/), and the [request log](/docs/guides/observe/observability/) (request IDs continue). Queues and pools finish in-flight requests normally.

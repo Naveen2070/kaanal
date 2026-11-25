@@ -1,6 +1,7 @@
 ---
 title: "Serving your frontend: site:"
 sidebar:
+  label: Serving your frontend
   order: 8
 ---
 

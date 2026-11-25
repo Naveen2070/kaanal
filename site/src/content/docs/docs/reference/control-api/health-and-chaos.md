@@ -74,7 +74,16 @@ In the live layer `down: false` means "unset": it clears a `down` you set earlie
 
 ### Timed chaos (`ttl`)
 
-A `PUT` with `"ttl": "30s"` (`100ms`–`24h`) leases the units it sets: `latency` (`latency_ms`), `error` (`error_rate`, `error_kind`, `error_status`), `down`, `mode`, and on an edge `jitter` (`jitter_ms`) and `bandwidth` (`bandwidth_cap`).
+A `PUT` with `"ttl": "30s"` (`100ms`–`24h`) leases the units it sets:
+
+| Unit        | Fields leased                              | Applies to |
+| ----------- | ------------------------------------------ | ---------- |
+| `latency`   | `latency_ms`                               | all        |
+| `error`     | `error_rate`, `error_kind`, `error_status` | all        |
+| `down`      | `down`                                     | all        |
+| `mode`      | `mode`                                     | all        |
+| `jitter`    | `jitter_ms`                                | edge only  |
+| `bandwidth` | `bandwidth_cap`                            | edge only  |
 
 - **Partial updates**: a `PUT` without `ttl` makes the units it touches permanent again; untouched units keep their existing leases. Re-sending a unit with a new `ttl` replaces its deadline. Invalid `ttl` values return `400` without changing state.
 - **Expiry**: when a lease expires, its fields are **cleared** (not restored; `mode` returns to `merge`), empty entries are removed, and an `expire` event is emitted on `/__kaanal/events`.
@@ -82,7 +91,7 @@ A `PUT` with `"ttl": "30s"` (`100ms`–`24h`) leases the units it sets: `latency
 
 ### `mode: override`
 
-By default, live entries stack on top of active scenarios (latencies sum, `down` ORs, error rates combine). With `"mode": "override"`, the live entry replaces lower layers for that key (e.g. `{"mode":"override","down":false}` calms a scenario outage). A node override also calms that node's `node_at` scenario entries; an endpoint or `node_at` override only affects its own key. The mode sticks until a later `PUT` sets `"mode": "merge"`.
+By default, live entries stack on top of active scenarios (latencies sum, `down` ORs, error rates combine). With `"mode": "override"`, the live entry replaces lower layers for that key (e.g. `{"mode":"override","down":false}` calms a scenario outage, and so does a bare `{"mode":"override"}`). A node override also calms that node's `node_at` scenario entries; an endpoint or `node_at` override only affects its own key, so a `node_at` override cannot calm chaos set on the node itself (use a node override). The mode sticks: a later `PUT` without `mode` keeps it, and `"mode": "merge"` goes back to stacking.
 
 ## `PUT /__kaanal/chaos`
 
@@ -102,11 +111,14 @@ Target one copy of a replicated node with `"replica": N` (0-based, with `node` o
 
 Target a wire with `{ "edge": { "from": "app", "to": "db" }, ... }` (cannot combine with `node`, `endpoint`, or `replica`; unknown edge is `404`):
 
-- **`latency_ms` & `jitter_ms`**: adjusts the network hop (`jitter_ms` is uniform `±` clamped at `0`, leased together with `latency`).
-- **`error_rate` & `error_kind`**: `reset` (default, `502`) or `hang` (never `status`/`malformed` or `error_status`).
-- **`down: true`**: link partition (hangs until callee `timeout`, else `60s`, then `504`).
-- **`bandwidth_cap`**: caps link speed (bytes/s integer or `"500KB/s"` string; `1 KB = 1024 B`; must be `<=` edge's configured `bandwidth`; invalid strings return `422`, `0` returns `400`).
-- **Cache links**: dropped lookups to a `cache` count as misses, never failures. Listed under `edges` in `GET /__kaanal/chaos`; clear with `DELETE /__kaanal/chaos?edge_from=app&edge_to=db`.
+| Field                         | Effect on the link                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `latency_ms` and `jitter_ms`  | Adjusts the network hop (`jitter_ms` is uniform `±` clamped at `0`, leased together with `latency`).                                                                                                                                                                                                                                                                                                                                     |
+| `error_rate` and `error_kind` | `reset` (default, `502`) or `hang` (never `status`/`malformed` or `error_status`).                                                                                                                                                                                                                                                                                                                                                       |
+| `down: true`                  | Link partition (hangs until callee `timeout`, else `60s`, then `504`).                                                                                                                                                                                                                                                                                                                                                                   |
+| `bandwidth_cap`               | Caps link speed (bytes/s integer or `"500KB/s"` string; `1 KB = 1024 B`; must be `<=` edge's configured `bandwidth`; units `B`, `KB`, `MB`, `GB`, `/s` optional, fractions round to the nearest byte; a string that is not a size or rate, such as `"5XB"`, `"-5KB"`, or `"KB"`, returns `422` naming the field and units; a cap of `0` after conversion returns `400`). `kaanal chaos set --bandwidth-cap 500KB/s` takes the same text. |
+
+Dropped lookups to a `cache` count as misses, never failures. Edge entries are listed under `edges` in `GET /__kaanal/chaos`; clear with `DELETE /__kaanal/chaos?edge_from=app&edge_to=db`.
 
 ```json
 { "endpoint": "GET /orders", "error_rate": 1.0, "error_kind": "reset" }
@@ -114,4 +126,15 @@ Target a wire with `{ "edge": { "from": "app", "to": "db" }, ... }` (cannot comb
 
 ## `DELETE /__kaanal/chaos/{node}` / `DELETE /__kaanal/chaos`
 
-Clear one node (`404` if unknown) or all **live** chaos. Both return `204`. `DELETE /__kaanal/chaos?node=&endpoint=` clears exactly the entry under that key (`node`, `endpoint` or both) and leaves the others; an unknown query parameter is `400` and clears nothing, a malformed `endpoint` is `400`, an unknown endpoint is `204` (nothing to remove) and an empty or unknown `node` is `404`. **Scenarios are not touched**; use `DELETE /__kaanal/scenarios` or `POST /__kaanal/reset`.
+Clear one node (`404` if unknown) or all **live** chaos. Both return `204`.
+
+`DELETE /__kaanal/chaos?node=&endpoint=` clears exactly the entry under that key (`node`, `endpoint` or both) and leaves the others:
+
+| Case                    | Status                    |
+| ----------------------- | ------------------------- |
+| Unknown query parameter | `400` (clears nothing)    |
+| Malformed `endpoint`    | `400`                     |
+| Unknown endpoint        | `204` (nothing to remove) |
+| Empty or unknown `node` | `404`                     |
+
+**Scenarios are not touched**; use `DELETE /__kaanal/scenarios` or `POST /__kaanal/reset`.

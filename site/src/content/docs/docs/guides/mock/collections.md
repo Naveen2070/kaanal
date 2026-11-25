@@ -1,6 +1,7 @@
 ---
 title: "Stateful routes: collection:"
 sidebar:
+  label: Stateful routes
   order: 4
 ---
 

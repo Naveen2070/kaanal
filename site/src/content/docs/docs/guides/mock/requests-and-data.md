@@ -41,7 +41,18 @@ nodes:
 ```
 
 - `locale:` is a tag such as `en-IN` or `en-US`. A node's own `locale:` beats the project default; the locale comes from the node that owns the route.
-- Seven packs are built in: `en-IN` (names, `+91`, `INR`, `India`), `en-US` (`+1`, `USD`, `United States`), `en-GB` (`+44`, `GBP`), `de-DE` (`+49`, `EUR`, no states), `fr-FR` (`+33`, `EUR`), `es-ES` (`+34`, `EUR`) and `pt-BR` (`+55`, `BRL`, states).
+- Seven packs are built in:
+
+  | Tag     | Phone prefix | Currency | Also            |
+  | ------- | ------------ | -------- | --------------- |
+  | `en-IN` | `+91`        | `INR`    | names, `India`  |
+  | `en-US` | `+1`         | `USD`    | `United States` |
+  | `en-GB` | `+44`        | `GBP`    |                 |
+  | `de-DE` | `+49`        | `EUR`    | no states       |
+  | `fr-FR` | `+33`        | `EUR`    |                 |
+  | `es-ES` | `+34`        | `EUR`    |                 |
+  | `pt-BR` | `+55`        | `BRL`    | states          |
+
 - Any other tag needs a pack: drop `locales/<tag>.yaml` next to `kaanal.yaml`. A pack with a built-in's tag replaces it. [Data packs](/docs/guides/mock/data-packs/) shows how to write one and where Kaanal looks.
 - An unknown locale is a startup error that lists the available tags (and says `did you mean` when only the case differs). `kaanal validate` and `kaanal up` check every pack in `locales/`, used or not.
 
@@ -70,7 +81,7 @@ Precedence, first match wins:
 6. the built-in dictionary;
 7. type and bounds defaults.
 
-**`pattern` matching:** if a generated string already matches `pattern`, it is kept; otherwise Kaanal samples from the regex (ASCII, open repeats capped at 8 extra, respecting `minLength`/`maxLength`). `example`, `enum`, `const`, and `data.yaml` `static`/`pick` values are never replaced; unsupported regexes (lookaround, back-references, huge repeats) warn on startup.
+**`pattern` matching:** if a generated string already matches `pattern` (an email under `.+@.+`), it is kept; otherwise Kaanal samples from the regex (ASCII, open repeats capped at 8 extra, respecting `minLength`/`maxLength`). `example`, `enum`, `const`, and `data.yaml` `static`/`pick` values are never replaced; unsupported regexes (lookaround, back-references, huge repeats) warn on startup.
 
 **Bounds & misfits:** schema types and `minimum`/`maximum`/`minLength`/`maxLength` always win over generators. Unfitting `data.yaml` entries warn and fall through (built-in misfits skip silently), whereas your own `pick`, `static`, and `template` strings are sent verbatim with a warning if they can violate length bounds.
 
@@ -101,7 +112,7 @@ With `oneOf`/`anyOf` and a `discriminator`, the picked branch's tag property is 
 - `discriminator mapping 'cat' names no oneOf/anyOf branch; it is never generated`
 - `discriminator has no propertyName and is ignored`
 
-Both commands also validate 5 sampled bodies per endpoint against the response schema, warning on mismatches (printed shortly after startup so large specs stay fast).
+Both commands also validate 5 sampled bodies per endpoint against the response schema, warning on mismatches (printed shortly after startup so large specs stay fast). A warning names the endpoint and the path, for example `GET /orders: 3 of 5 generated samples violate the response schema: /items/*/total: maximum`. It is Kaanal's bug or a contradiction in the spec (an `example` outside its own `maximum`); the mock still starts.
 
 ## Behaviour changes in this release
 

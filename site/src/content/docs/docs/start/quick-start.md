@@ -94,11 +94,10 @@ kaanal down
 
 ## Next steps
 
-- **Frontend or mobile developer:** [pin a loading, empty or error state](/docs/guides/break/pins/) and run
-  [scenarios](/docs/guides/break/scenarios/) such as `slow-db` (the demo ships fifteen; `kaanal scenario list` shows
-  them).
-- **CI or test author:** [run it in the background and script it](/docs/guides/observe/lifecycle/).
-- **Learning system design:** read [how Kaanal works](/docs/how-it-works/), then draw a small system in Studio and change
-  one thing at a time (a cache, a replica, a retry) to see what it does to the trace.
-- **Sizing a backend:** open Studio, draw your system and [find where it breaks](/docs/guides/simulate/simulation/).
-- **See it first:** [the demo shop](/docs/start/tour/) in your browser, with a chaos bar.
+| You are                          | Go to                                                                                                                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Frontend or mobile developer** | [Pin a loading, empty or error state](/docs/guides/break/pins/) and run [scenarios](/docs/guides/break/scenarios/) such as `slow-db` (the demo ships fifteen; `kaanal scenario list` shows them). |
+| **CI or test author**            | [Run it in the background and script it](/docs/guides/observe/lifecycle/).                                                                                                                        |
+| **Learning system design**       | Read [how Kaanal works](/docs/how-it-works/), then draw a small system in Studio and change one thing at a time (a cache, a replica, a retry) to see what it does to the trace.                   |
+| **Sizing a backend**             | Open Studio, draw your system and [find where it breaks](/docs/guides/simulate/simulation/).                                                                                                      |
+| **Seeing it first**              | [The demo shop](/docs/start/tour/) in your browser, with a chaos bar.                                                                                                                             |

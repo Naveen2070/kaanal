@@ -56,11 +56,14 @@ nodes:
 
 ## What clients see
 
-- **Rate limits (`429`):** returns `429` with a `Retry-After` header in whole seconds (rounded up, min `1`), exposed to browser JS. Exception: [`storage`](/docs/reference/nodes/#storage) nodes return `503` ("Slow Down") with no `Retry-After`, though summaries still count them as limited.
-- **Full queues:** return `overflow_status` (`503` by default).
-- **`error_map`:** applies to both. If it remaps `429` to another status, `Retry-After` is dropped (only rate-limit `429`s carry it).
-- **Chaos precedence:** a `down` node fails with its chaos status and consumes no token or slot.
-- **Chain termination:** any limit failure ends the chain; queued `parallel` branches leave their queues, while running branches finish.
+| Case                         | What the client sees                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rate limits (`429`)**      | Returns `429` with a `Retry-After` header in whole seconds (rounded up, min `1`), exposed to browser JS.                                          |
+| **Rate limits on `storage`** | [`storage`](/docs/reference/nodes/#storage) nodes return `503` ("Slow Down") with no `Retry-After`, though summaries still count them as limited. |
+| **Full queues**              | Return `overflow_status` (`503` by default).                                                                                                      |
+| **`error_map`**              | Applies to both. If it remaps `429` to another status, `Retry-After` is dropped (only rate-limit `429`s carry it).                                |
+| **Chaos precedence**         | A `down` node fails with its chaos status and consumes no token or slot.                                                                          |
+| **Chain termination**        | Any limit failure ends the chain; queued `parallel` branches leave their queues, while running branches finish.                                   |
 
 ## Seeing the wait
 

@@ -35,17 +35,29 @@ Writes the draft text to the server's config file without touching the running s
 
 Controls what happens to `flagged` scenario files that no longer resolve against the draft:
 
-- **`"none"` (default):** leaves them as-is (next `kaanal up` will fail until fixed).
-- **`"remove"`:** deletes regular files directly inside the project's `scenarios/` folder (never symlinks) and lists them in `removed`. Returns `400` if the draft does not build.
-- **`"rewrite"`:** updates `chaos[].node` and `chaos[].edge` ends in flagged files using recorded `rename_node` operations (chained in order, e.g. `a -> b -> c`). Returns `400` if no renames are recorded or a target sits inside an anchored YAML value.
+| Value                  | Effect                                                                                                                                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`"none"`** (default) | Leaves them as-is (next `kaanal up` will fail until fixed).                                                                                                                                                                              |
+| **`"remove"`**         | Deletes regular files directly inside the project's `scenarios/` folder (never symlinks) and lists them in `removed`. Returns `400` if the draft does not build.                                                                         |
+| **`"rewrite"`**        | Updates `chaos[].node` and `chaos[].edge` ends in flagged files using recorded `rename_node` operations (chained in order, e.g. `a -> b -> c`). Returns `400` if no renames are recorded or a target sits inside an anchored YAML value. |
 
 #### Atomicity, conflicts & path safety
 
-- **All-or-nothing writes:** new files stage to temporary files first, then removals and the config write run in order with rollback on failure. If `PUT` updates the draft mid-save, the files to delete are computed from the exact text being saved.
-- **Atomic file replacement:** writes to an exclusive, unpredictable temp file in the same folder, flushes, and renames over the target (preserving permissions and symlinks). Unparseable YAML is saved as-is; `kaanal up` reports errors later.
-- **Path rules:** `spec:`, `data:`, and `endpoints:` must stay relative inside the project (no `..` or escaping links), otherwise Save returns `400`.
-- **Conflicts & loss (`409`):** returns `409` with `"conflict": true` if the file on disk changed since Studio last read/wrote it (bypass with `"overwrite": true`, or discard with `/reload`). Returns `409` with `"lost": [...]` if patches dropped data unless `"confirm_loss": true`. Also `409` if started without a config file; `500` on write failure.
-- **Layout file:** writes `kaanal.layout.json` atomically after the config succeeds, dropping positions for removed nodes and keeping notes. Sets `layout_written` and `layout_note` (skipped without rolling back the config if the layout path is a symlink or folder moved).
+| Topic                       | Behaviour                                                                                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **All-or-nothing writes**   | New files stage to temporary files first, then removals and the config write run in order with rollback on failure. If `PUT` updates the draft mid-save, the files to delete are computed from the exact text being saved.                                   |
+| **Atomic file replacement** | Writes to an exclusive, unpredictable temp file in the same folder, flushes, and renames over the target (preserving permissions and symlinks). Unparseable YAML is saved as-is; `kaanal up` reports errors later.                                           |
+| **Path rules**              | `spec:`, `data:`, and `endpoints:` must stay relative inside the project (no `..` or escaping links), otherwise Save returns `400`.                                                                                                                          |
+| **Layout file**             | Writes `kaanal.layout.json` atomically after the config succeeds, dropping positions for removed nodes and keeping notes. Sets `layout_written` and `layout_note` (skipped without rolling back the config if the layout path is a symlink or folder moved). |
+
+Conflicts and loss:
+
+| Status  | When                                                                                                                                              |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **409** | With `"conflict": true` if the file on disk changed since Studio last read/wrote it (bypass with `"overwrite": true`, or discard with `/reload`). |
+| **409** | With `"lost": [...]` if patches dropped data unless `"confirm_loss": true`.                                                                       |
+| **409** | If started without a config file.                                                                                                                 |
+| **500** | On write failure.                                                                                                                                 |
 
 ### `POST /__kaanal/draft/reload`
 

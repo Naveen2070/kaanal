@@ -32,11 +32,12 @@ Kaanal needs one YAML topology file and an OpenAPI 3.0 specification. From them 
 
 ## Who it is for
 
-- **Frontend and mobile developers and testers**: real-feeling data, slow and failing backends on demand, pinned
-  loading, empty and error states.
-- **CI and test authors**: a background instance with a control API and exit codes made for scripts.
-- **People sizing a backend**: a simulator that finds where a design breaks under load and what would hold it.
-- **People learning system design**: draw a topology (gateway, services, DB, cache, load balancer) and watch the numbers move — hop-by-hop latency, cache offloads, retries, breakers, and queue saturation. Every run is seeded for fair comparisons; start with [How Kaanal works](/docs/how-it-works/) and [Studio](/docs/guides/simulate/studio/).
+| Who                                            | What they get                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Frontend and mobile developers and testers** | Real-feeling data, slow and failing backends on demand, pinned loading, empty and error states.                                                                                                                                                                                                                   |
+| **CI and test authors**                        | A background instance with a control API and exit codes made for scripts.                                                                                                                                                                                                                                         |
+| **People sizing a backend**                    | A simulator that finds where a design breaks under load and what would hold it.                                                                                                                                                                                                                                   |
+| **People learning system design**              | Draw a topology (gateway, services, DB, cache, load balancer) and watch the numbers move — hop-by-hop latency, cache offloads, retries, breakers, and queue saturation. Every run is seeded for fair comparisons; start with [How Kaanal works](/docs/how-it-works/) and [Studio](/docs/guides/simulate/studio/). |
 
 ## Where to start
 
