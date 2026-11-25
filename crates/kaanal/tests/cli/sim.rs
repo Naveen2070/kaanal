@@ -107,7 +107,7 @@ fn sim_run_in_a_project_without_traffic_says_what_to_add() {
     let err = usage_fails(&up, &["sim", "run"]);
     assert_eq!(
         err.trim(),
-        "no traffic profile is defined: add a traffic: section to kaanal.yaml or pass -f profile.yaml (see docs/web/traffic.md)"
+        "no traffic profile is defined: add a traffic: section to kaanal.yaml (a named profile with rps and journeys) or pass -f profile.yaml (see https://kaanal.naveenr.in/docs/guides/simulate/traffic/)"
     );
     let err = fails(&up, &["sim", "run", "-p", "peak"]);
     assert!(

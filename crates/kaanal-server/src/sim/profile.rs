@@ -120,9 +120,9 @@ fn missing_profile(g: &Generation, name: &str) -> String {
     names.truncate(10);
     let list = names.join(", ");
     match (name.is_empty(), names.is_empty()) {
-        (true, true) => "no traffic profile is defined: add a traffic: section to kaanal.yaml or pass -f profile.yaml (see docs/web/traffic.md)".into(),
+        (true, true) => "no traffic profile is defined: add a traffic: section to kaanal.yaml (a named profile with rps and journeys) or pass -f profile.yaml (see https://kaanal.naveenr.in/docs/guides/simulate/traffic/)".into(),
         (true, false) => format!("no traffic profile named; name one with -p: {list}{more}"),
-        (false, true) => format!("no traffic profile named '{name}'; none is defined: add a traffic: section to kaanal.yaml (see docs/web/traffic.md)"),
+        (false, true) => format!("no traffic profile named '{name}'; none is defined: add a traffic: section to kaanal.yaml (a named profile with rps and journeys; see https://kaanal.naveenr.in/docs/guides/simulate/traffic/)"),
         (false, false) => format!("no traffic profile named '{name}'; defined: {list}{more}"),
     }
 }
@@ -385,7 +385,13 @@ traffic:
         assert_eq!(e.status, StatusCode::NOT_FOUND);
         assert_eq!(
             e.message,
-            "no traffic profile is defined: add a traffic: section to kaanal.yaml or pass -f profile.yaml (see docs/web/traffic.md)"
+            "no traffic profile is defined: add a traffic: section to kaanal.yaml (a named profile with rps and journeys) or pass -f profile.yaml (see https://kaanal.naveenr.in/docs/guides/simulate/traffic/)"
+        );
+        // (a2) a name given, none defined: what to add, inline, plus the docs link
+        let e = to_sim(&with_profiles(0), &named("peak")).unwrap_err();
+        assert_eq!(
+            e.message,
+            "no traffic profile named 'peak'; none is defined: add a traffic: section to kaanal.yaml (a named profile with rps and journeys; see https://kaanal.naveenr.in/docs/guides/simulate/traffic/)"
         );
         // (b) some defined, none named: sorted, one
         let e = to_sim(&generation(), &named("")).unwrap_err();

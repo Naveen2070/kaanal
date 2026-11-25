@@ -1,5 +1,5 @@
 //! `kaanal sim`, `kaanal sample` and `kaanal skeleton`: thin clients of the simulation routes
-//! (`docs/web/simulation.md`). All the logic is the server's; this reads the answers aloud.
+//! (the simulation guide on the docs site). All the logic is the server's; this reads the answers aloud.
 
 mod plan;
 mod plan_cheapest;

@@ -1,7 +1,7 @@
 //! Generates Studio's asset table from the Vite manifest in `ui-dist/.vite/manifest.json` and sets
 //! `cfg(kaanal_ui)` when there is one (R1.106). Embeds exactly the files the manifest references;
 //! a referenced file that is missing fails the build. Never runs Node or pnpm: the bundle is
-//! built by `ui/` (see docs/web/studio.md) and copied in before `cargo build`.
+//! built by `ui/` (`pnpm build` there; docs/source/studio-ui.md) and copied in before `cargo build`.
 
 #[path = "src/control/manifest.rs"]
 mod manifest;
@@ -26,7 +26,7 @@ fn main() {
             println!("cargo:rustc-cfg=kaanal_ui");
         }
         Ok(None) => println!(
-            "cargo:warning=no Studio bundle in crates/kaanal-server/ui-dist (no .vite/manifest.json): /__kaanal/studio serves the status page (build ui/ first, see docs/web/studio.md)"
+            "cargo:warning=no Studio bundle in crates/kaanal-server/ui-dist (no .vite/manifest.json): /__kaanal/studio serves the status page (build ui/ first: cd ui && pnpm install && pnpm build, then rebuild; see https://kaanal.naveenr.in/docs/start/install/)"
         ),
         Err(e) => panic!("Studio bundle in {}: {e}", dist.display()),
     }
