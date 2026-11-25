@@ -5,8 +5,9 @@
   "type": "module",
   "packageManager": "pnpm@12.23.0",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
+    "sync-schema": "node -e \"require('fs').mkdirSync('public/schema',{recursive:true});require('fs').copyFileSync('../crates/kaanal-core/kaanal.schema.json','public/schema/v1.json')\"",
+    "dev": "pnpm sync-schema && astro dev",
+    "build": "pnpm sync-schema && astro build",
     "preview": "astro preview"
   },
   "dependencies": {

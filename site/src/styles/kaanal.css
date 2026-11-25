@@ -112,6 +112,11 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* A little wider than the Starlight default (45rem) so reference tables breathe */
+:root {
+  --sl-content-width: 50rem;
+}
+
 /* Dot-grid Studio canvas backdrop matching the landing page */
 body {
   background-color: var(--kaanal-ground);
@@ -378,10 +383,11 @@ starlight-theme-select select {
     transition: opacity 150ms ease;
   }
 
-  html[data-sidebar-collapsed="true"] {
-    --sl-content-inline-start: 3.5rem;
-  }
-
+  /* Collapsing only narrows the sidebar rail (it is position: fixed, so it takes no layout space). The
+     content and the table of contents stay exactly where they are: the earlier version flipped the content
+     margin from "auto 0" to "auto" and set width: 100% in one frame, which re-centred the content by 39px and
+     moved the table of contents by 84px at once while the rail was still sliding, so the page shook.
+     (Overriding --sl-content-inline-start on <html> never worked: Starlight sets it on [data-has-sidebar].) */
   html[data-sidebar-collapsed="true"] .sidebar-pane {
     width: 2.75rem;
     overflow: hidden;
@@ -406,17 +412,8 @@ starlight-theme-select select {
     overflow: hidden;
   }
 
-  html[data-sidebar-collapsed="true"] .main-pane {
-    --sl-content-margin-inline: auto;
-    width: 100%;
-  }
-
   html.kaanal-sidebar-animate .sidebar-pane {
     transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  html.kaanal-sidebar-animate .main-frame {
-    transition: padding-inline-start 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
 
@@ -583,15 +580,48 @@ starlight-theme-select select {
   }
 }
 
-.sl-markdown-content pre,
-.expressive-code .frame {
-  border-radius: 12px;
-  border-color: var(--kaanal-border);
+/* Code blocks are drawn by Expressive Code (radius, border and colours come from astro.config.mjs). The old
+   rule gave the title bar and the code box separate rounded borders, which left a notch and a gap. */
+.expressive-code {
+  margin-block: 1.1rem;
 }
 
+/* macOS-style terminal window: red, yellow and green dots. Expressive Code draws the three dots with a mask
+   and paints them with one colour (Starlight forces grey with a box-shadow), so a three-stop gradient under
+   the same mask colours each dot. */
+.expressive-code .frame.is-terminal .header::before {
+  background: linear-gradient(to right, #ff5f57 0 33.4%, #febc2e 33.4% 66.7%, #28c840 66.7% 100%);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* the window title (language or file name) sits centred in the bar, like a real editor */
+.expressive-code .frame.is-terminal .header,
+.expressive-code .frame:not(.is-terminal) .title {
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+}
+
+/* Inline code: quiet chip, tight to the surrounding text */
 .sl-markdown-content code:not(pre code) {
   border: 1px solid var(--kaanal-rule);
-  border-radius: 5px;
+  border-radius: 6px;
+  padding: 0.1em 0.38em;
+  margin-inline: 0.05em;
+  font-size: 0.86em;
+}
+
+/* Code in a heading (an HTTP route such as GET /__kaanal/health): smaller than the heading, one line, no shout */
+.sl-markdown-content :is(h1, h2, h3, h4) code:not(pre code) {
+  font-size: 0.74em;
+  font-weight: 600;
+  padding: 0.12em 0.5em;
+  margin-inline: 0;
+  border-radius: 8px;
+  background-color: var(--kaanal-well);
+  border-color: var(--kaanal-border);
+  vertical-align: 0.06em;
+  overflow-wrap: anywhere;
 }
 
 .starlight-aside {
@@ -618,6 +648,32 @@ starlight-theme-select select {
   display: block;
   max-width: 100%;
   overflow-x: auto;
+}
+
+/* Reference tables: compact type and top-aligned cells. */
+.sl-markdown-content table {
+  font-size: 0.9rem;
+}
+
+.sl-markdown-content :is(th, td) {
+  padding: 0.55rem 0.8rem;
+  vertical-align: top;
+}
+
+.sl-markdown-content :is(th, td) code:not(pre code) {
+  font-size: 0.82em;
+}
+
+/* Long inline code in a table (a JSON body, a path) wraps instead of widening the table. Pages made of
+   flags (the CLI page) opt in to keeping each flag whole with a per-page style in their frontmatter. */
+.sl-markdown-content :is(td, th) code:not(pre code) {
+  overflow-wrap: anywhere;
+}
+
+/* In a three-or-more column table the last (prose) column keeps a readable width; the chip columns give way
+   by wrapping between chips instead of squeezing the description into a narrow strip. */
+.sl-markdown-content tr > :is(th, td):last-child:nth-child(n + 3) {
+  min-width: 17rem;
 }
 
 /* Smooth cross-document page transitions without container morphing/shaking */

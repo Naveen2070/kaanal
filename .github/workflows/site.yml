@@ -4,9 +4,9 @@ name: site
 on:
   push:
     branches: [main, dev]
-    paths: ["site/**", ".github/workflows/site.yml"]
+    paths: ["site/**", "crates/kaanal-core/kaanal.schema.json", ".github/workflows/site.yml"]
   pull_request:
-    paths: ["site/**", ".github/workflows/site.yml"]
+    paths: ["site/**", "crates/kaanal-core/kaanal.schema.json", ".github/workflows/site.yml"]
   # Deploys production from main by hand (for example right after the secrets are added).
   workflow_dispatch:
 

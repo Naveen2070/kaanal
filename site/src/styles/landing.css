@@ -220,6 +220,27 @@ input {
   cursor: pointer;
 }
 
+/* "Light" and "Dark" differ by 1.7px; reserve the wider so the toggle never nudges the nav */
+.theme-label {
+  display: inline-block;
+  min-width: 2.4em;
+}
+
+/* The label names the theme the button switches to. Pure CSS from <html data-theme>, which the head script
+   sets before first paint, so the word is right from the first frame (a script that swapped "Theme" for
+   Light/Dark after load made the label flicker on every page change). */
+.theme-label [data-to="dark"] {
+  display: none;
+}
+
+html[data-theme="light"] .theme-label [data-to="dark"] {
+  display: inline;
+}
+
+html[data-theme="light"] .theme-label [data-to="light"] {
+  display: none;
+}
+
 .theme-btn:hover {
   background: var(--raised);
 }
@@ -617,8 +638,9 @@ input {
   transform: translateY(-1px);
 }
 
+/* 0.48 left the state label at 2.1:1 contrast; 0.78 keeps it dimmed and readable */
 .topo-node.is-inactive {
-  opacity: 0.48;
+  opacity: 0.78;
 }
 
 .topo-node.is-slow {
@@ -1031,6 +1053,13 @@ input {
   gap: 0.85rem;
 }
 
+/* nine node types: 3 x 3 from tablet up, never a lone card on the last row */
+@media (min-width: 720px) {
+  .nodes-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .node-spec-card {
   padding: 0.95rem 1rem;
   display: flex;
@@ -1089,6 +1118,13 @@ input {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.85rem;
+}
+
+/* six cards: 3 x 2 from tablet up */
+@media (min-width: 720px) {
+  .next-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .next-card {
@@ -1166,10 +1202,25 @@ input {
   }
 }
 
-@media (max-width: 640px) {
+/* narrow header: the full nav (4 links, GitHub label, theme word) needs about 800px. Icon-only theme
+   button, aria-label carries the name. */
+@media (max-width: 820px) {
   .nav-hide-sm {
     display: none;
   }
+  .theme-btn span {
+    display: none;
+  }
+}
+
+/* 320px phones: drop the Tamil badge so the header fits */
+@media (max-width: 380px) {
+  .brand-tamil {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
   .wf-row {
     grid-template-columns: 5.5rem minmax(0, 1fr) 3.7rem;
   }
