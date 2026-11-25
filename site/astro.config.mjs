@@ -39,6 +39,7 @@ export default defineConfig({
             { label: "Control API", items: [{ autogenerate: { directory: "docs/reference/control-api" } }] },
           ],
         },
+        { label: "Comparison", slug: "docs/comparison" },
       ],
     }),
     react(),

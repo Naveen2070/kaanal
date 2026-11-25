@@ -46,4 +46,5 @@ Kaanal needs one YAML topology file and an OpenAPI 3.0 specification. From them 
 
 - [Install](/docs/start/install/), then the [Quick start](/docs/start/quick-start/) (about five minutes).
 - Want to see it first? [Try the demo shop](/docs/start/tour/).
+- Wondering how it differs from WireMock, Mockoon, Prism, MockServer, Toxiproxy or MSW? See the [Comparison](/docs/comparison/).
 - Know what you need? Pick a [how-to guide](/docs/guides/) or look it up in the [reference](/docs/reference/).
