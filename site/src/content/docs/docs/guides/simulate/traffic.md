@@ -24,15 +24,24 @@ traffic:
 | `duration` | Simulated time of a run (default 60s). A run request may override it.  |
 | `warmup`   | Simulated time before results count (default a tenth of the duration). |
 
-A journey has an `endpoint` (the `"METHOD /path"` key, as in `endpoints:`), a `weight` above 0 (default 1), and optional `req_bytes` and `resp_bytes` (at most 1 GiB each). A size is a whole number of bytes (`2048`) or text with a unit (`2KB`, `1.5 MB`, `512B`): units `B`, `KB`, `MB`, `GB` in any case (`KiB`, `MiB`, `GiB` mean the same), with **KB = 1024 bytes** as in Studio, and a fraction rounds to the nearest byte. A size takes no `/s`, and a negative number, a missing number or an unknown unit is a load error naming the field and the units; the 1 GiB limit applies to the converted number (`req_bytes: 2GB` fails). Bytes matter only when an edge or a node has a `bandwidth`, a node has `per_kb`, or a storage node has a `throughput`. A route that takes or returns a **file** (a `multipart/*` form, an octet stream, an image, a PDF, a zip, or a `format: binary` schema) has no size in the OpenAPI document, so `kaanal validate` and `kaanal init` warn that you should set `req_bytes` or `resp_bytes` for it; a response `example` does set the default `resp_bytes`, because the generated body is the example. The bodies on the wire also carry the headers of [`header_bytes`](/docs/reference/resources/#payload-cost), and an edge or step can change what a call carries (`sends`, `returns`). An endpoint appears once per profile; give it a bigger weight instead of a second entry.
+## Journeys & payload sizes
 
-**What a journey is.** Each journey runs as its own open stream of independent requests with exponentially spaced arrivals (a Poisson stream). It is not a user session: there is no think time, no cart state, no "this user then does that". The mix tells you how much of each kind of request the system sees.
+Each journey specifies an `endpoint` (`"METHOD /path"`, appearing once per profile), a `weight > 0` (default `1`), and optional `req_bytes` / `resp_bytes` (up to `1 GiB` each).
 
-**What the result means.** A simulation is a relative what-if, not a prediction. Real traffic is burstier than a Poisson stream, so tails in a real system will be worse than a smooth stream shows.
+- **Size units:** whole bytes (`2048`) or text with units (`2KB`, `1.5 MB`, `512B`, `KiB`/`MiB`/`GiB`; **KB = 1024 bytes**, fractional values round to nearest byte). No `/s` suffix; negative, missing, or unknown units fail load.
+- **When bytes matter:** only when an edge/node has `bandwidth`, a node has `per_kb`, or a storage node has `throughput`.
+- **Binary routes & headers:** routes taking/returning files (`multipart/*`, octet-stream, images, PDFs, zips, `format: binary`) have no OpenAPI size, so `validate` and `init` warn you to set `req_bytes` / `resp_bytes` (response `example` sets default `resp_bytes`). Wire bodies also include [`header_bytes`](/docs/reference/resources/#payload-cost), and edges/steps can override sizes via `sends` / `returns`.
 
-**Files written for you.** `kaanal init` and `kaanal demo --eject` write one profile named `peak`: `rps: 100`, `duration: 30s`, and one journey per route of the file's `endpoints:` (weight 3 for a `GET`, 1 for `POST`, `PUT`, `PATCH` and `DELETE`). The numbers are estimates; edit them. A spec with more than 64 routes gets journeys for the first 64, and a spec with no route that gets an entry gets no `traffic:` section at all (a profile needs a journey). Files that already exist are never changed.
+## How journeys execute
 
-**No profile.** The CLI has no built-in profile. A project without `traffic:` cannot run `kaanal sim run` until you add a section or pass a file with `-f`. The messages say what to do (the same text comes back as the `404` of `POST /__kaanal/sim/run`; the names are sorted, at most ten, then `...`):
+- **Poisson arrivals:** each journey runs as an independent open stream with exponentially spaced arrivals. There are no user sessions, think time, or cart state — just the request mix.
+- **Interpreting results:** simulations are relative what-ifs, not predictions. Real traffic is burstier than Poisson, so production tails will be worse than a smooth stream shows.
+
+## Generated profiles & missing profiles
+
+`kaanal init` and `kaanal demo --eject` write a starter `peak` profile (`rps: 100`, `duration: 30s`, up to 64 routes with weight 3 for `GET` and 1 for writes) as estimates you should edit. Existing files are never overwritten; specs with no matching routes omit `traffic:`.
+
+The CLI has no built-in profile. Without `traffic:`, `kaanal sim run` fails unless you pass `-f profile.yaml` (Studio sends its own profile):
 
 | You ran                                                  | Message                                                                                                                                |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -40,8 +49,10 @@ A journey has an `endpoint` (the `"METHOD /path"` key, as in `endpoints:`), a `w
 | `kaanal sim run`, the file defines profiles              | `no traffic profile named; name one with -p: peak, other`                                                                              |
 | `kaanal sim run -p x`, the file has no profile named `x` | `no traffic profile named 'x'; defined: peak` (with none defined: `...; none is defined: add a traffic: section to kaanal.yaml ...`)   |
 
-Naming no profile is still a usage error (exit 64); a wrong name is a runtime error (exit 1). Studio sends its own profile and does not read these messages.
+Missing `-p` is exit `64` (usage); an unknown profile name is exit `1` (runtime). Same messages return as `404` on `POST /__kaanal/sim/run` (names sorted, capped at 10 + `...`).
 
-Profile names follow the scenario-name rule: 1 to 64 characters of `a-z`, `0-9`, `_` or `-`, starting with a letter or a digit.
+## Validation rules
 
-**Checked when the config loads:** the endpoint keys (`GET /a` and `get /a` are the same endpoint, and appear once), `duration` (above 0, at most 1h) and `warmup` (shorter than the duration). Whether an endpoint is a route of the system is a warning (`kaanal validate`, `up` and Apply show it), because the routes come from your specs; a run of a profile that names no route is refused. A request that shortens the duration drops a profile `warmup` that no longer fits and uses a tenth of the new duration.
+- **Profile names:** 1–64 chars of `a-z`, `0-9`, `_`, `-`, starting with a letter or digit.
+- **Load-time checks:** endpoint keys are case-insensitive and unique per profile, `duration` is `> 0` and `<= 1h`, and `warmup < duration` (shortening `duration` via a run request resets an oversized `warmup` to `duration / 10`).
+- **Route warnings:** unknown endpoints warn on `validate`, `up`, and Apply; running a profile with zero valid routes is refused.

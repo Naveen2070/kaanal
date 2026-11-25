@@ -53,11 +53,9 @@ UI:    http://localhost:8080/__kaanal/studio?mode=admin#token=<64 hex chars>
 Auth:  POST http://localhost:8080/login, JWKS http://localhost:8080/.well-known/jwks.json, 1 user
 ```
 
-Point your frontend's `API_BASE_URL` at the mocks URL. Open the UI URL: it is [Studio](/docs/guides/simulate/studio/),
-on its Admin tab when a project is loaded, where you watch requests, flip chaos and rewrite what a route answers. Only
-one instance runs per project directory; a second `kaanal up` tells you it is already running. Ctrl+C stops it. For
-scripts and CI, `kaanal up -d` starts it in the background and `kaanal down` stops it: see
-[Lifecycle](/docs/guides/observe/lifecycle/).
+Point your frontend's `API_BASE_URL` at the `Mocks:` URL, and open the `UI:` URL for [Studio](/docs/guides/simulate/studio/) (Admin tab) to watch requests, flip chaos, and edit responses live.
+
+Only one instance runs per project directory; stop it with `Ctrl+C`. For scripts and CI, use `kaanal up -d` and `kaanal down` (see [Lifecycle](/docs/guides/observe/lifecycle/)).
 
 **Log in from your frontend.** With an `auth` node, `POST /login` returns a signed JWT. Send
 `Content-Type: application/json` (a `fetch` with `JSON.stringify` and no header sends `text/plain` and gets 415). See

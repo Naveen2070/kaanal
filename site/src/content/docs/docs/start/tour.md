@@ -18,13 +18,15 @@ Try:   kaanal scenario activate slow-db --ttl 30s   (in another terminal, this f
 Stop:  Ctrl-C, or kaanal down from this folder
 ```
 
-Open the `Demo:` link. The shop lists 24 products priced in rupees (₹), shows a product page, and has a cart and a checkout behind a login (`demo@example.com`, password `demo`; a wrong password shows the real 401 path). Checkout pays with a pre-filled test card through a simulated payment service, then shows the order, and an Orders page lists them. Everything it calls is mocked by Kaanal, with believable latency from a gateway, a shop service, an auth service, a payment service, a database and a cache. Orders, like the cart, live in memory and are gone on restart.
+Open the `Demo:` link to browse 24 products (priced in ₹), view details, and test cart + checkout behind login (`demo@example.com` / `demo`; a wrong password hits the real `401` path). Everything runs against Kaanal's mocked gateway, shop, auth, payment, DB, and cache nodes; orders and cart live in memory and clear on restart.
 
 ## The chaos bar
 
 The bar sits at the bottom of the page, collapsed. Open it to:
 
-- **Run a story**: a named scenario such as `slow-db` (the database answers slowly), `cache-down`, `auth-errors`, `gateway-down`, `db-timeout`, `black-friday`, `flaky-network`, `cart-write-errors`, `brownout`, `meltdown`, or one of the payment stories: `payment-slow`, `payment-flaky` (a 502 on four payments in ten), `payment-down` (503), `payment-timeout` (a hung call that gives up with a 504 after 3 s) and `payment-declined` (every card refused with a 402; a pin, because chaos never produces a 4xx). A failed payment never stores an order. Each one turns itself off after 30 seconds, and the bar shows the time left.
+- **Run a story (30 s TTL each):**
+  - Infrastructure: `slow-db`, `cache-down`, `auth-errors`, `gateway-down`, `db-timeout`, `black-friday`, `flaky-network`, `cart-write-errors`, `brownout`, `meltdown`.
+  - Payments: `payment-slow`, `payment-flaky` (40% `502`), `payment-down` (`503`), `payment-timeout` (`504` after 3 s), `payment-declined` (`402` via pin; failed payments never save an order).
 - **Pin a state** on the product list: empty, error or loading, to see how the page handles each one.
 - **Move the sliders**: latency and error rate for each node.
 - **Reset all chaos** at once.
@@ -41,15 +43,13 @@ kaanal logs -f
 
 ## The token in the link
 
-The chaos bar talks to Kaanal's control API, which needs the instance's token. The link carries it after `#`, a part of the URL that the browser never sends to any server. The page reads it, keeps it in `sessionStorage` (this tab only, gone when you close it), and removes it from the address bar. Without the token the bar hides itself and the shop still works; open the printed link again to get it back.
+The chaos bar talks to Kaanal's control API using a token passed after `#` (never sent to any server). The page saves it to `sessionStorage` (this tab only) and strips it from the address bar; without it, the shop still works with the bar hidden.
 
 The link is the only place the token is printed. Do not paste it into chats or tickets.
 
 ## What it writes
 
-`demo` writes the project to `.kaanal/demo/` in the current folder, rewriting it on every start, and keeps its state (`run.json`, the lock) in `.kaanal/` as `kaanal up` does. Nothing else in the folder is touched. After it stops, only `.kaanal/` is left; delete it when you are done.
-
-A `kaanal.yaml` in the folder is ignored (`demo` prints a note), so you can try the demo inside a project. If a Kaanal instance is already running in the folder, `demo` stops with exit code 64 and changes nothing.
+`demo` writes the project to `.kaanal/demo/` on each start and keeps `run.json` and the lock in `.kaanal/` (only `.kaanal/` remains after stopping). Any existing `kaanal.yaml` in the folder is ignored with a note; if an instance is already running there, `demo` exits `64`.
 
 ## Taking the project with you: `--eject`
 
@@ -64,15 +64,12 @@ Wrote the demo project (N files) to /home/you/kaanal-demo
 Next:  cd kaanal-demo && kaanal up
 ```
 
-The ejected project is an ordinary Kaanal project: `kaanal up` serves the same storefront and the same stories, with no demo-only code path. `--eject` works while a demo is running. The project's `kaanal.yaml` ends with a `traffic:` section holding one profile, `peak` (100 requests a second for 30 s, one journey per route, reads weighted 3 and writes 1; estimates), so `kaanal sim run -p peak` works against `kaanal demo` or the ejected project. The chaos stories are unchanged.
+The ejected project is a standard Kaanal project with a starter `peak` traffic profile (`100` rps for `30s`), so both `kaanal up` and `kaanal sim run -p peak` work out of the box.
 
-- `.kaanal/` is added to the folder's `.gitignore` (created if missing, appended to otherwise), because `kaanal up` keeps the token and signing key there. A `.gitignore` that cannot be updated is a warning, not an error.
-- A new folder is created. An existing folder must be empty; otherwise `--eject` stops (exit code 64) and changes nothing.
-- `--force` writes into a folder that is not empty. It overwrites only the demo's own files and leaves every other file alone.
-- `--locale TAG` sets the project's `locale:` as it does for the demo; an unknown tag is exit code 64 and creates nothing.
-- A folder (or a file inside it) that is a symbolic link or junction is refused.
-- `--force` without `--eject`, and `--eject` with `--port` or `--open`, are exit code 64.
-- With `--json`: one object with `root`, `written` (the files, relative to `root`) and `next`.
+- **`.gitignore`:** adds `.kaanal/` (created if missing; non-fatal warning if unwritable).
+- **Target directory:** creates new folders; existing folders must be empty unless `--force` is passed (which only overwrites demo files). Symlinks and junctions are refused.
+- **Flags:** `--locale TAG` sets the config locale (unknown tags exit `64`). `--force` without `--eject`, or `--eject` with `--port`/`--open`, exits `64`.
+- **`--json`:** prints `{ root, written, next }`.
 
 ## Options
 

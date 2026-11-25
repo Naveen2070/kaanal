@@ -36,11 +36,7 @@ Kaanal needs one YAML topology file and an OpenAPI 3.0 specification. From them 
   loading, empty and error states.
 - **CI and test authors**: a background instance with a control API and exit codes made for scripts.
 - **People sizing a backend**: a simulator that finds where a design breaks under load and what would hold it.
-- **People learning system design**: draw a system (a gateway, services, a database, a cache, a load balancer) and watch
-  the numbers move. See latency add up hop by hop, a cache change the work a database does, retries and breakers change
-  what a failure does, and replicas and queues change where a design saturates. Every run is seeded, so an experiment
-  repeats exactly and you can compare two designs fairly. Start with [How Kaanal works](/docs/how-it-works/) and
-  [Studio](/docs/guides/simulate/studio/).
+- **People learning system design**: draw a topology (gateway, services, DB, cache, load balancer) and watch the numbers move — hop-by-hop latency, cache offloads, retries, breakers, and queue saturation. Every run is seeded for fair comparisons; start with [How Kaanal works](/docs/how-it-works/) and [Studio](/docs/guides/simulate/studio/).
 
 ## Where to start
 

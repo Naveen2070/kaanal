@@ -8,13 +8,18 @@ What Kaanal actually simulates, in plain terms.
 
 ## Topology
 
-Your system is a graph of **nodes** (`gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer`, `storage`) connected by **edges** (dependencies). The graph must be acyclic and have at most one gateway and one auth node; anything Kaanal can't simulate is rejected when the file loads, with a message naming the problem — never silently ignored.
+Your system is a graph of **nodes** connected by **edges** (dependencies):
 
-Requests enter at the gateway, or at the service that owns the route when there is none, then follow the endpoint's chain (by default every node reachable from the owner); `POST /login` and the JWKS enter at the auth node (after the gateway, if any). A config with only an auth node is valid. See the [endpoints reference](/docs/guides/mock/endpoints/) to change it.
+- **Node kinds:** `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer`, `storage`.
+- **Graph rules:** acyclic, with at most one `gateway` and one `auth` node. Invalid graphs are rejected on load with a clear error — never silently ignored.
+
+Requests enter at the `gateway` (or at the route's owning service if there is no gateway) and follow the endpoint's chain. By default, that chain includes every node reachable from the owner; see the [endpoints reference](/docs/guides/mock/endpoints/) to customize it.
+
+`POST /login` and JWKS requests enter at the `auth` node (after the gateway, if one exists). A config with only an `auth` node is valid.
 
 ## Call chains
 
-A request to a mocked endpoint doesn't return instantly. Kaanal walks the path _behind_ that endpoint and adds up the simulated cost of each hop:
+A request to a mocked endpoint doesn't return instantly. Kaanal walks the path _behind_ that endpoint and sums each hop's simulated cost:
 
 ```
 GET /users/42
@@ -27,52 +32,81 @@ GET /users/42
   total       12.2 ms    ← the client really waits this long
 ```
 
-Calls inside a `parallel` block run side by side, so the block costs as much as its slowest branch; a cache hit skips the rest of the sequence it is in. The breakdown comes back in the `X-Kaanal-Trace` response header, and the total is what your frontend experiences — so loading states, spinners and timeouts behave like they will in production.
+- **Parallel & cache hops:** calls inside a `parallel` block run side by side, costing as much as the slowest branch. A cache hit skips the rest of its sequence.
+- **Trace & client timing:** the hop breakdown returns in `X-Kaanal-Trace`, and the client waits for the full total — so spinners, loading states, and timeouts behave like production.
 
-Costs can be fixed (`5ms`), long-tailed (`{ p50: 4ms, p99: 20ms }` — most reads are ~4 ms, one in a hundred is ~20 ms, capped at 10×p99) or exponential (`{ mean: 5ms }`, as in queueing theory, capped at 10×mean).
-A node may also set `concurrency: N` (how many requests it serves at once, the rest queue; with `hold: call` the slot stays taken while the node waits on its calls). See [Capacity](/docs/guides/simulate/capacity/) for queues, pools, rate limits and 429s. Live mode queues requests the same way the simulator does: while a node is full, a request waits and its trace shows `node.wait=`.
+### Cost models & concurrency
+
+- **Fixed:** e.g. `5ms`.
+- **Long-tailed:** `{ p50: 4ms, p99: 20ms }` — most calls take ~4 ms, 1% take ~20 ms, capped at `10 × p99`.
+- **Exponential:** `{ mean: 5ms }` — queueing-theory exponential distribution, capped at `10 × mean`.
+- **Concurrency limits:** `concurrency: N` caps simultaneous requests per node; extras wait in a queue (trace shows `node.wait=`). With `hold: call`, the slot stays held while waiting on downstream calls. See [Capacity](/docs/guides/simulate/capacity/) for pools, rate limits, and 429s.
 
 ## Operations
 
-Each database hop is one of three operations, inferred from the endpoint: `GET /users/{id}` → **read** (one row), `GET /users` → **scan** (a list), everything else → **write**. Each has its own cost in the node's `ops`. The operation flows down the chain: an endpoint's `op:` applies to every database step below it, `op:` on a single step changes just that step, and `via:` uses the op of the endpoint it points at.
+Each database hop is one of three operations, inferred from the endpoint:
+
+- `GET /users/{id}` → **read** (one row)
+- `GET /users` → **scan** (a list)
+- Everything else → **write**
+
+Each operation uses its own cost in the node's `ops`. The operation flows down the chain: an endpoint's `op:` sets all database steps below it, `op:` on a single step overrides just that step, and `via:` inherits the target endpoint's op.
 
 ## Chaos
 
-Chaos is live runtime state (per node, per endpoint, or per node-at-endpoint). You set it by hand, or switch on a named [scenario](/docs/guides/break/scenarios/); neither is part of a node's configuration:
+Chaos is live runtime state (per node, per endpoint, or per node-at-endpoint). Set it manually or switch on a named [scenario](/docs/guides/break/scenarios/) — neither is baked into node config:
 
-- **latency**: added to every visit of the node.
-- **error rate + status**: each visit fails with that probability and HTTP status.
-- **down**: every visit fails 503.
-- **kind**: how an error shows up. `status` (default) answers with the HTTP status; `reset` sends the start of the response and then drops the connection; `malformed` sends the right status with a body that is not valid JSON; `hang` never answers and ends as a 504 after the node's `timeout` (60 s without one).
+- **latency:** added to every visit of the node.
+- **error rate + status:** each visit fails with that probability and HTTP status.
+- **down:** every visit fails with `503`.
+- **kind:** how an error appears:
+  - `status` (default): returns the HTTP status.
+  - `reset`: sends the response start, then drops the connection.
+  - `malformed`: returns the status with invalid JSON.
+  - `hang`: never answers; fails as `504` after the node's `timeout` (60 s default).
 
-A failure stops the chain at that node and its status becomes the response — a database failure surfaces as a 5xx at the gateway, after the time already spent. That's how cascading failures look in real systems.
+A failure stops the chain at that node, and its status becomes the response — a database failure surfaces as a 5xx at the gateway after the time already spent.
 
-**Where the failure happens matters.** At the gateway or the service that owns the route, `reset` and `malformed` reach your client as they are. Deeper (a database, a cache call, an external API) they become a 502, and a timeout a 504, unless the endpoint's `error_map` says otherwise. `error_map` keys can be a node name, a kind (`reset`, `malformed`, `timeout`), a status or a class like `5xx`, tried in that order. A cache never fails a request: a failing cache is a miss. The other side of that: a cache that hits ends the chain, so a read served from the cache never reaches the database, and chaos on the database changes nothing for it. To see database faults on a `GET`, break the cache too (or set a hit ratio low enough that misses reach the database).
+### Where the failure happens matters
 
-**A failure you set can go unseen.** Chaos on a node only bites when requests reach it. A warm cache answers first, and a node that no route calls is never visited, so the run can show no failures at all although the node is down. Studio says so in Controls (under the chaos buttons) and on Results when chaos is set and the run has no failures. To see where requests go, read the trace: it names every hop. `kaanal chaos set cache --down` shows the database failing, because a down cache is a miss and every read goes through to the database.
+- **Entry nodes:** at the `gateway` or route-owning `service`, `reset` and `malformed` reach the client as-is.
+- **Deeper nodes:** failures from a database, cache call, or external API become `502` (or `504` on timeout), unless the endpoint's `error_map` overrides them.
+- **`error_map` lookup order:** node name → kind (`reset`, `malformed`, `timeout`) → status → class (e.g. `5xx`).
+- **Caches:** a failing cache is always a miss, never a failed request. Because a cache hit ends the chain, database chaos won't affect cached reads — break the cache too (or lower its hit ratio) to see DB faults on `GET`.
 
-**Timeouts.** Any node can have `timeout: 1s`. It is a deadline for calls to that node, covering its queue wait, its own work and everything it calls. When it passes, the caller gets a 504 (the error body has `"kind":"timeout"`) at that moment — but the work that was already running keeps its slot until it ends, as a real database does. A slow dependency therefore turns into a pile of timeouts, not a clean recovery.
+### Unseen faults & timeouts
 
-**Chaos on one route.** Chaos can be set on a node, on an endpoint (`GET /orders`, once at its front door) or on a node only while it serves one endpoint. Entries that match a visit **stack**: latencies add (clamped to 5 minutes per entry key: the node, endpoint and node-at-endpoint entries each clamp on their own), `down` is an OR, and error rates combine as independent chances. Each failure keeps its own kind and status, which belong to the entry's own `error_rate` (a kind with no rate in the same entry does nothing and is reported as a warning). Two failing entries are drawn from one roll, so 30% `reset` plus 30% `503` gives about 30% resets and 21% 503s. Entries come in layers, bottom to top: the active scenarios in the order you activated them, then the chaos you set by hand, always on top. **A higher layer wins over a lower one** for the same field, whatever the key; inside one layer the node-at-endpoint entry goes before the node's. A hand-set entry with `mode: override` replaces everything below it for that key instead (see the [control API](/docs/reference/control-api/)). An endpoint entry is separate: it is rolled once at the endpoint's front door (its latency is a leading delay on the entry node, its failure belongs to the entry node) and is not merged into the node visits behind it. See [chaos internals](https://github.com/Naveen2070/kaanal/blob/main/docs/source/chaos.md). Stacking differs from service meshes, where the most specific rule replaces the others; to get "only this", clear the broader entry, or use `mode: override`.
+- **Unseen chaos:** faults only trigger when requests reach that node. A warm cache or an uncalled node means a run can show zero failures even when the node is down. Studio flags this in Controls and Results; check `X-Kaanal-Trace` to see exact hops.
+- **Timeouts:** `timeout: 1s` sets a deadline covering queue wait, own work, and downstream calls. On expiry, the caller gets `504` (`"kind":"timeout"`), while the running work keeps its slot until it finishes — turning slow dependencies into a pile of timeouts.
 
-**Scenarios.** A scenario is a named bundle of chaos entries from `kaanal.yaml` or `scenarios/NAME.yaml`: "payments is down", "slow database". Switch them on and off live, stack several, save what you built by hand, and reset everything between tests. See [Scenarios](/docs/guides/break/scenarios/).
+### Layering & chaos on one route
+
+Chaos can target a **node**, an **endpoint** (`GET /orders`), or a **node-at-endpoint**:
+
+- **Stacking within a visit:** latencies add (clamped to 5 minutes per entry key), `down` is ORed, and error rates combine as independent chances.
+- **Single-roll error draws:** each failure keeps its own `kind` and `status` tied to its entry's `error_rate` (a `kind` without an `error_rate` warns and does nothing). Two entries are drawn from one roll, so 30% `reset` + 30% `503` yields ~30% resets and ~21% 503s.
+- **Layer order (bottom to top):** active scenarios (in activation order), then manual chaos on top. **Higher layers win** per field; within one layer, node-at-endpoint applies before node-level.
+- **Overriding & endpoint entries:** `mode: override` replaces everything below it for that key (see the [control API](/docs/reference/control-api/)). An endpoint entry rolls once at the front door (its latency is a leading delay; its failure belongs to the entry node). See [chaos internals](https://github.com/Naveen2070/kaanal/blob/main/docs/source/chaos.md).
+
+### Scenarios
+
+A scenario is a named bundle of chaos entries from `kaanal.yaml` or `scenarios/NAME.yaml` (e.g. "payments is down", "slow database"). Toggle them live, stack several, save manual chaos into one, and reset between tests. See [Scenarios](/docs/guides/break/scenarios/).
 
 ## Determinism
 
 Given the same `seed` in `kaanal.yaml`:
 
 - The same URL always returns the same generated body (`GET /users/42` is always the same Priya).
-- A sequence of requests sent one after another always sees the same timings and the same failure pattern.
+- Sequential requests always see the same timings and failure pattern (under _concurrent_ requests, arrival order decides which specific request fails, while the _rate_ holds).
 
-This makes tests reproducible: commit the config, and every CI run gets the same backend. (Under _concurrent_ requests, arrival order decides which specific request fails; only the failure _rate_ is guaranteed.)
-
-By default (`determinism: controlled`) this holds on every run. With `determinism: realistic`, timings and failures vary from run to run: `kaanal up` draws a fresh seed at startup and prints it (`Seed:  N (determinism: realistic; replay its timings and failures with determinism: controlled and seed: N; generated data then follows that seed too)`). To replay that run's timings and failures, set `determinism: controlled` and `seed: N`. Generated bodies follow `seed:` in both modes, so replaying with a new `seed:` also changes the generated data, while the chain's timings and failures repeat exactly.
+- **`determinism: controlled` (default):** timings, failures, and generated bodies repeat identically on every run.
+- **`determinism: realistic`:** `kaanal up` picks a fresh seed at startup and prints it (`Seed: N ...`). To replay those exact timings and failures later, set `determinism: controlled` and `seed: N` (generated bodies follow `seed:` in both modes).
 
 ## Generated data
 
-Bodies come from your OpenAPI response schemas, chosen by field meaning: `email` fields get emails, `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and fields in one object agree with each other (city, state and pincode always describe the same place). `example` values in the spec are used verbatim. An `override:` in `endpoints:` beats generation entirely.
-
-All data is synthetic; emails use `example.com`. Names, places, phones and currency come from the node's locale pack and field names map to generators through an editable dictionary: see [Data and locales](/docs/guides/mock/requests-and-data/#data-and-locales) and [Data packs](/docs/guides/mock/data-packs/).
+- **Schema-aware:** `email` gets emails (`example.com`), `pincode` gets pincodes, `price` gets plausible prices, `createdAt` gets recent timestamps, and related fields (`city`, `state`, `pincode`) stay consistent.
+- **Overrides:** OpenAPI `example` values are used verbatim; an `override:` in `endpoints:` bypasses generation completely.
+- **Locales & dictionaries:** names, places, phones, and currency come from the node's locale pack and an editable dictionary. See [Data and locales](/docs/guides/mock/requests-and-data/#data-and-locales) and [Data packs](/docs/guides/mock/data-packs/).
 
 ## What Kaanal is not (yet)
 

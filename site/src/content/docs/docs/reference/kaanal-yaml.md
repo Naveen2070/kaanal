@@ -22,12 +22,32 @@ endpoints:                       # optional: per-endpoint overrides (a file path
   "GET /users":  { override: { status: 200, body: [ { id: 1 } ] } }
 ```
 
-- **nodes** — nine kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer`, `storage` (an object store: `first_byte` and `throughput`; see [Nodes](/docs/reference/nodes/) for every field; `auth` serves login and JWKS, see [Auth](/docs/guides/mock/auth/)). The gateway is optional (at most one); without it, requests enter at the service that owns the route. A `database` needs `ops` costs for `read`/`write`/`scan`, or a `flavor` preset. `proc` is processing time. A duration is `5ms`, a percentile pair `{ p50: 4ms, p99: 20ms }` (a realistic long-tailed distribution) or `{ mean: 5ms }` (exponential, as in queueing theory). Any node may set `concurrency: N` (how many requests it serves at once). Live mode and the simulator both enforce it: extra requests queue, and the trace shows how long with `node.wait=`.
-- **edges** — the dependency graph, limited to the [edge table](/docs/reference/edges-and-failure/#edges-who-may-call-whom). No cycles, no self or duplicate edges, no dangling references; all rejected at startup. `calls: N` sets how many times the target is called per request.
-- **scenarios** — optional named chaos bundles (`scenarios:` here, or one file each in `scenarios/` next to this file), switched on live; see [Scenarios](/docs/guides/break/scenarios/).
-- **endpoints** — per-endpoint behaviour, fully described in [Endpoints](/docs/guides/mock/endpoints/). An entry with `override` serves a fixed response that replaces or extends the spec's routes. Same path + same parameter names = override; otherwise a new static endpoint, which needs a gateway.
+## Top-level sections
 
-Check a file without starting:
+### `nodes`
+
+Nine kinds: `gateway`, `service`, `monolith`, `database`, `cache`, `external-api`, `auth`, `load-balancer`, and `storage` (`first_byte` and `throughput`). See [Nodes](/docs/reference/nodes/) for all fields and [Auth](/docs/guides/mock/auth/) for `auth`.
+
+- **Gateway:** optional (at most one); without it, requests enter at the route's owning service.
+- **Database:** requires `ops` (`read`/`write`/`scan`) or a `flavor` preset.
+- **Durations (`proc`, `ops`):** fixed (`5ms`), long-tailed (`{ p50: 4ms, p99: 20ms }`), or exponential (`{ mean: 5ms }`).
+- **Concurrency:** `concurrency: N` caps concurrent requests on any node; extras queue in both live mode and the simulator (`node.wait=` in trace).
+
+### `edges`
+
+Defines the dependency graph, subject to the [edge table](/docs/reference/edges-and-failure/#edges-who-may-call-whom). Cycles, self-edges, duplicate edges, and dangling references fail at startup. Use `calls: N` to repeat a dependency per request.
+
+### `scenarios`
+
+Optional named chaos bundles defined inline or as files in `scenarios/`. Toggle them live; see [Scenarios](/docs/guides/break/scenarios/).
+
+### `endpoints`
+
+Per-endpoint behaviour; see [Endpoints](/docs/guides/mock/endpoints/). An `override` serves a fixed response — matching path + parameter names overrides the spec route, while a new path creates a static endpoint (requires a gateway).
+
+## Validating a config
+
+Check a file without starting the server:
 
 ```bash
 kaanal validate -c kaanal.yaml    # ok / errors with file:line:col, plus warnings

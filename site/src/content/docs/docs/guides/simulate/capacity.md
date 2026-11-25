@@ -33,7 +33,8 @@ nodes:
 
 Set one of `pool` or `concurrency` on a node, not both (the file will not load).
 
-A slot is held for a hop's whole duration, including any extra latency you add with chaos. By default that is all: a node that waits on what it calls is not busy while it waits. A node that keeps a worker per request can say so with `hold: call`, which holds the slot until its calls return (see [nodes](/docs/reference/resources/#what-a-slot-covers-hold)). A request that waits for a held slot shows the wait on the node's first own hop.
+- **Slot duration:** held for the hop's full duration, including chaos latency.
+- **Waiting on calls (`hold: call`):** by default, a node is not busy while waiting on downstream calls. Set `hold: call` to keep the worker slot held until its calls return (see [resources](/docs/reference/resources/#what-a-slot-covers-hold)); queue waits appear on the node's first own hop.
 
 ## Rate limits
 
@@ -44,19 +45,22 @@ nodes:
   nginx: { type: gateway, rate_limit: { rps: 100, burst: 20 } }
 ```
 
-The bucket starts full with `burst` tokens and refills at `rps` per second. Each request takes one token when it reaches the node; with none left it is rejected with `429`. `rps` must be above 0 (at most 1000000000), `burst` at least 1, and `burst / rps` can be at most a year. Internally the time between tokens is rounded to a whole nanosecond, so the real rate is off by at most half a nanosecond per token: negligible up to about 10 000 requests per second, and noticeable (several percent or more) in the tens of millions.
+- Starts full with `burst` (`>= 1`) tokens, refilling at `rps` per second (`> 0` to `1,000,000,000`, with `burst / rps <= 1 year`).
+- Each request takes one token on arrival; empty buckets reject with `429`.
+- Token spacing rounds to whole nanoseconds — negligible up to ~10k rps, noticeable (several %) in the tens of millions.
 
 ## What counts as a visit
 
-A rate limit takes one token per **visit**, not per hop. A visit is a run of consecutive hops of one node, so a monolith's own processing followed by its inline database operation is one visit. A second call to the same node is a visit of its own, each pass of a `repeat` is one (`repeat: 3` takes three tokens), and a `parallel` block takes one per branch. Slots work per hop: each hop of the node takes a slot while it runs. With `hold: call` the node takes one slot (and one rate-limit token) when the request is admitted, and its own hops in that call run inside it.
+- **Rate limits:** take one token per **visit** (a run of consecutive hops on one node, e.g. a monolith's processing + inline DB op). Each separate call, `repeat` pass (`repeat: 3` = 3 tokens), or `parallel` branch is its own visit.
+- **Slots (`concurrency`/`pool`):** taken per hop while it runs. With `hold: call`, one slot and one rate-limit token are taken on admission, covering all own hops in that call.
 
 ## What clients see
 
-- **A rate limit says `429`** with a `Retry-After` header in whole seconds (rounded up, at least 1). A frontend can read it from JavaScript, because Kaanal exposes the header to browsers. The one exception is a [`storage`](/docs/reference/nodes/#storage) node, whose limit says `503` (S3's "Slow Down") and sends no `Retry-After`; the summary still counts those requests as limited for that node.
-- **A full line says the overflow status** (503 unless you changed it).
-- **`error_map` applies to both**, like any other failure. If it turns a 429 into something else, the `Retry-After` header is dropped: it only appears while the final status is 429 and a rate limit caused it (a 429 you create with `error_map` from another failure carries no `Retry-After`).
-- **Chaos wins over a limit.** A node you have set `down` fails with its own status and uses no token and no slot, so it never becomes a 429.
-- **A failing request ends the whole chain**, as with any failure. Branches of a `parallel` block that were still waiting in a line leave it; branches already running finish.
+- **Rate limits (`429`):** returns `429` with a `Retry-After` header in whole seconds (rounded up, min `1`), exposed to browser JS. Exception: [`storage`](/docs/reference/nodes/#storage) nodes return `503` ("Slow Down") with no `Retry-After`, though summaries still count them as limited.
+- **Full queues:** return `overflow_status` (`503` by default).
+- **`error_map`:** applies to both. If it remaps `429` to another status, `Retry-After` is dropped (only rate-limit `429`s carry it).
+- **Chaos precedence:** a `down` node fails with its chaos status and consumes no token or slot.
+- **Chain termination:** any limit failure ends the chain; queued `parallel` branches leave their queues, while running branches finish.
 
 ## Seeing the wait
 

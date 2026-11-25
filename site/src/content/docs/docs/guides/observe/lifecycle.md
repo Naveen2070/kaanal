@@ -34,7 +34,10 @@ Stop: kaanal down
 
 1. **Checks the config here**, exactly as `kaanal up` does. A bad `kaanal.yaml` is a `file:line:col` error and exit 1, before anything is created or started.
 2. **Takes the start lock** (`.kaanal/start.lock`), so two `up -d` in one folder run one after the other.
-3. **Looks for a running instance.** If one is up and answering its health check, it prints that instance's lines and `already running (pid N)`, and exits 0. One that holds the lock but does not answer yet (still starting, or in the middle of a shutdown) is waited for, within `--wait`: when it goes away a fresh one is started, and if it is still unresponsive at the deadline the command fails with `kaanal is running but not answering`. A leftover `run.json` of a dead instance is removed (see [stale state](#stale-state)).
+3. **Looks for a running instance.**
+   - If one answers its health check, prints its URLs and `already running (pid N)` and exits `0`.
+   - If one holds the lock without answering yet (starting or shutting down), waits up to `--wait`, then either starts a fresh one or fails with `kaanal is running but not answering`.
+   - Removes any leftover `run.json` from a dead instance (see [stale state](#stale-state)).
 4. **Rotates the log**: the old `.kaanal/kaanal.log` becomes `.kaanal/kaanal.log.1` (replacing the previous one) and a new, empty `kaanal.log` is created.
 5. **Starts a copy of itself** detached from your terminal, with its output in the log.
 6. **Waits** until that process has written its own `run.json`, holds the instance lock, and answers `GET /__kaanal/health` with 200. It checks every 100 ms.
@@ -66,15 +69,17 @@ already running (pid 29228)
 
 That makes `up -d` safe to put at the top of every test script. If the running instance is still starting, the second command waits up to 5 s for it to publish its state, then fails with `kaanal is starting or its state file is missing` (exit 1).
 
-**Simultaneous starts.** Five `kaanal up -d` launched at the same instant start exactly one instance; the other four wait their turn on the start lock, find it running, print `already running` and exit 0, and none of them rotates away the log of the live instance. A command that waits on the start lock is not limited by its own `--wait`: it waits for the one ahead of it, which is limited by that command's `--wait` plus its checks.
+**Simultaneous starts.** Five `kaanal up -d` calls launched together start one instance. The other four wait on the start lock, see it running, print `already running`, and exit `0` without rotating the live log.
+
+Waiting on the start lock is not bounded by your own `--wait`: it waits for the command ahead of it, which is bounded by that command's `--wait` plus its checks.
 
 **Non-loopback `--host`.** `kaanal up -d --host 0.0.0.0` prints the network-exposure warning in your terminal, and the background process also writes it to the log. See the [safety notes](/docs/how-it-works/safety/).
 
 ### The log
 
-`.kaanal/kaanal.log` is the background process's standard output and error: the startup lines (`Mocks:`, `UI:` without the token, `Auth:`, `Seed:`), warnings, and a panic message if there ever is one. Read it with any pager. It is replaced at each `up -d` (the previous one stays as `kaanal.log.1`, one generation only). If the old log cannot be renamed (on Windows, an editor holding it open), `up -d` warns and truncates it instead of refusing to start.
+`.kaanal/kaanal.log` captures the daemon's stdout/stderr (`Mocks:`, `UI:` without token, `Auth:`, `Seed:`, warnings, panics). Each `up -d` rotates the old file to `kaanal.log.1` (truncating with a warning on Windows if an editor holds it open).
 
-**What is never in it:** the token (the background process prints the `UI:` line without `#token=`; the token lives in `.kaanal/run.json`, in a folder only you can read, and in your terminal), request bodies, headers or any per-request line. The [request log](/docs/guides/observe/observability/) is in memory and dies with the process; this file is process output, not an access log. Foreground `kaanal up` writes no file.
+**What is never in it:** the token (kept in `.kaanal/run.json` and printed to your terminal), request bodies, headers, or per-request lines. The [request log](/docs/guides/observe/observability/) lives in memory; foreground `kaanal up` writes no file.
 
 ## `kaanal down`
 
@@ -108,9 +113,12 @@ What it does:
 
 The refusals are exit 1 with the reason, and nothing is killed: `kaanal did not stop, and pid 4120 is not a kaanal process (ping.exe); not killing it`, `... could not be verified as kaanal; not killing it: ...`, `kaanal instance changed while stopping; not killing`.
 
-**Which pids count as kaanal.** The process's image name must be `kaanal` (`kaanal.exe` on Windows), or the file name of the running `kaanal` itself, ignoring case. So a renamed or hashed copy (`kaanal-linux-x64`) can stop daemons that it started, and never anyone else's process. The check uses the operating system's tools by full path, so a program placed earlier on your `PATH` is never run: `tasklist` and `taskkill` from `System32` on Windows; `ps` and `kill` in `/bin` or `/usr/bin` on Linux and macOS. If they are in neither (NixOS keeps them elsewhere), the pid cannot be verified and `down` refuses to kill; the graceful path does not need them. On Linux `ps` shows only the first 15 characters of the name, and the check compares that many; a longer renamed binary is matched on its first 15.
+**Which pids count as kaanal.** The image name must be `kaanal` (`kaanal.exe` on Windows) or the running binary's own filename (case-insensitive), so renamed copies (`kaanal-linux-x64`) only stop daemons they started.
 
-**A second `down` while a drain is running.** A drain started with a long budget (`down --timeout 60s`) is not extended by a later command. The server answers a second shutdown request with the time left of the drain already running, and `down` waits for the longer of its own `--timeout` and that time left, plus 2 s, before it considers a force-kill. So a second `down` does not cut an earlier, longer drain short; it only waits for it.
+- **Verified via OS tools by full path** (never `PATH`): `tasklist`/`taskkill` in `System32` on Windows; `ps`/`kill` in `/bin` or `/usr/bin` on Linux/macOS.
+- If missing (e.g. NixOS), PID verification fails and `down` refuses to kill (graceful drain still works). On Linux, `ps` truncates names to 15 characters, so comparisons use the first 15.
+
+**A second `down` while draining.** A running drain (e.g. `down --timeout 60s`) is not shortened or extended by a later `down`; the server returns the remaining drain time, and `down` waits for `max(own --timeout, remaining) + 2s` before considering a kill.
 
 **Exit codes of `down`:** 0 stopped or not running, 1 it could not stop it (or would not kill), 64 a bad `--timeout`. It never exits 2.
 
@@ -150,7 +158,10 @@ $ echo $?
 
 Nothing is ever deleted while the lock is held, and a lock that cannot be tested at all (a network drive without file locking) is an error (exit 1), never "stale". A request that gets no answer is classified the same way: lock free means the instance is gone (exit 2, `kaanal is not running on 127.0.0.1:8080: ...`), lock held means it is alive but busy or wedged (exit 1).
 
-`kaanal logs -f` follows this rule too. When the stream ends after a `shutdown` event (a `down` or a signal), it waits for the process to exit and exits 2 with `kaanal stopped (the server shut down)`. When the stream ends without one (the instance was killed, or the drain budget was so small that the event was never written) it waits up to 2 s for the lock to go, then exits 2 if the instance is gone, or 1 if the lock is still held (`kaanal is running (pid N) but its control API did not answer: the event stream closed`).
+`kaanal logs -f` follows the same rule:
+
+- After a `shutdown` event (`down` or signal), it waits for exit and exits `2` (`kaanal stopped (the server shut down)`).
+- Without one (killed or tiny drain budget), it waits up to `2s` for the lock to clear, exiting `2` if gone or `1` if still held.
 
 ## Signals
 
@@ -159,7 +170,7 @@ Nothing is ever deleted while the lock is held, and a lock that cannot be tested
 | Linux, macOS | `SIGTERM` (`kill`, systemd, a CI runner), `SIGINT` (Ctrl+C)     |
 | Windows      | Ctrl+C, Ctrl+Break, closing the console window, system shutdown |
 
-All of them do the same: [drain](#the-drain) for 5 s, remove `run.json`, exit 0. The 5 s is fixed for signals; use `kaanal down --timeout` for another budget. The handlers are installed as soon as the runtime starts, before anything is published (`run.json`, the URLs); a signal that arrives from then on is queued and handled once the server is up. A signal during config loading or key generation, before that point, takes the default action and ends the process; nothing has been published by then, so nothing is left behind.
+All of them drain for a fixed `5s`, remove `run.json`, and exit `0` (use `kaanal down --timeout` for another budget). Handlers install right as the runtime starts; signals during earlier config/key setup take the default action and exit before anything is published.
 
 - **A hard kill** (`SIGKILL`, `taskkill /F`, a crashed machine) skips all of this and leaves [stale state](#stale-state), which the next command cleans up.
 - **A detached Windows daemon has no console**, so it never sees Ctrl+C or a console close. Stop it with `kaanal down` (or `POST /__kaanal/shutdown`). On Linux and macOS the daemon ignores `SIGHUP`, as `nohup` does, so closing the terminal does not kill it, and it is in its own process group, so Ctrl+C in that terminal does not reach it either.
@@ -187,9 +198,9 @@ data: {"timeout_ms":2999}
 
 `$(kaanal up -d)`, a CI step and a Node `execFileSync` all read the command's output until it closes. A background process that inherited the command's output pipe would keep it open for ever and the step would hang. Windows makes this easy to get wrong: Rust always starts child processes with handle inheritance on, so a plain spawn would hand the daemon the caller's pipes.
 
-`up -d` avoids it by marking its three standard handles (stdin, stdout, stderr) non-inheritable for the instant of the spawn and restoring them afterwards. That is one Win32 call (`SetHandleInformation`), which needs `unsafe` code; Kaanal forbids `unsafe` everywhere except one tiny crate for exactly this, `kaanal-winhandle` (rule R1.46, see [the per-file page](https://github.com/Naveen2070/kaanal/blob/main/docs/source/files/kaanal-winhandle/lib.md)). On other platforms there is nothing to do.
+`up -d` avoids this by temporarily marking stdin, stdout, and stderr non-inheritable during spawn (`SetHandleInformation` in the isolated `kaanal-winhandle` crate, the only place `unsafe` is allowed; see [kaanal-winhandle](https://github.com/Naveen2070/kaanal/blob/main/docs/source/files/kaanal-winhandle/lib.md)). Other platforms need no special handling.
 
-Limits: only those three handles are covered. If your own program has passed an extra inheritable handle to `kaanal up -d` (an extra pipe, an open file you made inheritable), the daemon can inherit that one. The daemon is also started outside the caller's job object when Windows allows it (so a terminal or IDE that kills its job on close does not take the daemon with it); when the job forbids that, it starts inside the job and ends with it.
+Only those three standard handles are covered; extra inheritable handles passed by a parent can still be inherited. When Windows allows, the daemon also starts outside the caller's job object so closing a terminal or IDE does not kill it.
 
 ## Exit codes
 
@@ -201,9 +212,9 @@ Limits: only those three handles are covered. If your own program has passed an 
 | 3    | Reserved for assertion failures. No command returns it yet.                                                                                                                                                                                                                          |
 | 64   | Usage error: the command line is wrong, found before any request was sent. In remote mode: a bad `--endpoint`, a missing token, `--token` without an endpoint, `up` with an endpoint.                                                                                                |
 
-**What is a 64.** Everything clap rejects (an unknown flag or subcommand, a missing argument, flags that exclude each other, a bad `--timeout`, `--wait` without `-d`) and every other bad argument the CLI can see for itself before it sends anything: a bad latency or rate, `--ttl`, `--state`, `--delay`, `--from`, a `-n` outside 1 to 1000, a bad `--since` or `--status` (with or without `-f`), `chaos set` with nothing to set, a bad scenario name or file name. 64 is `EX_USAGE` from `sysexits.h`. (Before this release these exited 1, and clap's own errors would have exited 2, which means "not running" here.)
+**What is a 64 (`EX_USAGE`).** All clap validation errors plus local CLI checks before sending a request: bad durations/rates, `--ttl`, `--state`, `--delay`, `--from`, `-n` outside `1..1000`, bad `--since`/`--status`, empty `chaos set`, or invalid scenario/file names.
 
-**Remote mode is never a 2.** Exit 2 means "no instance in this folder", which a remote command cannot know. With `--endpoint`, a refused, reset or timed-out connection is exit 1 (`cannot reach http://host:8080: ...`) and a rejected token is exit 1 (`token rejected`). Misusing the flags is a 64: a URL that is not `http://HOST:PORT` (https, a path, a user or password, no port), `--endpoint` without a token (`set KAANAL_TOKEN`), the `--token` flag without an endpoint, or `up` / `up -d` while an endpoint is set (flag or `KAANAL_ENDPOINT`).
+**Remote mode is never a 2.** Exit `2` means "no local instance in this folder". With `--endpoint`, connection failures and rejected tokens exit `1`. Flag misuse (non-`http://HOST:PORT`, missing token, `--token` without `--endpoint`, or `up`/`up -d` with an endpoint) exits `64`.
 
 **What stays a 1.** A value that parses on your side and that the server then refuses. `kaanal trace "bad id!"` is an HTTP 400 from the server, so exit 1.
 

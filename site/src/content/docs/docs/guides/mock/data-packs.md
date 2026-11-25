@@ -46,7 +46,7 @@ places:
   - { city: Leipzig, state: Sachsen, postcode: "04{3}" }
 ```
 
-`de-DE` is already built in, so this file replaces it; use a tag that is not built in (such as `ja-JP`) to add a locale. Then `locale: <tag>` in `kaanal.yaml` (or on a single node) switches to it. The built-in packs are authored for Kaanal, not taken from any census, registry or frequency list, and their phone numbers use fiction ranges where the country has one (`en-GB`, `en-US`, `de-DE`, `fr-FR`); `es-ES` and `pt-BR` have none, so treat those numbers as test data only. Restart to pick up edits; there is no hot reload.
+`de-DE` is built in, so this file replaces it; use a new tag (e.g. `ja-JP`) to add one, then set `locale: <tag>` in `kaanal.yaml` (or on a node). Built-in packs are synthetic (not from real registries; `es-ES`/`pt-BR` phones are test numbers only). Restart to pick up edits.
 
 ### Fields
 
@@ -103,7 +103,10 @@ A tag is never turned into a path: `locale:` must match `^[A-Za-z]{2,3}(-[A-Za-z
 
 ## Writing a dictionary
 
-`data.yaml` next to `kaanal.yaml` (or whatever `data:` names; it must be a file) is a second dictionary layer, not a merge into the built-in one. Your file is consulted **before** a schema `format` and the built-in dictionary **after** it (see [Precedence and fit](#precedence-and-fit)). So a matching key of yours wins over the built-in entry, even a broader one (your `"*id"` beats a built-in exact `orderId`); when your entry does not fit the field, the `format` decides, then the built-in dictionary, then the defaults. Names your file does not match keep their built-in behaviour.
+`data.yaml` next to `kaanal.yaml` (or `data:` path) adds a dictionary layer **before** schema `format` (the built-in dictionary runs **after** `format`; see [Precedence and fit](#precedence-and-fit)).
+
+- Any matching key in your file beats built-in entries (even `"*id"` over built-in `orderId`).
+- If your entry doesn't fit the field, `format` → built-in dictionary → defaults decide. Unmatched fields keep built-in behaviour.
 
 Unlike packs in `locales/`, a `data.yaml` (or `data:` file) that is a symlink is followed.
 
@@ -153,8 +156,8 @@ An entry is `{ gen: <name>, ...parameters }`. The set is closed: a dictionary ca
 
 Real data is lumpy, so the built-in dictionary is too (all of it can be changed in your `data.yaml`):
 
-- **Prices** are skewed cheap (`dist: decade`: most values in the lower decades of the range, a few expensive ones) and `price`, `*price` and `cost` fields end like a shop price (`style: retail`: `.99` half the time, `.00` a quarter, then `.95`, `.49`). A retail ending that would leave `minimum`/`maximum` is dropped for that value, and integer prices are never changed. A range that starts at 0 or below is drawn uniformly. `dist: uniform, style: plain` turns both off.
-- **Weighted choices.** `weights` maps a value to its weight; a value you do not list weighs 1, so every value stays possible. Keys are the value's text (`paid`, `true`, `4`). The built-in `status`, `*status`, `order_status` and `payment_status` favour the happy path (8 for `active`, `paid`, `delivered` and friends, 3 for `pending`, `shipped`, 1 for `cancelled`, `failed`), `active`/`enabled`/`verified` are true 4 times in 5, `rating` and `stars` lean positive and `quantity` is mostly 1 to 3. The weights **also apply to a spec's `enum`** on a field with that name (an `enum: [paid, pending, cancelled]` on `status` is weighted too, never limited). An entry of your own for the same name, without `weights`, turns this off for that name. At least one weight must be above 0.
+- **Prices:** skewed cheap (`dist: decade`) and ending like shop prices (`style: retail`: `.99` 50%, `.00` 25%, else `.95`/`.49` on `price`/`*price`/`cost`). Retail endings are dropped if they violate bounds, integer prices are unchanged, ranges `<= 0` draw uniformly, and `dist: uniform, style: plain` turns both off.
+- **Weighted choices (`weights`):** maps value text (`paid`, `true`, `4`) to positive weights (unlisted = `1`, at least one `> 0`). Built-ins favour happy-path statuses (`8` active/paid/delivered, `3` pending/shipped, `1` cancelled/failed), `true` flags (`4:1`), positive ratings, and small quantities (`1–3`). Built-in weights also apply to OpenAPI `enum`s unless overridden in `data.yaml`.
 - **Timestamps** lean recent: two thirds of values fall in the most recent third of the window (`days`, default 365, back from 2026-01-01).
 - **Ages** (`age`) come from four bands over 18 to 80 weighted 25/30/25/20, so most people are between 33 and 64; the birth date then follows the age (see Records that add up).
 
@@ -168,7 +171,9 @@ The generators are tried in order and **the first whose output fits the field's 
 
 ### Time chains
 
-Timestamps of one object stay in order, the way a real backend writes them: `createdAt`, then `updatedAt` (or `modifiedAt`), then `deletedAt`; `startAt`/`startDate` before `endAt`/`endDate`; `orderedAt`, `paidAt`, `shippedAt`, `deliveredAt`; `issuedAt` before `dueAt`. Each later member is drawn between the previous one and 2026-01-01, so it is always after it, and adding `updatedAt` to a schema never moves `createdAt`. A member with an `example`, `enum`, `const` or a `static`/`pick` entry of yours is never changed, and later members follow it. A date and a date-time in one chain are left alone.
+Timestamps on one object stay ordered: `createdAt → updatedAt/modifiedAt → deletedAt`, `startAt/startDate → endAt/endDate`, `orderedAt → paidAt → shippedAt → deliveredAt`, and `issuedAt → dueAt`.
+
+Each later field draws between the previous one and `2026-01-01` (adding `updatedAt` never shifts `createdAt`). Fields pinned by `example`/`enum`/`const`/`static`/`pick` stay fixed, and mixed date/date-time chains are left alone.
 
 Add your own chains, or switch built-in ones off, in `data.yaml`:
 
@@ -181,7 +186,11 @@ chains_off: [created_at]      # drops every built-in chain that contains this na
 
 ### Records that add up
 
-Fields of one record agree where a real system guarantees it. An order that has line items (each with a `price` and a `quantity`, or a line-amount field) gets `lineTotal` = price x quantity, `subtotal` = the sum of the lines, a `tax` that is a fraction of it, `shipping`, a `discount` never above the subtotal and `total` = subtotal + tax + shipping - discount. The sums are exact (cents, never `59.970000000000006`; all-integer schemas stay integers). A bare `total` is summed only next to `subtotal`, `tax`, `shipping` or `discount`, or when it is typed `number`; an integer `total` alone beside the lines is a count. A plain list such as `{ items: [{name, price}], total: 3 }`, or a field you pinned with an `example`, `enum`, `const` or `static`/`pick` entry, is never rewritten. `age` and `dateOfBirth`/`dob`/`birthday` agree to the year (a birth date with no `age` beside it is an adult's, 18 to 80 years before 2026-01-01), and `locale` and `language` follow the node's locale pack (`en-IN` gives `en-IN` and `en`).
+Related fields on one object stay mathematically and semantically consistent:
+
+- **Orders:** line items (price × quantity) set exact-cent lineTotal, subtotal, 	ax, shipping, discount (<= subtotal), and 	otal = subtotal + tax + shipping - discount (all-integer schemas stay integers). A bare 	otal only sums when typed umber or alongside subtotal/	ax/shipping/discount (otherwise an integer 	otal is a list count).
+- **Demographics:** ge and dateOfBirth/dob/irthday match to the year (without ge, birth dates are 18–80 years before 6-01-01). locale and language match the node's locale (n-IN and n).
+- **Pinned fields:** xample, num, const, static, and pick values are never rewritten.
 
 ### Precedence and fit
 
@@ -205,9 +214,9 @@ The schema's type and bounds always beat a dictionary entry. An entry applies on
 - `pick` and `static` values that do not fit the type or the numeric bounds are not used;
 - a string generator on an integer field (or the reverse) does not fit.
 
-When an entry does not fit, it is skipped and the next layer decides. A misfit in **your** `data.yaml` is reported by `kaanal validate` and `kaanal up` as a warning naming the endpoint and field (`GET /users .age: project dictionary entry for age does not fit...`). A misfit in the **built-in** dictionary is skipped silently, because it was only a guess from the field's name.
+Unfitting entries fall through to the next layer. A misfit in **your** `data.yaml` warns on `kaanal validate` and `kaanal up` (built-in misfits skip silently).
 
-Lengths are different for your own strings. A `static` value, any string a `pick` can choose, or a `template` (whose placeholders have fixed widths, so its length is known) that falls outside the field's `minLength`/`maxLength` is still used, unchanged, and `kaanal validate` and `kaanal up` warn (`GET /items .sku: project dictionary value for sku can fall outside its minLength/maxLength; it is sent as written`). A built-in `pick` or `template` that cannot meet the lengths is skipped silently instead, so the field gets a fitted generated string.
+Your own `static`, `pick`, and `template` strings are sent verbatim even if they fall outside `minLength`/`maxLength` (with a startup warning); built-in ones skip silently and fit the length.
 
 `pick`, `static` and `template` values are your own data and are not checked for being synthetic; the built-in packs and dictionary are, and so should anything you contribute (below).
 

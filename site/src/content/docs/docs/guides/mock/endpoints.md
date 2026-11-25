@@ -94,9 +94,16 @@ nodes:
 
 ## Error mapping
 
-`error_map` turns a failure into the response you want. The failing node's name is tried first, then the failure kind (`reset`, `malformed` or `timeout`), then the exact status, then its class (`5xx`); with no match a status failure keeps its own status, a deep `reset` or `malformed` becomes a 502 and a `timeout` a 504, and at the gateway or the route's owner a `reset` or `malformed` breaks the connection or the body instead (a node or kind key still wins there). A value is a status number or `{ status, body }`.
+`error_map` turns a failure into a custom response (`status` number or `{ status, body }`). Keys are matched in order:
 
-An endpoint maps only its own errors: when a step uses `via:`, the `error_map` of the endpoint it points at is not used, and `kaanal validate` warns about it.
+1. Failing node name
+2. Failure kind (`reset`, `malformed`, or `timeout`)
+3. Exact HTTP status
+4. Status class (`5xx`)
+
+Without a match: status failures keep their status, deep `reset`/`malformed` become `502` and `timeout` becomes `504`, while at the gateway or route owner `reset`/`malformed` break the connection or body (unless a node or kind key overrides it).
+
+An endpoint maps only its own errors: when a step uses `via:`, the target endpoint's `error_map` is ignored (`kaanal validate` warns).
 
 ## `states:` (what a pin answers)
 

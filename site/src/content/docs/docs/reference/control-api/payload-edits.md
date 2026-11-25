@@ -4,7 +4,9 @@ sidebar:
   order: 4
 ---
 
-A live edit rewrites what one route answers: its status, headers and body (JSON; text with a `content_type`; or bytes with `encoding: "base64"`, the body then being base64 and the `content_type` required), from the next request on; `once: true` makes it answer one request only. It is what Studio's [Admin mode](/docs/guides/break/admin-mode/) edits. It sits below chaos and pins and above the route's `override:`; a request that names a scenario scope never sees it. All routes need the token.
+Live edits rewrite a route's status, headers, and body (JSON, text with `content_type`, or base64 bytes with `encoding: "base64"` and `content_type`) starting from the next request. Use `once: true` for a single request.
+
+Edits power Studio's [Admin mode](/docs/guides/break/admin-mode/), sit below chaos/pins and above `override:`, and are ignored when `X-Kaanal-Scenario` is set. All routes require the token.
 
 | Method and path                            | Purpose                                                                                                                                       | Success                                                 |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
@@ -26,4 +28,5 @@ A live edit rewrites what one route answers: its status, headers and body (JSON;
 | `413`  | The body is over 1 MiB                                                                                                                                                                                                                                                                                                                                            |
 | `422`  | `{ "error", "field" }`: the edit is refused, and `field` is `status` (not 200 to 599, or a body on a `204` or `304`), `body` (over 1 MiB), `headers` (over 32, a bad name, a value over 4096 bytes or with a control character, or a name Kaanal sets itself) or `route` (a `collection:` route, a built-in login or key-set route, a `HEAD` made from its `GET`) |
 
-`stage-file` validates like `PUT`, patches the file with the comment-keeping splice and writes it atomically (`409` when the draft's `endpoints:` is inline, the file changed meanwhile, or the result would not be an endpoints file); the running system keeps its live edit until the next Apply reads the file. A refused `PUT` changes nothing. An Apply keeps the edits whose route still takes one and lists the others as `payloads_dropped` in its reply. `POST /__kaanal/reset` clears every edit.
+- **`stage-file`:** validates like `PUT`, patches the external endpoints file atomically while preserving comments (`409` if `endpoints:` is inline, modified on disk, or invalid), and leaves the live edit active until the next Apply.
+- **Refusals & resets:** failed `PUT`s change nothing; Apply keeps edits for matching routes and reports dropped ones in `payloads_dropped`; `POST /__kaanal/reset` clears all edits.

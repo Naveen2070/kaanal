@@ -58,7 +58,7 @@ fields:
   "*id":  [{ gen: uuid }, { gen: integer, min: 1, max: 99999 }]
 ```
 
-Field names match whatever their style (`userEmail`, `user_email`); a `*suffix` key matches whole trailing words only (`*id` matches `userId`, not `paid`); an entry can be a list, the first generator that fits the field's type applying. All of it, the generator list and the error messages are in [Data packs](/docs/guides/mock/data-packs/#writing-a-dictionary).
+Field names match regardless of casing or separators (`userEmail`, `user_email`). A `*suffix` key matches trailing whole words (`*id` matches `userId`, not `paid`), and list entries try each generator until one fits the schema type. See [Data packs](/docs/guides/mock/data-packs/#writing-a-dictionary) for the full generator list.
 
 Precedence, first match wins:
 
@@ -70,9 +70,9 @@ Precedence, first match wins:
 6. the built-in dictionary;
 7. type and bounds defaults.
 
-A string with a `pattern` matches it: a generated value that already matches (an email under `.+@.+`) is kept, otherwise Kaanal samples one from the regex (ASCII only, open repeats up to 8 extra, `minLength`/`maxLength` respected). Your `example`, `enum`, `const` and `data.yaml` `static`/`pick` values are never replaced. A pattern Kaanal cannot sample (lookaround, back-references, a huge repeat) or cannot fit within the length bounds is a startup warning, and the value may not match it.
+**`pattern` matching:** if a generated string already matches `pattern`, it is kept; otherwise Kaanal samples from the regex (ASCII, open repeats capped at 8 extra, respecting `minLength`/`maxLength`). `example`, `enum`, `const`, and `data.yaml` `static`/`pick` values are never replaced; unsupported regexes (lookaround, back-references, huge repeats) warn on startup.
 
-The schema's type and bounds always win over a dictionary entry: numbers are clamped to `minimum`/`maximum`, generated strings fitted to `maxLength` and `minLength` (in characters). An entry that cannot fit its field is skipped. A misfit in your `data.yaml` is a warning from `kaanal validate` and `kaanal up` that names the endpoint and field; a misfit built-in entry is skipped silently. Your own `pick`, `static` and `template` strings are never trimmed or padded: they are sent as written, and one that can fall outside the field's `minLength`/`maxLength` is a warning naming the field.
+**Bounds & misfits:** schema types and `minimum`/`maximum`/`minLength`/`maxLength` always win over generators. Unfitting `data.yaml` entries warn and fall through (built-in misfits skip silently), whereas your own `pick`, `static`, and `template` strings are sent verbatim with a warning if they can violate length bounds.
 
 ## Schema keywords
 
@@ -101,7 +101,7 @@ With `oneOf`/`anyOf` and a `discriminator`, the picked branch's tag property is 
 - `discriminator mapping 'cat' names no oneOf/anyOf branch; it is never generated`
 - `discriminator has no propertyName and is ignored`
 
-It also samples each endpoint's generated response (5 bodies) and checks them against the response schema. A miss is a warning that names the endpoint and the path, for example `GET /orders: 3 of 5 generated samples violate the response schema: /items/*/total: maximum`. It is Kaanal's bug or a contradiction in the spec (an `example` outside its own `maximum`); the mock still starts. `kaanal up` prints these lines a moment after it has started serving, so a big spec never slows startup.
+Both commands also validate 5 sampled bodies per endpoint against the response schema, warning on mismatches (printed shortly after startup so large specs stay fast).
 
 ## Behaviour changes in this release
 

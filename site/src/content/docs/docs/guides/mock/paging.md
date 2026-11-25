@@ -73,7 +73,9 @@ How a style is chosen:
 | Largest size | the parameter's `maximum`, else **100**; asking for more is clamped, not an error |
 | Smallest     | the parameter's `minimum`, else 1; asking for less is a 400                       |
 
-**Heavy records shrink the page.** One response body holds at most **10 000 values** (every object, array, string, number counts once), the same cap every generated body has. Kaanal works out the most values one record of the route can take (arrays at their longest) and, when `size × that` would pass the cap, serves fewer records per page, never fewer than one. So `?limit=10000` on a route whose records take up to 102 values gets pages of 98. The shrunk size is the page size everywhere: the `limit`/`size` field, `X-Total-Count` stays the total, and the `next` link and field continue exactly where the page ended, so walking still sees every record once.
+**Heavy records shrink the page.** One response body holds at most **10 000 values** (counting every object, array, string, and number). When `size × max_record_values` exceeds 10 000, Kaanal shrinks the page size (at least 1 record).
+
+For example, `?limit=10000` on a 102-value record returns 98 records. `limit`/`size` reflects the shrunk size, `X-Total-Count` keeps the full total, and `next` continues seamlessly from where the page ended.
 
 A bad paging value is a **400**, never a silent fix-up:
 
@@ -82,7 +84,12 @@ $ curl -s 'localhost:8080/pets?limit=0'
 {"error":"invalid query parameter","param":"limit","detail":"must be at least 1"}
 ```
 
-`param` is the parameter as the spec spells it. The 400 cases: a size, page or offset that is not a plain non-negative whole number (no sign, no spaces, digits only), or one above 4294967295 (`exceeds the maximum supported value`), a size below the minimum, a page below the first (`page=0` on a 1-based route), and a cursor Kaanal did not issue. If a parameter is repeated, the first value counts. A page or offset past the end is **not** an error: it is a `200` with no records.
+`param` matches the spec's spelling (first value wins if repeated). Returning `400` occurs on:
+
+- non-integer or negative `size`/`page`/`offset`, or values `> 4294967295`;
+- `size < minimum`, `page` below the first (`page=0` on a 1-based route), or an unissued `cursor`.
+
+A `page` or `offset` past the end is **not** an error — it returns `200` with `[]`.
 
 A cursor is `base64url("k1:" + offset)` with no padding. Treat it as opaque; only the exact token Kaanal gave you works, a hand-edited one is a 400.
 
@@ -177,7 +184,7 @@ A parameter **entry** may itself be a `$ref` (`- $ref: '#/components/parameters/
 
 Only `in: query` parameters are read for paging. The schemas of header, path and cookie parameters are never resolved here.
 
-> Two regressions worth knowing about, both in the paging work: specs that loaded before it failed to load. The first implementation (commit `fcd529e`) resolved every parameter's schema `$ref` up front, so a header, path or cookie parameter with an external or dangling schema `$ref` failed the **whole spec**; fixed in `1cb501f` by checking `in: query` first and resolving leniently (tests `non_query_params_with_unresolvable_schema_refs_still_load`, `query_param_with_dangling_schema_ref_is_skipped`). The parameter entries themselves were still resolved strictly, so an unresolvable entry `$ref` on any operation failed it the same way; fixed by skipping that entry (test `unresolvable_parameter_entries_are_skipped_not_fatal`).
+> **Historical regressions:** earlier commits resolved all parameter `$ref`s strictly (`fcd529e`), breaking specs with dangling/external `$ref`s on non-query params or parameter entries. Fixed (`1cb501f`) by checking `in: query` first and skipping unresolvable `$ref` parameters rather than failing the spec.
 
 ## Known limits
 

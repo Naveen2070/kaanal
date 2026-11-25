@@ -71,25 +71,15 @@ The service name is one lowercase letter, then lowercase letters, digits, `-` or
 
 ## From a URL
 
-```
+```bash
 kaanal init https://example.com/api/openapi.yaml
 ```
 
-`init` downloads the spec and saves it next to `kaanal.yaml`, named after the last part of the URL path when that ends in `.yaml`, `.yml` or `.json` (other characters become `_`), otherwise `openapi.yaml`. The config points at that local copy. A name that is a Windows device name (`con`, `nul`, `com1` and so on) or longer than 100 characters also gives `openapi.yaml`. If a file with that name already exists, `init` stops with exit 64 before downloading; `--force` replaces it and the output says so (`Replaced the existing openapi.yaml`; with `--json`, a `replaced` list). While `init` runs, the old file is kept as `<name>.kaanal-old` and deleted at the end; if that backup name is already taken (an interrupted run), `init` stops with exit 64 and leaves both files alone.
+`init` downloads the spec next to `kaanal.yaml`, named after the last URL path segment when ending in `.yaml`, `.yml`, or `.json` (otherwise `openapi.yaml`; invalid chars become `_`, and Windows device names or >100-char names fall back to `openapi.yaml`).
 
-The download is deliberately limited:
-
-- One `GET`, no cookies, no credentials. A URL with a user name or password (`https://user:pass@...`) is refused (exit 64).
-- `https` for any host. Plain `http` only for `localhost`, `127.0.0.0/8` or `::1`. Other schemes are refused (exit 64).
-- At most 3 redirects, each checked by the same rules, and never from `https` down to `http`.
-- 10 seconds in total and 10 MB at most.
-- The response must be an OpenAPI 3.0 document. An HTML page, other JSON, Swagger 2.0, a non-2xx status, a timeout or an oversized body is exit 1.
-
-Errors name the URL without its query string and never print the response. If anything fails, including the project check after the download, the downloaded file is removed again (a file replaced with `--force` is moved back from its backup), so your folder is as it was. If a cleanup step itself fails, a warning on stderr names the file.
-
-An `https` download honours the usual proxy environment variables (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`). A plain `http` download, which only ever goes to your own machine, never uses a proxy: a proxy would fetch from its own localhost, not yours.
-
-`https` support is the `https` Cargo feature, on by default (rustls with the `ring` crypto provider and the Mozilla root certificates from `webpki-roots`; building it needs a C compiler). A build with `--no-default-features` has no TLS: an `https://` URL is then refused with exit 64; download the file and pass its path instead.
+- **Existing files**: stops with exit `64` unless `--force` is passed (backs up to `<name>.kaanal-old` during download; refuses if that backup exists).
+- **Download rules**: single `GET` (no cookies/credentials; `user:pass@` exits `64`); `https` for any host, plain `http` only for `localhost`/`127.0.0.0/8`/`::1`; max `3` redirects (never `https` → `http`); `10s` / `10 MB` cap; must be OpenAPI 3.0 (else exit `1`).
+- **Proxies & TLS**: `https` honours `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`; `http` skips proxies. Failures clean up downloaded/backup files without printing response bodies or query strings. (`https` requires the default `https` Cargo feature.)
 
 ## Output
 

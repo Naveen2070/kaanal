@@ -52,7 +52,7 @@ Each entry names **where** it applies and sets **at least one** of the fields:
 
 `error_kind` and `error_status` belong to the **same entry's `error_rate`**. An entry that sets a kind or a status without a rate does nothing, and Kaanal tells you: `kaanal validate`, `kaanal scenario load` and the control API print a warning (it is not an error).
 
-An entry with the same node and endpoint twice in one scenario is an error (merge them). Unknown keys, a scenario with neither `chaos:` nor `pins:` (or both empty) and values outside the limits are errors, shown as `file:line:col`. Names that do not exist in your topology are errors too, and `kaanal validate` checks them. A `node` + `endpoint` pair the endpoint's chain never visits is only a warning ("this entry never fires").
+An entry repeating the same node+endpoint in one scenario, unknown keys, empty scenarios, out-of-range values, or unknown topology names fail on load (`file:line:col`). A `node` + `endpoint` pair never visited by that route's chain warns ("this entry never fires").
 
 ## Pins in a scenario
 
@@ -100,7 +100,7 @@ Several scenarios can be active at once. They form a **stack**, in the order you
 - Activating a scenario that is already active moves it to the top of the scenarios.
 - For the same field, **a higher layer wins over a lower one**. Within one layer, the more specific entry (node at endpoint before node) goes first.
 - Latencies add up (clamped to 5 minutes per entry key: the node, endpoint and node-at-endpoint entries each clamp on their own). `down` from any layer takes effect. Error rates combine as independent chances, and each keeps its own kind and status: 30% `reset` in the top layer plus 30% `503` below gives about 30% resets and 21% 503s.
-- Through the API, a hand-set entry with `mode: override` replaces everything below it for that key, so a live `down: false` can calm a scenario. A node override also calms that node's node-at-endpoint entries from scenarios. A node-at-endpoint override replaces only the other node-at-endpoint entries of that pair; it cannot calm chaos set on the node itself (use a node override for that). The mode sticks until a later `PUT` says `mode: merge`. See [the control API](/docs/reference/control-api/).
+- With `mode: override` via the API, a hand-set entry replaces everything below it for that key (e.g. `down: false` calms a scenario). A node override also calms node-at-endpoint scenario entries for that node; a node-at-endpoint override only replaces other node-at-endpoint entries. Stays in override mode until a `PUT` sends `mode: merge` (see [control API](/docs/reference/control-api/)).
 - Activating or deactivating a scenario does not change the random numbers a seeded run draws. To repeat a seeded run you also need to reset the request counters: see `reset` below.
 
 ## CLI
@@ -218,35 +218,10 @@ curl -H 'X-Kaanal-Scenario:' http://127.0.0.1:8080/checkout                     
 - **No header**: the request sees the global stack (what `kaanal scenario activate` built), as before.
 - **Empty header** (`X-Kaanal-Scenario:`): an explicit baseline. The request sees no chaos, whatever is active globally.
 - **Names**: comma separated, spaces around a name ignored, the last position wins when a name repeats (`a,b,a` is `b,a`). The stack is in header order, bottom to top.
-- **Bad header**: `400 { "error": "bad scenario scope", "detail": "..." }`, and the request does not run (no counter draw, no chaos draw). It still gets an `X-Request-Id` and is logged with `rejected: bad-scope` (see [observability](/docs/guides/observe/observability/)). That covers an unknown or invalid name, an empty name (`a,,b`), more than one header line, a non-ASCII value, more than 16 names and a value over 256 bytes.
-- **Echo**: the response carries `X-Kaanal-Scope` with the deduplicated stack that answered it (`b,a` for `a,b,a`; an empty value for an empty header). Without the request header there is no echo. It is exposed to browsers through CORS, and the request header is allowed by the preflight.
-- A `404` (no such route) or `405` (wrong method) is answered before the header is read, so a bad header never changes them. The `/__kaanal` control API ignores the header.
-- The header is read per request, so a scenario defined, replaced, deleted or saved afterwards is seen by the next request.
-- The request event on the [SSE stream](/docs/reference/control-api/live-and-events/#get-__kaanalevents) has a `scope` field: `null` without the header, the echoed stack (or `""`) with it.
-
-Playwright: set it once per browser context, so every request that context makes (page loads, `fetch`, XHR) is scoped.
-
-```ts
-const context = await browser.newContext({
-  extraHTTPHeaders: { 'X-Kaanal-Scenario': 'payments-down' },
-});
-```
-
-Cypress: add the header to the calls your app makes to Kaanal.
-
-```ts
-cy.intercept('http://127.0.0.1:8080/**', (req) => {
-  req.headers['x-kaanal-scenario'] = 'payments-down';
-});
-```
-
-A browser calling Kaanal from another origin sends a preflight; Kaanal answers it with permissive CORS headers on the mock routes, so the custom header is allowed.
-
-Scoping isolates chaos and pins. A scoped request sees the pins of the scenarios it names and never the live pins (`kaanal cycle`), so workers pin through pins-only scenarios.
-
-Scoping isolates only those two. Route counters and the engine's rate limits, queues and pools are shared by every request, because they model shared infrastructure. With a `seed:`, a worker's outcomes are reproducible only when it runs alone; two workers running at once draw from the same per-route counters in an interleaved order. For exact replay, run one worker per instance.
-
-Cost: a scoped request does one shared read lock and one short-string hash to find its compiled stack. A stack is compiled once, on its first request, then cached. Any change to scenarios or the stack (activate, deactivate, define, delete, save, reset, a live write, an expiry) clears the cache, so the next scoped request recompiles; that costs microseconds. In the 3000 requests/s load check, with half the requests carrying an empty header, there were no errors and the lag over the trace stayed in its bound (p50 10.3 ms, p99 17.4 ms).
+- **Bad header**: `400 { "error": "bad scenario scope", "detail": "..." }` before running (no counter or chaos draw; still gets `X-Request-Id` and logs `rejected: bad-scope` in [observability](/docs/guides/observe/observability/)). Triggered by unknown/invalid names, empty names (`a,,b`), multiple header lines, non-ASCII values, `> 16` names, or `> 256` bytes.
+- **Echo & events**: responses echo `X-Kaanal-Scope` with the deduplicated stack (`b,a` for `a,b,a`, empty for empty header, absent without header; exposed via CORS). The [SSE stream](/docs/reference/control-api/live-and-events/#get-__kaanalevents) emits `scope` (`null`, `""`, or the stack). `404`/`405` and `/__kaanal` ignore the header.
+- **What is isolated vs shared**: scoping isolates chaos and scenario pins (ignoring `kaanal cycle` live pins), but route counters, rate limits, queues, and pools remain shared. For exact seeded replay, run one worker per instance.
+- **Performance**: compiled stacks cache after the first request (`RwLock` read + hash) and invalidate on any scenario/live change.
 
 ## Auto-expiring activations
 
@@ -282,7 +257,7 @@ Two leases exist and they are independent:
 
 Neither touches the other: a chaos lease running out leaves every active scenario in place, and a scenario expiring leaves your hand-set chaos. Both are timed by the same server clock, so a 24 h scenario lease never delays a 1 s chaos lease.
 
-Saving does not carry a lease. `scenario save NAME --from live` (or `--from effective`) writes leased live fields as permanent (a file has no `ttl`) and the answer's `warnings` says how many (`"N fields have a ttl; the file has none"`; the CLI prints it on stderr); the live chaos itself keeps its timers unless you also `clear_live`. Activating the saved scenario therefore holds those fields until you deactivate it. Details: [control API](/docs/reference/control-api/health-and-chaos/#put-__kaanalchaosnode).
+Saving drops leases: `scenario save NAME --from live` (or `--from effective`) writes leased fields as permanent and warns (`N fields have a ttl; the file has none`), while leaving live timers running unless `clear_live` is set. See [control API](/docs/reference/control-api/health-and-chaos/#put-__kaanalchaosnode).
 
 ## Limits worth knowing
 

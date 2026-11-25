@@ -25,9 +25,9 @@ An id looks like `rcb02-0002`: the letter `r`, four hex digits, a dash and a cou
 - The counter starts at 1 and grows by one per request, in the order requests **arrive**. It has at least four digits (`0042`), and grows past them (`12345`). Hex digits are lowercase.
 - `kaanal reset` empties the log but the counter keeps going, so an id is never reused within a run.
 
-**Which responses carry it.** Every response from a mock route: `200`, a chaos `503`, a pinned answer, a `reset` or `malformed` wire failure, a `404`, a `405`, a `400` for a bad `X-Kaanal-Scenario`, a `429`, and the `500` of a stopped engine. CORS preflights (`OPTIONS`) and everything under `/__kaanal/` get **no** id and take no number. The header is listed in `Access-Control-Expose-Headers`, so JavaScript on another origin can read it from a `fetch` response.
+**Which responses carry it.** Every mock response (`200`, chaos `503`, pinned answers, `reset`/`malformed`, `404`, `405`, bad `X-Kaanal-Scenario` `400`, `429`, stopped-engine `500`). `OPTIONS` preflights and `/__kaanal/` paths get no id. Listed in `Access-Control-Expose-Headers` for browser `fetch`.
 
-**Your own id.** If the request has an `X-Request-Id` header that matches `[A-Za-z0-9._-]` and is 1 to 64 bytes long, Kaanal records it as the entry's `client_id`. Anything else (a space, a control byte, 65 bytes, bytes that are not text) is ignored without an error. The response still carries **Kaanal's** id, never yours, so the two cannot be confused. `kaanal trace` accepts either.
+**Your own id.** An `X-Request-Id` header matching `[A-Za-z0-9._-]` (1–64 bytes) is saved as `client_id`; invalid values are ignored silently. Responses still carry Kaanal's own id, and `kaanal trace` accepts either.
 
 ## What the log holds
 
@@ -117,8 +117,8 @@ Filters combine (all must match). Things to know:
 - Lines come in the order the events are published, which is the order requests **finish** give or take a few that finish at nearly the same moment (the log and the event stream are two steps). A slow request started early is printed when it ends, not before the fast ones that overtook it. `done` and `logs?after=` are exact.
 - If the screen cannot keep up (the follower buffers 4096 events), it says so instead of falling silent: `-- missed 17 requests (follow slower than the server) --`. The server sends the same notice when it drops events itself. Use `kaanal logs --since` to read what was missed.
 - The event stream is opened with an `Authorization` header, so the token never appears in a URL.
-- `--json` is the [global flag](/docs/reference/cli/#global-flags) (`kaanal --json logs` works too, and so does `KAANAL_JSON=1`); the output is the same as before. With it, stdout carries JSON Lines only: each live line is the full entry, fetched when the event arrives. If the entry left the ring in between, the line is the shorter event object instead (it has the same `id`, `status`, `path`, `endpoint` and so on, but no `hops`), and `-- could not fetch ID --` goes to stderr. The `-- missed N requests ... --` notice goes to stderr too, so a pipe into `jq` stays clean.
-- If the server stops, `logs -f` ends, because the event stream does, and it exits with code 2. A `kaanal down` (or a signal) makes the server send a `shutdown` event first; `logs -f` then waits for the process to finish its exit and prints `kaanal stopped (the server shut down)`. A server that was killed has no such event: the follower waits up to 2 s for the lock, then reports `kaanal is not running on ...: the event stream closed`. Only a server that is still alive (the lock stays held) gives exit 1, `kaanal is running (pid N) but its control API did not answer`. See [lifecycle](/docs/guides/observe/lifecycle/#stale-state). The events of requests cut at the end of a shutdown do not reach a follower.
+- **`--json`:** outputs JSON Lines (via `--json` or `KAANAL_JSON=1`). Each live line fetches the full entry; if already evicted, it prints the shorter event object (no `hops`) and logs `-- could not fetch ID --` plus `-- missed N requests ... --` to `stderr`, keeping `jq` pipes clean.
+- **Server stop:** exits `2` when the stream closes. Graceful shutdown (`kaanal down` or signal) sends a `shutdown` event first; hard kills wait up to `2s` for the lock (`2` if gone, `1` if still held). Requests cut at shutdown end do not reach followers.
 
 ## `kaanal trace`
 
@@ -190,7 +190,7 @@ All of them exit with code 1. A server that is not running exits with code 2. An
 
 ### Measured against simulated time
 
-`served` (`ms`) is the time a client really waited. `trace` and every row are the **simulated** times the plan was built from. They differ: the first includes scheduling, the second does not. On Windows the OS timer ticks about every 15 ms, so a short request can be _served_ 15 ms later than its trace says, while the hops themselves start at their scheduled times (`served 96ms`, `trace 79.3ms` is typical for an 80 ms chain). Read the waterfall for how the chain behaved, and `served` for what your test experienced.
+`served` (`ms`) is real wall time; `trace` and hop rows are **simulated** times. On Windows, the ~15 ms OS timer tick can add ~15 ms to `served` while hop timings remain exact (`served 96ms`, `trace 79.3ms`). Read the waterfall for chain behaviour and `served` for client experience.
 
 ## Using it from a test runner
 
@@ -230,7 +230,7 @@ A browser on another origin can read `X-Request-Id` because Kaanal exposes it th
 
 ## Requests that did not finish normally
 
-- **`client-gone`.** The client closed the connection before the answer was ready (a test timed out, a page navigated away). The entry has status `499` (nginx's "client closed request"), `rejected: client-gone`, no hops, and the endpoint and scope the request had by then, and the SSE stream gets its event. The simulated request still runs to its end inside Kaanal (it holds the queue slots a real request would), but nothing more is logged for it.
+- **`client-gone`:** client closed early (`499`, `rejected: client-gone`, no hops). Emitted to SSE; the simulated request still finishes internally and holds its queue slots, with nothing else logged.
 - **`engine-stopped`.** The engine behind the mock is gone: `500 {"error":"engine stopped"}`. It is logged, with the endpoint and the scope, and the route's request counter still advanced and its plan was still drawn (that is how the counter has always worked; it only differs from a `404` or `400`).
 - **A handler that panics** logs nothing. That would be a bug in Kaanal; the id it took is simply never seen again.
 - **`unmatched` and `bad-scope`.** A `404`, a `405` and a `400` for a bad `X-Kaanal-Scenario` are logged with those words, and take no counter value and no random draw, so a seeded run is not disturbed by stray requests.

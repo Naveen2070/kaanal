@@ -26,7 +26,9 @@ You can change what a state answers for one endpoint with [`states:`](/docs/guid
 
 ## The chain still runs, and a pin wins
 
-A pin changes **what the client receives**, not what happens inside. The whole call chain still runs: hops cost their time, queues and pools fill, rate limits take tokens, and the trace shows all of it. Then the pin decides the answer, and it wins over everything: a node you set `down`, a chaos error, `error_map`, a broken connection (`reset`, `malformed`), a `429` from a rate limit, a full queue. So `success` pinned on an endpoint whose database is down answers `200`, and the trace still tells you the database failed.
+A pin changes **what the client receives**, not what happens inside. The full call chain still runs (hops, queues, rate limits, trace), and then the pin overrides the response — beating `down` nodes, chaos errors, `error_map`, `reset`/`malformed`, `429`s, and full queues.
+
+For example, pinning `success` when the database is `down` returns `200`, while the trace still records the DB failure.
 
 The trace ends with `pinned=STATE`, and a pin's delay is the first piece, charged to the entry node (the gateway, or the service that owns a route with no gateway):
 
@@ -42,8 +44,8 @@ x-kaanal-trace: nginx.proc=1.0ms,net=1.0ms,app.proc=2.0ms,net=1.0ms,db.error=503
 
 Two more consequences:
 
-- **The delay sits outside every timeout.** A `loading` pin of 10 s under a gateway `timeout: 5s` still answers after about 10 s, with no timeout in the trace. The pin delay holds no slot or token, and adds no random draw, so a seeded run draws the same numbers with and without a pin. It is a hop of its own: chaos `latency_ms` on the endpoint is a separate `delay` piece after it, and each delay is capped at 5 min on its own (they are not summed or clamped together).
-- **The request events** on the [event stream](/docs/reference/control-api/live-and-events/#get-__kaanalevents) carry `"pin": "error"` (or `null`), and `failed_node` stays `null` for a pinned request even though the trace shows the chain failure. In the [request log](/docs/guides/observe/observability/) a pinned request has the flag `PN` (a pin delay adds `PD` and `DI`), and its entry keeps the chain's own failure in `chain_error`; `kaanal trace` ends such a request with `pinned=success hid: db.error=503`.
+- **Outside timeouts & RNG:** a `loading` pin (`10s`) under a `5s` gateway timeout still answers after `10s` with no timeout. Pin delays hold no slot or token, make no random draw, and cap independently from endpoint chaos `latency_ms` (each up to 5 min).
+- **Events & logs:** [event stream](/docs/reference/control-api/live-and-events/#get-__kaanalevents) items carry `"pin": "..."` with `failed_node: null`. The [request log](/docs/guides/observe/observability/) sets `PN` (plus `PD` and `DI` on delays), preserves `chain_error`, and `kaanal trace` ends with e.g. `pinned=success hid: db.error=503`.
 
 ## `kaanal cycle`: step through the states
 
@@ -56,7 +58,7 @@ kaanal cycle "GET /orders"          # GET /orders -> success
 kaanal cycle "GET /orders"          # GET /orders -> loading (it wraps)
 ```
 
-Each call moves the endpoint's **live pin** to the next state: `loading`, `empty`, `error`, `slow`, `success`, then back. With no pin yet, the first step is `loading`. The next state comes from the live pin only: a pin from a scenario does not count, so the first `cycle` after a scenario starts at `loading` and then masks the scenario's pin. A state that cannot work on that endpoint is skipped (`empty` where there is no empty form), so there the cycle has four states.
+Each call advances the endpoint's **live pin**: `loading` → `empty` → `error` → `slow` → `success` → `loading`. Scenario pins are ignored here (the first `cycle` starts at `loading` and masks the scenario), and unsupported states like `empty` on a non-list route are skipped.
 
 ```bash
 kaanal cycle "GET /orders" --state error --status 429 --delay 500ms   # GET /orders -> error (status 429, delay 500ms)
@@ -147,7 +149,7 @@ A request that carries the header sees **only the pins of the scenarios it names
 
 Names match exactly, ignoring case. For an `override:` body the same rules run on the value: arrays are emptied, those names are reset, other values stay.
 
-**This is a heuristic with a ceiling.** It knows common list and pagination names, nothing more. A response that is a single object (`GET /users/{id}`) has no list to empty, so `empty` returns the usual generated object. A list called `results` with a count called `hits` gets `results: []` but keeps a generated `hits`. For those, write the body you want:
+**This is a heuristic with a ceiling.** It only recognises common list/pagination names. A single-object route (`GET /users/{id}`) stays a normal object, and custom count names like `hits` stay generated unless you define `states.empty`:
 
 ```yaml
 endpoints:
@@ -164,7 +166,7 @@ A `states.empty.body` is returned **verbatim** (no `{id}` path substitution) and
 Special cases:
 
 - **204 and 304 routes.** A route that normally answers 204 or 304 has no body, so `empty` on it keeps the status and sends no body, with no `states:` needed. A 204 or 304 status never carries a body, whether the route normally answers it or a pin sets it (`--status 204`, `states.empty.status: 204`).
-- **Built-in routes.** The login and JWKS routes of an `auth` node have no empty form by default: an `empty` pin on them is refused, and `kaanal cycle` skips `empty` there (four states). `loading`, `slow`, `error` and `success` work. Give the route a `states.empty.body`, or an `override:` (which replaces the built-in answer, so the route is an override route), and it can be pinned `empty`.
+- **Built-in routes:** `auth` login and JWKS routes have no `empty` form by default (`cycle` skips `empty`), unless you add `states.empty.body` or `override:`.
 - **`override:` routes.** An endpoint with an `override:` body (static or on a spec route) derives `empty` from that body, not from the schema.
 
 ## HEAD, 4xx and the rest
