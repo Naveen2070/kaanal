@@ -1,0 +1,81 @@
+---
+import MobileMenuFooter from "virtual:starlight/components/MobileMenuFooter";
+import SidebarPersister from "@astrojs/starlight/components/SidebarPersister.astro";
+import SidebarSublist from "@astrojs/starlight/components/SidebarSublist.astro";
+
+const { sidebar } = Astro.locals.starlightRoute;
+---
+
+<div class="kaanal-sb-bar">
+  <span class="kaanal-sb-title">Contents</span>
+  <button
+    type="button"
+    id="kaanal-sidebar-toggle"
+    class="kaanal-sb-toggle"
+    aria-label="Toggle sidebar"
+    aria-expanded="true"
+    title="Hide sidebar (])"
+  >
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="2" y="2.5" width="12" height="11" rx="2" />
+      <line x1="6" y1="2.5" x2="6" y2="13.5" />
+    </svg>
+  </button>
+</div>
+
+<div class="kaanal-sb-tree">
+  <SidebarPersister><SidebarSublist sublist={sidebar} /></SidebarPersister>
+</div>
+
+<div class="md:sl-hidden"><MobileMenuFooter /></div>
+
+<script>
+  (() => {
+    const STORAGE_KEY = "kaanal-docs-sidebar";
+    const btn = document.getElementById("kaanal-sidebar-toggle");
+    if (!btn) return;
+
+    const isCollapsed = () => document.documentElement.dataset.sidebarCollapsed === "true";
+
+    const syncAria = () => {
+      const collapsed = isCollapsed();
+      btn.setAttribute("aria-expanded", String(!collapsed));
+      btn.setAttribute("title", collapsed ? "Show sidebar (])" : "Hide sidebar (])");
+    };
+
+    const toggle = () => {
+      document.documentElement.classList.add("kaanal-sidebar-animate");
+      const next = !isCollapsed();
+      if (next) {
+        document.documentElement.dataset.sidebarCollapsed = "true";
+      } else {
+        delete document.documentElement.dataset.sidebarCollapsed;
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, next ? "collapsed" : "open");
+      } catch {}
+      syncAria();
+    };
+
+    syncAria();
+    btn.addEventListener("click", toggle);
+
+    // Enable accordion animations only after initial SidebarPersister restore has settled
+    requestAnimationFrame(() => {
+      document.documentElement.classList.add("kaanal-accordion-ready");
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "]" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+      if (!matchMedia("(min-width: 50rem)").matches) return;
+      toggle();
+    });
+  })();
+</script>

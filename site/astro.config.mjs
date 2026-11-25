@@ -12,6 +12,11 @@ export default defineConfig({
       description: "A single binary that pretends to be your backend: mocks, simulation and chaos.",
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/Naveen2070/kaanal" }],
       customCss: ["./src/styles/kaanal.css"],
+      components: {
+        SiteTitle: "./src/components/starlight/SiteTitle.astro",
+        Header: "./src/components/starlight/Header.astro",
+        Sidebar: "./src/components/starlight/Sidebar.astro",
+      },
       plugins: [starlightLinksValidator()],
       sidebar: [
         { label: "Why Kaanal", slug: "docs" },

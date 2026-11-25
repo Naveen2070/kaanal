@@ -1,18 +1,482 @@
 ---
-// Stub landing page; the real one is designed after the docs (internal/direction/).
+import "../styles/landing.css";
+import { KaanalMark } from "../components/landing/KaanalMark";
+import { HeroWorkbench } from "../components/landing/HeroWorkbench";
+import { LoadKneeExplorer } from "../components/landing/LoadKneeExplorer";
+import { ConfigAndCliPanel } from "../components/landing/ConfigAndCliPanel";
+
+const NODE_KINDS = [
+  {
+    kind: "gateway",
+    hue: "--cat-gateway",
+    desc: "Optional reverse proxy or API gateway (nginx, Envoy). Pays proc first and hosts static endpoints.",
+  },
+  {
+    kind: "service",
+    hue: "--cat-service",
+    desc: "Backend microservice backed by an OpenAPI 3.0 spec, with slots, queues, CPUs and retries.",
+  },
+  {
+    kind: "monolith",
+    hue: "--cat-monolith",
+    desc: "Service with inline read/write/scan ops, or outgoing database edges, or both together.",
+  },
+  {
+    kind: "database",
+    hue: "--cat-database",
+    desc: "Behavioural store with read/write/scan latencies, connection pools and flavor presets.",
+  },
+  {
+    kind: "cache",
+    hue: "--cat-cache",
+    desc: "Redis or Memcached hit/miss model. Fails open on chaos so misses fall through to the database.",
+  },
+  {
+    kind: "external-api",
+    hue: "--cat-external",
+    desc: "Third-party HTTP dependency with its own latency, baseline error rate, pool and token bucket.",
+  },
+  {
+    kind: "auth",
+    hue: "--cat-auth",
+    desc: "Local RS256 identity provider: serves signed JWTs on POST /login and keys at /.well-known/jwks.json.",
+  },
+  {
+    kind: "load-balancer",
+    hue: "--cat-balancer",
+    desc: "Distributes calls across targets with round-robin, random, weighted, least-conn or p2c balancing.",
+  },
+  {
+    kind: "storage",
+    hue: "--cat-storage",
+    desc: "Object store (S3, GCS, Blob) modelling first-byte latency, byte throughput and request limits.",
+  },
+];
+
+const NEXT_LINKS = [
+  {
+    title: "Why Kaanal",
+    href: "/docs/",
+    desc: "The problems Kaanal solves, who it is built for, and how the pieces fit.",
+  },
+  {
+    title: "Install",
+    href: "/docs/start/install/",
+    desc: "Release archives, crates.io, npm, or building Studio and the binary from source.",
+  },
+  {
+    title: "Quick start",
+    href: "/docs/start/quick-start/",
+    desc: "Eject the demo shop, send a traced request, break the database and recover in 5 minutes.",
+  },
+  {
+    title: "Studio guide",
+    href: "/docs/guides/simulate/studio/",
+    desc: "The built-in graphical canvas for live mode, batch runs, chaos, sweeps and sizing.",
+  },
+  {
+    title: "How Kaanal works",
+    href: "/docs/how-it-works/",
+    desc: "Call chains, operations, failure propagation, timeouts and deterministic seeding.",
+  },
+  {
+    title: "Comparison",
+    href: "/docs/comparison/",
+    desc: "How Kaanal compares to WireMock, Mockoon, Prism, MockServer, Toxiproxy and MSW.",
+  },
+];
 ---
+
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Kaanal</title>
+    <title>Kaanal — A single binary that pretends to be your backend</title>
+    <meta
+      name="description"
+      content="OpenAPI mocks with realistic locale-aware data, multi-hop service-to-database timing, live chaos, and a discrete-event load simulator in one Rust binary."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script is:inline>
+      (() => {
+        try {
+          const stored = localStorage.getItem("starlight-theme");
+          const theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.dataset.theme = theme;
+        } catch {
+          // Storage blocked: CSS light-dark() follows system preference
+        }
+      })();
+    </script>
   </head>
-  <body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 20vh auto; padding: 0 1rem">
-    <h1>Kaanal</h1>
-    <p>A single binary that pretends to be your backend: mocks, simulation and chaos.</p>
-    <p>
-      <a href="https://github.com/Naveen2070/kaanal/releases">Download</a> ·
-      <a href="/docs/">Get started</a>
-    </p>
+  <body>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a href="/" class="brand-link">
+          <span class="brand-mark">
+            <KaanalMark size={22} />
+          </span>
+          <span>kaanal</span>
+          <span class="brand-tamil" lang="ta">கானல்</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary">
+          <a href="/docs/" class="nav-link">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+            </svg>
+            <span>Docs</span>
+          </a>
+          <a href="/docs/start/quick-start/" class="nav-link nav-hide-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+            <span>Quick start</span>
+          </a>
+          <a href="/docs/guides/simulate/studio/" class="nav-link nav-hide-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+              <path d="M10 6.5h4M17.5 10v4" />
+            </svg>
+            <span>Studio</span>
+          </a>
+          <a href="/docs/comparison/" class="nav-link nav-hide-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            <span>Comparison</span>
+          </a>
+          <a
+            href="https://github.com/Naveen2070/kaanal"
+            class="nav-link"
+            rel="noopener noreferrer"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z" />
+            </svg>
+            <span class="nav-hide-sm">GitHub</span>
+          </a>
+          <button
+            type="button"
+            id="theme-toggle"
+            class="theme-btn"
+            aria-label="Toggle color theme"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+            </svg>
+            <span id="theme-toggle-label">Theme</span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="container hero-grid">
+          <div>
+            <div class="eyebrow">
+              <span class="eyebrow-dot" aria-hidden="true"></span>
+              <span>v0.1.0 · Single Rust binary · Apache-2.0</span>
+            </div>
+
+            <h1 class="hero-title">
+              A single binary that pretends to be your backend.
+            </h1>
+
+            <p class="hero-sub">
+              Serve OpenAPI mocks with realistic data, multi-hop gateway → service → cache → database timing,
+              live chaos, and what-if load simulation — from one <code class="mono">kaanal.yaml</code> and one local port.
+            </p>
+
+            <div class="btn-row">
+              <a href="/docs/start/quick-start/" class="btn btn-primary">
+                Get started
+              </a>
+              <a
+                href="https://github.com/Naveen2070/kaanal/releases"
+                class="btn btn-secondary"
+                rel="noopener noreferrer"
+              >
+                Download
+              </a>
+              <a href="/docs/" class="nav-link" style="padding-left: 0.4rem;">
+                Why Kaanal →
+              </a>
+            </div>
+
+            <div class="cmd-strip" aria-label="Quick install and run commands">
+              <div class="cmd-tabs" role="tablist" aria-label="Install method">
+                <button
+                  type="button"
+                  role="tab"
+                  class="cmd-tab"
+                  aria-selected="true"
+                  data-cmd="kaanal demo"
+                  data-note="Starts an interactive shop with 24 products, auth, payments and a live chaos bar."
+                >
+                  Try demo
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="cmd-tab"
+                  aria-selected="false"
+                  data-cmd="kaanal up -c examples/nginx-server/kaanal.yaml"
+                  data-note="Serves mocks on http://localhost:8080 and prints the Studio editor URL."
+                >
+                  Run example
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="cmd-tab"
+                  aria-selected="false"
+                  data-cmd="cargo install --path crates/kaanal"
+                  data-note="Or download a prebuilt binary for Linux, macOS arm64 or Windows from Releases."
+                >
+                  Build / install
+                </button>
+              </div>
+              <div class="cmd-body">
+                <code class="cmd-code" id="hero-cmd-text">
+                  <span class="cmd-prompt">$</span>kaanal demo
+                </code>
+                <button type="button" class="copy-btn" id="hero-cmd-copy">Copy</button>
+              </div>
+              <div class="cmd-note" id="hero-cmd-note">
+                Starts an interactive shop with 24 products, auth, payments and a live chaos bar.
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <HeroWorkbench client:load />
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Three jobs, one engine</div>
+              <h2 class="section-title">Mock, break, and size on the same cost model</h2>
+              <p class="section-desc">
+                Traditional mock servers reply in 0 ms, hiding spinners, timeouts and retry storms.
+                Kaanal shares one topology and replay engine across live mocks and virtual-time simulation.
+              </p>
+            </div>
+          </div>
+
+          <div class="pillars-grid">
+            <article class="card pillar-card">
+              <div class="pillar-num">01 · MOCK</div>
+              <h3 class="pillar-title">Coherent data, real hop timing</h3>
+              <p class="pillar-text">
+                Generates schema-validated JSON with matching names, emails, addresses and locales (<code class="mono">en-IN</code>, <code class="mono">en-US</code>, <code class="mono">de-DE</code> and 4 more), delayed by the actual hop chain behind each route.
+              </p>
+            </article>
+
+            <article class="card pillar-card">
+              <div class="pillar-num">02 · BREAK</div>
+              <h3 class="pillar-title">Live chaos, scenarios &amp; pins</h3>
+              <p class="pillar-text">
+                Inject latency, 5xx errors, TCP resets, malformed bodies, hangs, or rate limits at any node or route. Stack named scenarios with TTLs, or cycle UI states with <code class="mono">kaanal cycle</code>.
+              </p>
+            </article>
+
+            <article class="card pillar-card">
+              <div class="pillar-num">03 · SIMULATE</div>
+              <h3 class="pillar-title">Find the knee before users do</h3>
+              <p class="pillar-text">
+                Sweep traffic until p99 or errors cross your SLO, inspect per-node queues and wire bandwidth, and run <code class="mono">kaanal sim plan</code> to compare cloud sizing estimates.
+              </p>
+            </article>
+          </div>
+
+          <LoadKneeExplorer client:visible />
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">File-first &amp; scriptable</div>
+              <h2 class="section-title">One Git-diffable YAML file, Studio UI, CLI and HTTP control API</h2>
+              <p class="section-desc">
+                Edit <code class="mono">kaanal.yaml</code> by hand or visually on the Studio canvas.
+                Drive the exact same running instance from your terminal, Playwright tests, or CI scripts.
+              </p>
+            </div>
+          </div>
+
+          <ConfigAndCliPanel client:visible />
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Topology primitives</div>
+              <h2 class="section-title">Nine infrastructure nodes, acyclic by construction</h2>
+              <p class="section-desc">
+                Compose monoliths or multi-tier microservices with concurrency limits, connection pools,
+                NIC bandwidth, retries, circuit breakers and replicas.
+              </p>
+            </div>
+            <a href="/docs/reference/nodes/" class="btn btn-secondary">Nodes reference →</a>
+          </div>
+
+          <div class="nodes-grid">
+            {NODE_KINDS.map((n) => (
+              <div class="card node-spec-card">
+                <div class="node-spec-head">
+                  <span class="node-spec-kind" style={`color: var(${n.hue})`}>
+                    <span class="topo-dot" style={`background: var(${n.hue})`}></span>
+                    {n.kind}
+                  </span>
+                </div>
+                <p class="node-spec-desc">{n.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div class="trust-grid">
+            <div class="sheet trust-item">
+              <h3 class="trust-title">100% deterministic for a seed</h3>
+              <p class="trust-desc">
+                Same <code class="mono">seed</code> produces the same response bodies and sequential failure patterns locally and in CI.
+              </p>
+            </div>
+            <div class="sheet trust-item">
+              <h3 class="trust-title">Local-first &amp; locked down</h3>
+              <p class="trust-desc">
+                Binds <code class="mono">127.0.0.1</code> by default, guards control routes with a 256-bit Bearer token and Host checks, and makes zero outbound calls.
+              </p>
+            </div>
+            <div class="sheet trust-item">
+              <h3 class="trust-title">Synthetic data only</h3>
+              <p class="trust-desc">
+                No real-person datasets are bundled; generated emails always use <code class="mono">@example.com</code> (RFC 2606).
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Documentation</div>
+              <h2 class="section-title">Start in five minutes</h2>
+            </div>
+          </div>
+
+          <div class="next-grid">
+            {NEXT_LINKS.map((item) => (
+              <a href={item.href} class="card next-card">
+                <span class="next-title">
+                  <span>{item.title}</span>
+                  <span aria-hidden="true">→</span>
+                </span>
+                <span class="next-desc">{item.desc}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div>
+          <strong>Kaanal</strong> (கானல்) · v0.1.0 · Apache-2.0 · Single binary, single port
+        </div>
+        <div class="footer-links">
+          <a href="/docs/">Docs</a>
+          <a href="/docs/start/install/">Install</a>
+          <a href="/docs/reference/cli/">CLI</a>
+          <a href="/docs/reference/">Reference</a>
+          <a href="https://github.com/Naveen2070/kaanal" rel="noopener noreferrer">GitHub</a>
+        </div>
+      </div>
+    </footer>
+
+    <script is:inline>
+      // Theme toggle synced with Starlight's localStorage key ("starlight-theme")
+      (() => {
+        const btn = document.getElementById("theme-toggle");
+        const label = document.getElementById("theme-toggle-label");
+        const current = () =>
+          document.documentElement.dataset.theme === "light" ? "light" : "dark";
+        const syncLabel = () => {
+          if (label) label.textContent = current() === "light" ? "Dark" : "Light";
+        };
+        syncLabel();
+        if (btn) {
+          btn.addEventListener("click", () => {
+            const next = current() === "light" ? "dark" : "light";
+            document.documentElement.dataset.theme = next;
+            try {
+              localStorage.setItem("starlight-theme", next);
+            } catch {}
+            syncLabel();
+          });
+        }
+      })();
+
+      // Hero quick-command tabs & copy button
+      (() => {
+        const tabs = document.querySelectorAll('.cmd-strip [role="tab"]');
+        const cmdEl = document.getElementById("hero-cmd-text");
+        const noteEl = document.getElementById("hero-cmd-note");
+        const copyBtn = document.getElementById("hero-cmd-copy");
+        let currentCmd = "kaanal demo";
+
+        tabs.forEach((tab) => {
+          tab.addEventListener("click", () => {
+            tabs.forEach((t) => t.setAttribute("aria-selected", "false"));
+            tab.setAttribute("aria-selected", "true");
+            currentCmd = tab.getAttribute("data-cmd") || "kaanal demo";
+            const note = tab.getAttribute("data-note") || "";
+            if (cmdEl) {
+              cmdEl.innerHTML = "";
+              const prompt = document.createElement("span");
+              prompt.className = "cmd-prompt";
+              prompt.textContent = "$";
+              cmdEl.appendChild(prompt);
+              cmdEl.appendChild(document.createTextNode(currentCmd));
+            }
+            if (noteEl) noteEl.textContent = note;
+          });
+        });
+
+        if (copyBtn) {
+          copyBtn.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(currentCmd);
+              copyBtn.textContent = "Copied";
+              setTimeout(() => {
+                copyBtn.textContent = "Copy";
+              }, 1600);
+            } catch {}
+          });
+        }
+      })();
+    </script>
   </body>
 </html>
