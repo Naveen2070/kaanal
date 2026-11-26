@@ -1,4 +1,4 @@
-<!-- Cargo.lock=4948adc42e8cd5bc5b57d55723216bb008910711ddabfa1e0a5b1ff90f784f05 ui/pnpm-lock.yaml=ed2f9b36f8620749ddea0bcc036977ffab62025e7bb26b038637841f914d4da0 -->
+<!-- Cargo.lock=4948adc42e8cd5bc5b57d55723216bb008910711ddabfa1e0a5b1ff90f784f05 ui/pnpm-lock.yaml=4dba10567ae678f3eb51507121e76aaab114f04d09c548aaccaed8383a058f77 -->
 # Third-party licenses
 
 Kaanal itself is licensed under the Apache License 2.0 (`LICENSE`). A release contains the third-party
