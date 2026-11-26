@@ -264,8 +264,10 @@ jobs:
         id: auth
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
+      # --allow-dirty: the checkout is clean, but crates/kaanal-server/ui-dist (the Studio bundle built above) is
+      # git-ignored and listed in that crate's `include`, and cargo counts such files as uncommitted.
       - name: Publish
-        run: cargo publish --workspace --locked
+        run: cargo publish --workspace --locked --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
