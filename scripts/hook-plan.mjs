@@ -10,6 +10,7 @@
 //                        `uifiles` line), `all` runs them all (config, lockfile, anything outside ui/src)
 //   uifiles <paths>      the staged UI files, relative to ui/
 //   docs yes|no          markdown changed (dprint runs)
+//   licenses yes|no      a lock file changed (Cargo.lock, ui/pnpm-lock.yaml): THIRD_PARTY_LICENSES.md must match it
 //   node-test <file>     a node test for a staged script (scripts/x.mjs -> scripts/x.test.mjs)
 //   note <text>          what the plan is, for the log
 //
@@ -206,6 +207,9 @@ if (uiFiles.length === 0) {
   say(`ui ${broad ? "all" : "changed"}`);
   say(`uifiles ${uiFiles.map((f) => f.slice(3)).join(" ")}`);
 }
+
+// ---- third-party notices: the file carries the hash of both lock files (RULES 150)
+say(`licenses ${files.some((f) => f === "Cargo.lock" || f === "ui/pnpm-lock.yaml") ? "yes" : "no"}`);
 
 // ---- docs
 say(`docs ${docsFiles.length > 0 ? "yes" : "no"}`);

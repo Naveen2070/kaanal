@@ -30,6 +30,7 @@ CI runs all of these. The pre-commit hook runs the ones your staged files can af
 | Rust                | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
 | Studio (`ui/`)      | `cd ui && vp check`, then the UI tests                                                                       |
 | Markdown            | `dprint check`                                                                                               |
+| A lock file         | `node scripts/third-party-licenses.mjs --check` (regenerate the file without `--check` if it fails)          |
 | Any source file     | `bash scripts/check-file-size.sh` (800 lines per source file, 1000 per test file)                            |
 | Docs site (`site/`) | `cd site && pnpm build`                                                                                      |
 

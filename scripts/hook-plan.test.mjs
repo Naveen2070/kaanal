@@ -65,3 +65,9 @@ test("a script with a test next to it plans that test", () => {
   assert.ok(plan(["scripts/hook-plan.mjs"]).includes("node-test scripts/hook-plan.test.mjs"));
   assert.ok(plan([".githooks/pre-commit"]).includes("node-test scripts/hook-plan.test.mjs"));
 });
+
+test("a lock file change plans the third-party licenses check, nothing else does", () => {
+  assert.ok(plan(["Cargo.lock"]).includes("licenses yes"));
+  assert.ok(plan(["ui/pnpm-lock.yaml"]).includes("licenses yes"));
+  assert.ok(plan(["README.md"]).includes("licenses no"));
+});

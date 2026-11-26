@@ -7,6 +7,7 @@
 #   UI changed    -> vp check, then `vp test related` on the staged files (all the tests when a config,
 #                    the lockfile or anything outside ui/src changed)
 #   Rust or UI    -> scripts/check-file-size.sh
+#   A lock file   -> node scripts/third-party-licenses.mjs --check (THIRD_PARTY_LICENSES.md must match)
 #   Markdown      -> dprint check
 #   scripts/x.mjs -> node --test scripts/x.test.mjs when it exists
 # How wide to go (the CI always runs everything):
@@ -31,6 +32,7 @@ if [ "$KAANAL_HOOK_FULL" = 1 ]; then
 clippy --workspace
 test --workspace
 ui all
+licenses yes
 docs yes"
     say "full run (KAANAL_HOOK_FULL=1)"
 elif command -v node >/dev/null 2>&1 && plan=$(printf '%s\n' "$files" | node scripts/hook-plan.mjs); then
@@ -41,6 +43,7 @@ else
 clippy --workspace
 test --workspace
 ui all
+licenses yes
 docs yes"
 fi
 
@@ -77,6 +80,15 @@ printf '%s\n' "$plan" | sed -n 's/^node-test //p' | while IFS= read -r t; do
     say "node --test $t"
     node --test "$t" || exit 1
 done || { echo "node test failed"; exit 1; }
+
+# ---- third-party notices (cheap, no tools: compares the lock-file hashes in the file's first line)
+if [ "$(field licenses)" = yes ]; then
+    say "third-party licenses check"
+    node scripts/third-party-licenses.mjs --check || {
+        echo "regenerate and stage it: node scripts/third-party-licenses.mjs (needs cargo-about and 'cd ui && pnpm install'; on Windows put the pnpm 12 shim before WinGet's old pnpm.exe on PATH)"
+        exit 1
+    }
+fi
 
 # ---- markdown
 if [ "$(field docs)" = yes ]; then
