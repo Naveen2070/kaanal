@@ -293,11 +293,15 @@ jobs:
           merge-multiple: true
           path: dist
 
-      # Trusted publishing needs npm 11.5.1 or newer (Node 24 ships one; the check keeps it honest).
+      # Staged publishing (`npm stage publish`) needs npm 11.15.0 or newer; Node 24 may ship an older one.
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
+
+      - name: Update npm
+        run: npm install -g npm@11.15.0
+        shell: bash
 
       - name: Check the packaging script
         run: node --test scripts/npm-pack.test.mjs
@@ -307,14 +311,16 @@ jobs:
         run: |
           node scripts/npm-pack.mjs --tag "$TAG" --archives dist --out npm-out
           npm --version
-          [ "$(printf '11.5.1\n%s\n' "$(npm --version)" | sort -V | head -n1)" = 11.5.1 ] || { echo "npm is too old for trusted publishing" >&2; exit 1; }
+          [ "$(printf '11.15.0\n%s\n' "$(npm --version)" | sort -V | head -n1)" = 11.15.0 ] || { echo "npm is too old for staged publishing" >&2; exit 1; }
         shell: bash
 
       # No NODE_AUTH_TOKEN anywhere: npm exchanges the run's OIDC token (id-token: write) by itself, and
       # adds the provenance statement.
-      - name: Publish
+      # Staged: the versions wait on npm until you approve them (`npm stage approve`, or the Staged Packages
+      # tab). Approve the three @kaanal/* packages first, then kaanal.
+      - name: Publish (staged)
         run: |
           for d in linux-x64 darwin-arm64 win32-x64 kaanal; do
-            (cd "npm-out/$d" && npm publish --access public)
+            (cd "npm-out/$d" && npm stage publish --access public)
           done
         shell: bash
