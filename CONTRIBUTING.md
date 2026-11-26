@@ -33,7 +33,7 @@ CI runs all of these. The pre-commit hook runs the ones your staged files can af
 | Any source file     | `bash scripts/check-file-size.sh` (800 lines per source file, 1000 per test file)                            |
 | Docs site (`site/`) | `cd site && pnpm build`                                                                                      |
 
-`KAANAL_HOOK_FULL=1 git commit ...` runs everything in the hook.
+The pre-commit hook runs only the tests a change can reach (the changed test files, the unit tests of a changed module, or that crate’s suite). `KAANAL_HOOK=deps git commit ...` also tests the crates that depend on it; `KAANAL_HOOK_FULL=1 git commit ...` runs everything. CI always runs everything.
 
 ## Code expectations
 

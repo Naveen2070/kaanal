@@ -1,13 +1,19 @@
 #!/bin/sh
 # Pre-commit: checks only what the staged files can affect, so a small change commits quickly.
-#   Rust changed  -> cargo fmt --check, clippy and tests for the changed crates and the crates that depend
-#                    on them (one integration-test binary when only that test's files changed)
-#   UI changed    -> vp check, then the tests related to the changed files (all of them when a config, the
-#                    lockfile or anything outside ui/src changed)
+#   Rust changed  -> cargo fmt --check, clippy on the changed crates and the crates that depend on them,
+#                    and only the tests the change can reach: the integration-test binaries of a changed
+#                    test file, the unit tests of a changed module, the tests that carry its name, else
+#                    that crate's suite. Dependents are linted, not tested.
+#   UI changed    -> vp check, then `vp test related` on the staged files (all the tests when a config,
+#                    the lockfile or anything outside ui/src changed)
 #   Rust or UI    -> scripts/check-file-size.sh
 #   Markdown      -> dprint check
-#   Both          -> both, each limited the same way
-# The CI always runs everything. To run the whole thing here too: KAANAL_HOOK_FULL=1 git commit ...
+#   scripts/x.mjs -> node --test scripts/x.test.mjs when it exists
+# How wide to go (the CI always runs everything):
+#   KAANAL_HOOK=crate   git commit ...   the whole suite of each changed crate
+#   KAANAL_HOOK=deps    git commit ...   crate, plus the whole suite of every crate that depends on it
+#   KAANAL_HOOK_FULL=1  git commit ...   everything: whole workspace, all UI tests, markdown
+# PowerShell: $env:KAANAL_HOOK_FULL = 1; git commit ...; Remove-Item Env:KAANAL_HOOK_FULL
 # The plan comes from scripts/hook-plan.mjs (needs node); if it fails, the hook falls back to everything.
 # Enable: git config core.hooksPath .githooks
 [ -f Cargo.toml ] || exit 0
@@ -66,6 +72,12 @@ if [ "$(field rust)" = yes ] || [ "$(field ui)" != none ]; then
     bash scripts/check-file-size.sh || { echo "file size gate failed: split the file (AGENTS.md, Code layout)"; exit 1; }
 fi
 
+# ---- node scripts with a test next to them (and the hook planner itself)
+printf '%s\n' "$plan" | sed -n 's/^node-test //p' | while IFS= read -r t; do
+    say "node --test $t"
+    node --test "$t" || exit 1
+done || { echo "node test failed"; exit 1; }
+
 # ---- markdown
 if [ "$(field docs)" = yes ]; then
     if command -v dprint >/dev/null 2>&1; then
@@ -89,8 +101,11 @@ if [ "$ui" = changed ] || [ "$ui" = all ]; then
             say "ui tests (all)"
             (cd ui && pnpm exec vp test run) || exit 1
         else
-            say "ui tests (related to the changed files)"
-            (cd ui && pnpm exec vp test run --changed --passWithNoTests) || exit 1
+            # the staged UI files, relative to ui/ (the plan prints them); vitest runs the tests that import them
+            uifiles=$(field uifiles)
+            say "ui tests (related to: $uifiles)"
+            # shellcheck disable=SC2086
+            (cd ui && pnpm exec vp test related $uifiles --run --passWithNoTests) || exit 1
         fi
     else
         say "pnpm not found, cannot check the ui"
