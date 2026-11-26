@@ -65,6 +65,7 @@ jobs:
     steps:
       - name: Check the secrets
         id: secrets
+        working-directory: . # runs before the checkout, so `site/` does not exist yet
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
