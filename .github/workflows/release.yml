@@ -5,10 +5,11 @@ name: Release
 #      `Tag: vX.Y.Z` (it must match the Cargo.toml version), the rest is the release notes.
 #   2. Merge that to main.
 #   3. Run this workflow on main with "publish" ticked. It builds Linux x86_64, macOS arm64 and Windows
-#      x86_64 archives, then creates the tag at the built commit and a GitHub release with the archives and
-#      SHA256SUMS. Versions below 1.0 are marked as pre-releases.
-# Running it with "publish" off, or on another branch, only builds the archives (kept as artifacts for a
-# week) and checks RELEASE.md; nothing is tagged or published.
+#      x86_64 archives, dry-runs the crates.io and then the npm publish, and only if both pass creates the tag
+#      at the built commit and a GitHub release with the archives and SHA256SUMS. Versions below 1.0 are
+#      marked as pre-releases.
+# Running it with "publish" off only builds the archives (kept as artifacts for a week), checks RELEASE.md
+# and does the two dry runs; nothing is tagged or published.
 #
 # With "publish" ticked the run also publishes to crates.io and npm, by TRUSTED PUBLISHING: no token is
 # stored in this repository; each registry accepts this workflow's short-lived GitHub identity (OIDC)
@@ -196,10 +197,106 @@ jobs:
             kaanal-${{ needs.info.outputs.tag }}-${{ matrix.target }}.${{ matrix.ext }}.sha256
           retention-days: 7
 
+  # The two dry runs gate the tag: nothing is tagged or released unless both pass. They run on every run and
+  # need no token, so they cannot catch a trusted-publisher mistake.
+  # Packages and compiles the six crates as crates.io would receive them, with the real publish's flags.
+  crates-dry-run:
+    name: Dry-run the crates.io publish
+    needs: [info, ui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fetch the Studio bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: studio-ui-dist
+          path: crates/kaanal-server/ui-dist
+
+      - name: Require the Studio bundle
+        run: |
+          for f in index.html .vite/manifest.json; do
+            [ -s "crates/kaanal-server/ui-dist/$f" ] || { echo "missing crates/kaanal-server/ui-dist/$f: the crate would not contain Studio" >&2; exit 1; }
+          done
+        shell: bash
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+        shell: bash
+
+      # cargo's dry run passes for a version that already exists, and the real publish would then fail after
+      # the tag was made. crates.io answers 404 for a free version; anything else stops the run.
+      - name: Require unpublished crate versions
+        if: inputs.publish
+        run: |
+          cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "\(.name) \(.version)"' | while read -r name version; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -A kaanal-release "https://crates.io/api/v1/crates/$name/$version")
+            [ "$code" = 404 ] || { echo "$name $version: crates.io answered $code, expected 404 (not yet published)" >&2; exit 1; }
+          done
+        shell: bash
+
+      - name: Dry run
+        run: cargo publish --workspace --dry-run --locked --allow-dirty
+
+  # Builds the four npm packages from this run's archives and dry-runs the staged publish. npm refuses even a
+  # dry run of a published version: with "publish" off (a run before the version bump) only the package
+  # contents are listed then, with "publish" on it is an error.
+  npm-dry-run:
+    name: Dry-run the npm publish
+    needs: [info, build, crates-dry-run]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.info.outputs.tag }}
+      PUBLISH: ${{ inputs.publish }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: kaanal-*
+          merge-multiple: true
+          path: dist
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Update npm
+        run: npm install -g npm@11.15.0
+        shell: bash
+
+      - name: Check the packaging script
+        run: node --test scripts/npm-pack.test.mjs
+        shell: bash
+
+      - name: Build the packages
+        run: node scripts/npm-pack.mjs --tag "$TAG" --archives dist --out npm-out
+
+      - name: Dry run
+        run: |
+          for d in linux-x64 darwin-arm64 win32-x64 kaanal; do
+            (
+              cd "npm-out/$d"
+              spec=$(node -p 'const p = require("./package.json"); `${p.name}@${p.version}`')
+              if npm view "$spec" version 2>/dev/null | grep -q .; then
+                [ "$PUBLISH" != true ] || { echo "$spec is already published: bump the version" >&2; exit 1; }
+                echo "$spec is already published: listing the package contents only"
+                npm pack --dry-run
+              else
+                npm stage publish --dry-run --access public
+              fi
+            )
+          done
+        shell: bash
+
   publish:
     name: Tag and publish
     if: inputs.publish && github.ref == 'refs/heads/main'
-    needs: [info, build]
+    needs: [info, build, crates-dry-run, npm-dry-run]
     runs-on: ubuntu-latest
     permissions:
       contents: write
