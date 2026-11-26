@@ -1,6 +1,6 @@
-Tag: v0.1.0
+Tag: v0.1.1
 
-# Kaanal v0.1.0
+# Kaanal v0.1.1
 
 Kaanal (கானல், "mirage") is a single binary that pretends to be your backend. Give it an OpenAPI 3.0 file and a small YAML topology, and it serves realistic mock data with the timing and failures of the system behind it. Studio, its graphical editor, lets you build that system, break it, run load against it and see where it gives way.
 

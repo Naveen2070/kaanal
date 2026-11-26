@@ -25,7 +25,7 @@ Kaanal is one binary. Pick the way that suits you; each gives you the same `kaan
   Without the Studio build the binary still runs; `/__kaanal/studio` then shows the status page.
 
 :::note
-The crates.io and npm packages are published with the 0.1.0 release. Until then, use a release archive or build from
+The crates.io and npm packages are published with the 0.1.1 release. Until then, use a release archive or build from
 source.
 :::
 
@@ -36,7 +36,7 @@ kaanal --version
 ```
 
 ```text
-kaanal 0.1.0
+kaanal 0.1.1
 ```
 
 ## Run it

@@ -9,7 +9,7 @@ sidebar:
 Liveness probe. No token. Besides `ok` it says the little the [status page](/docs/guides/observe/status-page/) shows: the version, the uptime in whole seconds, and whether a system is loaded (`false` on a blank start before the first Apply). Nothing a token guards: no node names, counts, paths or figures. A probe that checks only the status code or `ok` is unaffected.
 
 ```json
-{ "ok": true, "version": "0.1.0", "uptime_s": 83, "system": true }
+{ "ok": true, "version": "0.1.1", "uptime_s": 83, "system": true }
 ```
 
 ## `GET /__kaanal/topology`

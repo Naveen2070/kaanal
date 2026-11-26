@@ -1,4 +1,4 @@
-<!-- Cargo.lock=4948adc42e8cd5bc5b57d55723216bb008910711ddabfa1e0a5b1ff90f784f05 ui/pnpm-lock.yaml=4dba10567ae678f3eb51507121e76aaab114f04d09c548aaccaed8383a058f77 -->
+<!-- Cargo.lock=3e5853efc9eda953db3555a39622707219296935ffa00fc3f3d90231d12a3eb4 ui/pnpm-lock.yaml=4dba10567ae678f3eb51507121e76aaab114f04d09c548aaccaed8383a058f77 -->
 # Third-party licenses
 
 Kaanal itself is licensed under the Apache License 2.0 (`LICENSE`). A release contains the third-party
@@ -4563,12 +4563,12 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
-- kaanal 0.1.0 (https://github.com/Naveen2070/kaanal)
-- kaanal-core 0.1.0 (https://github.com/Naveen2070/kaanal)
-- kaanal-data 0.1.0 (https://github.com/Naveen2070/kaanal)
-- kaanal-server 0.1.0 (https://github.com/Naveen2070/kaanal)
-- kaanal-sim 0.1.0 (https://github.com/Naveen2070/kaanal)
-- kaanal-winhandle 0.1.0 (https://github.com/Naveen2070/kaanal)
+- kaanal 0.1.1 (https://github.com/Naveen2070/kaanal)
+- kaanal-core 0.1.1 (https://github.com/Naveen2070/kaanal)
+- kaanal-data 0.1.1 (https://github.com/Naveen2070/kaanal)
+- kaanal-server 0.1.1 (https://github.com/Naveen2070/kaanal)
+- kaanal-sim 0.1.1 (https://github.com/Naveen2070/kaanal)
+- kaanal-winhandle 0.1.1 (https://github.com/Naveen2070/kaanal)
 - allocator-api2 0.2.21 (https://github.com/zakarumych/allocator-api2)
 - arraydeque 0.5.1 (https://github.com/andylokandy/arraydeque)
 - dirs-sys 0.5.0 (https://github.com/dirs-dev/dirs-sys-rs)
