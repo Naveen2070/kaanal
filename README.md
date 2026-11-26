@@ -14,6 +14,10 @@ _Kaanal_ (கானல், Tamil for "mirage") is a single binary that pretends 
 
 > **Status:** v0.1 (first public release; expect changes below 1.0).
 
+https://github.com/user-attachments/assets/55b16eb4-32a4-4caa-bbca-9a9c8926ccd0
+
+_Want to learn how a system really works? Break it, safely, on your laptop. Kaanal is one binary that pretends to be your backend: mock it, break the database from the CLI or Studio, then size it and see where it gives way. [kaanal.naveenr.in](https://kaanal.naveenr.in)_
+
 ## Why Kaanal?
 
 - **Unblock the frontend.** One `kaanal.yaml` plus an OpenAPI 3.0 spec gives you a working backend before the real one exists.
