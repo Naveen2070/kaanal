@@ -25,9 +25,19 @@ _Want to learn how a system really works? Break it, safely, on your laptop. Kaan
 - **Failures on demand.** Take a node down, add tail latency or force a 504 from the CLI, HTTP or Studio.
 - **Data that looks real.** Names, emails, phones and addresses stay consistent within a record (`en-IN`, `en-US`, `en-GB`, `de-DE`, `fr-FR`, `es-ES`, `pt-BR`, or your own pack). The same `seed` gives the same data.
 
-## Quick Start
+## Install
 
-Download a binary for Linux (`x86_64`), macOS (`arm64`), or Windows (`x86_64`) from [GitHub Releases](https://github.com/Naveen2070/kaanal/releases) (verify `SHA256SUMS`) and put `kaanal` on your `PATH`.
+Prebuilt for Linux (`x86_64`), macOS (`arm64`) and Windows (`x86_64`). Pick one:
+
+```sh
+npx kaanal demo            # npm: run without installing
+npm install -g kaanal      # npm: install
+cargo install kaanal       # crates.io: builds from source, Rust 1.100+
+```
+
+Or download an archive from [GitHub Releases](https://github.com/Naveen2070/kaanal/releases), check it against `SHA256SUMS`, and put `kaanal` on your `PATH`.
+
+## Quick Start
 
 ```sh
 kaanal demo                                   # interactive demo shop with live chaos bar
