@@ -31,7 +31,7 @@ pub(crate) struct Cli {
 /// **Private.** Subcommands.
 #[derive(Subcommand)]
 pub(crate) enum Cmd {
-    /// Start the emulator
+    /// Start Kaanal
     Up {
         #[arg(short, long, default_value = "kaanal.yaml")]
         config: PathBuf,

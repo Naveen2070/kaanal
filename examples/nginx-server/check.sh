@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase One success criteria 3-5 against a running instance. Start the emulator in
+# Phase One success criteria 3-5 against a running instance. Start Kaanal in
 # another terminal (from the repo root):
 #   cargo run -p kaanal -- up -c examples/nginx-server/kaanal.yaml
 # This script may be run from any directory: it resolves the repo root from its own

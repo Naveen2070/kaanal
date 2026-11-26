@@ -6,7 +6,7 @@ This document provides a comprehensive architectural breakdown of Kaanal (கா
 
 ## 1. Design Philosophy & Architectural Invariants
 
-Kaanal emulates a multi-tier backend from a single binary, a single configuration file (`kaanal.yaml`), and OpenAPI 3.0 specifications.
+Kaanal stands in for a multi-tier backend from a single binary, a single configuration file (`kaanal.yaml`), and OpenAPI 3.0 specifications.
 
 1. **One Binary, One Port**: Mock routes and the `/__kaanal/*` control plane share one TCP listener. No sidecar proxy or secondary port is required.
 2. **Behavioral Modeling, Not Protocol Emulation**: Databases, caches, and external APIs are modeled by their operation latencies, capacity limits, and failure probabilities. Kaanal never executes SQL or emulates wire protocols (rule R2.8).

@@ -1,4 +1,4 @@
-//! Pure logic for the Kaanal infrastructure emulator.
+//! Pure logic for the Kaanal engine.
 //!
 //! This crate owns everything that must stay deterministic and testable: `kaanal.yaml`
 //! parsing ([`Config`]), topology graph validation ([`Topology`]), flavor presets

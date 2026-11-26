@@ -8,7 +8,7 @@
 
 # Kaanal
 
-_Kaanal_ (கானல், Tamil for "mirage") is a single-binary backend emulator. It serves OpenAPI 3.0 mocks with coherent synthetic data, models multi-hop topology latency and capacity, and injects live chaos on demand — all from one local port.
+_Kaanal_ (கானல், Tamil for "mirage") is a single binary that pretends to be your backend. It serves OpenAPI 3.0 mocks with coherent synthetic data, models multi-hop topology latency and capacity, and injects live chaos on demand — all from one local port.
 
 [![Release](https://img.shields.io/github/v/release/Naveen2070/kaanal)](https://github.com/Naveen2070/kaanal/releases) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Rust: 1.100+](https://img.shields.io/badge/Rust-1.100%2B-orange.svg)](https://www.rust-lang.org) [![Docs](https://img.shields.io/badge/Docs-kaanal.naveenr.in-teal.svg)](https://kaanal.naveenr.in/docs/)
 

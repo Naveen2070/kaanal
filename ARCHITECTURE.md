@@ -1,6 +1,6 @@
 # Kaanal Architecture
 
-Kaanal (கானல்) is a single-binary backend emulator. One HTTP listener serves both OpenAPI-driven mock routes and the `/__kaanal/*` control plane, while a pure deterministic core models topology latency, capacity, and failures.
+Kaanal (கானல்) is a single binary that pretends to be your backend. One HTTP listener serves both OpenAPI-driven mock routes and the `/__kaanal/*` control plane, while a pure deterministic core models topology latency, capacity, and failures.
 
 ## Workspace Crates
 

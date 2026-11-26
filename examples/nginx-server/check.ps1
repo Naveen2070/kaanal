@@ -1,5 +1,5 @@
 # Phase One success criteria 3-5 against a running instance. Runs on Windows PowerShell 5.1 and pwsh 7.
-# Start the emulator in another terminal (from the repo root):
+# Start Kaanal in another terminal (from the repo root):
 #   cargo run -p kaanal -- up -c examples/nginx-server/kaanal.yaml
 # This script may be run from any directory: it resolves the repo root from its own
 # path and runs every kaanal command there, because `.kaanal/run.json` and Cargo.toml
